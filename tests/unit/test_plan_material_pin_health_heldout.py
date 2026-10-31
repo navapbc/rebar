@@ -87,7 +87,7 @@ def test_compute_validity_enforces_or_advises_same_health(
     assert advisory["health"]["pin_status"] == "stale-pin-drift"
 
 
-def test_close_and_drift_refresh_disable_only_code_freshness(
+def test_close_profile_disables_only_code_freshness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     profile = getattr(attest, "PlanValidityProfile", None)
@@ -102,12 +102,11 @@ def test_close_and_drift_refresh_disable_only_code_freshness(
     close = attest.compute_validity(
         attestation, state, "plan-review", repo_root="/repo", profile=profile.CLOSE
     )
-    refresh = attest.compute_validity(
-        attestation, state, "plan-review", repo_root="/repo", profile=profile.DRIFT_REFRESH
-    )
     assert default["verdict"] == "stale-head"
-    assert close["valid"] is refresh["valid"] is True
-    assert close["health"] == refresh["health"]
+    assert close["valid"] is True
+    # CLOSE waives code freshness only — the pin health it reports is the same record DEFAULT
+    # computed, so nothing beyond the head-drift check is suppressed.
+    assert close["health"] == default["health"]
 
 
 def test_completion_verifier_shape_is_byte_compatible(monkeypatch: pytest.MonkeyPatch) -> None:

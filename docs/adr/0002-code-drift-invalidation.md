@@ -115,17 +115,19 @@ plan-review at the pinned-SHA snapshot, the claim gate at whole-HEAD / the worki
 would disagree and re-introduce the staleness false-positive this ADR exists to prevent.
 
 **Consolidation** *(amended by bug 72d9 `athletic-esthetical-polecat` — see below)*. There is
-now exactly ONE shared ref-resolution boundary,
-`rebar.llm.plan_review.attest._hash_basis(repo_root, *, at_current_gate_ref=False)`, that BOTH
+now exactly ONE shared ref-resolution boundary in
+`rebar.llm.plan_review.attest`, that BOTH
 consumers resolve through (the Rule-of-Three is satisfied by the two consumers + the concrete
 divergence risk, not speculative generality):
 
 - **plan-review signing** (`dependency_hashes` / `_rehash`) hashes at the active attested snapshot
-  (S3's context-local code root) and records the snapshot SHA in the signed manifest as a
-  `verified-at-sha:<sha>` step (the same channel S4 uses — no payload/version change).
+  (S3's context-local code root, via `_hash_basis(repo_root)`) and records the snapshot SHA in the
+  signed manifest as a `verified-at-sha:<sha>` step (the same channel S4 uses — no payload/version
+  change).
 - **the claim gate** (`claim_gate_check`) re-hashes the dependency paths at a snapshot of the
   **current gate ref** (`REBAR_GATE_REF` / `[snapshot].ref` / `origin/main`, resolved from the
-  local object DB with no network) and compares against the manifest's pinned hashes.
+  local object DB with no network, via `gate_ref_hash_basis(repo_root)`) and compares against the
+  manifest's pinned hashes.
 
 The boundary's guarantee is that both sides resolve with the SAME **semantics** — a committed
 snapshot under the same gate configuration — never a possibly-dirty working tree on one side

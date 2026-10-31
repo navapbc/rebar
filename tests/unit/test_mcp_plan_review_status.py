@@ -6,9 +6,12 @@ cannot drift from the CLI/library answer."""
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
+import jsonschema
 import pytest
 
 from rebar import _mcp_reads, _mcp_writes
@@ -169,3 +172,70 @@ def test_tool_delegates_to_the_library_function(monkeypatch: pytest.MonkeyPatch)
     assert result["verdict"] == "stale-code"
     assert result["reason"] == "reviewed code changed: src/rebar/_mcp_reads.py"
     assert result["verified_at_sha"] == "0" * 40
+
+
+# ── the declared enum vs. what this surface actually emits (a018 step 5) ─────────────
+_SCHEMA = Path(__file__).resolve().parents[2] / "src/rebar/schemas/plan_review_status.schema.json"
+
+#: The signature-check verdicts ``attest_gate`` passes through verbatim from
+#: ``signing.verify_signature``. ``key_not_valid_at_era`` is NOT among them: it is produced
+#: only by ``rebar.attest.opcert.verify_opcert``, whose sole src caller chain is
+#: ``trusted_env.verify_required_environment`` ← ``_commands/verify_opcert.py`` (the
+#: ``rebar verify-opcert`` merge gate). The status path reaches ``registry.verify`` directly,
+#: which cannot emit it.
+_SIGNATURE_FAILURE_VERDICTS = (
+    "mismatch",
+    "invalid",
+    "foreign_key",
+    "unavailable",
+    "unknown_kind",
+    "unknown_scheme",
+)
+
+
+@pytest.mark.parametrize("verdict", _SIGNATURE_FAILURE_VERDICTS)
+def test_signature_failure_verdicts_pass_through_and_are_declared(
+    monkeypatch: pytest.MonkeyPatch, verdict: str
+) -> None:
+    """The oracle for 'declared enum ⊇ emitted set': every verdict the surface can emit
+    survives the MCP layer unchanged AND validates against the published schema."""
+    _stub_status(
+        monkeypatch,
+        {
+            "ok": False,
+            "verdict": verdict,
+            "reason": f"signature check returned {verdict}",
+            "verified_at_sha": None,
+            "signed_at": None,
+        },
+    )
+    tools, _ = _read_tools()
+
+    result = tools["plan_review_status"]("86c8-4b91-5257-4cca")
+
+    assert result["verdict"] == verdict
+    jsonschema.validate(result, json.loads(_SCHEMA.read_text(encoding="utf-8")))
+
+
+@pytest.mark.parametrize(
+    ("verdict", "why"),
+    [
+        ("not-closed", "produced only under kind == 'completion-verifier'"),
+        ("key_not_valid_at_era", "produced only by the verify-opcert merge gate"),
+    ],
+)
+def test_verdicts_this_surface_cannot_emit_are_rejected_by_the_schema(
+    verdict: str, why: str
+) -> None:
+    """The negative half: a verdict the status path cannot produce must not be declared,
+    so the enum documents this surface rather than the union of every gate."""
+    payload = {
+        "ok": False,
+        "verdict": verdict,
+        "reason": why,
+        "verified_at_sha": None,
+        "signed_at": None,
+    }
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, json.loads(_SCHEMA.read_text(encoding="utf-8")))

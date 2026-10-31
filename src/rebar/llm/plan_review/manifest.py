@@ -241,9 +241,9 @@ def gate_ref_hash_basis(repo_root=None) -> GateRefBasis:
     """Resolve the CURRENT-gate-ref hashing basis — the ONE shared ref-resolution boundary
     (ADR 0002) — reporting whether it degraded to the working tree.
 
-    :func:`_hash_basis` delegates here for its ``at_current_gate_ref`` mode and keeps its
-    lenient, never-raising contract (it returns only ``.path``); callers that must fail CLOSED
-    on a substituted basis read ``.degraded``. The resolution logic lives here and ONLY here —
+    :func:`_hash_basis` resolves the working-tree basis; callers that need the gate ref call
+    here directly. This never raises — callers that must fail CLOSED on a substituted basis
+    read ``.degraded``. The resolution logic lives here and ONLY here —
     it is not duplicated into the claim gate."""
     from rebar import config as _config
 
@@ -286,21 +286,16 @@ def gate_ref_hash_basis(repo_root=None) -> GateRefBasis:
         return GateRefBasis(working, ref=ref, degraded=True)
 
 
-def _hash_basis(repo_root=None, *, at_current_gate_ref: bool = False) -> str:
+def _hash_basis(repo_root=None) -> str:
     """Resolve the shared code basis for review signing and claim freshness.
 
-    At claim, hash the current configured gate ref from local objects so changes
-    since the review's pinned SHA register as scoped drift. Source-local reviews
-    or an unresolved snapshot fall back to the checkout. gate_ref_hash_basis reports
-    that substitution so an attested claim can fail closed. During review, use
-    the active attested snapshot when present. Otherwise use the checkout. This
-    function always yields a path and performs no network fetch. Legacy signatures
-    without a verified SHA compare against the current gate-ref basis.
+    During review, use the active attested snapshot when present. Otherwise use
+    the checkout. This function always yields a path and performs no network
+    fetch. Callers that need the current gate ref instead call
+    :func:`gate_ref_hash_basis` directly, which reports whether it degraded to
+    the working tree so an attested claim can fail closed.
     """
     from rebar import config as _config
-
-    if at_current_gate_ref:
-        return gate_ref_hash_basis(repo_root).path
     from rebar.llm.gate_context import current_code_root
 
     active = current_code_root()

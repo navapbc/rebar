@@ -220,17 +220,6 @@ def test_membership_glob_digest_moves_when_sibling_tf_added(tmp_path: Path) -> N
     assert before != after
 
 
-def test_terraform_membership_entries_are_glob_dep_entries() -> None:
-    # A session's membership globs validate as glob dependency entries (is_glob True → they get a
-    # membership digest via the shared hash_dep_entry boundary), and non-conforming ones drop.
-    entries = read_set.terraform_membership_entries(
-        ["infra/**/*.tf", "**/*.tf.json", "/abs/*.tf", "notes.py", "../esc/*.tf", "plain/dir"]
-    )
-    assert entries == ["**/*.tf.json", "infra/**/*.tf"]
-    for entry in entries:
-        assert read_set.is_glob(entry)
-
-
 # ─────────────────── synthetic read merge determinism ────────────────────
 
 

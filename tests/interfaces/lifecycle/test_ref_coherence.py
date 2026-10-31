@@ -164,21 +164,21 @@ def test_hash_basis_resolution(tmp_path, monkeypatch):
     # active attested code root → that snapshot
     with use_code_root("/some/snap"):
         assert attest._hash_basis(str(repo)) == "/some/snap"
-    # at_current_gate_ref + attested config → the materialized snapshot at the gate ref
+    # gate ref + attested config → the materialized snapshot at the gate ref
     main_sha = _git(repo, "rev-parse", "origin/main")
     monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
     monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
-    basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
+    basis = attest.gate_ref_hash_basis(str(repo)).path
     assert basis.endswith(main_sha)
     assert (Path(basis) / "dep.py").read_text() == "ORIGINAL = 1\n"
-    # at_current_gate_ref + local config → the working tree (the documented back-out)
+    # gate ref + local config → the working tree (the documented back-out)
     monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
-    basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
+    basis = attest.gate_ref_hash_basis(str(repo)).path
     assert basis == str(rebar.config.repo_root(str(repo)))
-    # at_current_gate_ref + an unresolvable ref → degrade to the working tree (never crash)
+    # gate ref + an unresolvable ref → degrade to the working tree (never crash)
     monkeypatch.setenv("REBAR_GATE_SOURCE", "attested")
     monkeypatch.setenv("REBAR_GATE_REF", "no-such-ref")
-    basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
+    basis = attest.gate_ref_hash_basis(str(repo)).path
     assert basis == str(rebar.config.repo_root(str(repo)))
 
 
@@ -215,7 +215,7 @@ def test_attested_claim_gate_refuses_to_certify_when_the_gate_ref_is_unresolvabl
 
     # PRECONDITION PROOF (anti-vacuity): the substitution really fired, and the substituted
     # basis genuinely holds the reviewed bytes — so an unguarded comparison finds NO drift.
-    basis = attest._hash_basis(str(repo), at_current_gate_ref=True)
+    basis = attest.gate_ref_hash_basis(str(repo)).path
     assert basis == str(rebar.config.repo_root(str(repo))), "the working-tree substitution fired"
     assert (Path(basis) / "dep.py").read_text() == "ORIGINAL = 1\n"
 

@@ -32,7 +32,7 @@ def _result(monkeypatch, current: str, manifest: list[str]) -> dict:
             "plan_review_phase": current,
         },
         "plan-review",
-        profile=PlanValidityProfile.DRIFT_REFRESH,
+        profile=PlanValidityProfile.CLOSE,
     )
 
 
