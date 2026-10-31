@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import pytest
+from _child_hooks import child_env
 from _git_upkeep import BARE_REMOTE_UPKEEP_PINS, init_bare_remote
 from _subprocess_env import subprocess_env
 from _topology_template import clone_topology_template
@@ -516,9 +517,8 @@ _SLOW_NOW = 1_000_000_000_000_000_000  # ~year 2001, 19 digits
 
 
 def _engine_run_at(repo: Path, *args: str, now: int, check: bool = True):
-    """`_engine_run` with the physical HLC clock pinned to *now* (REBAR_HLC_NOW)."""
-    env = _engine.engine_env(repo_root=str(repo))
-    env["REBAR_HLC_NOW"] = str(now)
+    """`_engine_run` with the child's physical HLC clock pinned to *now*."""
+    env = child_env(_engine.engine_env(repo_root=str(repo)), hlc_now=now)
     return subprocess.run(
         [_CLI, *args], cwd=str(repo), env=env, text=True, capture_output=True, check=check
     )
@@ -1532,13 +1532,10 @@ def test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced(two_clones):
 # A's future snapshot, then reconnects and publishes through a later write.
 
 
-def _engine_run_env(repo: Path, *args: str, env_extra=None, check: bool = True):
-    """``_engine_run`` with EXTRA env merged over ``engine_env`` — the injection point for
-    ``REBAR_HLC_NOW`` (physical clock) / ``REBAR_COMPACTION_HORIZON_NS`` so the test
-    controls event + compaction timestamps."""
-    env = _engine.engine_env(repo_root=str(repo))
-    if env_extra:
-        env.update({k: str(v) for k, v in env_extra.items()})
+def _engine_run_env(repo: Path, *args: str, hlc_now: int, check: bool = True):
+    """``_engine_run`` with the child's physical HLC clock pinned to *hlc_now*, so the
+    test controls the event and compaction timestamps the child writes."""
+    env = child_env(_engine.engine_env(repo_root=str(repo)), hlc_now=hlc_now)
     return subprocess.run(
         [_CLI, *args], cwd=str(repo), env=env, text=True, capture_output=True, check=check
     )
@@ -1582,12 +1579,12 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
             "create",
             "task",
             "far-past compaction subject",
-            env_extra={"REBAR_HLC_NOW": _A_FAR_PAST},
+            hlc_now=_A_FAR_PAST,
         ).stdout
     )
-    _engine_run_env(repo_a, "comment", tid, "fold-1", env_extra={"REBAR_HLC_NOW": _A_FAR_PAST + 1})
-    _engine_run_env(repo_a, "comment", tid, "fold-2", env_extra={"REBAR_HLC_NOW": _A_FAR_PAST + 2})
-    _engine_run_env(repo_a, "comment", tid, "young-live", env_extra={"REBAR_HLC_NOW": _A_YOUNG_NOW})
+    _engine_run_env(repo_a, "comment", tid, "fold-1", hlc_now=_A_FAR_PAST + 1)
+    _engine_run_env(repo_a, "comment", tid, "fold-2", hlc_now=_A_FAR_PAST + 2)
+    _engine_run_env(repo_a, "comment", tid, "young-live", hlc_now=_A_YOUNG_NOW)
     # Publish the uncompacted ticket so origin holds it.
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
 
@@ -1603,7 +1600,7 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
         "--threshold=0",
         f"--horizon={_A_HORIZON}",
         "--skip-sync",
-        env_extra={"REBAR_HLC_NOW": _A_COMPACT_NOW},
+        hlc_now=_A_COMPACT_NOW,
     ).stdout
     assert "compacted" in out, out
     assert any(n.endswith("-SNAPSHOT.json") for n in _event_files(tracker_a)), (
@@ -1619,7 +1616,7 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
         "comment",
         tid,
         "remote-append-from-B",
-        env_extra={"REBAR_HLC_NOW": _A_REMOTE_APPEND_NOW},
+        hlc_now=_A_REMOTE_APPEND_NOW,
     )
     assert "remote-append-from-B" in _engine_run(repo_b, "show", tid).stdout
 
@@ -1660,14 +1657,14 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
         "comment",
         seed,
         "orphan-from-B",
-        env_extra={"REBAR_HLC_NOW": _B_ORPHAN_TS},
+        hlc_now=_B_ORPHAN_TS,
     )
     b_comment = _seed_dir_files(tracker_b, seed, "-COMMENT.json")[-1]
     b_uuid = json.loads(b_comment.read_text())["uuid"]
     assert "orphan-from-B" in _engine_run(repo_b, "show", seed).stdout
 
     # A compacts seed with a far-future SNAPSHOT ts (horizon 0 → fold everything; the
-    # SNAPSHOT ts is next_tick, floored up to REBAR_HLC_NOW). Then A publishes it.
+    # SNAPSHOT ts is next_tick, floored up to the pinned clock). Then A publishes it.
     out = _engine_run_env(
         repo_a,
         "store",
@@ -1676,7 +1673,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
         "--threshold=0",
         "--horizon=0",
         "--skip-sync",
-        env_extra={"REBAR_HLC_NOW": _B_FAR_FUTURE},
+        hlc_now=_B_FAR_FUTURE,
     ).stdout
     assert "compacted" in out, out
     snap = _seed_dir_files(tracker_a, seed, "-SNAPSHOT.json")
@@ -1694,7 +1691,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
         "comment",
         seed,
         "post-merge-from-B",
-        env_extra={"REBAR_HLC_NOW": _B_POST_MERGE_WRITE},
+        hlc_now=_B_POST_MERGE_WRITE,
     )
 
     def _comment_bodies(repo: Path) -> list[str]:

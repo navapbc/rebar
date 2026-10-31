@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 import rebar
+from rebar._store import hlc
 
 pytestmark = pytest.mark.interface
 
@@ -23,7 +24,7 @@ pytestmark = pytest.mark.interface
 JS_SAFE_MAX = 2**53 - 1
 
 #: A fixed nanosecond instant injected into the ``ns_ticket`` fixture through the HLC
-#: clock seam (``REBAR_HLC_NOW``) so the fixture's stored timestamps are DETERMINISTIC
+#: clock seam (``hlc._clock``) so the fixture's stored timestamps are DETERMINISTIC
 #: rather than a wall-clock draw. It is a multiple of 256: in ``[2**60, 2**61)`` the
 #: float64 grid spacing (ULP) is 256, so an integer is float64-exact iff it is
 #: ``≡ 0 mod 256``. Injecting this base makes the CREATE tick ``base + 1`` and the
@@ -68,10 +69,10 @@ def _cli_json(*args: str) -> Any:
 def ns_ticket(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     """Create a stored ticket with timestamps beyond JS's exact range and float64-inexact.
 
-    ``REBAR_HLC_NOW`` pins the value so the round-trip hazard is always exercised. The
+    The ``hlc._clock`` seam pins the value so the round-trip hazard is always exercised. The
     fixture asserts that premise to catch clock regressions.
     """
-    monkeypatch.setenv("REBAR_HLC_NOW", str(_HLC_INEXACT_BASE_NS))
+    monkeypatch.setattr(hlc, "_clock", lambda: _HLC_INEXACT_BASE_NS)
     ticket_id = str(rebar.create_ticket("task", "a ticket carrying a nanosecond timestamp"))
     rebar.comment(ticket_id, "a comment, so comments[].timestamp is exercised too")
     stored = rebar.show_ticket(ticket_id)

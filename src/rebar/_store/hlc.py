@@ -15,9 +15,10 @@ history remains authoritative, making missing or lost cache writes safe. A singl
 global cache and local lock provide stronger monotonicity than per-ticket caches.
 The per-ticket witness supplies the causal floor after fetch.
 
-Clock errors fall back to ``physical_now()`` so event writes continue.
-``REBAR_HLC_NOW`` injects skewed test time. ``next_tick`` holds
-``.rebar/hlc.lock`` only for its read-modify-write and never across the store lock.
+Clock errors fall back to ``physical_now()`` so event writes continue. The
+module-level ``_clock`` is the injection point a test rebinds to supply skewed
+time. ``next_tick`` holds ``.rebar/hlc.lock`` only for its read-modify-write and
+never across the store lock.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -35,17 +36,13 @@ from rebar._store.paths import StorePaths
 logger = logging.getLogger(__name__)
 
 
+_clock: Callable[[], int] = time.time_ns
+
+
 def physical_now() -> int:
-    """The physical clock source: ``time.time_ns()``, or the ``REBAR_HLC_NOW``
-    override (the injection point the skewed-clock harness drives). A malformed
-    override is ignored."""
-    override = os.environ.get("REBAR_HLC_NOW")  # read-via: test-only-clock-injection
-    if override is not None:
-        try:
-            return int(override.strip())
-        except ValueError:
-            pass
-    return time.time_ns()
+    """The physical clock source, read through the rebindable ``_clock`` seam so a
+    test can inject skewed time without a production environment read."""
+    return _clock()
 
 
 def _max_event_prefix(tracker: str | os.PathLike, ticket_id: str) -> int:

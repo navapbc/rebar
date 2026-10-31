@@ -8,9 +8,10 @@ rollback, lock-release, cache-cleanup, or git-staging code, so this is the only 
 that exercises the true process-death durability contract (stale write-lock
 reclamation + a dirty tracker worktree left between the SNAPSHOT write and the commit).
 
-Determinism comes from a test-only failpoint in ``compact.py``
-(``REBAR_TEST_COMPACT_RENAME_BARRIER``) that pauses the child right after the FIRST
-source rename and signals readiness via a marker file — no reliance on a timing race.
+Determinism comes from a test-owned failpoint injected into the child by
+``tests/_child_hooks.py::child_env``, which rebinds ``compact_txn._rename_barrier``
+to pause right after the FIRST source rename and signals readiness via a marker
+file — no reliance on a timing race.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import time
 from pathlib import Path
 
 import pytest
+from _child_hooks import child_env
 from _subprocess_env import subprocess_env
 
 import rebar
@@ -97,8 +99,7 @@ def test_sigkill_mid_retirement_recovers_from_fresh_process(
 
     barrier = tmp_path / "barrier"
     barrier.mkdir()
-    env = subprocess_env()
-    env["REBAR_TEST_COMPACT_RENAME_BARRIER"] = str(barrier)
+    env = child_env(subprocess_env(), rename_barrier=barrier)
     env["REBAR_COMPACTION_HORIZON_NS"] = "0"
 
     proc = subprocess.Popen(

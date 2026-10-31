@@ -2,7 +2,7 @@
 
 Pins the four properties the design rests on: strict monotonicity, the per-ticket
 ``max(prefix)`` witness (the cross-clone causal floor, correct even with NO cache
-file), the injectable ``REBAR_HLC_NOW`` source, and the retirement of the old
+file), the injectable ``_clock`` source, and the retirement of the old
 ``REBAR_HLC`` rollback switch.
 """
 
@@ -30,13 +30,13 @@ def _write_event(tracker: Path, ticket_id: str, prefix: int, etype: str = "EDIT"
 
 # ── injection and retired rollback switch ───────────────────────────────────
 def test_physical_now_honors_injection(monkeypatch):
-    monkeypatch.setenv("REBAR_HLC_NOW", "123456789012345678")
+    monkeypatch.setattr(hlc, "_clock", lambda: 123456789012345678)
     assert hlc.physical_now() == 123456789012345678
 
 
 def test_rebar_hlc_env_no_longer_disables_the_clock(tracker, monkeypatch):
     monkeypatch.setenv("REBAR_HLC", "0")
-    monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")
+    monkeypatch.setattr(hlc, "_clock", lambda: 1700000000000000000)
     # The retired rollback switch no longer bypasses the monotonic HLC path.
     assert hlc.next_tick(tracker, "tk-1") == 1700000000000000001
     assert hlc.next_tick(tracker, "tk-1") == 1700000000000000002
@@ -45,7 +45,7 @@ def test_rebar_hlc_env_no_longer_disables_the_clock(tracker, monkeypatch):
 
 # ── monotonicity & witness (enabled) ────────────────────────────────────────
 def test_strictly_monotonic(tracker, monkeypatch):
-    monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")  # frozen physical clock
+    monkeypatch.setattr(hlc, "_clock", lambda: 1700000000000000000)  # frozen physical clock
     ticks = [hlc.next_tick(tracker, "tk-1") for _ in range(50)]
     assert ticks == sorted(ticks)
     assert len(set(ticks)) == 50  # all unique
@@ -55,7 +55,7 @@ def test_strictly_monotonic(tracker, monkeypatch):
 def test_witness_max_prefix_floors_the_tick(tracker, monkeypatch):
     # A pulled event whose prefix is far ABOVE the physical clock (a fast peer).
     big = 5_000_000_000_000_000_000
-    monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")  # slow local clock
+    monkeypatch.setattr(hlc, "_clock", lambda: 1700000000000000000)  # slow local clock
     _write_event(tracker, "tk-1", big)
     tick = hlc.next_tick(tracker, "tk-1")
     assert tick > big, "tick must exceed the witnessed max-prefix (causal floor)"
@@ -64,7 +64,7 @@ def test_witness_max_prefix_floors_the_tick(tracker, monkeypatch):
 def test_witness_correct_with_no_cache_file(tracker, monkeypatch):
     # EXP4b: even with NO .rebar/hlc.state, the tick still exceeds the ticket's
     # max(prefix) — correctness is re-derived from the durable log.
-    monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")
+    monkeypatch.setattr(hlc, "_clock", lambda: 1700000000000000000)
     big = 5_000_000_000_000_000_000
     _write_event(tracker, "tk-1", big)
     assert not (tracker.parent / ".rebar" / "hlc.state").exists()
@@ -74,7 +74,7 @@ def test_witness_correct_with_no_cache_file(tracker, monkeypatch):
 def test_witness_is_per_ticket(tracker, monkeypatch):
     # A huge prefix on ANOTHER ticket must not floor this ticket's tick (the
     # witness is per-ticket; only the global cache carries cross-ticket high-water).
-    monkeypatch.setenv("REBAR_HLC_NOW", "1700000000000000000")
+    monkeypatch.setattr(hlc, "_clock", lambda: 1700000000000000000)
     (tracker / "tk-other").mkdir()
     _write_event(tracker, "tk-other", 9_000_000_000_000_000_000)
     tick = hlc.next_tick(tracker, "tk-1")
@@ -86,9 +86,14 @@ def test_never_raises_on_missing_ticket_dir(tracker, monkeypatch):
     assert isinstance(hlc.next_tick(tracker, "does-not-exist-yet"), int)
 
 
-def test_hlc_source_retains_only_the_test_clock_override():
+def test_hlc_source_injects_the_clock_without_an_environment_read():
     source = Path(hlc.__file__).read_text(encoding="utf-8")
-    assert re.search(r"\bREBAR_HLC_NOW\b", source), "the injected test clock must remain"
+    assert re.search(r"^_clock: Callable\[\[\], int\] = time\.time_ns$", source, re.M), (
+        "``_clock`` must remain the injection seam for the skewed-clock harness"
+    )
+    assert re.search(r"os\.environ", source) is None, (
+        "the HLC module must not read the environment — the clock seam is ``_clock``"
+    )
     assert re.search(r"\bREBAR_HLC\b", source) is None, (
         "the retired rollback switch must not appear anywhere in the HLC module"
     )

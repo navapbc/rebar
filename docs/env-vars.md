@@ -56,7 +56,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_GATE_REVERIFY_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_SOURCE` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_TMPDIR` | `src/rebar/_config_resolvers.py` |  |
-| `REBAR_HLC_NOW` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_LLM_ALLOW_LOCAL_PROXY` | `src/rebar/llm/anthropic_model.py` |  |
 | `REBAR_LLM_API_KEY` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config_readers.py` |  |
@@ -141,7 +140,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py` |  |
-| `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact_txn.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py`, `src/rebar/llm/evals/plan_replay/labels.py` |  |
 | `REBAR_USAGE_LOG` | `src/rebar/_config_resolvers.py` |  |
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_resolvers.py` |  |
@@ -160,7 +158,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_148 variables._
+_146 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

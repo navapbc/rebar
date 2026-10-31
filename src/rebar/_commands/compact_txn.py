@@ -9,8 +9,7 @@ import json
 import logging
 import os
 import sys
-import time
-from pathlib import Path
+from collections.abc import Callable
 
 from rebar._commands import compact_plan, compact_recovery
 from rebar._commands._compact_policy import is_foldable
@@ -175,23 +174,19 @@ def _build_authorship_ledger(
     return ledger
 
 
-def _maybe_pause_at_rename_barrier(n_renamed: int) -> None:
-    """Test-only failpoint (inert in production). When the environment variable
-    ``REBAR_TEST_COMPACT_RENAME_BARRIER`` names a directory, pause after the FIRST
-    source rename (``n_renamed == 1``) so a test can reliably SIGKILL a real
-    compactor process in the mid-retirement window — SNAPSHOT already written, one
-    source ``*.retired``, the rest still active, nothing committed and the write lock
-    still held. The hook writes a ``reached`` marker (its PID) and then blocks until a
-    ``release`` file appears, so the test controls the kill point deterministically
-    with no timing race. Guarded entirely by the env var: unset ⇒ immediate return."""
-    barrier = os.environ.get("REBAR_TEST_COMPACT_RENAME_BARRIER")  # read-via: test-failpoint
-    if not barrier or n_renamed != 1:
-        return
-    bdir = Path(barrier)
-    (bdir / "reached").write_text(str(os.getpid()), encoding="utf-8")
-    release = bdir / "release"
-    while not release.exists():
-        time.sleep(0.02)
+def _no_rename_barrier(_n_renamed: int) -> None:
+    """The production rename barrier: inert. A test rebinds :data:`_rename_barrier`
+    to pause the compactor after the FIRST source rename (argument ``1``), in the
+    mid-retirement window — SNAPSHOT already written, one source ``*.retired``, the
+    rest still active, nothing committed and the write lock still held.
+
+    The count argument is unused here and so carries a leading underscore: this
+    default exists only to satisfy the ``Callable[[int], None]`` contract that the
+    rebinding test relies on."""
+    return None
+
+
+_rename_barrier: Callable[[int], None] = _no_rename_barrier
 
 
 def _parse_candidate_events(ticket_dir: str) -> list[Candidate]:
@@ -268,7 +263,7 @@ def _retire_folded_sources(fold_files: list[str], ticket_id: str, final_path: st
             os.rename(fp, retired)
             renamed.append(fp)
             logger.info("compact: retired folded event %s", os.path.basename(fp))
-            _maybe_pause_at_rename_barrier(len(renamed))
+            _rename_barrier(len(renamed))
     except OSError:
         logger.warning(
             "compact: failed to retire a folded event for %s — reversing %d rename(s)",
