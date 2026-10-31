@@ -109,7 +109,7 @@ The gate has **two layers**:
   "done" evidence inherently lives OUTSIDE the codebase — a deploy, a prod/live-run
   outcome, an IaC apply, a cloud-resource state, a merge-gate (Gerrit vote) result,
   a human/operator action, an operator drill, live-store surgery, or a recorded
-  out-of-band attestation — but which are NOT tagged `[operator-attested]`. Such an
+  out-of-band attestation — but which are NOT tagged `[non-codebase]` (ADR 0101). Such an
   AC makes the completion verifier hunt for code proof that cannot exist and burn a
   close-gate cycle (the motivating cases were tickets 115b and 8c4f); surfacing it
   at PLAN time is the cheap fix. It NEVER blocks (it rides P6, which is advisory),
@@ -118,7 +118,8 @@ The gate has **two layers**:
   are not routed through that index, which the packaged-routing CI gate enforces),
   and it is precision-first (a codebase-verifiable suppression co-signal drops items
   that name an in-repo proving command / test / doc / config file, plus a negation
-  guard). The `[operator-attested]` tag matcher is single-sourced in
+  guard). The `[non-codebase]` tag matcher (which also accepts the legacy
+  spelling) is single-sourced in
   `det_operator_attested` (`_OPERATOR_ATTESTED_TAG_RE`, re-exported by `workflow_ops`)
   so the lint and the
   completion-verifier enrichment agree on "tagged" by construction. It is self-gated
@@ -1157,7 +1158,7 @@ an unaudited `--force` bypass.
 Before the completion verifier runs, the close gate performs a deterministic check: if the
 ticket's `## Acceptance Criteria` section contains any unchecked `- [ ]` item, the close
 fails immediately (exit 1) **without making any LLM call**. Items whose text begins with the
-`[operator-attested]` tag (ADR-0043) are exempt — the shared matcher `_OPERATOR_ATTESTED_TAG_RE`
+`[non-codebase]` tag (ADR-0043, renamed by ADR 0101) are exempt — the shared matcher `_OPERATOR_ATTESTED_TAG_RE`
 from `det_operator_attested.py` is reused so the two surfaces cannot drift. To override when
 a gate-level bypass is warranted, pass `--force="<reason>"`. Checking boxes to satisfy
 this precheck is attestation-safe: checkbox state is normalized out of the material
@@ -1182,7 +1183,7 @@ precheck (bug `2f56-313f-6175-41b1`). The completion verifier classifies criteri
 from the author tag** (ADR-0043, by design), so a mistagged criterion would launder
 repository-verifiable work past verification — the verifier accepts a ticket comment where an
 exact path/symbol check was possible. Before any LLM call, the close now fails (exit 1) when
-an `[operator-attested]` AC item:
+a `[non-codebase]` AC item:
 
 1. **cites exact repo path/symbol evidence** in its own text or indented continuation lines.
    Test artifacts always fire (`tests/unit/test_x.py`, `pkg/mod.py::test_y`, bare `test_*`
