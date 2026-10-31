@@ -66,12 +66,18 @@ def _iso(epoch: int) -> str:
     return dt.datetime.fromtimestamp(epoch, tz=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# Canonical status is unconditional, so a NEVER_RUN verdict is the only remaining
+# route to the run-history witness; these run-history tests drive it through bootstrap.
+NEVER_RUN: dict[tuple[str, ...], tuple[int, str, str]] = {
+    ("rebar", "bridge", "status"): (1, '{"verdict": "NEVER_RUN"}', ""),
+}
+
+
 def hb_env(tmp_path: Path, **over: str) -> dict[str, str]:
     env = {
         "ALERT_WINDOW_HOURS": "2",
         "GITHUB_REPOSITORY": "navapbc/rebar",
         "GITHUB_OUTPUT": str(tmp_path / "gh_out"),
-        "REBAR_CANARY_HEARTBEAT_SOURCE": "github-api",
     }
     env.update(over)
     (tmp_path / "gh_out").touch()
@@ -119,7 +125,7 @@ class SequenceRunner(FakeRunner):
 
 
 def status_env(tmp_path: Path, **over: str) -> dict[str, str]:
-    env = hb_env(tmp_path, REBAR_CANARY_HEARTBEAT_SOURCE="status")
+    env = hb_env(tmp_path)
     env.update(over)
     return env
 
@@ -137,12 +143,11 @@ def _status(verdict: str, **extra: object) -> tuple[int, str, str]:
     return (0 if verdict in {"HEALTHY", "PAUSED", "RUNNING"} else 1, json.dumps(payload), "")
 
 
-def test_status_source_is_default_and_never_queries_workflow_heartbeat(
+def test_canonical_status_is_unconditional_and_never_queries_workflow_heartbeat(
     mod: ModuleType, tmp_path: Path
 ) -> None:
     runner = SequenceRunner([_status("HEALTHY")])
     env = hb_env(tmp_path)
-    env.pop("REBAR_CANARY_HEARTBEAT_SOURCE")
     rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
     assert read_outputs(tmp_path / "gh_out")["stale"] == "false"
@@ -158,18 +163,6 @@ def test_status_source_is_default_and_never_queries_workflow_heartbeat(
             "--json",
         ]
     ]
-
-
-def test_explicit_github_api_source_preserves_one_release_rollback(
-    mod: ModuleType, tmp_path: Path
-) -> None:
-    payload = json.dumps({"updated_at": _iso(NOW - 60)})
-    runner = FakeRunner({("gh", "api"): (0, payload, "")})
-    env = hb_env(tmp_path, REBAR_CANARY_HEARTBEAT_SOURCE="github-api")
-    rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
-    assert rc == 0
-    assert read_outputs(tmp_path / "gh_out")["stale"] == "false"
-    assert runner.calls and runner.calls[0][:2] == ["gh", "api"]
 
 
 def test_running_snapshot_waits_observed_lease_and_advancing_fence_stays_running(
@@ -258,7 +251,7 @@ def test_exact_cutoff_boundary_is_not_stale(mod: ModuleType, tmp_path: Path) -> 
     """YAML: stale iff run_epoch < cutoff_epoch (STRICT). run_epoch == cutoff -> fresh."""
     run_epoch = NOW - 2 * 3600  # exactly the 2h window
     payload = json.dumps({"updated_at": _iso(run_epoch)})
-    runner = FakeRunner({("gh", "api"): (0, payload, "")})
+    runner = FakeRunner({("gh", "api"): (0, payload, ""), **NEVER_RUN})
     rc = mod.main(["check-heartbeat"], runner=runner, environ=hb_env(tmp_path), now_epoch=NOW)
     assert rc == 0
     assert read_outputs(tmp_path / "gh_out")["stale"] == "false"
@@ -267,7 +260,7 @@ def test_exact_cutoff_boundary_is_not_stale(mod: ModuleType, tmp_path: Path) -> 
 def test_one_second_past_cutoff_is_stale(mod: ModuleType, tmp_path: Path) -> None:
     run_epoch = NOW - 2 * 3600 - 1
     payload = json.dumps({"updated_at": _iso(run_epoch)})
-    runner = FakeRunner({("gh", "api"): (0, payload, "")})
+    runner = FakeRunner({("gh", "api"): (0, payload, ""), **NEVER_RUN})
     rc = mod.main(["check-heartbeat"], runner=runner, environ=hb_env(tmp_path), now_epoch=NOW)
     assert rc == 0
     assert read_outputs(tmp_path / "gh_out")["stale"] == "true"
@@ -277,7 +270,7 @@ def test_age_arithmetic_truncates_like_shell(mod: ModuleType, tmp_path: Path) ->
     """7385s = 2h 3m (integer division twice, seconds dropped)."""
     run_epoch = NOW - 7385
     payload = json.dumps({"updated_at": _iso(run_epoch)})
-    runner = FakeRunner({("gh", "api"): (0, payload, "")})
+    runner = FakeRunner({("gh", "api"): (0, payload, ""), **NEVER_RUN})
     rc = mod.main(["check-heartbeat"], runner=runner, environ=hb_env(tmp_path), now_epoch=NOW)
     assert rc == 0
     assert read_outputs(tmp_path / "gh_out")["last_run_ago"] == "2h 3m ago"
@@ -299,7 +292,7 @@ def test_invalid_windows_rejected(mod: ModuleType, tmp_path: Path, bad: str) -> 
 def test_large_window_accepted(mod: ModuleType, tmp_path: Path) -> None:
     run_epoch = NOW - 20 * 3600
     payload = json.dumps({"updated_at": _iso(run_epoch)})
-    runner = FakeRunner({("gh", "api"): (0, payload, "")})
+    runner = FakeRunner({("gh", "api"): (0, payload, ""), **NEVER_RUN})
     rc = mod.main(
         ["check-heartbeat"],
         runner=runner,
@@ -316,7 +309,7 @@ def test_github_output_appends_not_truncates(mod: ModuleType, tmp_path: Path) ->
     """$GITHUB_OUTPUT is append-mode: earlier keys written by other steps survive."""
     env = hb_env(tmp_path)
     Path(env["GITHUB_OUTPUT"]).write_text("earlier=kept\n", encoding="utf-8")
-    runner = FakeRunner({("gh", "api"): (0, "", "")})
+    runner = FakeRunner({("gh", "api"): (0, "", ""), **NEVER_RUN})
     rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
     out = read_outputs(tmp_path / "gh_out")

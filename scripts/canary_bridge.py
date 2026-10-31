@@ -137,15 +137,7 @@ def cmd_check_heartbeat(
         return 1
 
     window_hours = int(window_str)
-    source = getattr(args, "source", None) or environ.get("REBAR_CANARY_HEARTBEAT_SOURCE", "status")
-    if source not in {"status", "github-api"}:
-        print(
-            f"::error::REBAR_CANARY_HEARTBEAT_SOURCE must be status or github-api, got {source!r}"
-        )
-        return 1
-    if source == "status":
-        return _check_status_heartbeat(runner, environ, now_epoch, window_hours)
-    return _check_github_heartbeat(runner, environ, now_epoch, window_hours)
+    return _check_status_heartbeat(runner, environ, now_epoch, window_hours)
 
 
 def _check_status_heartbeat(
@@ -187,13 +179,7 @@ def _check_status_heartbeat(
     if verdict == "NEVER_RUN":
         # Producer-first rollout: old producers have no ref yet, so retain the
         # one-release GitHub run-history witness until the first new pass lands.
-        return _check_github_heartbeat(
-            runner,
-            environ,
-            now_epoch,
-            window_hours,
-            bootstrap=True,
-        )
+        return _check_github_heartbeat(runner, environ, now_epoch, window_hours)
     if verdict == "RUNNING":
         lease = status.get("lock_lease_secs")
         if not isinstance(lease, (int, float)) or isinstance(lease, bool) or lease <= 0:
@@ -257,10 +243,8 @@ def _check_github_heartbeat(
     environ: Mapping[str, str],
     now_epoch: int,
     window_hours: int,
-    *,
-    bootstrap: bool = False,
 ) -> int:
-    """One-release rollback/bootstrap source based on successful workflow runs."""
+    """Last-pass producer bootstrap witness, based on successful workflow runs."""
     repo = environ["GITHUB_REPOSITORY"]
     gh_output = environ["GITHUB_OUTPUT"]
 
@@ -325,8 +309,8 @@ def _check_github_heartbeat(
             stale="false",
             last_run_ago=ago,
             status_msg=(
-                f"Reconciler healthy \u2014 last successful run was {age_hours}h {age_mins}m ago."
-                + (" (last-pass producer bootstrap fallback)." if bootstrap else "")
+                f"Reconciler healthy \u2014 last successful run was {age_hours}h {age_mins}m "
+                "ago. (last-pass producer bootstrap fallback)."
             ),
         )
     return 0
@@ -680,14 +664,7 @@ def main(
     )
     sub = parser.add_subparsers(dest="subcommand")
     for name in _SUBCOMMANDS:
-        child = sub.add_parser(name)
-        if name == "check-heartbeat":
-            child.add_argument(
-                "--source",
-                choices=("status", "github-api"),
-                default=None,
-                help="Heartbeat source (default: canonical bridge status).",
-            )
+        sub.add_parser(name)
 
     args = parser.parse_args(argv)
     if args.subcommand is None:

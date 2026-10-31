@@ -8,6 +8,40 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## The canary's `github-api` heartbeat source is removed
+
+**Contract change for any repository running a copy of `reconcile-bridge-canary.yml`.** The
+one-release rollback window ADR 0094 opened has closed. The `status_source` workflow input,
+its `REBAR_CANARY_HEARTBEAT_SOURCE` environment variable, and `canary_bridge.py
+check-heartbeat --source` are all removed; the canary reads canonical bridge status
+unconditionally. A copied workflow that still passes `status_source` fails dispatch
+validation, and one that still passes `--source` exits 2 on an unrecognized argument.
+
+The GitHub run-history witness itself is retained, but only as the `NEVER_RUN` bootstrap
+fallback ADR 0094 requires for a producer-first deployment that has not yet written a
+last-pass ref. It is no longer selectable, so a healthy bootstrap message always carries the
+`(last-pass producer bootstrap fallback)` suffix. Rolling back now means reverting the status
+consumer and producer together.
+
+## `docs/env-vars.md` lists every `REBAR_<SECTION>_<KEY>` override
+
+**Contract change for any agent that reads the env registry to find a settable override.**
+The generator used to list only the names it could see as a literal environment read under
+`src/rebar`, plus the derived `REBAR_MCP_*` inventory. Every other canonical config override
+is built at runtime by `env_overrides()` from the section registry, so it carried no literal
+read and never reached the document — the registry silently understated the settable surface.
+
+The generator now derives each canonical name from `_SECTIONS` via `_canonical_env_name` and
+attributes it to `src/rebar/_config_sections.py`. A test asserts the derived set is a subset
+of the documented rows, deriving both sides rather than asserting a total, so the check keeps
+holding as config keys are added and retired.
+
+## Test-only child-process hooks are no longer read by rebar
+
+`REBAR_HLC_NOW` and `REBAR_TEST_COMPACT_RENAME_BARRIER` moved out of `src/rebar` into
+test-owned child injection. Nothing under `src/rebar` reads either name, so neither is part
+of rebar's configuration surface.
+
 ## The bare id-list spelling of `activate` in `criteria_routing.json` is deprecated
 
 **Contract change for any repo whose `.rebar/criteria_routing.json` sets `activate` to a

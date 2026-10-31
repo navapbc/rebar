@@ -403,7 +403,17 @@ def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
     # Config aliases have no literal read, so add their real, settable surface explicitly.
     for alias_name in aliases:
         reads.setdefault(alias_name, set()).add("src/rebar/_deprecations.py (deprecation registry)")
-    # Derived REBAR_MCP_* keys likewise come from the canonical MCP_ENV_VARS inventory.
+    # Every config key carries a settable canonical override, read at runtime through
+    # _canonical_env_name rather than under a literal key, so the scan cannot see them.
+    from rebar._config_schema import _SECTIONS
+    from rebar._config_sources import _canonical_env_name
+
+    for sect, keys in _SECTIONS.items():
+        for key in keys:
+            reads.setdefault(_canonical_env_name(sect, key), set()).add(
+                f"src/rebar/_config_sections.py (canonical env name of {sect}.{key})"
+            )
+    # REBAR_MCP_DEDUP and friends live in MCP_ENV_VARS, not in _SECTIONS.
     from rebar.mcp_server import MCP_ENV_VARS
 
     for entry in MCP_ENV_VARS:
@@ -441,6 +451,11 @@ def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
     )
     lines.append(
         "- project env-read helpers: " + ", ".join(f"`{h}`" for h in sorted(KNOWN_ENV_HELPERS))
+    )
+    lines.append(
+        "- canonical config overrides (no literal read — `env_overrides()` builds each name "
+        "at runtime from `_SECTIONS` via `_canonical_env_name`, so every settable "
+        "`REBAR_<SECTION>_<KEY>` is listed from that registry instead of from the scan)"
     )
     lines.append(
         "- NOT recognized: reads under `tests/` (outside the scan root), non-literal keys "

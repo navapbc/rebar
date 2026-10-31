@@ -65,10 +65,16 @@ def read_outputs(path: Path) -> dict[str, str]:
 NOW = 1_785_800_000  # arbitrary fixed epoch
 
 
+# The canary always reads canonical status first; a NEVER_RUN verdict is the only
+# remaining route to the run-history witness, so these tests drive it through bootstrap.
+NEVER_RUN: dict[tuple[str, ...], tuple[int, str, str]] = {
+    ("rebar", "bridge", "status"): (1, '{"verdict": "NEVER_RUN"}', ""),
+}
+
+
 def hb_env(tmp_path: Path, **over: str) -> dict[str, str]:
     env = {
         "ALERT_WINDOW_HOURS": "2",
-        "REBAR_CANARY_HEARTBEAT_SOURCE": "github-api",
         "GITHUB_REPOSITORY": "navapbc/rebar",
         "GITHUB_OUTPUT": str(tmp_path / "gh_out"),
     }
@@ -92,14 +98,17 @@ def test_check_heartbeat_fresh(mod: ModuleType, tmp_path: Path) -> None:
     """A success run inside the window -> stale=false + healthy message."""
     run_epoch = NOW - 3600 - 120  # 1h 2m ago, window 2h
     payload = json.dumps({"updated_at": _iso(run_epoch)})
-    runner = FakeRunner({("gh", "api"): (0, payload, "")})
+    runner = FakeRunner({("gh", "api"): (0, payload, ""), **NEVER_RUN})
     env = hb_env(tmp_path)
     rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
     out = read_outputs(tmp_path / "gh_out")
     assert out["stale"] == "false"
     assert out["last_run_ago"] == "1h 2m ago"
-    assert out["status_msg"] == "Reconciler healthy — last successful run was 1h 2m ago."
+    assert out["status_msg"] == (
+        "Reconciler healthy — last successful run was 1h 2m ago. "
+        "(last-pass producer bootstrap fallback)."
+    )
     # the gh api call targets the reconcile-bridge workflow's success runs
     gh = [c for c in runner.calls if c[0] == "gh"]
     assert len(gh) == 1
@@ -112,7 +121,7 @@ def test_check_heartbeat_stale(mod: ModuleType, tmp_path: Path) -> None:
     """A success run older than the window -> stale=true + threshold message."""
     run_epoch = NOW - (3 * 3600) - (5 * 60)  # 3h 5m ago
     payload = json.dumps({"updated_at": _iso(run_epoch)})
-    runner = FakeRunner({("gh", "api"): (0, payload, "")})
+    runner = FakeRunner({("gh", "api"): (0, payload, ""), **NEVER_RUN})
     env = hb_env(tmp_path)
     rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
@@ -124,7 +133,7 @@ def test_check_heartbeat_stale(mod: ModuleType, tmp_path: Path) -> None:
 
 def test_check_heartbeat_no_success_runs(mod: ModuleType, tmp_path: Path) -> None:
     """Empty API result (legit zero-state) -> stale=true, last_run_ago=never."""
-    runner = FakeRunner({("gh", "api"): (0, "", "")})
+    runner = FakeRunner({("gh", "api"): (0, "", ""), **NEVER_RUN})
     env = hb_env(tmp_path)
     rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
@@ -138,7 +147,7 @@ def test_check_heartbeat_api_error_is_transient(
     mod: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """API failure must NOT alert: stale=false + indeterminate message + ::warning."""
-    runner = FakeRunner({("gh", "api"): (1, "", "boom: rate limited")})
+    runner = FakeRunner({("gh", "api"): (1, "", "boom: rate limited"), **NEVER_RUN})
     env = hb_env(tmp_path)
     rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0

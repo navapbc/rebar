@@ -29,9 +29,44 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   same unknown-key policy as a core key, checked against a list kept in step with the
   readers by a test. Details in [docs/release-notes.md](docs/release-notes.md).
 
+- **The test-only child-process hooks are no longer read by rebar.** `REBAR_HLC_NOW` and
+  `REBAR_TEST_COMPACT_RENAME_BARRIER` moved out of `src/rebar` into test-owned child
+  injection; nothing under `src/rebar` reads either name.
+
+- **`docs/env-vars.md` now lists every `REBAR_<SECTION>_<KEY>` override.** The generator
+  derives each settable canonical name from the section registry instead of listing only
+  the variables it could see as a literal read, so config overrides that `env_overrides()`
+  builds at runtime are documented rather than silently absent.
+
+- **BREAKING (pre-1.0): the canary's `github-api` heartbeat source is removed.** The
+  `status_source` workflow input, its `REBAR_CANARY_HEARTBEAT_SOURCE` environment variable,
+  and the `check-heartbeat --source` flag are gone; the canary reads canonical bridge status
+  unconditionally. The GitHub run-history witness is retained solely as the `NEVER_RUN`
+  bootstrap fallback ADR 0094 requires. Copied templates that pass `status_source` must drop
+  it.
+
 ## [0.14.0] - 2026-10-30
 
 ### Changed
+
+- **BREAKING (pre-1.0) — library `transition` now accepts only the reason-carrying force
+  shape shared with `claim`.** Pass `force="<reason>"` to bypass whichever lifecycle gate the
+  operation reaches; `None` alone means no bypass, and an explicitly empty string records
+  `(no reason given)`. The former boolean `force=True` and close-only
+  `force_close="<reason>"` library spellings have been removed and now raise `TypeError`
+  naming `force="<explicit reason>"`. The free-text `reason` parameter remains only an
+  administrative close reason. Automated NDJSON replay remains an ordinary close and does not
+  gain authority to bypass a target repository's completion-verification gate.
+
+- **BREAKING (pre-1.0) — hosted OpenAI no longer supports the explicit `openai-chat`
+  fallback.** Hosted `openai-chat:gpt-…` and `model_provider = "openai-chat"` now resolve to
+  `openai-responses:gpt-…` with no deprecation-warning path. Custom OpenAI-compatible
+  `base_url`/slot `endpoint` configurations still use Chat Completions because support for
+  `/v1/responses` on arbitrary compatible servers is unknown.
+
+- **BREAKING (pre-1.0): the `REBAR_HLC=0` rollback switch is removed.** The hybrid logical
+  clock is always on; the variable is ignored (commit `81da792`, ticket
+  `fdd1-12fa-ce83-45d1`).
 
 - **BREAKING (pre-1.0): coordinator-routed Jira writes retry HTTP 429 and 5xx within the
   pass.** This partially supersedes "reconciler handlers make one transport attempt" below: an
@@ -504,21 +539,6 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   deliberate read-only/off policy. The safe capability posture is unchanged in effect — a
   broken config still never enables writes, LLM calls, or Jira sync — but the fault now
   surfaces to be fixed instead of masquerading as configuration.
-
-- **BREAKING (pre-1.0) — library `transition` now accepts only the reason-carrying force
-  shape shared with `claim`.** Pass `force="<reason>"` to bypass whichever lifecycle gate the
-  operation reaches; `None` alone means no bypass, and an explicitly empty string records
-  `(no reason given)`. The former boolean `force=True` and close-only
-  `force_close="<reason>"` library spellings have been removed and now raise `TypeError`
-  naming `force="<explicit reason>"`. The free-text `reason` parameter remains only an
-  administrative close reason. Automated NDJSON replay remains an ordinary close and does not
-  gain authority to bypass a target repository's completion-verification gate.
-
-- **BREAKING (pre-1.0) — hosted OpenAI no longer supports the explicit `openai-chat`
-  fallback.** Hosted `openai-chat:gpt-…` and `model_provider = "openai-chat"` now resolve to
-  `openai-responses:gpt-…` with no deprecation-warning path. Custom OpenAI-compatible
-  `base_url`/slot `endpoint` configurations still use Chat Completions because support for
-  `/v1/responses` on arbitrary compatible servers is unknown.
 
 ## [0.12.0] - 2026-08-15
 

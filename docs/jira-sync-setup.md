@@ -187,9 +187,8 @@ immediately, rather than waiting in a workflow-local retry loop.
 
 No store cleanup is needed to roll this template change back. Existing inline
 workflows can remain on their previous package pin because the legacy command
-spellings and benign exit codes `3`, `4`, and `75` retain their prior behavior. Set
-`REBAR_CANARY_HEARTBEAT_SOURCE=github-api` for the one-release heartbeat rollback;
-do not rewrite the tickets worktree or its event history.
+spellings and benign exit codes `3`, `4`, and `75` retain their prior behavior. Do not
+rewrite the tickets worktree or its event history.
 
 ## 5. Validate safely, then enable
 
@@ -291,7 +290,6 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 | Step | Reason |
 |------|--------|
 | **Fetch `refs/reconciler/*` and run `rebar bridge status --target reconciler`** | The durable last-pass ref is the completion witness; the live lock's advancing OID/fence separately proves a running holder. A producer-first deployment with no last-pass yet temporarily uses the GitHub run-history bootstrap witness. |
-| **`github-api` status source** | One-release rollback for copied templates; API errors remain transient in that mode. |
 | **`rebar list/create/comment/transition`** | rebar's CLI is the ticket interface. Unlike the reconciler, **CLI writes auto-commit and auto-push** to `origin/tickets`; the canary's strict core flush makes any still-unpushed ticket changes terminal. |
 | **Bug-close `--reason "Fixed: …"`** | rebar enforces a bug-close reason prefixed `Fixed:` or `Escalated to user:`. Auto-recovery counts as a fix. |
 | **`BRIDGE_CANARY_ALERT:` comment prefix** | The reconciler's outbound comment sync excludes this prefix, so the canary's fresh-timestamped "still stale" comments are **not** mirrored to Jira (a volatile timestamp never dedups → duplicate Jira comments). |

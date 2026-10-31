@@ -80,3 +80,11 @@ Rollback is operationally explicit: set the canary source to `github-api`, then 
 consumer and producer together. Old binaries ignore `refs/reconciler/last-pass`; the ref and local
 detail file are safe to leave in place. Do not roll back only the producer after consumers have
 stopped using the GitHub bootstrap fallback, or a fresh environment will remain NEVER_RUN.
+
+## Status update (2026-11-11)
+
+The one-release rollback window has closed. The canary reads canonical bridge status
+unconditionally: the selector input, its environment variable, and the `--source` flag are
+removed. The GitHub run-history witness is retained, but only as the `NEVER_RUN` bootstrap
+fallback this ADR requires; it is no longer selectable as a rollback source. Rolling back now
+means reverting the status consumer and producer together.

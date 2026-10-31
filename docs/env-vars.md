@@ -7,6 +7,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 - key-bearing stdlib reads (the literal key is registered): `os.environ["X"]`, `os.environ.__getitem__("X", …)`, `os.environ.get("X", …)`, `os.environ.pop("X", …)`, `os.environ.setdefault("X", …)`, `os.getenv("X", …)`
 - bulk/whole-mapping accesses (allowed, register nothing — they name no single variable): `os.environ.__contains__`, `os.environ.__delitem__`, `os.environ.__iter__`, `os.environ.__len__`, `os.environ.__setitem__`, `os.environ.clear`, `os.environ.copy`, `os.environ.items`, `os.environ.keys`, `os.environ.popitem`, `os.environ.update`, `os.environ.values`
 - project env-read helpers: `_env_truthy`, `_gate_str_pref`, `_int_env`, `_llm_float`, `_llm_int`, `_llm_str`, `_llm_str_source`, `_str_env`, `read_secret_env`
+- canonical config overrides (no literal read — `env_overrides()` builds each name at runtime from `_SECTIONS` via `_canonical_env_name`, so every settable `REBAR_<SECTION>_<KEY>` is listed from that registry instead of from the scan)
 - NOT recognized: reads under `tests/` (outside the scan root), non-literal keys (reported as dynamic below instead of dropped), `os.environ` passed by reference into another callable (`dict(os.environ)`, `f(os.environ)`), `getattr(os.environ, …)` indirection, and keys built from a runtime source other than a parameter (a regex match group, say) — no call site carries those names, so they stay dynamic.
 
 | Variable | Read in | Alias/deprecation |
@@ -24,9 +25,9 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
 | `JIRA_API_TOKEN` | `src/rebar/config.py`, `src/rebar/reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/reconciler/runtime.py` |  |
 | `JIRA_PAT` | `src/rebar/reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/reconciler/runtime.py` |  |
-| `JIRA_PROJECT` | `src/rebar/_config_resolvers.py` |  |
-| `JIRA_URL` | `src/rebar/_config_resolvers.py` |  |
-| `JIRA_USER` | `src/rebar/_config_resolvers.py` |  |
+| `JIRA_PROJECT` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sections.py (canonical env name of jira.project)` |  |
+| `JIRA_URL` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sections.py (canonical env name of jira.url)` |  |
+| `JIRA_USER` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sections.py (canonical env name of jira.user)` |  |
 | `LANGFUSE_HOST` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_PUBLIC_KEY` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_SECRET_KEY` | `src/rebar/llm/config.py` |  |
@@ -37,12 +38,25 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `PYTEST_XDIST_WORKER` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_ALLOW_ENV_REIDENTIFY` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_AUTHOR` | `src/rebar/config.py` |  |
+| `REBAR_CODE_HEALTH_INCLUDE_EXTENSIONS` | `src/rebar/_config_sections.py (canonical env name of code_health.include_extensions)` |  |
+| `REBAR_CODE_HEALTH_SCAN_ROOTS` | `src/rebar/_config_sections.py (canonical env name of code_health.scan_roots)` |  |
+| `REBAR_CODE_HEALTH_SIZE_CAP` | `src/rebar/_config_sections.py (canonical env name of code_health.size_cap)` |  |
+| `REBAR_CODE_HEALTH_SIZE_NEAR_FRACTION` | `src/rebar/_config_sections.py (canonical env name of code_health.size_near_fraction)` |  |
+| `REBAR_COMPACTION_HORIZON_NS` | `src/rebar/_config_sections.py (canonical env name of compact.COMPACTION_HORIZON_NS)` |  |
+| `REBAR_COMPACT_SNAPSHOT_ALPHA` | `src/rebar/_config_sections.py (canonical env name of compact.snapshot_alpha)` |  |
+| `REBAR_COMPACT_THRESHOLD` | `src/rebar/_config_sections.py (canonical env name of compact.threshold)` |  |
+| `REBAR_COMPACT_TRIGGER` | `src/rebar/_config_sections.py (canonical env name of compact.trigger)` |  |
+| `REBAR_COMPACT_TRIGGER_INTERVAL_S` | `src/rebar/_config_sections.py (canonical env name of compact.trigger_interval_s)` |  |
 | `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_CONFIG_UNKNOWN_KEYS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_CTAGS_BIN` | `src/rebar/grounding/resolve.py` |  |
+| `REBAR_DEFAULT_ASSIGNEE` | `src/rebar/_config_sections.py (canonical env name of ticket.default_assignee)` |  |
 | `REBAR_DETECTED_BY` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_DOCS_URL` | `src/rebar/config.py` |  |
+| `REBAR_ENSURE_HINT_ENABLED` | `src/rebar/_config_sections.py (canonical env name of ensure.hint_enabled)` |  |
+| `REBAR_ENSURE_HINT_INTERVAL_SECS` | `src/rebar/_config_sections.py (canonical env name of ensure.hint_interval_secs)` |  |
 | `REBAR_ENV_ID` | `src/rebar/config.py` |  |
+| `REBAR_FIXTURE_HEAL_INTERVAL_DAYS` | `src/rebar/_config_sections.py (canonical env name of fixture_heal.interval_days)` |  |
 | `REBAR_GATE_ALLOW_UNGATED` | `src/rebar/llm/gate_context.py` |  |
 | `REBAR_GATE_FREE_WATERMARK_BYTES` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_FREE_WATERMARK_PCT` | `src/rebar/_config_resolvers.py` |  |
@@ -56,6 +70,11 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_GATE_REVERIFY_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_SOURCE` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_GATE_TMPDIR` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_IDENTITY_ENFORCE_SINCE` | `src/rebar/_config_sections.py (canonical env name of identity.enforce_since)` |  |
+| `REBAR_IDENTITY_REQUIRE_AUTHENTICATED` | `src/rebar/_config_sections.py (canonical env name of identity.require_authenticated)` |  |
+| `REBAR_IDENTITY_SIGNING_KEY` | `src/rebar/_config_sections.py (canonical env name of identity.signing_key)` |  |
+| `REBAR_JIRA_ALLOW_INSECURE` | `src/rebar/_config_sections.py (canonical env name of jira.allow_insecure)` |  |
+| `REBAR_JIRA_CLI_TIMEOUT` | `src/rebar/_config_sections.py (canonical env name of reconciler.jira_cli_timeout)` |  |
 | `REBAR_LLM_ALLOW_LOCAL_PROXY` | `src/rebar/llm/anthropic_model.py` |  |
 | `REBAR_LLM_API_KEY` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config_readers.py` |  |
@@ -85,42 +104,42 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_TRIVIAL_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LOCK_RETRIES` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
-| `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_CUSTOM_IMPORT` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_ENABLED` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_MISSING_AUD` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_PRIVATE_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_ID` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_SECRET_ENV` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_INTROSPECTION_ENDPOINT` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_ISSUER_URL` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_JWT_ALGORITHMS` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_JWT_ALLOW_PRIVATE_JWKS_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_JWT_EXPECTED_TYP` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_JWT_ISSUER` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_JWT_JWKS_REFETCH_COOLDOWN` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_JWT_JWKS_TIMEOUT` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_JWT_JWKS_URI` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_JWT_LEEWAY` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_PROXY_IDENTITY_HEADER` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_PROXY_SCOPES` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_PROXY_SECRET_ENV` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_PROXY_SECRET_HEADER` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_REQUIRED_SCOPES` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_RESOURCE_SERVER_URL` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_STATIC_TOKENS_FILE` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_AUTH_STRATEGIES` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.allow_jira_sync)` |  |
+| `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.allow_llm)` |  |
+| `REBAR_MCP_ALLOW_UNAUTHENTICATED_HTTP` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.allow_unauthenticated_http)` |  |
+| `REBAR_MCP_AUTH_CUSTOM_IMPORT` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_custom_import)` |  |
+| `REBAR_MCP_AUTH_ENABLED` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_enabled)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_MISSING_AUD` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_introspection_allow_missing_aud)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_ALLOW_PRIVATE_HOST` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_introspection_allow_private_host)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_ID` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_introspection_client_id)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_CLIENT_SECRET_ENV` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_introspection_client_secret_env)` |  |
+| `REBAR_MCP_AUTH_INTROSPECTION_ENDPOINT` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_introspection_endpoint)` |  |
+| `REBAR_MCP_AUTH_ISSUER_URL` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_issuer_url)` |  |
+| `REBAR_MCP_AUTH_JWT_ALGORITHMS` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_jwt_algorithms)` |  |
+| `REBAR_MCP_AUTH_JWT_ALLOW_PRIVATE_JWKS_HOST` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_jwt_allow_private_jwks_host)` |  |
+| `REBAR_MCP_AUTH_JWT_EXPECTED_TYP` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_jwt_expected_typ)` |  |
+| `REBAR_MCP_AUTH_JWT_ISSUER` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_jwt_issuer)` |  |
+| `REBAR_MCP_AUTH_JWT_JWKS_REFETCH_COOLDOWN` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_jwt_jwks_refetch_cooldown)` |  |
+| `REBAR_MCP_AUTH_JWT_JWKS_TIMEOUT` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_jwt_jwks_timeout)` |  |
+| `REBAR_MCP_AUTH_JWT_JWKS_URI` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_jwt_jwks_uri)` |  |
+| `REBAR_MCP_AUTH_JWT_LEEWAY` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_jwt_leeway)` |  |
+| `REBAR_MCP_AUTH_PROXY_IDENTITY_HEADER` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_proxy_identity_header)` |  |
+| `REBAR_MCP_AUTH_PROXY_SCOPES` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_proxy_scopes)` |  |
+| `REBAR_MCP_AUTH_PROXY_SECRET_ENV` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_proxy_secret_env)` |  |
+| `REBAR_MCP_AUTH_PROXY_SECRET_HEADER` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_proxy_secret_header)` |  |
+| `REBAR_MCP_AUTH_REQUIRED_SCOPES` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_required_scopes)` |  |
+| `REBAR_MCP_AUTH_RESOURCE_SERVER_URL` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_resource_server_url)` |  |
+| `REBAR_MCP_AUTH_STATIC_TOKENS_FILE` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_static_tokens_file)` |  |
+| `REBAR_MCP_AUTH_STRATEGIES` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.auth_strategies)` |  |
 | `REBAR_MCP_DEDUP` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_mcp_inflight.py` |  |
-| `REBAR_MCP_HTTP_ALLOWED_HOSTS` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_HTTP_ALLOWED_ORIGINS` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_HTTP_HOST` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_HTTP_PATH` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_HTTP_PORT` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_HTTP_TLS_AT_EDGE` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_READONLY` | `src/rebar/_config_schema.py (mcp config)` |  |
-| `REBAR_MCP_TRANSPORT` | `src/rebar/_config_schema.py (mcp config)` |  |
+| `REBAR_MCP_HTTP_ALLOWED_HOSTS` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.http_allowed_hosts)` |  |
+| `REBAR_MCP_HTTP_ALLOWED_ORIGINS` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.http_allowed_origins)` |  |
+| `REBAR_MCP_HTTP_HOST` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.http_host)` |  |
+| `REBAR_MCP_HTTP_PATH` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.http_path)` |  |
+| `REBAR_MCP_HTTP_PORT` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.http_port)` |  |
+| `REBAR_MCP_HTTP_TLS_AT_EDGE` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.http_tls_at_edge)` |  |
+| `REBAR_MCP_READONLY` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.readonly)` |  |
+| `REBAR_MCP_TRANSPORT` | `src/rebar/_config_schema.py (mcp config)`, `src/rebar/_config_sections.py (canonical env name of mcp.transport)` |  |
 | `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py`, `src/rebar/mcp_server.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_GUARD` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_JOB_TIMEOUT_SECONDS` | `src/rebar/opcert_service/config.py` |  |
@@ -132,16 +151,63 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_TICKETS_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_RECLAIM_HORIZON_DAYS` | `src/rebar/_config_sections.py (canonical env name of reclaim.horizon_days)` |  |
+| `REBAR_RECONCILER_ALLOW_INSECURE` | `src/rebar/_config_sections.py (canonical env name of reconciler.allow_insecure)` |  |
+| `REBAR_RECONCILER_BACKEND` | `src/rebar/_config_sections.py (canonical env name of reconciler.backend)` |  |
+| `REBAR_RECONCILER_BASE_URL` | `src/rebar/_config_sections.py (canonical env name of reconciler.base_url)` |  |
+| `REBAR_RECONCILER_CA_BUNDLE` | `src/rebar/_config_sections.py (canonical env name of reconciler.ca_bundle)` |  |
+| `REBAR_RECONCILER_COMMENT_MAX_CHARS` | `src/rebar/_config_sections.py (canonical env name of reconciler.comment_max_chars)` |  |
 | `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/reconciler/apply_inbound.py` |  |
+| `REBAR_RECONCILER_DC_PANDOC_TIMEOUT_S` | `src/rebar/_config_sections.py (canonical env name of reconciler.dc_pandoc_timeout_s)` |  |
+| `REBAR_RECONCILER_DELETION_PROBE_LIMIT` | `src/rebar/_config_sections.py (canonical env name of reconciler.deletion_probe_limit)` |  |
+| `REBAR_RECONCILER_LOCK_LEASE_SECS` | `src/rebar/_config_sections.py (canonical env name of reconciler.lock_lease_secs)` |  |
 | `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/reconciler/_pass_lock_lifecycle.py` |  |
+| `REBAR_RECONCILER_MAX_ACTING_FRACTION` | `src/rebar/_config_sections.py (canonical env name of reconciler.max_acting_fraction)` |  |
+| `REBAR_RECONCILER_RICH_TEXT_CUTOVER` | `src/rebar/_config_sections.py (canonical env name of reconciler.rich_text_cutover)` |  |
 | `REBAR_ROOT` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
+| `REBAR_SCRATCH_BASE_DIR` | `src/rebar/_config_sections.py (canonical env name of scratch.base_dir)` |  |
 | `REBAR_SNAPSHOT_FETCH_TIMEOUT_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_config_resolvers.py` |  |
-| `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py` |  |
-| `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py`, `src/rebar/llm/evals/plan_replay/labels.py` |  |
+| `REBAR_SYNC_PULL` | `src/rebar/_config_sections.py (canonical env name of sync.pull)` |  |
+| `REBAR_SYNC_PUSH` | `src/rebar/_config_sections.py (canonical env name of sync.push)`, `src/rebar/_io/import_ndjson.py` |  |
+| `REBAR_SYNC_REMOTE` | `src/rebar/_config_sections.py (canonical env name of sync.remote)` |  |
+| `REBAR_TICKET_CLARITY_THRESHOLD` | `src/rebar/_config_sections.py (canonical env name of ticket_clarity.threshold)` |  |
+| `REBAR_TICKET_DISPLAY_MODE` | `src/rebar/_config_sections.py (canonical env name of ticket.display_mode)` |  |
+| `REBAR_TRACKER_BRANCH` | `src/rebar/_config_sections.py (canonical env name of tracker.branch)` |  |
+| `REBAR_TRACKER_DIR` | `src/rebar/_config_sections.py (canonical env name of tracker.dir)`, `src/rebar/_config_sources.py`, `src/rebar/llm/evals/plan_replay/labels.py` |  |
+| `REBAR_UI_ENABLED` | `src/rebar/_config_sections.py (canonical env name of ui.enabled)` |  |
+| `REBAR_UNSAFE_ID_GUARD_BYPASS` | `src/rebar/_config_sections.py (canonical env name of reconciler.id_guard_bypass_unsafe)` |  |
 | `REBAR_USAGE_LOG` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_VERIFY_AUTO_RESUME_MAX` | `src/rebar/_config_sections.py (canonical env name of verify.auto_resume_max)` |  |
+| `REBAR_VERIFY_COMMENT_TRAIL_XCHECK_ACTIVE` | `src/rebar/_config_sections.py (canonical env name of verify.comment_trail_xcheck_active)` |  |
+| `REBAR_VERIFY_COMPLETION_FLOOR_ACTIVE` | `src/rebar/_config_sections.py (canonical env name of verify.completion_floor_active)` |  |
+| `REBAR_VERIFY_COMPLETION_PINNED_TICKET_VIEW` | `src/rebar/_config_sections.py (canonical env name of verify.completion_pinned_ticket_view)` |  |
+| `REBAR_VERIFY_COMPLETION_PRESERVE_CRITERIA` | `src/rebar/_config_sections.py (canonical env name of verify.completion_preserve_criteria)` |  |
+| `REBAR_VERIFY_COMPLETION_PRIORITY_FLOOR` | `src/rebar/_config_sections.py (canonical env name of verify.completion_priority_floor)` |  |
+| `REBAR_VERIFY_COMPLETION_RECOVERY_POOL_MULTIPLIER` | `src/rebar/_config_sections.py (canonical env name of verify.completion_recovery_pool_multiplier)` |  |
+| `REBAR_VERIFY_COMPLETION_VERIFY_CHILD_TRAVERSAL_STEPS` | `src/rebar/_config_sections.py (canonical env name of verify.completion_verify_child_traversal_steps)` |  |
+| `REBAR_VERIFY_COMPLETION_VERIFY_FIXED_OVERHEAD_STEPS` | `src/rebar/_config_sections.py (canonical env name of verify.completion_verify_fixed_overhead_steps)` |  |
+| `REBAR_VERIFY_COMPLETION_VERIFY_STEPS_PER_CRITERION` | `src/rebar/_config_sections.py (canonical env name of verify.completion_verify_steps_per_criterion)` |  |
+| `REBAR_VERIFY_COMPLETION_VERIFY_STEP_FLOOR_MIN` | `src/rebar/_config_sections.py (canonical env name of verify.completion_verify_step_floor_min)` |  |
+| `REBAR_VERIFY_CONTRADICTION_XCHECK_ACTIVE` | `src/rebar/_config_sections.py (canonical env name of verify.contradiction_xcheck_active)` |  |
+| `REBAR_VERIFY_ENABLE_CODE_REVIEW` | `src/rebar/_config_sections.py (canonical env name of verify.enable_code_review)` |  |
+| `REBAR_VERIFY_ENFORCE_PLAN_MATERIAL_PINS` | `src/rebar/_config_sections.py (canonical env name of verify.enforce_plan_material_pins)` |  |
+| `REBAR_VERIFY_MAX_TICKET_DESCRIPTION_CHARS` | `src/rebar/_config_sections.py (canonical env name of verify.max_ticket_description_chars)` |  |
+| `REBAR_VERIFY_NOVELTY_DROP_THRESHOLD` | `src/rebar/_config_sections.py (canonical env name of verify.novelty_drop_threshold)` |  |
+| `REBAR_VERIFY_NOVELTY_PRIORITY_FLOOR` | `src/rebar/_config_sections.py (canonical env name of verify.novelty_priority_floor)` |  |
+| `REBAR_VERIFY_OPCERT_ENFORCE_SINCE` | `src/rebar/_config_sections.py (canonical env name of verify.opcert_enforce_since)` |  |
+| `REBAR_VERIFY_OPCERT_REMOTE_URL` | `src/rebar/_config_sections.py (canonical env name of verify.opcert_remote_url)` |  |
+| `REBAR_VERIFY_REMEDIATION_WINDOW_MINUTES` | `src/rebar/_config_sections.py (canonical env name of verify.remediation_window_minutes)` |  |
+| `REBAR_VERIFY_REQUIRE_COMPLETION_VERIFICATION_FOR_CLOSE` | `src/rebar/_config_sections.py (canonical env name of verify.require_completion_verification_for_close)` |  |
+| `REBAR_VERIFY_REQUIRE_ENVIRONMENT` | `src/rebar/_config_sections.py (canonical env name of verify.require_environment)` |  |
+| `REBAR_VERIFY_REQUIRE_PLAN_REVIEW_FOR_CLAIM` | `src/rebar/_config_sections.py (canonical env name of verify.require_plan_review_for_claim)` |  |
+| `REBAR_VERIFY_REQUIRE_PLAN_REVIEW_FOR_CLOSE` | `src/rebar/_config_sections.py (canonical env name of verify.require_plan_review_for_close)` |  |
+| `REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT` | `src/rebar/_config_sections.py (canonical env name of verify.require_ticket_for_commit)` |  |
+| `REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS` | `src/rebar/_config_sections.py (canonical env name of verify.suggest_duplicate_tickets)` |  |
+| `REBAR_VERIFY_VERIFY_WINDOW_HEADROOM` | `src/rebar/_config_sections.py (canonical env name of verify.verify_window_headroom)` |  |
+| `REBAR_WARNINGS_CROSS_SESSION` | `src/rebar/_config_sections.py (canonical env name of warnings.cross_session)` |  |
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_resolvers.py` |  |
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_INTERVAL_SECONDS` | `src/rebar/review_bot/config.py` |  |
@@ -158,7 +224,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_146 variables._
+_211 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

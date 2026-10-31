@@ -24,14 +24,6 @@ on:
         required: false
         default: '4'
         type: string
-      status_source:
-        description: 'Heartbeat source (status; github-api is one-release rollback)'
-        required: false
-        default: 'status'
-        type: choice
-        options:
-          - 'status'
-          - 'github-api'
 
 concurrency:
   group: reconcile-bridge-canary
@@ -51,7 +43,6 @@ jobs:
       ALERT_WINDOW_HOURS: ${{ inputs.alert_window_hours || '4' }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
       ALERT_TAG: heartbeat-alert
-      REBAR_CANARY_HEARTBEAT_SOURCE: ${{ inputs.status_source || 'status' }}
       # The signing-key step exports REBAR_IDENTITY_SIGNING_KEY through GITHUB_ENV.
       # runner.temp is unavailable in job-level env, so the path is set at step scope.
 
@@ -131,7 +122,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          python scripts/canary_bridge.py check-heartbeat --source "${REBAR_CANARY_HEARTBEAT_SOURCE}"
+          python scripts/canary_bridge.py check-heartbeat
 
       - name: Log canary result
         run: |

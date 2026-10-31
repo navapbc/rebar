@@ -130,7 +130,6 @@ def test_real_ref_fence_progress_classifies_running_or_crashed(
         "GITHUB_OUTPUT": str(output),
         "GITHUB_REPOSITORY": "navapbc/rebar",
         "ALERT_WINDOW_HOURS": "2",
-        "REBAR_CANARY_HEARTBEAT_SOURCE": "status",
     }
 
     rc = canary.main(

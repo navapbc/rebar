@@ -286,3 +286,19 @@ def test_a_partial_scan_root_does_not_flag_every_row_as_stale(tmp_path: Path):
     them would reject unrelated fixture scans."""
     reads, _dynamic = _scan_source(tmp_path, "X = os.environ.get('REBAR_FAKE_PARTIAL')\n")
     assert "REBAR_FAKE_PARTIAL" in reads, "a partial root still scans normally"
+
+
+def test_every_canonical_env_name_is_documented():
+    """Every settable REBAR_<SECTION>_<KEY> override reaches docs/env-vars.md.
+
+    Both sides are derived, never counted: the canonical set moves whenever a
+    config key is added or retired, so a literal total would be a standing lie.
+    """
+    from rebar._config_schema import _SECTIONS
+    from rebar._config_sources import _canonical_env_name
+
+    doc = (REPO_ROOT / "docs" / "env-vars.md").read_text(encoding="utf-8")
+    rows = set(re.findall(r"^\| `([A-Z0-9_]+)` \|", doc, re.M))
+    canonical = {_canonical_env_name(sect, key) for sect, keys in _SECTIONS.items() for key in keys}
+    assert canonical, "the section registry yielded no canonical names"
+    assert not (canonical - rows), f"undocumented canonical overrides: {sorted(canonical - rows)}"
