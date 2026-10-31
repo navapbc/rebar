@@ -19,7 +19,6 @@ from rebar._config_coercion import (
 )
 from rebar._deprecations import (
     raise_or_warn_cfg_key,
-    warn_deprecated,
     warn_deprecated_cfg_keys,
 )
 
@@ -195,10 +194,6 @@ _SECTIONS: dict[str, dict] = {
 }
 
 
-# section -> {deprecated_key -> canonical_key}, consumed by the coerce_sparse loop below.
-# ADR 0116 retired the remaining config-key alias, so no live cfg aliases remain.
-_ALIASES: dict[str, dict[str, str]] = {}
-
 # Config sections owned by an OPTIONAL layer rather than the stdlib core typed
 # Config — currently ``llm`` (the ``nava-rebar[agents]`` extra; resolved by
 # ``rebar.llm.LLMConfig.from_env`` so the stdlib core never imports the agents
@@ -209,6 +204,45 @@ _ALIASES: dict[str, dict[str, str]] = {}
 # ``mapping`` is the provider-neutral reconciler mapping-vocabulary layer
 # (``rebar.reconciler.mapping_config``), resolved by :func:`load_mapping_config`.
 _RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot", "mapping"})
+
+# The keys ``[tool.rebar.llm]`` actually honours. Reserved sections are not coerced
+# here, which until now also meant they were exempt from unknown-key policy: a typo or
+# a key some later story removes was accepted in total silence, even under
+# ``REBAR_CONFIG_UNKNOWN_KEYS=error``. This list restores that feedback WITHOUT
+# importing ``rebar.llm`` (the optional ``[agents]`` extra — see the note above, which
+# is why the core parser must not touch the agents stack). It therefore duplicates the
+# readers, so ``tests/unit/test_config_llm_known_keys.py`` AST-walks them and asserts
+# exact equality; that test, not this comment, is what keeps the two in step.
+_LLM_KNOWN_KEYS: tuple[str, ...] = (
+    "base_url",
+    "evals",
+    "headers",
+    "llm_retry_max_attempts",
+    "llm_retry_max_wait_s",
+    "llm_tool_timeout_s",
+    "max_steps",
+    "max_tokens",
+    "mcp_servers",
+    "model",
+    "model_classes",
+    "model_provider",
+    "parse_failure_artifact_dir",
+    "temperature",
+    "timeout",
+)
+
+
+def _warn_unknown_llm_keys(val: object, source: str, *, strict: bool) -> None:
+    """Apply unknown-key policy to ``[llm]`` without coercing it.
+
+    ``rebar.llm`` owns the values, so nothing here validates them; this only reports
+    names no reader will ever look at. A non-dict value is left alone — the optional
+    layer raises its own, better-targeted error for that.
+    """
+    if not isinstance(val, dict):
+        return
+    leftover = {k: v for k, v in val.items() if k not in _LLM_KNOWN_KEYS}
+    _warn_unknown("llm", leftover, source, strict=strict)
 
 
 def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -> dict:
@@ -223,7 +257,11 @@ def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -
     out: dict[str, dict] = {}
     for sect, val in raw.items():
         if sect in _RESERVED_SECTIONS:
-            continue  # owned by an optional layer (e.g. llm → rebar.llm); not a core key
+            # Owned by an optional layer (e.g. llm → rebar.llm); not a core key, so it
+            # is never coerced here. [llm] still gets unknown-key policy applied.
+            if sect == "llm":
+                _warn_unknown_llm_keys(val, source, strict=strict)
+            continue
         if sect not in _SECTIONS:
             if strict:
                 raise ConfigError(
@@ -242,14 +280,7 @@ def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -
         for tkey in list(d):
             if raise_or_warn_cfg_key(sect, tkey) is not None:
                 d.pop(tkey)  # warn-class: consumed here so _warn_unknown does not re-flag it
-        warn_deprecated_cfg_keys(sect, d, renames=_ALIASES.get(sect, {}), logger=logger)
-        for old, new in _ALIASES.get(sect, {}).items():
-            if old in d:
-                if new not in d:
-                    warn_deprecated(f"cfg:{sect}.{old}", logger=logger)
-                    d[new] = d.pop(old)
-                else:
-                    d.pop(old)  # canonical key wins
+        warn_deprecated_cfg_keys(sect, d, logger=logger)
         coerced: dict = {}
         for key, coercer in _SECTIONS[sect].items():
             if key in d:

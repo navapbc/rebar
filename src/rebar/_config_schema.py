@@ -29,7 +29,6 @@ from rebar._config_coercion import (
     _validate_reconciler_tls,
 )
 from rebar._config_coercion import _warn_unknown as _warn_unknown
-from rebar._config_sections import _ALIASES as _ALIASES
 from rebar._config_sections import _RESERVED_SECTIONS as _RESERVED_SECTIONS
 from rebar._config_sections import _SECTIONS as _SECTIONS
 from rebar._config_sections import coerce_sparse as coerce_sparse

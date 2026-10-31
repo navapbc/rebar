@@ -17,6 +17,7 @@ raised exception type, and the absence of store mutation — never internals.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -58,7 +59,6 @@ def _dep():
 
 # The seeded removed inputs (from the Finding-5 audit), by class.
 ERROR_ENV = ["TICKETS_TRACKER_DIR", "REBAR_MCP_ALLOW_RECONCILE_LIVE"]
-WARN_ENV = ["REBAR_PUSH", "REBAR_RECONCILER_LOCK_MAX_RETRIES"]
 ERROR_CFG = ["verify.require_verdict_for_close"]
 
 
@@ -88,13 +88,38 @@ def test_tombstone_vocabularies_and_types_defined() -> None:
 def test_registry_seeded_with_known_retired_inputs() -> None:
     dep = _dep()
     names = {ri.name: ri for ri in dep.tombstones()}
-    # Error-class store/security/policy/sync inputs.
+    # Error-class store/security/policy inputs.
     assert names["TICKETS_TRACKER_DIR"].behavior == "error"
     assert names["TICKETS_TRACKER_DIR"].replacement == "REBAR_TRACKER_DIR"
     assert names["REBAR_MCP_ALLOW_RECONCILE_LIVE"].behavior == "error"
     assert names["verify.require_verdict_for_close"].behavior == "error"
-    # Operationally-inert warn-class inputs.
-    assert names["REBAR_PUSH"].behavior == "warn"
+
+
+def test_only_error_class_rows_remain() -> None:
+    """The registry is reserved for retired inputs that still change behaviour if they
+    are honoured. An inert retired name tells an operator nothing that the ordinary
+    unknown-key warning does not, and a warn row additionally exempts the dead key from
+    `REBAR_CONFIG_UNKNOWN_KEYS=error`, which is the opposite of what strict mode is for.
+    So the warn class is drained: 19 rows (6 error + 13 warn) became 6."""
+    rows = _dep().tombstones()
+
+    assert len(rows) == 6
+    assert [ri.behavior for ri in rows] == ["error"] * 6
+
+
+def test_every_tombstone_names_its_real_removal_release() -> None:
+    """Every row used to claim `removed_in="v1.0.0"` — a placeholder horizon rather than
+    a fact, since the project is pre-1.0 and these inputs were removed in shipped
+    releases. The message an operator reads quotes this field, so a placeholder makes
+    the error actively misleading about when their config broke."""
+    rows = _dep().tombstones()
+
+    for ri in rows:
+        assert re.fullmatch(r"v0\.\d+\.\d+", ri.removed_in), (
+            f"{ri.name} must name a real pre-1.0 release, got {ri.removed_in!r}"
+        )
+    assert {ri.removed_in for ri in rows} == {"v0.8.0", "v0.12.0"}
+    assert sorted(ri.removed_in for ri in rows) == ["v0.12.0"] + ["v0.8.0"] * 5
 
 
 def test_scan_tombstones_clean_env_returns_empty() -> None:
@@ -139,22 +164,22 @@ def test_error_toml_key_fails_loud(rebar_repo: Path) -> None:
     assert "require_completion_verification_for_close" in out  # the replacement
 
 
-# ── warn-class retired input → warn, exit 0, continue ─────────────────────────
-def test_warn_env_var_warns_not_errors(rebar_repo: Path, monkeypatch, caplog) -> None:
-    """A warn-class retired input logs a deprecation warning (old->replacement) on the
-    `rebar` logger and lets the process continue (no raise, exit 0) — captured in-process
-    via caplog since subprocess stderr logging is not reliably configured."""
+# ── retired inert input → read by nothing, so silently ignored ────────────────
+def test_retired_inert_env_var_is_ignored_without_erroring(
+    rebar_repo: Path, monkeypatch, caplog
+) -> None:
+    """`REBAR_PUSH` was a warn-class row until the warn class was drained. It is read by
+    nothing — `env_overrides()` only consults live section/key pairs — so a stale export
+    cannot reach any code path. The contract is that it neither raises nor changes
+    `sync.push`, which stays at its configured value."""
     from rebar import config as cfg
 
     monkeypatch.setenv("REBAR_ROOT", str(rebar_repo))
-    monkeypatch.setenv("REBAR_PUSH", "always")
+    monkeypatch.setenv("REBAR_PUSH", "off")
     cfg.reset_config_cache()
     with caplog.at_level(logging.WARNING, logger="rebar"):
-        cfg.load_config(str(rebar_repo))  # must NOT raise
-    msgs = " ".join(r.getMessage() for r in caplog.records)
-    assert "REBAR_PUSH" in msgs and "REBAR_SYNC_PUSH" in msgs, (
-        f"warn-class input must log old->replacement: {msgs!r}"
-    )
+        c = cfg.load_config(str(rebar_repo))  # must NOT raise
+    assert c.sync.push != "off", "a retired name must not steer live config"
 
 
 # ── RemovedInputError is un-swallowable by `except ConfigError` ───────────────

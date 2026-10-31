@@ -139,11 +139,6 @@ def _typed_config_errors(layers: list[tuple[str, dict]]) -> list[tuple[str, _con
                 )
                 continue
             values = dict(val)
-            for old, new in _config._ALIASES.get(sect, {}).items():
-                if old in values:
-                    if new not in values:
-                        values[new] = values[old]
-                    values.pop(old)
             for key, coercer in _SECTIONS[sect].items():
                 if key not in values or f"{sect}.{key}" in removed:
                     continue

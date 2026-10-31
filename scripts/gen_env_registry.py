@@ -402,7 +402,7 @@ def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
     aliases = _env_aliases()
     # Config aliases have no literal read, so add their real, settable surface explicitly.
     for alias_name in aliases:
-        reads.setdefault(alias_name, set()).add("src/rebar/config.py (alias resolver)")
+        reads.setdefault(alias_name, set()).add("src/rebar/_deprecations.py (deprecation registry)")
     # Derived REBAR_MCP_* keys likewise come from the canonical MCP_ENV_VARS inventory.
     from rebar.mcp_server import MCP_ENV_VARS
 

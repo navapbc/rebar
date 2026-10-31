@@ -176,14 +176,8 @@ Old spellings still honored (with a runtime warning) that resolve to a canonical
 
 ## Removed configuration keys
 
-Fully-removed keys (tombstones): setting one no longer has any effect and is either warned or failed-loud — derived from the `cfg`-kind entries of `rebar._deprecations.tombstones()`:
+Fully-removed keys (tombstones): setting one FAILS LOUD with a migration error naming its replacement and the release that removed it. Every row is error-class — the registry is reserved for retired keys that would change behaviour if honoured, so an inert retired key is reported through the ordinary unknown-key path instead. Derived from the `cfg`-kind entries of `rebar._deprecations.tombstones()`:
 
-| Removed key | Replacement | Behavior when still set |
-|-------------|-------------|-------------------------|
-| `code_health.analyzers` | _(no replacement)_ | warn |
-| `code_health.enabled` | _(no replacement)_ | warn |
-| `jira.resolved_statuses` | _(no replacement)_ | warn |
-| `reconciler.lock_backend` | _(no replacement)_ | warn |
-| `reconciler.lock_max_retries` | _(no replacement)_ | warn |
-| `reconciler.resolved_statuses` | _(no replacement)_ | warn |
-| `verify.require_verdict_for_close` | `verify.require_completion_verification_for_close` | error |
+| Removed key | Replacement | Behavior when still set | Removed in |
+|-------------|-------------|-------------------------|------------|
+| `verify.require_verdict_for_close` | `verify.require_completion_verification_for_close` | error | v0.8.0 |
