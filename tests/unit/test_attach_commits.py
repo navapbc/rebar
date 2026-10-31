@@ -408,5 +408,21 @@ def test_referencing_commits_falls_back_to_per_call_scan_without_index(tmp_path,
     # Force the None (index-unavailable) branch; resolution must fall back cleanly.
     monkeypatch.setattr(resolver, "build_resolver_scan_index", lambda _tracker: None)
 
+    # Record what reaches the resolver: crediting is identical on both paths by design,
+    # so only the arguments show which path ran.
+    real_resolve = resolver.resolve_ticket_id
+    resolve_calls: list[tuple[object, object]] = []
+
+    def recording_resolve(ticket_id, tracker_dir, **kwargs):
+        resolve_calls.append((kwargs.get("alias_index"), kwargs.get("dir_names")))
+        return real_resolve(ticket_id, tracker_dir, **kwargs)
+
+    monkeypatch.setattr(resolver, "resolve_ticket_id", recording_resolve)
+
     found = commit_impact.referencing_commits({target_id}, str(tracker), str(repo))
     assert target_sha in found
+    # The fallback passes no prebuilt index: every resolution is a per-call scan.
+    assert resolve_calls, "referencing_commits resolved no ticket references"
+    assert all(alias is None and names is None for alias, names in resolve_calls), (
+        f"expected the per-call fallback (alias_index/dir_names None); got {resolve_calls!r}"
+    )
