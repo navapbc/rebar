@@ -320,3 +320,100 @@ def test_credential_lookup_never_prompts_on_a_terminal(monkeypatch, inherited):
 
     assert safe_submit._credential("rebar.solutions.navateam.com") == ("u", "p")
     assert seen["GIT_TERMINAL_PROMPT"] == "0"
+
+
+_GREEN_DETAIL = {
+    "current_revision": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    "labels": {
+        "LLM-Review": {"approved": {"_account_id": 1}},
+        "Verified": {"approved": {"_account_id": 2}},
+    },
+    "unresolved_comment_count": 0,
+    "submittable": True,
+}
+
+
+def _submit_failing_with(monkeypatch, status: int, body: bytes):
+    """Load the script with a green change whose submit POST fails with ``status``/``body``."""
+    import io
+    import urllib.error
+
+    safe_submit = _safe_submit_module()
+    monkeypatch.setattr(safe_submit, "_credential", lambda host: ("user", "pass"))
+
+    def fake_request(base_url: str, method: str, path: str, auth: str, body_=None) -> dict:
+        if method == "POST" and path.endswith("/submit"):
+            raise urllib.error.HTTPError(path, status, "refused", {}, io.BytesIO(body))
+        return dict(_GREEN_DETAIL) if method == "GET" else {}
+
+    monkeypatch.setattr(safe_submit, "_request", fake_request)
+    return safe_submit
+
+
+_FULL_SHA_ARGS = ["2764", "--revision", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "--hashtag", ""]
+
+
+def test_safe_submit_409_prints_gerrit_message_and_status(monkeypatch, capsys):
+    safe_submit = _submit_failing_with(
+        monkeypatch, 409, b'{"message": "revision abc is not current revision"}'
+    )
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    err = capsys.readouterr().err
+    assert "revision abc is not current revision" in err
+    assert "409" in err
+
+
+def test_safe_submit_409_strips_xssi_prefix_from_body(monkeypatch, capsys):
+    safe_submit = _submit_failing_with(monkeypatch, 409, b')]}\'\n{"message": "submit blocked"}')
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    err = capsys.readouterr().err
+    assert "submit blocked" in err
+    assert ")]}'" not in err
+
+
+def test_safe_submit_409_prints_plain_text_body_as_is(monkeypatch, capsys):
+    body = (
+        b"Cannot rebase db3f3e396f1: Change 3169 could not be rebased due to a conflict "
+        b"during merge.\n\nmerge conflict(s):\n* docs/release-notes.md\n"
+    )
+    safe_submit = _submit_failing_with(monkeypatch, 409, body)
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    err = capsys.readouterr().err
+    assert "could not be rebased due to a conflict during merge" in err
+    assert "* docs/release-notes.md" in err
+
+
+def test_safe_submit_409_prints_json_without_message_as_is(monkeypatch, capsys):
+    safe_submit = _submit_failing_with(monkeypatch, 409, b'{"status": "CONFLICT"}')
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    assert '{"status": "CONFLICT"}' in capsys.readouterr().err
+
+
+def test_safe_submit_409_with_empty_body_keeps_todays_line(monkeypatch, capsys):
+    safe_submit = _submit_failing_with(monkeypatch, 409, b"")
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    assert "refusing stale submit" in capsys.readouterr().err
+
+
+def test_safe_submit_non_409_prints_body_before_reraising(monkeypatch, capsys):
+    import urllib.error
+
+    safe_submit = _submit_failing_with(monkeypatch, 500, b"internal boom detail")
+
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        safe_submit.main(_FULL_SHA_ARGS)
+
+    assert raised.value.code == 500
+    err = capsys.readouterr().err
+    assert "internal boom detail" in err
+    assert "500" in err

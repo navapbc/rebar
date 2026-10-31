@@ -56,6 +56,26 @@ def _request(base_url: str, method: str, path: str, auth: str, body: dict | None
     return json.loads(_strip_xssi(raw) or "{}")
 
 
+def _error_body(exc: urllib.error.HTTPError) -> str:
+    """Return the reason Gerrit gave for a failed request, for the operator to read.
+
+    A JSON object with a string ``message`` yields that message; any other body (plain
+    text, other JSON) is returned as-is after the ``)]}'`` prefix is stripped.
+    """
+    try:
+        raw = exc.read()
+    except OSError:
+        return ""
+    text = _strip_xssi(raw.decode("utf-8", "replace"))
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return text
+    if isinstance(parsed, dict) and isinstance(parsed.get("message"), str):
+        return parsed["message"]
+    return text
+
+
 def _label_ok(change: dict, label: str) -> bool:
     info = (change.get("labels") or {}).get(label) or {}
     return bool(info.get("approved"))
@@ -137,12 +157,15 @@ def main(argv: list[str] | None = None) -> int:
             {},
         )
     except urllib.error.HTTPError as exc:
+        reason = f"Gerrit response (HTTP {exc.code}): {_error_body(exc)}"
         if exc.code == 409:
             print(
                 "refusing stale submit: Gerrit reports revision is no longer current",
                 file=sys.stderr,
             )
+            print(reason, file=sys.stderr)
             return 2
+        print(reason, file=sys.stderr)
         raise
     return 0
 
