@@ -116,7 +116,9 @@ reopened ticket that carries close metadata. On an affected large store, run
 
 ## Where `run_ensures` runs
 
-- **`init` / re-init** and the **symlink worktree attach** (`init.py`) — the sweep replaces the
+- **`init` / re-init** and the **symlink worktree attach** (`_commands/init.py` is the entry point; the
+  units themselves live in `_commands/_init_ensures.py` and stay reachable as
+  `init._<name>`) — the sweep replaces the
   old hand-listed `_migrate_*`/`_ensure_*` calls; init logs any `failed` unit and never aborts.
 - **`rebar store fsck --repair`** — the ensure-sweep is folded into the existing "drive healthy"
   verb as a distinct phase (no new mutation flag). `--dry-run` does not sweep.
@@ -273,15 +275,15 @@ new SNAPSHOTs stop carrying the mirror.
   only when the map is absent. Migrated: `signing._record_for_kind` (the `kind=None` /
   verify-latest path), `_engine_support/validate.py` (store-health signature check),
   `_commands/txn.py` (the `require_signature_for_close` gate).
-- **Contract: new snapshots omit the mirror.** `compact.py` strips the legacy `signature`
+- **Contract: new snapshots omit the mirror.** `_commands/compact.py` strips the legacy `signature`
   key from a SNAPSHOT's `compiled_state` (alongside the always-derived `updated_at`), so a
   freshly compacted or fsck-rebuilt ticket carries only `attestations`. Old snapshots that
   still hold only the mirror are upgraded on read by the existing fold-in
-  (`_processors.py`), so migrated consumers always find a record.
+  (`reducer/_processors.py`), so migrated consumers always find a record.
 - **Toggle removed (task 7ed9): never-emit is now hardcoded.** 352b shipped this behind a
   rollback lever (`compact.emit_legacy_signature_mirror`, default `false` = drop). Its
   default already meant "never persist the mirror", so its removal changes no runtime
-  behavior — it only deletes the documented one-line config rollback. `compact.py` now
+  behavior — it only deletes the documented one-line config rollback. `_commands/compact.py` now
   unconditionally strips `signature` from every new snapshot, and the config key no longer
   exists (setting it warns + is ignored). **The in-memory re-derivation is untouched:** the
   reducer's `process_signature` still re-projects `state['signature']` from the attestations
@@ -310,6 +312,6 @@ auto-updates hourly to `origin/main`, so no pre-attestations binary remains live
 mirror; the in-memory re-derivation (below) covers every migrated reader.
 
 **A note on removing the read-side fold-in.** 352b intentionally **keeps** the
-`_processors.py` old-snapshot fold-in. Removing it is a *further* contract step that is safe
+`reducer/_processors.py` old-snapshot fold-in. Removing it is a *further* contract step that is safe
 only once no snapshot predating the `attestations` map remains in any store — a separate
 readiness condition from the write-side drop. It is cheap and lossless to keep, so it stays.

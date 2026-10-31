@@ -297,8 +297,9 @@ whole-field clobber). The surface:
   `--set-tags=""` clears the *observed* tags only. `--set-tags` cannot be combined with
   `--add-tag` / `--remove-tag` (error).
 - `--tags` is **not** an `edit` flag (it would clobber); it remains only on `create`
-  (genesis). The library/MCP `edit_ticket(tags=…)` is a deprecated alias for `set_tags`;
-  prefer `add_tags` / `remove_tags` / `set_tags`.
+  (genesis). The library/MCP `edit_ticket(tags=…)` set-alias was removed pre-1.0;
+  `tags` is rejected as an unknown edit field — use `add_tags` / `remove_tags` /
+  `set_tags`.
 - Tag names are trimmed; empty / whitespace-only / control-character names are rejected.
 
 The convergent delta is carried by the `TAG_DELTA` event — its body, the add-wins conflict

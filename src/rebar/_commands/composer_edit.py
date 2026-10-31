@@ -186,8 +186,8 @@ def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> s
 
 # Tags are NOT an EDIT field any more (P2.3): they mutate via TAG_DELTA deltas
 # (--add-tag/--remove-tag/--set-tags), so a whole-field EDIT can never clobber a
-# concurrent tag add. The library/MCP ``edit(tags=...)`` arg is a DEPRECATED alias
-# for --set-tags, intercepted in edit_core before this field set is validated.
+# concurrent tag add. The library/MCP edit_ticket(tags=...) set-alias was removed
+# pre-1.0 (DE7); "tags" is now an unknown field, refused below.
 _EDIT_FIELDS = (
     "title",
     "priority",
