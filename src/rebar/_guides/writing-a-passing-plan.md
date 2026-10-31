@@ -138,6 +138,22 @@ These are the criteria that actually block a claim. Fix every one before you cla
   this problem. (One approach only; don't write rejected options into the plan.)
 - **Decompose sensibly if it's a container (`G5`).** Children cover the work, are the right
   size, and are ordered by their real dependencies.
+- **Assert what the cited command actually reports (`F1`).** An acceptance criterion that names
+  a command must assert something that command can produce on a correct implementation. Check
+  it by running the command on a clean tree *before* you write the criterion. Two measured
+  traps, each of which has shipped in real plans and failed at close:
+  - **The mechanism gate's `new=` counter is never 0.** `python
+    scripts/check_mechanism_delta.py --check` counts marker-admitted mechanisms inside `new=N`,
+    and the baseline has no write path for new keys, so a clean `origin/main` already reports
+    `active=648 new=28 increased=0 stale=0` — and exits **0**. Assert **"exits 0"** (or "adds no
+    unadmitted mechanism"), never `new=0`. The sibling complexity ratchet is the opposite case:
+    it admits nothing by marker, so `new=0` is correct for *that* gate.
+  - **`make verify` does not run `integration`- or `external`-marked tests.** It runs `make
+    test`, which selects `not integration and not external`. A module whose `pytestmark` is
+    `pytest.mark.integration` — such as `tests/integration/test_concurrency_regression.py`, all
+    33 of whose tests are deselected — is never executed. If your change touches one, name the
+    explicit command (`pytest <path> -m ""`) alongside `make verify`, or the criterion passes
+    without covering your work.
 
 A finding blocks only when it lands on a blocking-eligible criterion above; advisory criteria
 never block on their own (they're scored and coached, capped at the top ~20 per review).
