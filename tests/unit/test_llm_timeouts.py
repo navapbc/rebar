@@ -24,7 +24,7 @@ pytest.importorskip("pydantic_ai")
 
 import pydantic_ai.models
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelResponse, RetryPromptPart, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
 from rebar.llm.anthropic_model import _build_retrying_anthropic_model
@@ -146,14 +146,19 @@ def _anthropic_ok_response(text: str) -> bytes:
 @pytest.mark.allow_network
 def test_stalled_server_trips_read_timeout_under_run_sync(_dummy_anthropic_key):
     """PROBE 1 — the mechanism ABORTS a stalled request. A server that accepts the connection
-    then never replies leaves the socket read hanging; with ``read=0.2`` the run aborts fast and
+    then never replies leaves the socket read hanging; with ``read=0.2`` the run aborts and
     ``httpx.ReadTimeout`` is genuinely raised (surfaced wrapped as an SDK/pydantic-ai error, but
-    present in the cause chain). Retries are disabled (attempts=1) so it fires once."""
+    present in the cause chain). Retries are disabled (attempts=1) so it fires once.
+
+    The server stays parked until the run has returned, so only the client's own read timeout
+    can end the request. That ordering, not a wall-clock ceiling, is the proof: a stalled host
+    cannot fake it (bug cuddly-callous-antlion)."""
+    run_returned = threading.Event()
 
     def _stall(conn: socket.socket) -> None:
         with contextlib.suppress(OSError):
             conn.recv(65536)  # read the request, then hang — never send a response
-            time.sleep(5.0)
+            run_returned.wait(timeout=30.0)  # bounded so the thread always exits
         conn.close()
 
     with _local_server(_stall) as port:
@@ -166,24 +171,19 @@ def test_stalled_server_trips_read_timeout_under_run_sync(_dummy_anthropic_key):
             http_timeout=http_timeout,
         )
         pydantic_ai.models.ALLOW_MODEL_REQUESTS = True
-        t0 = time.monotonic()
         try:
             with pytest.raises(BaseException) as exc_info:
                 Agent(model).run_sync("go")
-            elapsed = time.monotonic() - t0
         finally:
+            run_returned.set()  # release the parked server only after the run has ended
             pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
             asyncio.run(http_client.aclose())
 
-    # httpx's real read timeout fired (not the 5s connect timeout, not the server's 5s sleep).
-    # The raised ReadTimeout is the PRIMARY proof; elapsed is a loose sanity bound that it
-    # aborted BEFORE the server's 5s stall (generous headroom for slow/loaded CI runners —
-    # connection + SDK overhead, not the read window, dominates wall-time).
+    # httpx's real read timeout fired (not the 5s connect timeout). The server was still parked
+    # when the run ended, so the client aborted the stalled read itself.
     assert any(
         isinstance(e, _transport_http_module().ReadTimeout) for e in _exc_chain(exc_info.value)
     )
-    # timing: hang-guard — abort-before-stall proof; the 5s server stall is the failure mode
-    assert elapsed < 4.5  # aborted at ~read timeout, well before the 5s stall
 
 
 @pytest.mark.allow_network
@@ -241,8 +241,13 @@ def _tool_calling_model():
 
 
 def test_tool_timeout_cancels_an_async_tool():
-    """A hung ASYNC tool is cancelled at ~tool_timeout (bounded liveness); the run
-    continues (a soft tool error goes back to the model — no exception raised)."""
+    """A hung ASYNC tool is cancelled by tool_timeout (bounded liveness); the run
+    continues (a soft tool error goes back to the model — no exception raised).
+
+    The proof is ordering, not wall time, so a stalled host cannot fake or break it
+    (bug cuddly-callous-antlion): ``cancelled`` is set only when the 5s sleep is
+    interrupted, and the retry prompt naming 0.3s shows the configured tool_timeout
+    interrupted it."""
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = True
     cancelled = False
     try:
@@ -258,14 +263,18 @@ def test_tool_timeout_cancels_an_async_tool():
                 raise
             return "never"
 
-        t0 = time.monotonic()
         result = agent.run_sync("go")
-        elapsed = time.monotonic() - t0
     finally:
         pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
-    assert cancelled  # direct cancellation proof; wall time is only a liveness guard
-    # timing: hang-guard — abort-before-sleep proof; the 5s sleep is the failure mode
-    assert elapsed < 4.5  # cancelled before the 5s sleep completed
+    assert cancelled  # the 5s sleep was interrupted, not completed
+    timeout_retries = [
+        part
+        for message in result.all_messages()
+        for part in message.parts
+        if isinstance(part, RetryPromptPart) and part.tool_name == "slow"
+    ]
+    assert len(timeout_retries) == 1, timeout_retries
+    assert "0.3 seconds" in str(timeout_retries[0].content)  # the configured tool_timeout
     assert "done" in str(result.output)  # the run recovered, not aborted
 
 
