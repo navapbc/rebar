@@ -1,12 +1,21 @@
-"""Reviewed-related-material producer/consumer contract."""
+"""Reviewed-related-material producer/consumer contract.
+
+Held-out oracles merged from test_plan_review_sidecar_heldout.py: Held-out malformed and producer
+wiring cases for reviewed material.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
-from rebar.llm.plan_review import sidecar
-from rebar.llm.plan_review.relation_snapshot import PlanMaterialPin
+import pytest
+
+import rebar.llm.plan_review as plan_review
+from rebar.llm.config import LLMConfig
+from rebar.llm.plan_review import sidecar, xcheck
+from rebar.llm.plan_review.relation_snapshot import PlanMaterialPin, PlanRelationSnapshot
 
 
 def test_related_material_round_trips_exactly_without_schema_bump() -> None:
@@ -113,3 +122,131 @@ def test_decision_margin_is_none_when_either_side_is_missing() -> None:
     findings = {f["finding"]: f for f in sidecar.build_payload(verdict, material="m")["findings"]}
     assert findings["no-threshold"]["decision_margin"] is None
     assert findings["no-priority"]["decision_margin"] is None
+
+
+# ── held-out oracles (merged from test_plan_review_sidecar_heldout.py) ──
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        None,
+        {},
+        [
+            {
+                "role": "parent",
+                "canonical_id": "aaaa-bbbb-cccc-dddd",
+                "material_fingerprint": "1" * 16,
+            }
+        ],
+        [{"role": "child", "canonical_id": "not-an-id", "material_fingerprint": "1" * 16}],
+        [{"role": "child", "canonical_id": "aaaa-bbbb-cccc-dddd", "material_fingerprint": "bad"}],
+        [
+            {
+                "role": "child",
+                "canonical_id": "aaaa-bbbb-cccc-dddd",
+                "material_fingerprint": "1" * 16,
+            },
+            {
+                "role": "child",
+                "canonical_id": "aaaa-bbbb-cccc-dddd",
+                "material_fingerprint": "1" * 16,
+            },
+        ],
+    ],
+)
+def test_every_present_invalid_related_material_shape_is_rejected(raw) -> None:
+    assert callable(getattr(sidecar, "parse_reviewed_related_material", None)), (
+        "reviewed-related-material parser is absent"
+    )
+    error = getattr(sidecar, "ReviewedRelatedMaterialError", None)
+    assert error is not None, "ReviewedRelatedMaterialError API is absent"
+    with pytest.raises(error):
+        sidecar.parse_reviewed_related_material({"reviewed_related_material": raw})
+
+
+def test_full_review_emits_the_exact_pre_llm_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pin = PlanMaterialPin("child", "aaaa-bbbb-cccc-dddd", "1111111111111111")
+    snapshot = PlanRelationSnapshot(
+        subject_state={"ticket_id": "1111-2222-3333-4444"},
+        ticket_states_by_id={},
+        child_ids=(pin.canonical_id,),
+        prerequisite_ids=(),
+        related_material=(pin,),
+        ticket_store_revision="a" * 40,
+    )
+    monkeypatch.setattr(
+        plan_review.relation_snapshot,
+        "collect_plan_relation_snapshot",
+        lambda *a, **k: snapshot,
+    )
+    monkeypatch.setattr(
+        plan_review.context_assembly,
+        "assemble_context",
+        lambda *a, **k: SimpleNamespace(ticket_id="1111-2222-3333-4444", ticket_type="story"),
+    )
+    monkeypatch.setattr(
+        "rebar.llm.workflow.gate_dispatch.produce_plan_review_verdict",
+        lambda *a, **k: {
+            "verdict": "PASS",
+            "ticket_id": "1111-2222-3333-4444",
+            "coverage": {"llm_ran": True, "counts": {}},
+            "blocking": [],
+            "advisory": [],
+            "overflow": [],
+            "dropped": [],
+        },
+    )
+    monkeypatch.setattr(plan_review, "_maybe_apply_rising_floor", lambda *a, **k: None)
+    monkeypatch.setattr(plan_review, "_maybe_apply_completion_floor", lambda *a, **k: None)
+    monkeypatch.setattr(plan_review.drift_floor, "maybe_apply", lambda *a, **k: None)
+    monkeypatch.setattr(xcheck, "maybe_apply_contradiction", lambda *a, **k: None)
+    monkeypatch.setattr(xcheck, "maybe_apply_comment_trail", lambda *a, **k: None)
+    monkeypatch.setattr(plan_review, "_group_blocking_fix_units", lambda *a, **k: None)
+    captured = {}
+
+    def capture(
+        verdict,
+        *,
+        material=None,
+        material_parts=None,
+        reviewed_related_material=None,
+        review_phase=None,
+        priority_floor=None,
+        repo_root=None,
+        source=None,
+        retry_lineage=None,
+    ):
+        captured.update(
+            source=source,
+            material=material,
+            reviewed_related_material=reviewed_related_material,
+            review_phase=review_phase,
+            priority_floor=priority_floor,
+            repo_root=repo_root,
+            retry_lineage=retry_lineage,
+        )
+        return True
+
+    monkeypatch.setattr(sidecar, "emit", capture)
+    result = plan_review._run_plan_review(
+        "1111-2222-3333-4444",
+        cfg=LLMConfig(),
+        runner=None,
+        sign=False,
+        emit_sidecar=True,
+        advisory_cap=None,
+        repo_root="/repo",
+    )
+    assert result["sidecar_emitted"] is True
+    assert captured == {
+        "source": None,  # no resolved gate handle on a direct _run_plan_review call
+        "material": plan_review.generation.from_snapshot(snapshot).own_material,
+        "reviewed_related_material": snapshot.related_material,
+        "review_phase": "planning",
+        "priority_floor": None,
+        "repo_root": "/repo",
+        "retry_lineage": None,  # a normal (non-retry) review carries no retry lineage
+    }

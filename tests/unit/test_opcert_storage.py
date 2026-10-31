@@ -3,7 +3,11 @@
 ``signing.sign_opcert_manifest`` writes an envelope-bearing signature event whose reduced kind
 record retains the DSSE envelope, material fingerprint, and merged-log commit.
 ``opcert.opcert_from_record`` reconstructs and verifies it against a pinned keyring. Adversarial
-compatibility cases remain in ``test_opcert_storage_heldout.py``.
+compatibility cases remain in the held-out oracles below.
+
+Held-out oracles merged from test_opcert_storage_heldout.py: Held-out op-cert storage oracles cover
+compaction survival, legacy HMAC mapping to ``None``, byte-preserving additive compatibility, and
+reduction through later events. Tests use ``ssh-keygen`` and a git-backed store.
 """
 
 from __future__ import annotations
@@ -157,3 +161,102 @@ def test_opcert_from_record_roundtrips_and_verifies(store: Path, tmp_path: Path)
     )
     assert verdict.verified is True
     assert verdict.verdict == "certified"
+
+
+# ── held-out oracles (merged from test_opcert_storage_heldout.py) ──
+
+try:
+    sshsig.ensure_available()
+    _SSH_OK = True
+except Exception:  # noqa: BLE001
+    _SSH_OK = False
+
+
+def _sign_opcert(store: Path, tid: str, priv: str, commit: str) -> None:
+    signing.sign_opcert_manifest(
+        tid,
+        [f"{KIND}: PASS"],
+        material_fingerprint=MATERIAL,
+        merged_log_commit=commit,
+        key_path=priv,
+        principal=ENV_ID,
+        repo_root=str(store),
+    )
+
+
+def test_opcert_survives_compaction(store: Path, tmp_path: Path) -> None:
+    priv, _pub = _keypair(tmp_path, "env")
+    commit = _head(store)
+    tid = rebar.create_ticket("task", "op-cert me", repo_root=str(store))
+    _sign_opcert(store, tid, priv, commit)
+
+    rebar.compact(tid, repo_root=str(store))  # fold events into a SNAPSHOT
+
+    rec = rebar.show_ticket(tid, repo_root=str(store))["attestations"][KIND]
+    assert rec.get("envelope")
+    assert rec["material_fingerprint"] == MATERIAL
+    assert rec["merged_log_commit"] == commit
+
+
+def _write_legacy_hmac_attestation(store: Path, tid: str) -> None:
+    """Append a genuine LEGACY HMAC SIGNATURE event (as clones did before story 8d8e repointed the
+    seam to op-certs). Constructed directly rather than via ``sign_manifest`` — which now mints an
+    op-cert — so these tests exercise the read-both path on a real HMAC record."""
+    from rebar._commands._seam import append_event
+
+    resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
+    tracker = Path(store) / ".tickets-tracker"
+    manifest = [f"{KIND}: PASS"]
+    append_event(
+        resolved,
+        "SIGNATURE",
+        {
+            "manifest": manifest,
+            "algorithm": "HMAC-SHA256",
+            "signature": "ab" * 32,
+            "key_id": "412fa5372ad877e0",
+            "kind": KIND,
+        },
+        tracker,
+        repo_root=str(store),
+    )
+
+
+def test_opcert_from_record_none_for_hmac(store: Path) -> None:
+    tid = rebar.create_ticket("task", "hmac me", repo_root=str(store))
+    _write_legacy_hmac_attestation(store, tid)
+    rec = rebar.show_ticket(tid, repo_root=str(store))["attestations"][KIND]
+    assert opcert.opcert_from_record(rec) is None  # a plain HMAC record is not an op-cert
+
+
+def test_hmac_record_is_additively_unchanged(store: Path) -> None:
+    """A legacy HMAC record carries none of the op-cert fields — the extension is
+    present-only, so older clones preserve-and-ignore."""
+    tid = rebar.create_ticket("task", "hmac me", repo_root=str(store))
+    _write_legacy_hmac_attestation(store, tid)
+    rec = rebar.show_ticket(tid, repo_root=str(store))["attestations"][KIND]
+    # The op-cert fields are folded present-only, so an HMAC record gains none of them.
+    # (The raw HMAC `signature` hex is stripped from show reads by public_state, so we assert the
+    # HMAC verify path separately below rather than off the stripped record.)
+    assert "envelope" not in rec
+    assert "material_fingerprint" not in rec
+    assert "merged_log_commit" not in rec
+    assert rec.get("algorithm") == "HMAC-SHA256"  # still an HMAC record, unchanged in kind
+    # Contract phase (story 8f1d): HMAC is a RETIRED scheme for the op-cert kinds. The record is
+    # byte-unchanged (append-only history untouched), but validity-on-read now reports it
+    # NOT-certified — a forgeable HMAC op-cert can no longer certify.
+    verdict = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
+    assert verdict["verified"] is False
+    assert verdict["verdict"] == "unsigned"
+
+
+def test_opcert_survives_later_events(store: Path, tmp_path: Path) -> None:
+    priv, _pub = _keypair(tmp_path, "env")
+    commit = _head(store)
+    tid = rebar.create_ticket("task", "op-cert me", repo_root=str(store))
+    _sign_opcert(store, tid, priv, commit)
+    rebar.comment(tid, "a later event", repo_root=str(store))  # more history after the op-cert
+
+    rec = rebar.show_ticket(tid, repo_root=str(store))["attestations"][KIND]
+    assert rec.get("envelope")
+    assert rec["merged_log_commit"] == commit

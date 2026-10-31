@@ -277,7 +277,8 @@ def test_unresolvable_storage_anchor_fails_closed(
 ) -> None:
     """(2c) Fail-closed on an unresolvable storage anchor. Forcing the CLI's s_commit=None end to
     end needs compaction of the TERMINAL SIGNATURE event, which is env/threshold-dependent and
-    flaky (see the NOTE in test_verify_opcert_heldout.py). So we unit-test the smallest tier that
+    flaky (see the compacted-close-event comment in test_verify_opcert.py). So we unit-test the
+    smallest tier that
     truly exercises the fail-closed path: `opcert.verify_opcert` with a storage anchor that does not
     resolve in the tracker must NOT certify, while the SAME inputs with the real anchor DO — proving
     the unresolvable anchor is the sole cause."""

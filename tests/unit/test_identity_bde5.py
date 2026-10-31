@@ -1,5 +1,10 @@
 """Happy-path authorship attestation checks: the policy registers at import
-and verifies an event against its author's in-band public keys."""
+and verifies an event against its author's in-band public keys.
+
+Held-out oracles merged from test_identity_bde5_heldout.py: Held-out authorship checks: reject
+cross-identity and tampered signatures; unknown or keyless identities remain non-verified without
+raising. Trust roots come only from the subject identity's in-band keys.
+"""
 
 from __future__ import annotations
 
@@ -71,3 +76,107 @@ def test_sign_then_verify_roundtrip(store: Path, tmp_path: Path) -> None:
 
     verdict = authorship.verify_authorship(envelope, a, repo_root=str(store))
     assert verdict.verified is True
+
+
+# ── held-out oracles (merged from test_identity_bde5_heldout.py) ──
+
+try:
+    sshsig.ensure_available()
+    _SSH_OK = True
+except Exception:  # noqa: BLE001 — best-effort SSHSIG availability probe; skip if unavailable
+    _SSH_OK = False
+
+
+def _keypair_heldout(tmp_path: Path, name: str) -> tuple[str, str]:
+    key = tmp_path / name
+    subprocess.run(
+        ["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "", "-q", "-C", name],
+        check=True,
+        capture_output=True,
+    )
+    parts = (tmp_path / f"{name}.pub").read_text().strip().split()
+    return str(key), f"{parts[0]} {parts[1]}"
+
+
+def _signed(store: Path, tmp_path: Path):
+    """Sign a payload with Alice's key; return (envelope, alice_id, payload)."""
+    priv, pub = _keypair_heldout(tmp_path, "alice")
+    a = rebar.create_identity("Alice", "alice@example.com", keys=[pub], repo_root=str(store))
+    payload = b'{"uuid":"e1","author_id":"' + a.encode() + b'","data":{"x":1}}'
+    return authorship.sign_authorship(payload, priv, principal=a), a, payload
+
+
+def test_cross_identity_rejected(store: Path, tmp_path: Path) -> None:
+    """An envelope signed by A does NOT verify against a different identity B."""
+    envelope, _a, _payload = _signed(store, tmp_path)
+    _priv_b, pub_b = _keypair_heldout(tmp_path, "bob")
+    b = rebar.create_identity("Bob", "bob@example.com", keys=[pub_b], repo_root=str(store))
+    verdict = authorship.verify_authorship(envelope, b, repo_root=str(store))
+    assert verdict.verified is False
+
+
+def test_tampered_payload_rejected(store: Path, tmp_path: Path) -> None:
+    """Mutating the signed payload breaks verification against the real author."""
+    envelope, a, payload = _signed(store, tmp_path)
+    tampered = dsse.Envelope(
+        payload_type=envelope.payload_type,
+        payload=payload.replace(b'"x":1', b'"x":999'),
+        signatures=list(envelope.signatures),
+    )
+    verdict = authorship.verify_authorship(tampered, a, repo_root=str(store))
+    assert verdict.verified is False
+
+
+def test_tampered_signature_rejected(store: Path, tmp_path: Path) -> None:
+    envelope, a, payload = _signed(store, tmp_path)
+    bad_sig = bytearray(envelope.signatures[0].sig)
+    # Flip a byte in the MIDDLE of the armored signature (the base64 crypto body),
+    # not the trailing footer/newline which ssh-keygen tolerates.
+    bad_sig[len(bad_sig) // 2] ^= 0xFF
+    broken = dsse.Envelope(
+        payload_type=envelope.payload_type,
+        payload=payload,
+        signatures=[dsse.Signature(keyid=envelope.signatures[0].keyid, sig=bytes(bad_sig))],
+    )
+    assert authorship.verify_authorship(broken, a, repo_root=str(store)).verified is False
+
+
+def test_unknown_identity_non_verified(store: Path, tmp_path: Path) -> None:
+    """Verifying against an id that is not an identity ticket → non-verified, no raise."""
+    envelope, _a, _payload = _signed(store, tmp_path)
+    task = rebar.create_ticket("task", "not an identity", repo_root=str(store))
+    v = authorship.verify_authorship(envelope, task, repo_root=str(store))
+    assert v.verified is False
+
+
+def test_keyless_identity_non_verified(store: Path, tmp_path: Path) -> None:
+    """An identity with no keys is a non-verified trust root (never raises)."""
+    envelope, _a, _payload = _signed(store, tmp_path)
+    keyless = rebar.create_identity("Keyless", "k@example.com", repo_root=str(store))
+    assert authorship.verify_authorship(envelope, keyless, repo_root=str(store)).verified is False
+
+
+def test_verify_never_raises_when_lookup_errors(
+    store: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the identity lookup itself throws, verify degrades to non-verified."""
+    envelope, a, _payload = _signed(store, tmp_path)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("corrupt store")
+
+    monkeypatch.setattr(rebar, "show_ticket", _boom)
+    v = authorship.verify_authorship(envelope, a, repo_root=str(store))
+    assert v.verified is False
+
+
+def test_trust_root_built_from_identity_keys(store: Path, tmp_path: Path) -> None:
+    """resolve_trust_root reflects the identity's in-band keys (principal-scoped)."""
+    _priv, pub = _keypair_heldout(tmp_path, "carol")
+    c = rebar.create_identity("Carol", "carol@example.com", keys=[pub], repo_root=str(store))
+    tr = authorship.resolve_trust_root(c, repo_root=str(store))
+    assert tr is not None
+    assert c in tr  # principal appears
+    assert pub.split()[1] in tr  # the key data appears
+    # An identity we never created has no trust root.
+    assert authorship.resolve_trust_root("dead-beef-dead-beef", repo_root=str(store)) is None

@@ -35,7 +35,7 @@ _SENTINEL_VALUE = "synthetic-not-a-secret-9c66-3e2b"
 # The op-cert startup oracle guards that the composed signer — not the ambient environment —
 # is the key source. That guard runs with a live signer, so it is the single worst place for
 # a whole-environment repr to survive; this module holds it to the bool-bound form.
-_GUARDED_MODULE = _TESTS_ROOT / "unit" / "test_rp04_s6_opcert_startup_heldout.py"
+_GUARDED_MODULE = _TESTS_ROOT / "unit" / "test_rp04_s6_opcert_startup.py"
 _GUARDED_TEST = "test_both_chains_sign_from_composed_signer_without_env"
 _GUARDED_VAR = "REBAR_OPCERT_KEY_PATH"
 

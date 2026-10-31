@@ -32,7 +32,7 @@ def test_anthropic_auth_oracle_isolated_from_provider_import_order(
     children into the SHARED numbered temp root and deleted four other sessions' roots
     (bug 16e1-237d).
     """
-    node = f"tests/unit/test_rp04_s4_llm_runtime_heldout.py::{target}"
+    node = f"tests/unit/test_rp04_s4_llm_runtime.py::{target}"
     completed = run_nested_pytest(tmp_path, "-q", node, env=subprocess_env())
 
     assert completed.returncode == 0, completed.stdout + completed.stderr
