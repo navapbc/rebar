@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Submit a Gerrit change only if the inspected revision is still current."""
+"""Submit a Gerrit change only if the inspected revision is still current.
+
+Exit codes:
+  0  submitted.
+  2  refused: the revision is stale (checked before submitting, or shown by re-reading
+     the change after Gerrit answered 409), or Gerrit refused the submit with 409 for
+     another reason (merge conflict, unmet submit requirement). stderr says which and
+     prints Gerrit's response.
+  3  refused before submitting: a required vote is missing, comments are unresolved,
+     or Gerrit reports the change not submittable.
+  4  no Gerrit credential for the host.
+  Any other HTTP error from the submit prints Gerrit's response and re-raises (exit 1).
+"""
 
 from __future__ import annotations
 
@@ -12,6 +24,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 
 from rebar._store.gitutil import credential_git_env
 
@@ -76,6 +89,25 @@ def _error_body(exc: urllib.error.HTTPError) -> str:
     return text
 
 
+def _explain_409(body: str, submitted: str | None, reread: Callable[[], dict]) -> str:
+    """Name what a 409 on submit means, claiming staleness only when a re-read shows it."""
+    try:
+        now = reread().get("current_revision")
+    except (urllib.error.URLError, OSError):
+        now = None
+    if now and now != submitted:
+        return (
+            "refusing stale submit: Gerrit reports revision is no longer current: "
+            f"submitted {submitted}, current is {now}"
+        )
+    if "conflict" in body.lower():
+        return (
+            "refusing submit: Gerrit cannot merge this change (merge conflict); rebase it "
+            "onto origin/main, resolve the conflict, and push a new patch set"
+        )
+    return "refusing submit: Gerrit rejected the submit (HTTP 409)"
+
+
 def _label_ok(change: dict, label: str) -> bool:
     info = (change.get("labels") or {}).get(label) or {}
     return bool(info.get("approved"))
@@ -95,7 +127,9 @@ def _session_hashtag() -> str | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("change", help="Gerrit numeric change id or Change-Id")
     parser.add_argument(
         "--revision",
@@ -115,12 +149,15 @@ def main(argv: list[str] | None = None) -> int:
     auth = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
     change = urllib.parse.quote(args.change, safe="")
 
-    detail = _request(
-        args.base_url.rstrip("/"),
-        "GET",
-        f"/a/changes/{change}?o=CURRENT_REVISION&o=DETAILED_LABELS&o=SUBMITTABLE",
-        auth,
-    )
+    def read_change() -> dict:
+        return _request(
+            args.base_url.rstrip("/"),
+            "GET",
+            f"/a/changes/{change}?o=CURRENT_REVISION&o=DETAILED_LABELS&o=SUBMITTABLE",
+            auth,
+        )
+
+    detail = read_change()
     current = detail.get("current_revision")
     if not _revision_matches(current, args.revision):
         print(
@@ -157,12 +194,10 @@ def main(argv: list[str] | None = None) -> int:
             {},
         )
     except urllib.error.HTTPError as exc:
-        reason = f"Gerrit response (HTTP {exc.code}): {_error_body(exc)}"
+        body = _error_body(exc)
+        reason = f"Gerrit response (HTTP {exc.code}): {body}"
         if exc.code == 409:
-            print(
-                "refusing stale submit: Gerrit reports revision is no longer current",
-                file=sys.stderr,
-            )
+            print(_explain_409(body, current, read_change), file=sys.stderr)
             print(reason, file=sys.stderr)
             return 2
         print(reason, file=sys.stderr)

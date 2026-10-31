@@ -236,18 +236,23 @@ def test_safe_submit_names_missing_git_credential(monkeypatch, capsys):
 
 
 def test_safe_submit_returns_stale_when_submit_races_to_409(monkeypatch, capsys):
+    """Another session uploads a patch set between the vote check and the submit POST."""
     import urllib.error
 
     safe_submit = _safe_submit_module()
 
     monkeypatch.setattr(safe_submit, "_credential", lambda host: ("user", "pass"))
+    gets = []
 
     def fake_request(base_url: str, method: str, path: str, auth: str, body=None) -> dict:
         if method == "POST" and path.endswith("/submit"):
             raise urllib.error.HTTPError(path, 409, "conflict", {}, None)
         if method == "GET":
+            gets.append(path)
             return {
-                "current_revision": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+                "current_revision": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                if len(gets) == 1
+                else "cafebabecafebabecafebabecafebabecafebabe",
                 "labels": {
                     "LLM-Review": {"approved": {"_account_id": 1}},
                     "Verified": {"approved": {"_account_id": 2}},
@@ -266,7 +271,9 @@ def test_safe_submit_returns_stale_when_submit_races_to_409(monkeypatch, capsys)
         == 2
     )
 
-    assert "no longer current" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no longer current" in err
+    assert "cafebabecafebabecafebabecafebabecafebabe" in err
 
 
 def test_safe_submit_reraises_non_409_submit_http_error(monkeypatch):
@@ -333,18 +340,30 @@ _GREEN_DETAIL = {
 }
 
 
-def _submit_failing_with(monkeypatch, status: int, body: bytes):
-    """Load the script with a green change whose submit POST fails with ``status``/``body``."""
+def _submit_failing_with(monkeypatch, status: int, body: bytes, reread=None):
+    """Load the script with a green change whose submit POST fails with ``status``/``body``.
+
+    ``reread`` is what any GET after the first returns: a revision SHA, or an exception to
+    raise. By default the change still reports the submitted revision as current.
+    """
     import io
     import urllib.error
 
     safe_submit = _safe_submit_module()
     monkeypatch.setattr(safe_submit, "_credential", lambda host: ("user", "pass"))
+    gets = []
 
     def fake_request(base_url: str, method: str, path: str, auth: str, body_=None) -> dict:
         if method == "POST" and path.endswith("/submit"):
             raise urllib.error.HTTPError(path, status, "refused", {}, io.BytesIO(body))
-        return dict(_GREEN_DETAIL) if method == "GET" else {}
+        if method != "GET":
+            return {}
+        gets.append(path)
+        if len(gets) > 1 and isinstance(reread, Exception):
+            raise reread
+        if len(gets) > 1 and reread:
+            return {**_GREEN_DETAIL, "current_revision": reread}
+        return dict(_GREEN_DETAIL)
 
     monkeypatch.setattr(safe_submit, "_request", fake_request)
     return safe_submit
@@ -397,12 +416,14 @@ def test_safe_submit_409_prints_json_without_message_as_is(monkeypatch, capsys):
     assert '{"status": "CONFLICT"}' in capsys.readouterr().err
 
 
-def test_safe_submit_409_with_empty_body_keeps_todays_line(monkeypatch, capsys):
+def test_safe_submit_409_with_empty_body_does_not_claim_staleness(monkeypatch, capsys):
     safe_submit = _submit_failing_with(monkeypatch, 409, b"")
 
     assert safe_submit.main(_FULL_SHA_ARGS) == 2
 
-    assert "refusing stale submit" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "rejected the submit (HTTP 409)" in err
+    assert "no longer current" not in err
 
 
 def test_safe_submit_non_409_prints_body_before_reraising(monkeypatch, capsys):
@@ -417,3 +438,65 @@ def test_safe_submit_non_409_prints_body_before_reraising(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "internal boom detail" in err
     assert "500" in err
+
+
+_CONFLICT_BODY = (
+    b"Cannot rebase db3f3e396f1: Change 3169 could not be rebased due to a conflict "
+    b"during merge.\n\nmerge conflict(s):\n* docs/release-notes.md\n"
+)
+
+
+def test_safe_submit_409_merge_conflict_names_conflict_not_staleness(monkeypatch, capsys):
+    safe_submit = _submit_failing_with(monkeypatch, 409, _CONFLICT_BODY)
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    err = capsys.readouterr().err
+    assert "docs/release-notes.md" in err
+    assert "merge conflict" in err
+    assert "rebase it onto origin/main" in err
+    assert "no longer current" not in err
+
+
+def test_safe_submit_409_after_newer_patch_set_reports_staleness(monkeypatch, capsys):
+    newer = "cafebabecafebabecafebabecafebabecafebabe"
+    safe_submit = _submit_failing_with(
+        monkeypatch,
+        409,
+        b"revision deadbeefdeadbeefdeadbeefdeadbeefdeadbeef is not current revision",
+        reread=newer,
+    )
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    err = capsys.readouterr().err
+    assert "no longer current" in err
+    assert newer in err
+
+
+def test_safe_submit_other_409_reports_gerrit_reason_without_guessing(monkeypatch, capsys):
+    safe_submit = _submit_failing_with(
+        monkeypatch, 409, b"submit requirement 'Code-Review' is unsatisfied"
+    )
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    err = capsys.readouterr().err
+    assert "rejected the submit (HTTP 409)" in err
+    assert "submit requirement 'Code-Review' is unsatisfied" in err
+    assert "no longer current" not in err
+    assert "merge conflict" not in err
+
+
+def test_safe_submit_409_when_reread_fails_still_names_conflict(monkeypatch, capsys):
+    import urllib.error
+
+    safe_submit = _submit_failing_with(
+        monkeypatch, 409, _CONFLICT_BODY, reread=urllib.error.URLError("down")
+    )
+
+    assert safe_submit.main(_FULL_SHA_ARGS) == 2
+
+    err = capsys.readouterr().err
+    assert "merge conflict" in err
+    assert "no longer current" not in err
