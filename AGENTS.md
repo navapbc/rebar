@@ -387,12 +387,22 @@ A third gate ratchets **mechanism growth** the same way. `make lint` runs
 `python scripts/check_mechanism_delta.py --check`, a **shrink-only** ratchet over
 `.github/mechanism-baseline.json` that censuses seven kinds of mechanism — `lock`, `env_var`,
 `config_key`, `feature_flag`, `ci_gate`, `autouse_fixture`, `test_helper` — and **fails on any
-`new>0`**. It exists because 56% of sampled fixes ADD a mechanism against 30% that are pure
-logic fixes: each cycle grows the surface that produces the next cycle's defect classes, and
-nothing pushed back. The gate does not forbid a new mechanism; it forbids an *unjustified*
-one. **Removing** a mechanism always passes (it buckets as `stale`) — that asymmetry is what
-makes it a ratchet rather than a freeze. When you genuinely need one, justify it in the tree,
-at the definition site:
+new or increased mechanism that LACKS a marker**, reporting that verdict through its **exit
+code** rather than through its counters. It exists because 56% of sampled fixes ADD a mechanism
+against 30% that are pure logic fixes: each cycle grows the surface that produces the next
+cycle's defect classes, and nothing pushed back. The gate does not forbid a new mechanism; it
+forbids an *unjustified* one. **Removing** a mechanism always passes (it buckets as `stale`) —
+that asymmetry is what makes it a ratchet rather than a freeze.
+
+**Read the exit code, not the `new=` counter.** The counter includes marker-admitted
+mechanisms, so a clean tree reports a nonzero `new`: measured `active=648 new=28 increased=0
+stale=0` with exit 0 at `0886e96f03a`. The baseline has no write path for new keys —
+`drain_stale` (`scripts/_mechanism_delta/compare.py`) keeps only baseline keys still present,
+and there is no `--lock` — so `new=0` is UNREACHABLE here and must never appear in an
+acceptance criterion; assert "exits 0" instead. The complexity ratchet above is the opposite
+case: it admits nothing by marker, so its clean state genuinely is `new=0`.
+
+When you genuinely need one, justify it in the tree, at the definition site:
 
 ```
 # mechanism-ok: <kind> <name> — <reason or ticket id>
