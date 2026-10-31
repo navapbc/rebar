@@ -8,6 +8,35 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## The bare id-list spelling of `activate` in `criteria_routing.json` is deprecated
+
+**Contract change for any repo whose `.rebar/criteria_routing.json` sets `activate` to a
+list.** The list form is still honoured and still resolves to exactly the same routing it
+always did. It now logs a deprecation warning, and it is scheduled for removal in `v1.0.0`.
+
+The list spelling names criteria to activate and leaves rebar to infer each one's gate from
+the routing maps:
+
+```json
+{"activate": ["project.portability", "plan.testing"]}
+```
+
+The canonical spelling states the gate instead of leaving it to be inferred:
+
+```json
+{"activate": {"project.portability": ["plan_review"], "plan.testing": ["plan_review", "code_review"]}}
+```
+
+Both produce the same effective criteria today, so migrating is a pure rewrite with no
+change in which criteria run. Nothing about `_activation_map` or any other overlay key
+changes.
+
+**The warning is emitted once per overlay, not once per call.** It fires from inside the
+memoised routing compute, whose cache key is the gate, the repo root, and a signature of the
+overlay's content. So a process that resolves criteria repeatedly logs the warning once, and
+editing the overlay produces a new cache key and warns again. A client that greps its logs
+for deprecation notices should not expect one per `effective_criteria` call.
+
 ## Warn-class tombstones are retired, and unknown `[llm]` keys are reported
 
 **Contract change for any config that still sets a retired key, and for
