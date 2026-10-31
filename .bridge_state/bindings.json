@@ -45568,6 +45568,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T23:36:17Z"
     },
+    "6f24-3d47-b251-4905": {
+      "created_at": "2026-10-31T10:29:57Z",
+      "jira_id": "4597867",
+      "jira_key": "REB-6832",
+      "state": "confirmed",
+      "updated_at": "2026-10-31T10:30:00Z"
+    },
     "6f2d-4221-26de-48cc": {
       "baseline": {
         "assignee": null,
@@ -84562,6 +84569,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T08:42:37Z"
     },
+    "cbf2-2789-fc0b-4448": {
+      "created_at": "2026-10-31T10:30:01Z",
+      "jira_id": "4597868",
+      "jira_key": "REB-6833",
+      "state": "confirmed",
+      "updated_at": "2026-10-31T10:30:04Z"
+    },
     "cbf4-721b-1ce0-44b7": {
       "baseline": {
         "assignee": {
@@ -103063,9 +103077,17 @@
       "updated_at": "2026-08-15T15:15:40Z"
     },
     "f6b9-8d8e-4f56-4003": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Symptom\n\n`scripts/gerrit_safe_submit.py` refused a submit with:\n\n```\nrefusing stale submit: Gerrit reports revision is no longer current\n```\n\non a change whose revision *was* current. Gerrit's own detail endpoint reported `current_revision = db3f3e396f1bb50a1350731cba30a6962d44fbaf`, `status: NEW`, two patch sets, and that exact SHA as patch set 2 \u2014 the same SHA passed to `--revision`.\n\nThe real cause, from the POST body:\n\n```\nCannot rebase db3f3e396f1...: Change 3169 could not be rebased due to a conflict during merge.\n\nmerge conflict(s):\n* docs/release-notes.md\n```\n\n`GET /a/changes/3169/revisions/current/mergeable` confirmed `\"mergeable\": false` under `REBASE_IF_NECESSARY`.\n\n## Root cause\n\n`scripts/gerrit_safe_submit.py:130-146` wraps the submit POST and maps the whole of HTTP 409 onto one message:\n\n```python\nexcept urllib.error.HTTPError as exc:\n    if exc.code == 409:\n        print(\n            \"refusing stale submit: Gerrit reports revision is no longer current\",\n            file=sys.stderr,\n        )\n        return 2\n    raise\n```\n\nGerrit returns 409 for several distinct conditions on submit, including an unmergeable change, submit requirements not satisfied, and a genuinely superseded revision. The handler discards `exc.read()` entirely, so the one condition it names is asserted regardless of which occurred.\n\nThe staleness check that *would* be authoritative already ran and passed at `:104-109`, comparing `detail[\"current_revision\"]` against `--revision`. So by the time the 409 arrives, staleness has been ruled out \u2014 the message contradicts a check the same script just performed.\n\n## Why it matters\n\nThe message points the operator at the wrong remedy. \"Revision is no longer current\" means *re-inspect votes and re-submit*; a merge conflict means *pre-rebase and resolve*, which is the documented exception to AGENTS.md's \"do not pre-rebase\" rule. Acting on the printed message produces a loop of re-reading Gerrit state that cannot terminate, because nothing about the revision is wrong. Diagnosis required dropping to a raw authenticated `curl` to read the body the script had already received and thrown away.\n\nThis is also a silent-failure class: any future 409 condition is reported as staleness too.\n\n## Acceptance criteria\n\n- [ ] **AC1** The 409 handler reads the response body and includes it in the message, so the\n      printed text names the condition Gerrit reported rather than a fixed guess.\n- [ ] **AC2** When the body indicates the change cannot be merged, the message names the\n      conflict and the remedy (pre-rebase and resolve), not staleness.\n- [ ] **AC3** The script claims staleness only when it can show it \u2014 that is, when\n      `current_revision` differs from `--revision`, which is already checked at `:104-109`.\n- [ ] **AC4** A test drives the 409 path with a merge-conflict body and asserts the emitted\n      message contains the conflicting path and does not contain \"no longer current\".\n- [ ] **AC5** A test drives the 409 path with a genuinely superseded revision and asserts the\n      staleness wording is still produced for that case.\n- [ ] **AC6** Exit codes for the distinguished cases are documented in the module docstring.\n\n## Evidence\n\nObserved on change 3169 patch set 2 while landing `cb2b-7446-748c-47bc` on 2026-10-31. The conflict was real and resolvable: a018 (`5cd7e2784ab`) and cb2b both inserted a new section directly beneath the `docs/release-notes.md` header. Pre-rebasing and keeping both sections cleared it.\n\n## Out of scope\n\nThe conflict itself, and the adjacent-insert contention on `docs/release-notes.md` that produces this class of conflict whenever two slices of one epic land close together.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "gerrit_safe_submit.py reports every 409 as a stale revision, hiding merge conflicts"
+      },
       "created_at": "2026-10-31T09:31:29Z",
       "jira_id": "4597866",
       "jira_key": "REB-6831",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-10-31T09:31:31Z"
     },
@@ -111834,7 +111856,12 @@
     "1793424995881008842": "__rebar_unknown_comment_id__",
     "1793426968865688489": "__rebar_unknown_comment_id__",
     "1793427843917558648": "__rebar_unknown_comment_id__",
-    "1793431859258940172": "__rebar_unknown_comment_id__"
+    "1793431859258940172": "__rebar_unknown_comment_id__",
+    "1793439170926957697": "__rebar_unknown_comment_id__",
+    "1793439627545281647": "__rebar_unknown_comment_id__",
+    "1793441281672116001": "__rebar_unknown_comment_id__",
+    "1793441992883201001": "__rebar_unknown_comment_id__",
+    "1793442224584597001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -117168,6 +117195,8 @@
     "REB-683": "f983-9441-35f4-445f",
     "REB-6830": "743a-96fa-fdc8-4f98",
     "REB-6831": "f6b9-8d8e-4f56-4003",
+    "REB-6832": "6f24-3d47-b251-4905",
+    "REB-6833": "cbf2-2789-fc0b-4448",
     "REB-684": "76e9-a6f0-3632-42ee",
     "REB-685": "b2e2-c631-3b0e-425c",
     "REB-686": "jira-reb-686",
