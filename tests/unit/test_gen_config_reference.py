@@ -252,7 +252,9 @@ def test_alias_table_escapes_pipes_in_name_and_replacement(monkeypatch):
 
 
 def test_config_reference_reflects_cfg_tombstones():
-    """Each removed cfg key appears in its own row WITH its removal behavior."""
+    """Each removed cfg key appears in its own row WITH its behavior and its real
+    removal release — the release is what tells an operator WHEN their config broke, so
+    a row carrying only the behavior leaves them guessing."""
     from rebar._deprecations import tombstones
 
     doc = gen.render_config_reference()
@@ -263,6 +265,9 @@ def test_config_reference_reflects_cfg_tombstones():
         assert row, f"tombstoned cfg key {tomb.name!r} missing from a reference table row"
         assert tomb.behavior in row, (
             f"removal behavior {tomb.behavior!r} for {tomb.name!r} not in its row: {row}"
+        )
+        assert tomb.removed_in in row, (
+            f"removal release {tomb.removed_in!r} for {tomb.name!r} not in its row: {row}"
         )
 
 
@@ -386,7 +391,9 @@ def test_alias_and_tombstone_on_one_canonical_key_both_render(monkeypatch):
     monkeypatch.setattr(
         gen, "_cfg_deprecations", lambda: [("legacy.alias", key, "permanent alias")]
     )
-    monkeypatch.setattr(gen, "_cfg_tombstones", lambda: [("legacy.removed", key, "warns")])
+    monkeypatch.setattr(
+        gen, "_cfg_tombstones", lambda: [("legacy.removed", key, "error", "v0.8.0")]
+    )
     row = _row_for(gen.render_config_reference(), key)
     assert row, f"schema key {key!r} missing from a reference table row"
     assert "legacy.alias" in row, f"alias note dropped from {key!r} row: {row}"

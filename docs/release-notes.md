@@ -8,6 +8,68 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Warn-class tombstones are retired, and unknown `[llm]` keys are reported
+
+**Contract change for any config that still sets a retired key, and for
+`[tool.rebar.llm]`.** Two related changes to how rebar reports config inputs it no longer
+honours.
+
+**The tombstone registry is now error-class only.** It previously carried 19 rows: 6
+error-class and 13 warn-class. A warn row named a retired input that was *operationally
+inert* — a renamed or dropped tunable with no behavioural bite — and logged a bespoke "was
+removed in …" message. That bought nothing the ordinary unknown-key warning does not
+already say, and it cost something real: the tombstone path consumed the key *before*
+`_warn_unknown` saw it, so a dead key was silently EXEMPT from
+`REBAR_CONFIG_UNKNOWN_KEYS=error`. An operator who deliberately opted into strict unknown-key
+checking did not get it for precisely the keys that were most certainly dead.
+
+The 13 warn rows are gone. What replaces each depends on the channel:
+
+- The **7 env names** — `REBAR_PUSH`, `REBAR_RECONCILER_LOCK_MAX_RETRIES`,
+  `REBAR_RECONCILER_LOCK_RETRY_BUDGET`, `REBAR_CODE_HEALTH_ANALYZERS`,
+  `REBAR_CODE_HEALTH_ENABLED`, `REBAR_JIRA_RESOLVED_STATUSES`,
+  `REBAR_RECONCILER_RESOLVED_STATUSES` — are now **ignored silently**. `env_overrides()`
+  only reads live section/key pairs, so a stale export never reached any code path; the warn
+  row was the only thing that noticed it. Nothing changes about what these variables do
+  (nothing), only that rebar no longer comments on them.
+- The **6 config keys** — `reconciler.lock_backend`, `reconciler.lock_max_retries`,
+  `code_health.analyzers`, `code_health.enabled`, `jira.resolved_statuses`,
+  `reconciler.resolved_statuses` — become **ordinary unknown keys**. Under the default
+  policy this is a behaviour-preserving swap: the operator still gets a warning naming the
+  key, just worded as `unknown key 'code_health.enabled' ignored`. Under
+  `REBAR_CONFIG_UNKNOWN_KEYS=error` it is a **real break**: a config still carrying one of
+  these lines now fails to load where it previously warned and continued. That is the point
+  of the change, but it is the thing to check before upgrading if you run strict.
+
+The **6 surviving error-class rows are unchanged in behaviour** and still fail loud with
+`RemovedInputError`. Their `removed_in` field is corrected: every row used to claim
+`v1.0.0`, a placeholder horizon rather than a fact, which made the error message actively
+misleading about when the config broke. They now name real pre-1.0 releases — `v0.8.0` for
+`TICKETS_TRACKER_DIR`, `REBAR_MCP_ALLOW_RECONCILE_LIVE`, `verify.require_verdict_for_close`,
+`.rebar/config.conf` and `REBAR_LLM_MAX_ITERS`, and `v0.12.0` for `REBAR_LLM_MODEL`. The
+`warn` behavior string stays in the registry's vocabulary, so a future retired-but-inert
+input can still be classified that way; there are simply no rows using it.
+
+**Unknown `[tool.rebar.llm]` keys are now reported.** `llm` is a *reserved* section — owned
+by the optional `[agents]` extra, and read raw by `rebar.llm` rather than coerced by the
+core parser, which must never import the agents stack. That exemption from coercion had
+silently extended to unknown-key policy: `[llm] overlap_k = 5` was accepted in total
+silence, even under `REBAR_CONFIG_UNKNOWN_KEYS=error`. A typo in an LLM tunable looked
+exactly like a working config.
+
+The core parser now checks `[llm]` key NAMES against `_LLM_KNOWN_KEYS` and routes anything
+unrecognised through the normal unknown-key path — warn by default, hard error under
+strict. Values are still entirely owned by `rebar.llm`; nothing here validates them, and no
+import of the agents stack is introduced. Because that list necessarily duplicates the
+readers, `tests/unit/test_config_llm_known_keys.py` AST-walks `rebar/llm/config_readers.py`,
+`config.py`, `headers.py` and `model_classes.py` and asserts exact equality in both
+directions, so a new reader that is not enrolled, or an enrolled key no reader reads, fails
+the suite rather than drifting.
+
+If you set an LLM key that rebar does not read, you will now see
+`unknown key 'llm.<name>' ignored` where there was previously nothing. Under strict, remove
+the line or the command will fail.
+
 ## `plan_review_status.verdict` no longer declares `not-closed`
 
 **Contract change for clients that validate against

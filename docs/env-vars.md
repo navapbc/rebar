@@ -168,10 +168,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_config_resolvers.py:300` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:282` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:295` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:302` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:559` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:281` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:294` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:301` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:558` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/terraform_source.py:410` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:37` — `os.environ.get(<non-literal>)`
