@@ -87,17 +87,12 @@ def _raw_toml_layers(root: str | None) -> list[tuple[str, dict]]:
     """Read the uncoerced user/project tables without taking the fail-fast load path."""
     layers: list[tuple[str, dict]] = []
     try:
-        up = _config.user_config_path()
-        if up.is_file():
-            layers.append((str(up), _config._read_toml_table(up, pyproject=False)))
-        proj = _config._discover_project_config(root)
-        if proj is not None:
-            path, kind = proj
-            table = _config._read_toml_table(path, pyproject=(kind == "pyproject"))
-            layers.append((str(path), table))
+        for rl in _config.raw_layers(root):
+            layers.append((str(rl.path), rl.raw))
     except _config.ConfigError:
         # An unreadable/malformed config file: validate should still report the env +
         # file tombstones it can, so treat the TOML side as empty rather than aborting.
+        # The generator parses lazily, so layers already yielded survive intact.
         return layers
     return layers
 

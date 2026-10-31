@@ -611,7 +611,7 @@ ADR 0098 names `GitRuntime` and `BridgeRuntime` as design roles. The implementat
 
 ### Configuration ownership enforcement
 
-`rebar._config_sources` owns raw configuration input and `rebar._config_resolvers` owns the approved below-seam resolvers. `scripts/check_config_ownership.py` derives credential names and backend keys, then rejects prohibited ambient reads below the composition, credential, and backend boundaries. The gate runs through `make lint`. `scripts/config_ownership_exceptions.py` contains no legacy exceptions.
+`rebar._config_sources` owns raw configuration input and `rebar._config_resolvers` owns the approved below-seam resolvers. Within that ownership, `raw_layers(root)` is the single discovery generator every raw-config reader shares — it yields the user then project `RawLayer`s (label, path, kind, table) lowest precedence first and parses each file as its layer is yielded, so a tolerant caller such as `rebar config validate` keeps the layers it already consumed when a later one will not parse. `scripts/check_config_ownership.py` derives credential names and backend keys, then rejects prohibited ambient reads below the composition, credential, and backend boundaries. The gate runs through `make lint`. `scripts/config_ownership_exceptions.py` contains no legacy exceptions.
 
 ### Authoritative binding (RP-04 S2)
 

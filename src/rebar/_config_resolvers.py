@@ -101,7 +101,7 @@ def _snapshot_table(root: str | os.PathLike[str] | None = None) -> dict:
     """Merged raw ``[snapshot]`` config table (user < project), or ``{}`` if unreadable
     — a broken core config degrades the janitor to env/defaults, never breaks it.
 
-    The three raw-input helpers are reached as ATTRIBUTES of :mod:`rebar._config_sources`,
+    :func:`rebar._config_sources.raw_layers` is reached as an ATTRIBUTE of that module,
     imported lazily in-body. That is deliberate, not incidental: the attribute lookup hits
     the same module ``__dict__`` slot the pre-split module-global lookup did, so late
     binding survives the move and a ``monkeypatch.setattr`` on that module still steers
@@ -111,17 +111,8 @@ def _snapshot_table(root: str | os.PathLike[str] | None = None) -> dict:
 
     try:
         merged: dict = {}
-        up = _config_sources.user_config_path()
-        if up.is_file():
-            sub = _config_sources._read_toml_table(up, pyproject=False).get("snapshot")
-            if isinstance(sub, dict):
-                merged.update(sub)
-        proj = _config_sources._discover_project_config(root)
-        if proj is not None:
-            path, kind = proj
-            sub = _config_sources._read_toml_table(path, pyproject=(kind == "pyproject")).get(
-                "snapshot"
-            )
+        for rl in _config_sources.raw_layers(root):
+            sub = rl.raw.get("snapshot")
             if isinstance(sub, dict):
                 merged.update(sub)
         return merged

@@ -7,6 +7,7 @@ and portability of the output (config-refinement task c647).
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -220,3 +221,43 @@ def test_config_cli_json_identical_across_clones(
     assert a["config"] == b["config"]  # values portable
     assert a["sources"] == b["sources"]  # provenance portable
     assert a["project_config"]["path"] != b["project_config"]["path"]  # only paths differ
+
+
+def test_validate_keeps_user_layer_when_project_toml_is_malformed(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """Partial-layer tolerance: the shared discovery generator parses each layer as it
+    is YIELDED, so a malformed project ``rebar.toml`` cannot discard the user layer the
+    caller already consumed — ``config validate`` still reports the user file's removed
+    key.
+
+    An eager implementation that parsed every layer before yielding any would lose the
+    user layer here and silently stop reporting its tombstone.
+    """
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[sync\npush = 'async'\n", encoding="utf-8")  # unclosed table
+    user_cfg = Path(os.environ["XDG_CONFIG_HOME"]) / "rebar" / "config.toml"
+    user_cfg.parent.mkdir(parents=True, exist_ok=True)
+    user_cfg.write_text("[verify]\nrequire_verdict_for_close = true\n", encoding="utf-8")
+
+    rc = show_config.config_cli(["validate", "--root", str(p)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "ERROR: cfg verify.require_verdict_for_close was removed" in out
+
+
+def test_config_still_fails_fast_on_a_malformed_project_toml(
+    tmp_path: Path, capsys: pytest.CaptureFixture
+) -> None:
+    """The tolerant ``validate`` path above must not soften the resolving path: a
+    project ``rebar.toml`` that will not parse still exits 1 with the parse error, even
+    though a readable user layer was discovered and coerced ahead of it."""
+    p = _proj(tmp_path)
+    (p / "rebar.toml").write_text("[sync\npush = 'async'\n", encoding="utf-8")  # unclosed table
+    user_cfg = Path(os.environ["XDG_CONFIG_HOME"]) / "rebar" / "config.toml"
+    user_cfg.parent.mkdir(parents=True, exist_ok=True)
+    user_cfg.write_text("[sync]\npull = 'off'\n", encoding="utf-8")
+
+    rc = show_config.config_cli(["--root", str(p)])
+    err = capsys.readouterr().err
+    assert rc == 1 and "could not read config" in err

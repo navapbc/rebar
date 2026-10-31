@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 from rebar._config_schema import _RESERVED_SECTIONS as _RESERVED_SECTIONS
 from rebar._config_schema import _SECTION_CLASSES as _SECTION_CLASSES
@@ -38,7 +39,6 @@ from rebar._config_sources import _CANONICAL_ENV_NAMES as _CANONICAL_ENV_NAMES
 from rebar._config_sources import (
     _TOML_CACHE,
     _canonical_env_name,
-    _discover_project_config,
     _read_toml_table,
     _strict_unknown_keys,
     env_overrides,
@@ -46,10 +46,13 @@ from rebar._config_sources import (
     tracker_dir_override,
     user_config_path,
 )
+from rebar._config_sources import RawLayer as RawLayer
+from rebar._config_sources import _discover_project_config as _discover_project_config
 from rebar._config_sources import _parse_toml as _parse_toml
 from rebar._config_sources import _pyproject_rebar_state as _pyproject_rebar_state
 from rebar._config_sources import config_file as config_file
 from rebar._config_sources import layer_llm_config_file as layer_llm_config_file
+from rebar._config_sources import raw_layers as raw_layers
 from rebar._config_sources import repo_root_or_none as repo_root_or_none
 from rebar._config_sources import resolve_absent_retire_grace as resolve_absent_retire_grace
 from rebar._config_sources import resolve_acli_call_timeout as resolve_acli_call_timeout
@@ -256,19 +259,11 @@ def _ordered_layers(
     Return the discovered project source too; values and provenance share layers.
     """
     layers: list[tuple[str, dict]] = []
-    up = user_config_path()
-    if up.is_file():
-        layers.append(
-            (
-                "user",
-                coerce_sparse(_read_toml_table(up, pyproject=False), source=str(up), strict=strict),
-            )
-        )
-    proj = _discover_project_config(root)
-    if proj is not None:
-        path, kind = proj
-        raw = _read_toml_table(path, pyproject=(kind == "pyproject"))
-        layers.append(("project", coerce_sparse(raw, source=str(path), strict=strict)))
+    proj: tuple[Path, str] | None = None
+    for rl in raw_layers(root):
+        if rl.label == "project":
+            proj = (rl.path, rl.kind)
+        layers.append((rl.label, coerce_sparse(rl.raw, source=str(rl.path), strict=strict)))
     layers.append(("env", coerce_sparse(env_overrides(), source="env", strict=strict)))
     if cli_overrides:
         layers.append(("cli", coerce_sparse(cli_overrides, source="cli", strict=strict)))
@@ -343,28 +338,49 @@ def _config_probe_paths(root: str | os.PathLike[str] | None = None) -> list[Path
     return out
 
 
-def _resolve(
-    root: str | os.PathLike[str] | None, cli_overrides: dict | None
-) -> tuple[Config, tuple]:
-    """Resolve config and file tokens for read and candidate paths."""
-    layers, proj = _ordered_layers(root, cli_overrides=cli_overrides, strict=_strict_unknown_keys())
-    cfg = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
+class _Resolution(NamedTuple):
+    """One composed resolution: typed config, per-key provenance, project source, tokens."""
+
+    config: Config
+    sources: dict[str, dict[str, str]]
+    project: tuple[Path, str] | None
+    validation: tuple
+
+
+def _winning_label(layers: list[tuple[str, dict]], sect: str, key: str) -> str:
+    """The highest-precedence layer that set ``sect.key``, or ``"default"``."""
+    hits = [label for label, sparse in layers if key in sparse.get(sect, {})]
+    return hits[-1] if hits else "default"  # lowest→highest: last match wins
+
+
+def _validation_tokens(root: str | os.PathLike[str] | None, proj: tuple[Path, str] | None) -> tuple:
+    """Freshness tokens for the files a resolve read plus the candidates it may later
+    read — read files first, then the (possibly-absent) probe candidates, deduped so a
+    newly-appearing higher-priority config invalidates the warm-hit cache."""
     up = user_config_path()
-    read_paths: list[Path] = []
-    if up.is_file():
-        read_paths.append(up)
+    read_paths: list[Path] = [up] if up.is_file() else []
     if proj is not None:
         read_paths.append(proj[0])
-    # Read files first, then the (possibly-absent) probe candidates — deduped, so a
-    # newly-appearing higher-priority config invalidates the warm-hit cache.
-    tokens: list[tuple] = []
-    seen: set[str] = set()
+    tokens: dict[str, tuple] = {}
     for p in [*read_paths, *_config_probe_paths(root), up]:
-        key = str(p)
-        if key not in seen:
-            seen.add(key)
-            tokens.append(_file_token(p))
-    return cfg, tuple(tokens)
+        if str(p) not in tokens:
+            tokens[str(p)] = _file_token(p)
+    return tuple(tokens.values())
+
+
+def _compose(root: str | os.PathLike[str] | None, cli_overrides: dict | None) -> _Resolution:
+    """Walk the layers ONCE, then derive typed config, provenance, and file tokens.
+
+    The single composition ``load_config`` and ``resolve_with_sources`` share, so
+    displayed provenance always matches resolved values.
+    """
+    layers, proj = _ordered_layers(root, cli_overrides=cli_overrides, strict=_strict_unknown_keys())
+    config = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
+    sources = {
+        sect: {key: _winning_label(layers, sect, key) for key in keys}
+        for sect, keys in _SECTIONS.items()
+    }
+    return _Resolution(config, sources, proj, _validation_tokens(root, proj))
 
 
 def load_config(
@@ -399,9 +415,9 @@ def load_config(
         cfg, validation = entry
         if all(_file_token(Path(tok[0])) == tok for tok in validation):
             return cfg  # every file it read is unchanged → cache is fresh
-    cfg, validation = _resolve(root, effective_cli)
-    _RESULT_CACHE[key] = (cfg, validation)
-    return cfg
+    res = _compose(root, effective_cli)
+    _RESULT_CACHE[key] = (res.config, res.validation)
+    return res.config
 
 
 def mcp_readonly() -> bool:
@@ -578,16 +594,8 @@ def read_reserved_section(name: str, root: str | os.PathLike[str] | None = None)
     errors for the caller to handle.
     """
     merged: dict = {}
-    up = user_config_path()
-    if up.is_file():
-        sub = _read_toml_table(up, pyproject=False).get(name)
-        if isinstance(sub, dict):
-            merged.update(sub)
-    proj = _discover_project_config(root)
-    if proj is not None:
-        path, kind = proj
-        table = _read_toml_table(path, pyproject=(kind == "pyproject"))
-        sub = table.get(name)
+    for rl in raw_layers(root):
+        sub = rl.raw.get(name)
         if isinstance(sub, dict):
             merged.update(sub)
     return merged
@@ -607,17 +615,5 @@ def resolve_with_sources(
     Share ``load_config`` layers so displayed provenance matches resolved values.
     """
     effective_cli = cli_overrides if cli_overrides is not None else _CLI_OVERRIDES
-    layers, project = _ordered_layers(
-        root, cli_overrides=effective_cli, strict=_strict_unknown_keys()
-    )
-    config = Config.from_mapping(merge_sparse(*(sparse for _, sparse in layers)))
-    sources: dict[str, dict[str, str]] = {}
-    for sect, keys in _SECTIONS.items():
-        sources[sect] = {}
-        for key in keys:
-            label = "default"
-            for layer_label, sparse in layers:  # lowest→highest: last match wins
-                if key in sparse.get(sect, {}):
-                    label = layer_label
-            sources[sect][key] = label
-    return config, sources, project
+    res = _compose(root, effective_cli)
+    return res.config, res.sources, res.project

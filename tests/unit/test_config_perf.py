@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 import tomllib
 
+from rebar import _config_sources
 from rebar import config as cfg
 
 pytestmark = pytest.mark.unit
@@ -56,14 +57,17 @@ def _count_parses(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
 
 
 def _count_walks(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Spy the discovery walk where it LIVES — ``_config_sources`` owns raw config
+    input, and ``config.raw_layers``/``config._discover_project_config`` are
+    re-exports of it, so patching the owning module is what steers every caller."""
     calls: list[int] = []
-    real = cfg._discover_project_config
+    real = _config_sources._discover_project_config
 
     def _spy(root=None):
         calls.append(1)
         return real(root)
 
-    monkeypatch.setattr(cfg, "_discover_project_config", _spy)
+    monkeypatch.setattr(_config_sources, "_discover_project_config", _spy)
     return calls
 
 

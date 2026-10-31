@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 # Re-export owned below-seam resolvers here and through ``rebar.config``. Their
 # module uses lazy attribute lookups, preserving late binding without an import cycle.
@@ -193,6 +195,32 @@ def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tupl
             break  # repo boundary / filesystem root
         cur = cur.parent
     return None
+
+
+class RawLayer(NamedTuple):
+    """One discovered raw config layer: precedence label, path, kind, and its table."""
+
+    label: str
+    path: Path
+    kind: str
+    raw: dict
+
+
+def raw_layers(root: str | os.PathLike[str] | None = None) -> Iterator[RawLayer]:
+    """Yield the user then project raw config layers, lowest precedence first.
+
+    The single discovery walk every raw-config reader shares. Each file parses as its
+    layer is yielded, never up front, so a caller that tolerates a malformed later
+    layer still keeps the earlier layers it already consumed.
+    """
+    up = user_config_path()
+    if up.is_file():
+        yield RawLayer("user", up, "toml", _read_toml_table(up, pyproject=False))
+    proj = _discover_project_config(root)
+    if proj is not None:
+        path, kind = proj
+        raw = _read_toml_table(path, pyproject=(kind == "pyproject"))
+        yield RawLayer("project", path, kind, raw)
 
 
 def _deep_merge(base: dict, overlay: dict) -> dict:
