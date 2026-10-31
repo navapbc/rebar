@@ -1,5 +1,7 @@
 # ADR 0013 — Single `LLM-Review` label + submit requirement as the v1 code-review gate
 
+> **Amended by [ADR 0020](0020-two-vote-ci-gate.md) (2026-07-01).** Decision (1)'s single-vote / no-CI-`Verified` statements are superseded by the two-vote gate; the `LLM-Review` label, its submit requirement and the `MaxNoBlock` caveat below stand.
+
 **Status:** Accepted (epic d251 / story S3)
 **Date:** 2026-06-30
 

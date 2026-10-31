@@ -1,5 +1,7 @@
 # ADR 0057 — Model classes are the interface; `REBAR_LLM_MODEL` is deprecated
 
+> **Amended (2026-08-12).** The deprecated `REBAR_LLM_MODEL` variable was REMOVED in v0.12.0 and is a tombstone (`rebar._deprecations`, tier `error`: setting it fails loud) — ticket `6cc4-56f1-6cc6-4c7f`. Read "deprecated" below as "removed"; the model-class slots are the only live interface.
+
 **Status:** accepted
 **Ticket:** d23e (parent epic: the LLM provider seam)
 

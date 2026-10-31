@@ -1,5 +1,7 @@
 # ADR 0092 — Bridge-primary vocabulary with explicit reconcile compatibility adapters
 
+> **Amended (2026-09-04) — see §Amendment.** The compatibility adapters this ADR kept were removed by ticket `82bb-439b-1c42-4abd`; only the engine-only `--filter-local-ids` post-filter survives.
+
 **Status:** Accepted
 **Date:** 2026-08-08
 
@@ -54,3 +56,17 @@ returns its historical tally; legacy bootstrap modes and `MODE_CAPS` remain unch
 
 Rollback is additive: callers can return to the retained `rebar reconcile --mode ...` adapter
 without changing the shared reconciliation core or persisted store data.
+
+## Amendment (2026-09-04) — the compatibility adapters were removed; only `--filter-local-ids` survives
+
+Ticket `82bb-439b-1c42-4abd` (seagreen-wet-bluefish) removed, as a pre-1.0 BREAKING change, the top-level CLI
+`rebar reconcile` route, direct-engine `--mode reconcile-check`, the Python `rebar.reconcile` facade, the MCP
+`reconcile` tool and the persisted `reconcile_diagnostics` status field (`docs/release-notes.md`
+§"legacy reconcile compatibility surfaces are removed"). The Decision's "Keep explicit compatibility
+adapters" paragraph no longer describes the tree: `rebar bridge preview|sync|fsck|status` and their
+library/MCP twins are the only vocabulary. One adapter survives — the direct-engine legacy route's
+`--filter-local-ids` engine-only post-filter, restored by commit `e8fbf305057b` for live-DC harness scoping
+that `--only` cannot express for not-yet-bound inbound Jira keys.
+[ADR 0111](0111-no-internal-only-compatibility-shims.md) cites this ADR as its public compatibility-contract
+carve-out; that carve-out now covers exactly that one flag. The Consequences bullet "Removing compatibility
+requires a separate deprecation decision" was satisfied by the pre-1.0 removal pass recorded on that ticket.
