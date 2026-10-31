@@ -200,12 +200,12 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     Returns ``{ok, verdict, reason, verified_at_sha, signed_at}`` where ``verdict`` is the
     :func:`compute_validity` classifier — ``certified`` when current, else one of ``stale-code`` /
     ``stale-head`` / ``stale-material`` / ``stale-reopened`` / ``stale-pin-drift`` /
-    ``stale-pin-missing`` / ``unsigned`` / ``wrong-kind`` / ``not-closed`` / ``malformed-pin`` /
+    ``stale-pin-missing`` / ``unsigned`` / ``wrong-kind`` / ``malformed-pin`` /
     ``malformed-phase`` / ``incompatible-phase`` / ``unverifiable-material`` /
     ``stale-store`` (bug b928: the local store was not current, so the gate declined to
     decide at all — the one verdict that is not about the attestation) / ``error``, or a
-    signature failure straight from the verifier (``mismatch`` / ``invalid`` / ``foreign_key`` /
-    ``unavailable`` / ``unknown_kind`` / ``unknown_scheme``). Every
+    signature failure straight from the verifier (``mismatch`` / ``invalid`` /
+    ``foreign_key`` / ``unavailable`` / ``unknown_kind`` / ``unknown_scheme``). Every
     non-certified reason NAMES what changed (which material component, which dependency files,
     which two SHAs, which reopen) rather than listing what might have — bug 94a3.
     Criteria-registry drift is NOT among them: it is grandfathered (ADR 0053) and surfaces as

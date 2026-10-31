@@ -497,3 +497,42 @@ def test_an_authenticated_none_scope_keeps_its_drift_exemption(
     assert attest.classify_file_scope(deps.keys(), "none") == "none", (
         "and it must still classify as none, preserving the drift exemption"
     )
+
+
+def test_unresolvable_ref_reason_is_single_sourced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both halves of the freshness check fail CLOSED on an unresolvable attested gate ref,
+    and both must say so in the SAME words. The message is what distinguishes "could not
+    check" from "the files changed", so a wording drift between the scoped and unscoped paths
+    would make the same condition read as two different failures."""
+    from rebar._snapshot.repo_snapshot import SnapshotError
+    from rebar.llm import gate_source
+    from rebar.llm.plan_review.manifest import GateRefBasis
+
+    manifest = ["verified-at-sha:" + "a" * 40]
+
+    monkeypatch.setattr(
+        attest,
+        "gate_ref_hash_basis",
+        lambda *a, **k: GateRefBasis("/wt", ref="origin/main", degraded=True),
+    )
+    scoped = attest._scoped_code_drift({"src/x.py": "digest"}, manifest, "/repo")
+
+    def _boom(*a: object, **k: object) -> str:
+        raise SnapshotError("unresolvable")
+
+    monkeypatch.setattr(gate_source, "current_head_sha", _boom)
+    monkeypatch.setattr(gate_source, "default_ref", lambda *a, **k: "origin/main")
+    unscoped = attest._unscoped_head_drift({"head_sha": "signed"}, manifest, "/repo")
+
+    expected = attest._unresolvable_ref_reason("origin/main")
+    assert scoped == expected
+    assert unscoped == expected
+    assert "'origin/main'" in expected
+    assert "refusing to certify against the working tree" in expected
+
+
+def test_unresolvable_ref_reason_names_the_fallback_when_the_ref_is_unknown() -> None:
+    """When the failure happened before the ref itself was resolvable there is no name to
+    quote, so the message falls back to a generic phrase rather than emitting ``'None'``."""
+    assert "the configured gate ref" in attest._unresolvable_ref_reason(None)
+    assert "None" not in attest._unresolvable_ref_reason(None)

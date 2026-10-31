@@ -241,7 +241,7 @@ def drift_refresh_candidate(ticket_id: str, *, repo_root=None) -> dict[str, Any]
         state,
         _MANIFEST_PREFIX,
         repo_root=repo_root,
-        profile=PlanValidityProfile.DRIFT_REFRESH,
+        profile=PlanValidityProfile.CLOSE,
     )
     if not validity.get("valid"):
         return None
@@ -396,6 +396,21 @@ def _authoritative_head(attestation: Mapping[str, Any]) -> str | None:
 
 
 # ── the fast claim-gate check (no LLM, no heavy reads) ────────────────────────────
+def _unresolvable_ref_reason(ref: str | None) -> str:
+    """The ONE wording for "the gate ref could not be resolved, so refuse to certify".
+
+    Both halves of the freshness check — scoped (:func:`_scoped_code_drift`) and unscoped
+    (:func:`_unscoped_head_drift`) — fail CLOSED on an unresolvable attested gate ref, and
+    both must say so identically: the message is user-facing and is what distinguishes
+    "could not check" from "the files changed". Single-sourced here so the two cannot drift."""
+    named = f"'{ref}'" if ref else "the configured gate ref"
+    return (
+        "cannot confirm the code the plan was reviewed against is current: the gate ref "
+        f"{named} could not be resolved to a snapshot, so the attestation cannot be "
+        "re-checked (refusing to certify against the working tree)"
+    )
+
+
 def _scoped_code_drift(deps: Mapping[str, str], auth_manifest: list[str], repo_root) -> str | None:
     """The scoped (``dep``-line) half of the plan-review code-drift check: ``None`` when the
     signed dependency hashes still match, else the ``stale-code`` reason to fail on.
@@ -420,12 +435,7 @@ def _scoped_code_drift(deps: Mapping[str, str], auth_manifest: list[str], repo_r
 
     basis = gate_ref_hash_basis(repo_root)
     if basis.degraded and _signing.verified_at_sha_from_manifest(auth_manifest):
-        named = f"'{basis.ref}'" if basis.ref else "the configured gate ref"
-        return (
-            "cannot confirm the code the plan was reviewed against is current: the gate ref "
-            f"{named} could not be resolved to a snapshot, so the attestation cannot be "
-            "re-checked (refusing to certify against the working tree)"
-        )
+        return _unresolvable_ref_reason(basis.ref)
     drifted = [
         path
         for path, digest in sorted(deps.items())
@@ -460,12 +470,7 @@ def _unscoped_head_drift(
         from rebar import config as _config
 
         ref = gate_source.default_ref(str(_config.repo_root(repo_root)))
-        named = f"'{ref}'" if ref else "the configured gate ref"
-        return (
-            "cannot confirm the code the plan was reviewed against is current: the gate "
-            f"ref {named} could not be resolved to a snapshot, so the attestation cannot "
-            "be re-checked (refusing to certify against the working tree)"
-        )
+        return _unresolvable_ref_reason(ref)
     if head == "unknown" or signed_head != head:
         return f"attestation is stale (unscoped; signed at {signed_head}, HEAD is {head})"
     return None
@@ -530,8 +535,8 @@ def compute_validity(
         has_phase_metadata = any(str(line).startswith("review-phase: ") for line in auth_manifest)
         # Compatibility compares the ticket's CURRENT compiled phase against the phase the
         # signed review actually ran under, via the fixed `review_phase_status` table (tickets
-        # 5967 + 2bbd; docs/plan-review-gate.md §"phase_status compatibility"). At CLOSE this is
-        # identical to DEFAULT/DRIFT_REFRESH: a planning (or legacy-planning) attestation is
+        # 5967 + 2bbd; docs/plan-review-gate.md §"phase_status compatibility"). It behaves the
+        # same under every profile: a planning (or legacy-planning) attestation is
         # compatible with an execution-phase ticket. The close gate's job is to catch a plan
         # that CHANGED during execution — enforced via own-material + pin drift, which still
         # invalidate here — NOT to compel a fresh execution-phase review when nothing changed.

@@ -8,6 +8,28 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## `plan_review_status.verdict` no longer declares `not-closed`
+
+**Contract change for clients that validate against
+`src/rebar/schemas/plan_review_status.schema.json`.** The `verdict` enum declared
+`not-closed`, a value this surface cannot emit: it is produced only under
+`kind == "completion-verifier"` in `attest.py`, while `plan_review_status` always asks for
+`kind="plan-review"`. It is now removed, so the enum documents *this* gate rather than the
+union of every gate. `rebar.llm.gate_runs` keeps it — that is the completion-verifier
+surface, where it is genuinely reachable.
+
+Backward-compatible for readers under `docs/api-stability.md`: no required key is removed
+or retyped, and the emitted set is now a strict subset of the declared enum. A client that
+branched on `not-closed` from this surface was matching a branch that never fired.
+
+The schema continues to declare the six signature-check verdicts the surface does pass
+through from `signing.verify_signature` — `mismatch`, `invalid`, `foreign_key`,
+`unavailable`, `unknown_kind`, `unknown_scheme`. `key_not_valid_at_era` is deliberately
+NOT among them: it is produced only by `rebar.attest.opcert.verify_opcert`, reached solely
+through `trusted_env.verify_required_environment` from the `rebar verify-opcert` merge
+gate. The `plan_review_status` path resolves signatures through `registry.verify`, which
+cannot emit it.
+
 ## `rebar.reducer._processors` no longer re-exports the identity and status folds
 
 **Contract change for clients that import reducer internals.** `_processors.py` carried

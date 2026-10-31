@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 class PlanValidityProfile(Enum):
     DEFAULT = "default"
     CLOSE = "close"
-    DRIFT_REFRESH = "drift_refresh"
 
 
 PinStatus = Literal[

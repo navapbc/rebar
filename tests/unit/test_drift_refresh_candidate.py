@@ -53,7 +53,7 @@ def test_candidate_delegates_full_ticket_state_to_drift_refresh_profile(
         "ticket_state": state,
         "kind": "plan-review",
         "repo_root": "/repo",
-        "profile": profile.DRIFT_REFRESH,
+        "profile": profile.CLOSE,
     }
 
 
