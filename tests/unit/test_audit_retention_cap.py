@@ -38,7 +38,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _events_in(repo: Path, tid: str) -> list[str]:
     tracker = str(_config.tracker_dir(str(repo)))
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     rid = resolve_ticket_id(tid, tracker) or tid
     d = os.path.join(tracker, rid)

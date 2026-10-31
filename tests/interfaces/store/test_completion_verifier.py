@@ -457,7 +457,7 @@ def test_child_closure_does_not_recurse_grandchildren(rebar_repo: Path) -> None:
 
     from rebar import config as _config
     from rebar._commands import transition as _t
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._ids import resolve_ticket_id
 
     subprocess.run(
         ["git", "commit", "--allow-empty", "-q", "-m", "c"],

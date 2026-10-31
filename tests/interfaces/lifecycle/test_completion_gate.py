@@ -26,7 +26,7 @@ import rebar.llm
 from rebar import config as _config
 from rebar._commands import transition as _t
 from rebar._commands import transition_close as _tc
-from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._ids import resolve_ticket_id
 
 
 def _enable(repo: Path) -> None:

@@ -165,7 +165,7 @@ only ports their bash argument/output wrappers.)
 
 **Shape**: each command becomes a function in `rebar._commands/` that
 (1) parses/validates args, (2) resolves ids via
-`rebar._engine_support.resolver`, (3) composes the event JSON in Python,
+`rebar._ids`, (3) composes the event JSON in Python,
 (4) appends it through **one narrow seam**:
 
 - **The event-append seam.** Tier B does NOT port the locked write path.
