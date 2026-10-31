@@ -1,4 +1,8 @@
-"""Unit gate tests must not persist synthetic tickets in an ambient store."""
+"""Unit gate tests must not persist synthetic tickets in an ambient store.
+
+Held-out oracles merged from test_test_suite_store_isolation_heldout.py: Held-out ambient-store
+isolation cases for synthetic completion verdicts.
+"""
 
 from __future__ import annotations
 
@@ -43,3 +47,21 @@ def test_nested_pytest_does_not_clean_shared_numbered_temp_root(
     assert sentinel.is_file(), "nested pytest deleted another run's temp tree"
     assert sentinel.read_text() == "must survive\n"
     assert {path.name for path in shared_root.iterdir()} == entries_before
+
+
+# ── held-out oracles (merged from test_test_suite_store_isolation_heldout.py) ──
+
+
+def test_completion_outage_unit_test_does_not_write_ambient_store(tmp_path: Path) -> None:
+    assert_nodes_do_not_mutate_external_store(
+        tmp_path,
+        "tests/unit/test_gate_engine_cutover.py::"
+        "test_completion_workflow_outage_raises_so_close_fails_closed",
+    )
+
+
+def test_force_close_unit_test_does_not_write_ambient_store(tmp_path: Path) -> None:
+    assert_nodes_do_not_mutate_external_store(
+        tmp_path,
+        "tests/unit/test_llm_failure_matrix.py::test_force_close_skips_completion_gate",
+    )

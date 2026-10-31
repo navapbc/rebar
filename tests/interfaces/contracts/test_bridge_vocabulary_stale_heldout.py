@@ -37,7 +37,7 @@ _WHOLE_FILE_ALLOWLIST = {
     "tests/interfaces/facades/test_bridge_vocabulary_heldout.py",
     "tests/interfaces/facades/test_bridge_vocabulary_e2e_heldout.py",
     "tests/interfaces/facades/test_bridge_status_heldout.py",
-    "tests/unit/test_identity_ac7_bff8_heldout.py",
+    "tests/unit/test_identity_ac7_bff8.py",
 }
 _COMPATIBILITY_FILES = {
     "docs/cli-reference.md",

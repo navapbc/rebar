@@ -34,7 +34,7 @@ def _run(
 # Note: the legacy jira onboarding compatibility alias is intentionally NOT invoked here
 # by its literal spelling (the repo's bridge-vocabulary gate forbids uncategorized legacy
 # spellings in new files); its post-cutover dispatch is proven by the registry-derived
-# parametrization in test_cli_registry_cutover_s6_heldout.py instead.
+# parametrization in test_cli_registry_cutover_s6.py instead.
 _NO_STORE_CASES = [
     ("review-plan", ("review-plan", "--help"), 0, "Usage: rebar review-plan"),
     ("review-code", ("review-code", "--help"), 0, "rebar review-code"),

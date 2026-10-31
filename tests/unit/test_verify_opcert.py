@@ -2,6 +2,10 @@
 
 Companion coverage handles rejection, advisory, grandfathering, workflow integration, and trigger
 auditing. Tests use ssh-keygen and a repository-backed ticket store.
+
+Held-out oracles merged from test_verify_opcert_heldout.py: Missing, foreign, and stale material
+must fail when enforcement applies. The workflow runs ``rebar verify-opcert`` for every audited
+trigger. Tests use ssh-keygen and a repository-backed ticket store.
 """
 
 from __future__ import annotations
@@ -138,3 +142,190 @@ def test_verify_opcert_passes_when_required_env_cert_present(
     # Require env ENV_ID; the ticket carries a valid cert from it → gate passes.
     proc = _run_verify_opcert(repo, "--require-environment", ENV_ID)
     assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+
+# ── held-out oracles (merged from test_verify_opcert_heldout.py) ──
+
+try:
+    sshsig.ensure_available()
+    _SSH_OK = True
+except Exception:  # noqa: BLE001
+    _SSH_OK = False
+
+_WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "verify-identity.yml"
+
+
+def _tracker_head(repo: Path) -> str:
+    from rebar._commands._seam import tracker_dir
+
+    tr = str(tracker_dir(str(repo)))
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tr, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["rebar", "verify-opcert", "--root", str(repo), *extra],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _sign(repo: Path, tid: str, priv: str, commit: str) -> None:
+    signing.sign_opcert_manifest(
+        tid,
+        [f"{KIND}: PASS"],
+        material_fingerprint=MATERIAL,
+        merged_log_commit=commit,
+        key_path=priv,
+        principal=ENV_ID,
+        repo_root=str(repo),
+    )
+
+
+# ---- enforced + missing / foreign → exit 1 ----------------------------------------------------
+
+
+def test_missing_opcert_fails_when_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _store(tmp_path, monkeypatch)
+    _priv, pub = _keypair(tmp_path, "env")
+    tid = rebar.create_ticket("task", "ungated", repo_root=str(repo))
+    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    rebar.transition(tid, "open", "closed", repo_root=str(repo))  # closed, but NO op-cert
+    # No --since → all in-scope tickets enforced; required env set → missing cert fails.
+    proc = _run(repo, "--require-environment", ENV_ID)
+    assert proc.returncode == 1, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+
+def test_foreign_opcert_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _store(tmp_path, monkeypatch)
+    _pinned_priv, pinned_pub = _keypair(tmp_path, "pinned")
+    foreign_priv, _foreign_pub = _keypair(tmp_path, "foreign")
+    commit = _head(repo)
+    tid = rebar.create_ticket("task", "foreign-signed", repo_root=str(repo))
+    _write_trusted_env(repo, ENV_ID, pinned_pub, _tip_position(repo))
+    _sign(repo, tid, foreign_priv, commit)  # op-cert signed by a NON-pinned key
+    rebar.transition(tid, "open", "closed", repo_root=str(repo))
+    proc = _run(repo, "--require-environment", ENV_ID)
+    assert proc.returncode == 1, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+
+# ---- advisory posture (no required environment) → exit 0 --------------------------------------
+
+
+def test_advisory_when_no_required_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _store(tmp_path, monkeypatch)
+    tid = rebar.create_ticket("task", "ungated", repo_root=str(repo))
+    rebar.transition(tid, "open", "closed", repo_root=str(repo))  # closed, no cert
+    # No --require-environment and no config → advisory everywhere → exit 0.
+    proc = _run(repo)
+    assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+
+# ---- grandfathered ticket (closed before the boundary) → exit 0 -------------------------------
+
+
+def test_grandfathered_ticket_passes_without_cert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _store(tmp_path, monkeypatch)
+    _priv, pub = _keypair(tmp_path, "env")
+    tid = rebar.create_ticket("task", "old work", repo_root=str(repo))
+    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    rebar.transition(tid, "open", "closed", repo_root=str(repo))  # closed, no cert
+    # A LATER tracker commit becomes the enforce-since boundary, so the ticket's close-STATUS
+    # event predates it → grandfathered → advisory pass despite the missing cert.
+    rebar.create_ticket("task", "later activity", repo_root=str(repo))
+    since = _tracker_head(repo)
+    proc = _run(repo, "--require-environment", ENV_ID, "--since", since)
+    assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+
+# A compacted close event leaves no resolvable enforcement anchor.
+# `_is_enforced` treats a missing anchor as enforced so verification fails closed.
+# Function-level coverage pins this rule because compacting the terminal event in this fixture
+# would depend on environment-sensitive thresholds.
+
+
+# ---- authoritative material: self-reported material is not trusted (security regression) ------
+
+
+def test_self_reported_stale_material_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A self-consistent op-cert (signed by the genuine pinned key) whose bound material_fingerprint
+    is NOT the ticket's authoritative material must FAIL. The record + envelope live on the
+    auto-pushed tickets branch, so the gate must recompute the material from live ticket state and
+    never trust the self-reported value. Regression for the verify-side authoritative-input gap."""
+    repo = _store(tmp_path, monkeypatch)
+    priv, pub = _keypair(tmp_path, "env")
+    commit = _head(repo)
+    tid = rebar.create_ticket("task", "gated", repo_root=str(repo))
+    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    # MATERIAL is a fixed dummy, NOT the ticket's real (sha256-derived) material fingerprint.
+    signing.sign_opcert_manifest(
+        tid,
+        [f"{KIND}: PASS"],
+        material_fingerprint=MATERIAL,
+        merged_log_commit=commit,
+        key_path=priv,
+        principal=ENV_ID,
+        repo_root=str(repo),
+    )
+    rebar.transition(tid, "open", "closed", repo_root=str(repo))
+    proc = _run(repo, "--require-environment", ENV_ID)
+    assert proc.returncode == 1, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+    # The failure is specifically a subject-digest mismatch (recomputed material != bound material),
+    # surfaced as the `mismatch` verdict — not some incidental error.
+    assert "mismatch" in proc.stdout, f"expected 'mismatch' verdict; stdout={proc.stdout}"
+
+
+def test_authoritative_material_cert_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Positive counterpart to the stale-material case: the SAME signing key + ticket, but the cert
+    binds the ticket's AUTHORITATIVE (recomputed) material fingerprint, so the gate certifies it
+    (exit 0). Pairs with test_self_reported_stale_material_rejected to prove the gate distinguishes
+    a matching bound material from a mismatched one — not that it rejects everything."""
+    from rebar.llm.plan_review.attest import current_material_fingerprint
+
+    repo = _store(tmp_path, monkeypatch)
+    priv, pub = _keypair(tmp_path, "env")
+    commit = _head(repo)
+    tid = rebar.create_ticket("task", "gated", repo_root=str(repo))
+    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    material = current_material_fingerprint(tid, repo_root=str(repo))  # the REAL material
+    signing.sign_opcert_manifest(
+        tid,
+        [f"{KIND}: PASS"],
+        material_fingerprint=material,
+        merged_log_commit=commit,
+        key_path=priv,
+        principal=ENV_ID,
+        repo_root=str(repo),
+    )
+    rebar.transition(tid, "open", "closed", repo_root=str(repo))
+    proc = _run(repo, "--require-environment", ENV_ID)
+    assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+
+# ---- workflow file: op-cert step + CI-trigger audit -------------------------------------------
+
+
+def test_workflow_has_verify_opcert_step() -> None:
+    text = _WORKFLOW.read_text(encoding="utf-8")
+    assert "rebar verify-opcert" in text  # the op-cert lane runs in the shipped merge-gate job
+
+
+def test_workflow_ci_trigger_audit_lists_every_trigger() -> None:
+    text = _WORKFLOW.read_text(encoding="utf-8").lower()
+    # A concrete audit artifact: a comment classifying each on: trigger INCLUDED/NO_FILTER.
+    assert "included" in text or "no_filter" in text
+    for trigger in ("push", "pull_request", "workflow_dispatch"):
+        assert trigger in text

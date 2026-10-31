@@ -23,7 +23,7 @@ _TESTS_DIR = _REPO_ROOT / "tests"
 
 @pytest.mark.parametrize(
     "module",
-    ["test_audit_ticket_page.py", "test_audit_ticket_page_heldout.py"],
+    ["test_audit_ticket_page.py"],
 )
 def test_audit_page_modules_collect_under_bare_pytest(module: str, tmp_path: Path) -> None:
     """The audit-page modules collect under the BARE ``pytest`` console script (bug a371).
