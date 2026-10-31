@@ -258,10 +258,10 @@ The host telling you it is mounted is the same host that has been wrong for days
 outside, after one metric period:
 
 ```
-aws cloudwatch get-metric-statistics --namespace rebar/host \
+aws cloudwatch get-metric-statistics --profile frontier --namespace rebar/host \
   --metric-name gate_scratch_mounted --start-time "$(date -u -d '15 min ago' +%FT%TZ)" \
   --end-time "$(date -u +%FT%TZ)" --period 300 --statistics Maximum
-aws cloudwatch describe-alarms \
+aws cloudwatch describe-alarms --profile frontier \
   --alarm-names rebar-gate-scratch-unmounted rebar-gate-scratch-disk-high \
   --query 'MetricAlarms[].{Name:AlarmName,State:StateValue}' --output table
 ```

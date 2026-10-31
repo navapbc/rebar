@@ -49,7 +49,7 @@ Copy the token once (`github_pat_…`).
 
 ### 1b. Store it in SSM
 ```bash
-aws ssm put-parameter --region us-east-1 \
+aws ssm put-parameter --profile frontier --region us-east-1 \
   --name /rebar/prod/g2p-github-pat \
   --type SecureString --overwrite \
   --value 'github_pat_…'      # paste the token; do NOT echo it into shell history
@@ -91,7 +91,7 @@ CI_SSH_PUBKEY_FILE=~/.ssh/rebar_ci_gerrit.pub \
 Kept in SSM as the source of record so it can be re-installed if the GitHub secret is
 lost. The box never reads this param — it is GitHub-side only.
 ```bash
-aws ssm put-parameter --region us-east-1 \
+aws ssm put-parameter --profile frontier --region us-east-1 \
   --name /rebar/prod/ci-gerrit-ssh-key \
   --type SecureString --overwrite \
   --value "$(cat ~/.ssh/rebar_ci_gerrit)"
@@ -136,7 +136,7 @@ Rotate on your standard cadence and immediately on any suspected exposure.
 
 ### 3a. Rotate the GitHub PAT
 1. Generate a **new** fine-grained PAT (same scope as §1a).
-2. `aws ssm put-parameter … --name /rebar/prod/g2p-github-pat --overwrite --value 'new'`.
+2. `aws ssm put-parameter --profile frontier … --name /rebar/prod/g2p-github-pat --overwrite --value 'new'`.
 3. Re-materialise on the box (`materialize-g2p-config.sh`) + reload `hooks` (or restart
    the container). Verify a fresh patchset dispatches a run.
 4. **Revoke** the old PAT in GitHub (Developer settings). Overlap is fine; revoke once
@@ -181,9 +181,9 @@ good — the temporary back-out is in `two-vote-gate-rollback.md`):
    Terraform owns their existence; the write-only `value_wo` won't fight you, and a
    later apply won't revert your value unless `value_wo_version` is bumped — ADR 0105):
    ```bash
-   aws ssm put-parameter --region us-east-1 --overwrite --type SecureString \
+   aws ssm put-parameter --profile frontier --region us-east-1 --overwrite --type SecureString \
      --name /rebar/prod/g2p-github-pat --value CHANGEME
-   aws ssm put-parameter --region us-east-1 --overwrite --type SecureString \
+   aws ssm put-parameter --profile frontier --region us-east-1 --overwrite --type SecureString \
      --name /rebar/prod/ci-gerrit-ssh-key --value CHANGEME
    ```
 

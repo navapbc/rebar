@@ -21,9 +21,9 @@ region for every SSM / AWS-CLI operation** in this runbook — they are:
 The host is **SSM-managed** (no public SSH); connect with Session Manager:
 
 ```bash
-aws ssm start-session --region us-east-1 --target i-00880b2c7f13527c5
+aws ssm start-session --profile frontier --region us-east-1 --target i-00880b2c7f13527c5
 # non-interactive (scripted) equivalent — run a command and read its output:
-aws ssm send-command --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
+aws ssm send-command --profile frontier --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
   --document-name AWS-RunShellScript --parameters 'commands=["<cmd>"]'
 ```
 
@@ -134,7 +134,7 @@ the bot's Gerrit credential to journald in clear text on every request (ticket 6
 Pass the change as an id or number. A successful durable reset and enqueue ACKs **202**:
 
 ```bash
-TOKEN=$(aws ssm get-parameter --name /rebar/prod/gerrit-bot-token \
+TOKEN=$(aws ssm get-parameter --profile frontier --name /rebar/prod/gerrit-bot-token \
   --with-decryption --query Parameter.Value --output text)
 
 curl -sS -X POST \
@@ -594,7 +594,7 @@ non-`NEW` means no open change was affected.
 
 **Logging decision (review-bot logs → CloudWatch).** DECISION: do **not** ship review-bot
 logs to a CloudWatch Logs group at this time. Rationale: the host is SSM-managed, so journald
-is reachable read-only on demand (`aws ssm send-command … AWS-RunShellScript` →
+is reachable read-only on demand (`aws ssm send-command --profile frontier … AWS-RunShellScript` →
 `journalctl -u …`), which was sufficient to root-cause this incident; a CloudWatch Logs group
 adds cost + a log-shipping agent for a single-host, low-volume service. Revisit if remote
 diagnosis frequency grows or the host becomes multi-instance — the follow-up would be a

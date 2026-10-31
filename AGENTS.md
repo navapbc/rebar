@@ -88,6 +88,14 @@ using them. A `curl --netrc` request returning `401` only shows that `.netrc` is
 not contain the working Gerrit credential; unless `.netrc` was explicitly configured, that
 response does not invalidate credentials already proven by Git over HTTPS.
 
+**AWS CLI: pass `--profile frontier` on every `aws` command against this deployment** (account
+`896586841071`, `us-east-1`). The default credential chain has no credentials for that account,
+so a command without the profile fails. The commands in `infra/runbooks/` carry the flag already.
+Terraform under `infra/` pins no provider profile, so `export AWS_PROFILE=frontier` before
+`terraform init`/`plan`/`apply`. Commands that run **on the instance** (inside an
+`aws ssm send-command` payload or an SSM session, and the `infra/**/*.sh` host scripts) use the
+instance role and take no profile; adding one makes them fail.
+
 ## Record your work in rebar, not in scratch notes
 
 **Choose ticket identifiers by context.** After discovering or resolving a ticket, use its

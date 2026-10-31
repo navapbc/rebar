@@ -77,7 +77,7 @@ volume at 03:00, **tag-targeted** on `Name=rebar-gerrit-data`, and retains the
 List the available restore points (newest first):
 
 ```bash
-aws ec2 describe-snapshots --region us-east-1 --owner-ids self \
+aws ec2 describe-snapshots --profile frontier --region us-east-1 --owner-ids self \
   --filters "Name=volume-id,Values=vol-06fa2e77a9dd97527" \
   --query 'reverse(sort_by(Snapshots,&StartTime))[].{Id:SnapshotId,Started:StartTime,State:State,Size:VolumeSize}' \
   --output table
@@ -96,7 +96,7 @@ Order matters — secrets before the instance, infra before compose.
    (`infra/terraform/ssm.tf`) are placeholders (`CHANGEME`). Set the real values
    BEFORE the apply — `user_data.sh` fails fast on a `CHANGEME` sentinel:
    ```bash
-   aws ssm put-parameter --overwrite --type SecureString \
+   aws ssm put-parameter --profile frontier --overwrite --type SecureString \
      --name /rebar/prod/alert-endpoint --value 'ops@example.com'
    # …repeat for gerrit-admin-password, github-replication-deploy-key,
    #   mcp-hmac-signing-key, anthropic-api-key, gerrit-bot-token, ssh host key.
@@ -177,27 +177,27 @@ DRILL_START=$(date -u +%s)
 #    snapshot has been INITIATED (create-snapshot captures a point-in-time; the wait
 #    can run after Gerrit is back up).
 sudo docker compose -f infra/compose/docker-compose.yml stop gerrit   # ~seconds pause
-SNAP=$(aws ec2 create-snapshot --region $REGION --volume-id $SRC_VOL \
+SNAP=$(aws ec2 create-snapshot --profile frontier --region $REGION --volume-id $SRC_VOL \
   --description "restore-drill $(date -u +%FT%TZ)" \
   --query SnapshotId --output text)
 sudo docker compose -f infra/compose/docker-compose.yml start gerrit  # gate back up
-aws ec2 wait snapshot-completed --region $REGION --snapshot-ids $SNAP
+aws ec2 wait snapshot-completed --profile frontier --region $REGION --snapshot-ids $SNAP
 
 # 2. Find the instance's AZ and create a THROWAWAY volume from the snapshot
 #    in that same AZ (EBS attach requires same-AZ).
-AZ=$(aws ec2 describe-instances --region $REGION --instance-ids $INSTANCE_ID \
+AZ=$(aws ec2 describe-instances --profile frontier --region $REGION --instance-ids $INSTANCE_ID \
   --query 'Reservations[0].Instances[0].Placement.AvailabilityZone' --output text)
-DRILL_VOL=$(aws ec2 create-volume --region $REGION --snapshot-id $SNAP \
+DRILL_VOL=$(aws ec2 create-volume --profile frontier --region $REGION --snapshot-id $SNAP \
   --availability-zone $AZ --volume-type gp3 \
   --tag-specifications 'ResourceType=volume,Tags=[{Key=Name,Value=rebar-restore-drill},{Key=Project,Value=rebar}]' \
   --query VolumeId --output text)
-aws ec2 wait volume-available --region $REGION --volume-ids $DRILL_VOL
+aws ec2 wait volume-available --profile frontier --region $REGION --volume-ids $DRILL_VOL
 
 # 3. Attach the THROWAWAY volume (use a free device, NOT /dev/sdf which the live
 #    data volume uses). On Nitro/Graviton it surfaces as an NVMe device.
-aws ec2 attach-volume --region $REGION --volume-id $DRILL_VOL \
+aws ec2 attach-volume --profile frontier --region $REGION --volume-id $DRILL_VOL \
   --instance-id $INSTANCE_ID --device /dev/sdg
-aws ec2 wait volume-in-use --region $REGION --volume-ids $DRILL_VOL
+aws ec2 wait volume-in-use --profile frontier --region $REGION --volume-ids $DRILL_VOL
 ```
 
 Then, on the box (SSM Session Manager), **mount read-only at a temp path and
@@ -220,11 +220,11 @@ Cleanup — **leave the original volume untouched**:
 
 ```bash
 sudo umount /mnt/restore-drill                                   # on the box
-aws ec2 detach-volume --region $REGION --volume-id $DRILL_VOL    # from your shell
-aws ec2 wait volume-available --region $REGION --volume-ids $DRILL_VOL
-aws ec2 delete-volume  --region $REGION --volume-id $DRILL_VOL
+aws ec2 detach-volume --profile frontier --region $REGION --volume-id $DRILL_VOL    # from your shell
+aws ec2 wait volume-available --profile frontier --region $REGION --volume-ids $DRILL_VOL
+aws ec2 delete-volume --profile frontier  --region $REGION --volume-id $DRILL_VOL
 # Optionally delete the on-demand drill snapshot if you created one:
-aws ec2 delete-snapshot --region $REGION --snapshot-id $SNAP
+aws ec2 delete-snapshot --profile frontier --region $REGION --snapshot-id $SNAP
 ```
 
 The live `prevent_destroy` volume `vol-06fa2e77a9dd97527` is **never** detached,

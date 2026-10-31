@@ -55,7 +55,7 @@ proves the grant works; it proves nothing about whether the service can find a r
 ROLE=arn:aws:iam::<account>:role/rebar-gerrit-instance-role
 PROFILE_ARN=arn:aws:bedrock:us-east-1:<account>:inference-profile/us.anthropic.claude-sonnet-4-6
 
-aws iam simulate-principal-policy \
+aws iam simulate-principal-policy --profile frontier \
   --policy-source-arn "$ROLE" \
   --action-names bedrock:InvokeModel bedrock:InvokeModelWithResponseStream \
   --resource-arns "$PROFILE_ARN" \
@@ -67,7 +67,7 @@ Expect `allowed` for both. A `implicitDeny` here means the policy or the resourc
 ### 2. Runtime layer — a real call FROM the instance (the one that actually settles it)
 
 ```sh
-aws ssm send-command --instance-ids <instance-id> \
+aws ssm send-command --profile frontier --instance-ids <instance-id> \
   --document-name AWS-RunShellScript \
   --parameters 'commands=["aws bedrock-runtime converse --region us-east-1 \
      --model-id us.anthropic.claude-sonnet-4-6 \
@@ -76,7 +76,7 @@ aws ssm send-command --instance-ids <instance-id> \
      --query \"output.message.content[0].text\" --output text 2>&1 | tail -2"]'
 ```
 
-Then `aws ssm get-command-invocation --command-id <id> --instance-id <instance-id>`. Expect the model's reply
+Then `aws ssm get-command-invocation --profile frontier --command-id <id> --instance-id <instance-id>`. Expect the model's reply
 (e.g. `ready`). This is the only layer that reveals which IAM action the service authorizes against, and it is
 what caught the wrong grant.
 

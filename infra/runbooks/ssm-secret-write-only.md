@@ -52,7 +52,7 @@ the migration cutover below), seed the real value **out-of-band** — the value 
 or terraform:
 
 ```sh
-aws ssm put-parameter --overwrite --type SecureString \
+aws ssm put-parameter --profile frontier --overwrite --type SecureString \
   --name /rebar/prod/opcert-ed25519-key --value "<real-secret>"
 ```
 
@@ -66,7 +66,7 @@ no-clobber).
 Two independent ways to rotate; pick per situation:
 
 1. **Out-of-band re-seed (preferred for routine rotation)** — identical to the seed step above:
-   `aws ssm put-parameter --overwrite …` with the new value, then re-materialize + restart the
+   `aws ssm put-parameter --profile frontier --overwrite …` with the new value, then re-materialize + restart the
    consumer. This is a value-only change (not a git change), so it does **not** advance `main` and
    the autodeploy timer no-ops on it. Because the value is never in state, this leaves **no** new
    cleartext copy in the state history. Leave `value_wo_version` unchanged.
@@ -102,19 +102,19 @@ not echo the values, and run only the rows whose source changed. Capture and re-
 reads stdin:
 
 ```sh
-secret_value="$(aws ssm get-parameter --with-decryption --name /rebar/prod/anthropic-api-key   --region us-east-1 --query 'Parameter.Value' --output text)"
+secret_value="$(aws ssm get-parameter --profile frontier --with-decryption --name /rebar/prod/anthropic-api-key   --region us-east-1 --query 'Parameter.Value' --output text)"
 printf '%s' "$secret_value" | gh secret set ANTHROPIC_API_KEY --repo navapbc/rebar
 unset secret_value
 
-secret_value="$(aws ssm get-parameter --with-decryption --name /rebar/prod/jira-api-token   --region us-east-1 --query 'Parameter.Value' --output text)"
+secret_value="$(aws ssm get-parameter --profile frontier --with-decryption --name /rebar/prod/jira-api-token   --region us-east-1 --query 'Parameter.Value' --output text)"
 printf '%s' "$secret_value" | gh secret set JIRA_API_TOKEN --repo navapbc/rebar
 unset secret_value
 
-secret_value="$(aws ssm get-parameter --with-decryption --name /rebar/prod/ci-gerrit-ssh-key   --region us-east-1 --query 'Parameter.Value' --output text)"
+secret_value="$(aws ssm get-parameter --profile frontier --with-decryption --name /rebar/prod/ci-gerrit-ssh-key   --region us-east-1 --query 'Parameter.Value' --output text)"
 printf '%s' "$secret_value" | gh secret set GERRIT_SSH_PRIVKEY --repo navapbc/rebar
 unset secret_value
 
-secret_value="$(aws ssm get-parameter --with-decryption --name /rebar/prod/rebar-bot-signing-key   --region us-east-1 --query 'Parameter.Value' --output text)"
+secret_value="$(aws ssm get-parameter --profile frontier --with-decryption --name /rebar/prod/rebar-bot-signing-key   --region us-east-1 --query 'Parameter.Value' --output text)"
 printf '%s' "$secret_value" | gh secret set REBAR_BOT_SIGNING_KEY --repo navapbc/rebar
 unset secret_value
 ```
@@ -127,7 +127,7 @@ Verify the mirror timestamps after syncing. `gh secret list` cannot reveal value
 `LastModifiedDate` for the rotation window:
 
 ```sh
-aws ssm get-parameters --region us-east-1 --with-decryption   --names /rebar/prod/anthropic-api-key /rebar/prod/jira-api-token           /rebar/prod/ci-gerrit-ssh-key /rebar/prod/rebar-bot-signing-key   --query 'Parameters[].{Name:Name,LastModifiedDate:LastModifiedDate}' --output table
+aws ssm get-parameters --profile frontier --region us-east-1 --with-decryption   --names /rebar/prod/anthropic-api-key /rebar/prod/jira-api-token           /rebar/prod/ci-gerrit-ssh-key /rebar/prod/rebar-bot-signing-key   --query 'Parameters[].{Name:Name,LastModifiedDate:LastModifiedDate}' --output table
 
 gh secret list --repo navapbc/rebar --json name,updatedAt   --jq '.[] | select(.name=="ANTHROPIC_API_KEY" or .name=="JIRA_API_TOKEN" or .name=="GERRIT_SSH_PRIVKEY" or .name=="REBAR_BOT_SIGNING_KEY")'
 ```
@@ -150,7 +150,7 @@ seeds the 4 new MCP-PAT SSM params so the scrub covers those too.
    regardless. `user_data.sh`'s `CHANGEME` fail-fast prevents a boot on a placeholder in the gap.
 
 2. **Re-seed / rotate in the same window.** For every affected slot, generate a **new** value
-   (rotation — the old values were exposed in cleartext state) and `aws ssm put-parameter --overwrite`
+   (rotation — the old values were exposed in cleartext state) and `aws ssm put-parameter --profile frontier --overwrite`
    it. Rotate the crown-jewels explicitly: Gerrit admin password, op-cert Ed25519 signing key,
    rebar-bot signing key, Anthropic API key, `jira-api-token`, and the SSH host keys. Update any
    external system that trusts the old value (Gerrit account, Jira token, bot's registered public
@@ -175,8 +175,8 @@ seeds the 4 new MCP-PAT SSM params so the scrub covers those too.
    retained versions of `s3://rebar-tfstate-896586841071/rebar/prod/terraform.tfstate` (bucket
    versioning, ~149 versions) even after the live state is clean. Because the exposed secrets are
    **rotated** in step 2, the historical copies are of retired values, but they must still be purged:
-   permanently delete the affected object versions (`aws s3api list-object-versions` →
-   `aws s3api delete-object --version-id …` for each state version containing a cleartext secret), or
+   permanently delete the affected object versions (`aws s3api list-object-versions --profile frontier` →
+   `aws s3api delete-object --profile frontier --version-id …` for each state version containing a cleartext secret), or
    roll the bucket to a fresh key/lifecycle-expire the old versions per your data-handling policy.
    Treat every retired value as compromised regardless.
 

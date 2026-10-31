@@ -36,9 +36,9 @@ Put the pair under the Gerrit secret prefix `/rebar/prod` (mirrors the S5 deploy
 two param slots are declared in `infra/terraform/ssm.tf` (and mirrored in the `user_data.sh` PARAMS
 map), so terraform owns their existence; an operator populates the values out-of-band:
 ```
-aws ssm put-parameter --region us-east-1 --type SecureString --overwrite \
+aws ssm put-parameter --profile frontier --region us-east-1 --type SecureString --overwrite \
   --name /rebar/prod/github-oauth-client-id     --value "<client id>"
-aws ssm put-parameter --region us-east-1 --type SecureString --overwrite \
+aws ssm put-parameter --profile frontier --region us-east-1 --type SecureString --overwrite \
   --name /rebar/prod/github-oauth-client-secret --value "<client secret>"
 ```
 > **Hyphens, not underscores** — the leaf names are `github-oauth-client-{id,secret}`, matching the
@@ -54,7 +54,7 @@ aws ssm put-parameter --region us-east-1 --type SecureString --overwrite \
   is absent or either credential is empty — a half-configured OAUTH Gerrit never boots.
 
 > **Ordering to avoid a mid-apply error:** prefer to let terraform `apply` **create** the two slots
-> as `CHANGEME` first, *then* `aws ssm put-parameter --overwrite` the real values (as shown above).
+> as `CHANGEME` first, *then* `aws ssm put-parameter --profile frontier --overwrite` the real values (as shown above).
 > These secret slots use write-only `value_wo` (never persisted to state — ADR 0105; see
 > [`ssm-secret-write-only.md`](./ssm-secret-write-only.md)), so a later `apply` never reverts your
 > value to `CHANGEME` unless you bump `value_wo_version`. If you instead `put-parameter` *before* the

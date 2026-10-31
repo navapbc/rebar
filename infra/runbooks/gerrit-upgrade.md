@@ -33,9 +33,9 @@ the image — an upgrade must not regenerate or clobber them:
 2. **Snapshot first** (the rollback safety net). Take an on-demand snapshot of the
    data volume and wait for completion:
    ```bash
-   SNAP=$(aws ec2 create-snapshot --region us-east-1 --volume-id vol-06fa2e77a9dd97527 \
+   SNAP=$(aws ec2 create-snapshot --profile frontier --region us-east-1 --volume-id vol-06fa2e77a9dd97527 \
      --description "pre-gerrit-upgrade $(date -u +%FT%TZ)" --query SnapshotId --output text)
-   aws ec2 wait snapshot-completed --region us-east-1 --snapshot-ids $SNAP
+   aws ec2 wait snapshot-completed --profile frontier --region us-east-1 --snapshot-ids $SNAP
    echo "rollback snapshot: $SNAP"
    ```
 3. **Update the pinned tag.** Edit the Gerrit image tag in the compose file

@@ -43,7 +43,7 @@ one ever appears.
 - **The GitHub Actions OIDC identity provider**, account-wide and rebar-owned
   (`infra/terraform/oidc.tf`):
   `arn:aws:iam::896586841071:oidc-provider/token.actions.githubusercontent.com`
-  (verified present with `aws iam list-open-id-connect-providers`). Do **not** create a second
+  (verified present with `aws iam list-open-id-connect-providers --profile frontier`). Do **not** create a second
   one — there is exactly one per account, keyed on the URL.
 - **The precedent role** `rebar-terraform-plan` (`infra/terraform/iam.tf`), which federates the
   same provider from `.github/workflows/terraform-drift.yml`. Its trust policy is the model for
@@ -166,15 +166,15 @@ new profile ids from an operator identity instead.
 ```sh
 ACCOUNT=896586841071
 # Write the two documents above to trust.json / permissions.json first.
-aws iam create-role --role-name rebar-external-ci-bedrock \
+aws iam create-role --profile frontier --role-name rebar-external-ci-bedrock \
   --assume-role-policy-document file://trust.json \
   --tags Key=Project,Value=rebar Key=Ticket,Value=f124
 
-aws iam put-role-policy --role-name rebar-external-ci-bedrock \
+aws iam put-role-policy --profile frontier --role-name rebar-external-ci-bedrock \
   --policy-name rebar-external-ci-bedrock-converse \
   --policy-document file://permissions.json
 
-aws iam get-role --role-name rebar-external-ci-bedrock \
+aws iam get-role --profile frontier --role-name rebar-external-ci-bedrock \
   --query 'Role.Arn' --output text
 ```
 
@@ -288,7 +288,7 @@ typed `LLMConfigError` naming the knob rather than a bare boto3 `NoRegionError`
    `bedrock:*` cannot fail, so its success carries zero information):
 
    ```sh
-   aws iam simulate-principal-policy \
+   aws iam simulate-principal-policy --profile frontier \
      --policy-source-arn arn:aws:iam::896586841071:role/rebar-external-ci-bedrock \
      --action-names bedrock:InvokeModel bedrock:InvokeModelWithResponseStream \
      --resource-arns arn:aws:bedrock:us-east-1:896586841071:inference-profile/us.anthropic.claude-sonnet-4-6 \

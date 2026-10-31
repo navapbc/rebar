@@ -143,7 +143,7 @@ fails the build if any of them disagree.
 make venv                                       # .venv on the CI-pinned Python (.github/python-version.txt)
 make install                                    # uv sync --locked (dev extra) + the pre-commit hook (the commit gate)
 source .venv/bin/activate
-export AWS_PROFILE=...                          # the LLM ops (review-plan, verify-completion) default to Bedrock
+export AWS_PROFILE=frontier                     # this project's AWS profile; the LLM ops (review-plan, verify-completion) default to Bedrock
 export AWS_DEFAULT_REGION=us-east-1             # a region must resolve; Bedrock has no default
 ```
 

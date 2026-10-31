@@ -48,7 +48,7 @@ client-side only: it does not add an SSM parameter or a `token_env` record. Code
 2. Seed each SSM SecureString out-of-band (approval-gated; do **not** commit the value):
 
    ```sh
-   aws ssm put-parameter --overwrite --type SecureString \
+   aws ssm put-parameter --profile frontier --overwrite --type SecureString \
      --name /rebar/prod/mcp-client-pat-copilot --value "<copilot-pat>"
    # …repeat for -codex and -claude
    ```
@@ -71,7 +71,7 @@ Rotation is **operator-driven**. A pure value rotation (re-seeding an SSM Secure
 a git change, so it does **not** advance `main`; the autodeploy timer (ADR 0079) tracks `main` and
 therefore **no-ops on a value-only rotation**. The operator must drive it:
 
-1. Re-seed the SSM SecureString(s) with the new value(s) (`aws ssm put-parameter --overwrite …`).
+1. Re-seed the SSM SecureString(s) with the new value(s) (`aws ssm put-parameter --profile frontier --overwrite …`).
 2. **Re-materialize** on the box: re-run `infra/scripts/fetch-secrets.sh` (rewrites `.env` +
    `mcp-static-tokens.json`).
 3. **Restart / replace the `rebar-mcp` process/container** (the ADR 0104 blue-green swap).

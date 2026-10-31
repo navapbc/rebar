@@ -50,14 +50,14 @@ checklist first; all of it is readable from the API with no shell.
 1. **Status checks are `ok` — both of them.** If either is `impaired`, this is a host/hypervisor
    fault, not a full disk; stop here and follow the EC2 impaired-instance path instead.
    ```bash
-   aws ec2 describe-instance-status --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
+   aws ec2 describe-instance-status --profile frontier --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
      --query 'InstanceStatuses[].{Inst:InstanceStatus.Status,Sys:SystemStatus.Status}' --output table
    ```
 2. **SSM says `ConnectionLost`.** A `ConnectionLost` agent with a *recent* last-ping is the
    signature: the box was healthy, then stopped being able to run anything. Note the ping time —
    it dates the wedge (2026-09-02: last ping **03:09:52 PDT**).
    ```bash
-   aws ssm describe-instance-information --region us-east-1 \
+   aws ssm describe-instance-information --profile frontier --region us-east-1 \
      --filters "Key=InstanceIds,Values=i-00880b2c7f13527c5" \
      --query 'InstanceInformationList[].{Ping:PingStatus,Last:LastPingDateTime,Agent:AgentVersion}' --output table
    ```
@@ -67,7 +67,7 @@ checklist first; all of it is readable from the API with no shell.
    same 5-minute `observability.sh` probe and the probe died with the disk. A metric that stops
    is a dead publisher, not a healthy host.
    ```bash
-   aws cloudwatch get-metric-statistics --region us-east-1 \
+   aws cloudwatch get-metric-statistics --profile frontier --region us-east-1 \
      --namespace rebar/host --metric-name root_disk_used_percent --statistics Maximum \
      --period 300 --start-time "$(date -u -v-12H +%FT%TZ)" --end-time "$(date -u +%FT%TZ)" \
      --query 'reverse(sort_by(Datapoints,&Timestamp))[:20].{T:Timestamp,Pct:Maximum}' --output table
@@ -83,7 +83,7 @@ checklist first; all of it is readable from the API with no shell.
    and the box is not hung — it just cannot write anything. On 2026-09-02 this showed uptime
    ~11.9 h, continuous Docker veth churn, **no OOM kills and no I/O errors**.
    ```bash
-   aws ec2 get-console-output --region us-east-1 --instance-id i-00880b2c7f13527c5 --latest \
+   aws ec2 get-console-output --profile frontier --region us-east-1 --instance-id i-00880b2c7f13527c5 --latest \
      --output text | tail -60
    ```
 6. **TCP 443 is OPEN but HTTP returns 504, then times out.** The reverse proxy outlives its
@@ -143,14 +143,14 @@ specific workload is proven from independent logs.
    complete before continuing — EBS snapshots are point-in-time from the moment they are
    created — but record the id.
    ```bash
-   SNAP=$(aws ec2 create-snapshot --region us-east-1 --volume-id vol-0270fcf13709cf472 \
+   SNAP=$(aws ec2 create-snapshot --profile frontier --region us-east-1 --volume-id vol-0270fcf13709cf472 \
      --description "pre-unwedge root-full $(date -u +%FT%TZ)" --query SnapshotId --output text)
    echo "rollback snapshot: $SNAP"     # 2026-09-02: snap-06f35ff3a20fe4a73
    ```
 2. **Grow the root volume.** Double it (2026-09-02: 30 → 60 GiB).
    ```bash
-   aws ec2 modify-volume --region us-east-1 --volume-id vol-0270fcf13709cf472 --size 60
-   aws ec2 describe-volumes-modifications --region us-east-1 --volume-ids vol-0270fcf13709cf472 \
+   aws ec2 modify-volume --profile frontier --region us-east-1 --volume-id vol-0270fcf13709cf472 --size 60
+   aws ec2 describe-volumes-modifications --profile frontier --region us-east-1 --volume-ids vol-0270fcf13709cf472 \
      --query 'VolumesModifications[].{State:ModificationState,Pct:Progress,Size:TargetSize}' --output table
    ```
    **Wait for `optimizing`, not `completed`.** `optimizing` means the new capacity is already
@@ -160,7 +160,7 @@ specific workload is proven from independent logs.
    filesystem both expand with no shell** — you do not need to run `growpart`/`xfs_growfs`
    yourself, which is what makes this path viable when SSM is gone.
    ```bash
-   aws ec2 reboot-instances --region us-east-1 --instance-ids i-00880b2c7f13527c5
+   aws ec2 reboot-instances --profile frontier --region us-east-1 --instance-ids i-00880b2c7f13527c5
    ```
    If the reboot does not take (the instance never stops responding), escalate to
    `stop-instances` + `start-instances`. The Elastic IP `eipalloc-0bfd9c30897fc366a` means the
@@ -179,12 +179,12 @@ Recovery is complete when all three are true. On 2026-09-02 this was reached at 
 curl -sS -o /dev/null -w '%{http_code}\n' https://rebar.solutions.navateam.com/config/server/version
 
 # 2. SSM is Online again — you have a shell back
-aws ssm describe-instance-information --region us-east-1 \
+aws ssm describe-instance-information --profile frontier --region us-east-1 \
   --filters "Key=InstanceIds,Values=i-00880b2c7f13527c5" \
   --query 'InstanceInformationList[].PingStatus' --output text        # -> Online
 
 # 3. The filesystem actually grew (now that SSM works)
-aws ssm send-command --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
+aws ssm send-command --profile frontier --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
   --document-name AWS-RunShellScript --parameters 'commands=["df -h /"]'
 # 2026-09-02: /dev/nvme0n1p1  60G  29G  32G  48% /
 ```
@@ -206,7 +206,7 @@ let the box settle, then measure. **This measurement is what identifies the actu
 and its numbers belong on the reclaim ticket.
 
 ```bash
-aws ssm send-command --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
+aws ssm send-command --profile frontier --region us-east-1 --instance-ids i-00880b2c7f13527c5 \
   --document-name AWS-RunShellScript --parameters 'commands=[
     "du -xh --max-depth=2 / | sort -rh | head -30",
     "docker system df -v | head -40"

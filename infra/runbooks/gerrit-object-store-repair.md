@@ -19,7 +19,7 @@ blob <sha>` or a full connectivity check reports missing objects in
 2. Create the backup snapshot first:
 
    ```sh
-   aws ec2 create-snapshot --volume-id "$GERRIT_DATA_VOLUME" \
+   aws ec2 create-snapshot --profile frontier --volume-id "$GERRIT_DATA_VOLUME" \
      --description "pre-repair Gerrit object-store backup $(date -u +%FT%TZ)"
    ```
 

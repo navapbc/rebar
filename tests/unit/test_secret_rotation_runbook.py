@@ -37,7 +37,7 @@ def test_rotation_runbook_syncs_actions_secret_mirrors_after_ssm_rotation() -> N
     text = _RUNBOOK.read_text(encoding="utf-8")
 
     for secret, param in _MIRRORS.items():
-        command = f"aws ssm get-parameter --with-decryption --name {param}"
+        command = f"aws ssm get-parameter --profile frontier --with-decryption --name {param}"
         assert command in text
         assert f"gh secret set {secret} --repo navapbc/rebar" in text
         assert param in text.split(f"gh secret set {secret} --repo navapbc/rebar")[0]
