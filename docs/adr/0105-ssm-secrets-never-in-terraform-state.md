@@ -91,10 +91,12 @@ existing-state scrub for the historical cleartext — lives in
 - **The decision is enforced, not just documented.** `make lint` fails closed if any future
   `SecureString` secret reintroduces `value`/`ignore_changes = [value]`, so the regression cannot
   land silently. The guard is portable (pure-Python, no CI provider or live AWS required).
-- **A one-time operator cutover is required** (tracked as a deferred operator task linked
-  `discovered_from` `eb67`): apply the migration, re-seed/rotate the exposed crown-jewel secrets, and
-  scrub the existing cleartext from the remote state and its retained versions. Until that runs, the
-  historical exposure documented in `eb67` persists; the code change alone does not mutate prod.
+- **The one-time operator cutover ran** — task `gnarly-sinistrous-groundhog`
+  (`097b-de23-bf12-4c38`, linked `discovered_from` `eb67`): the migration was applied, the
+  exposed crown-jewel secrets re-seeded/rotated, and the cleartext scrubbed from the remote
+  state and its retained versions. Procedure and scrub steps:
+  [infra/runbooks/ssm-secret-write-only.md](../../infra/runbooks/ssm-secret-write-only.md)
+  §REMEDIATE.
 - **A minor version floor rises.** `versions.tf` now requires Terraform ≥ 1.11 and AWS provider
   ≥ 5.79; both are satisfied by the current toolchain, and the ≥ 1.11 floor still guards the
   `use_lockfile` state-locking behavior (which needed ≥ 1.10).

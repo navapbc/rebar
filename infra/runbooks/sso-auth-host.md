@@ -64,6 +64,47 @@ the repository root with `python3 scripts/terraform_prod.py plan --out <plan>` a
 already signed in elsewhere reaches it without re-auth. (rebar currently runs no gate instance —
 the auth host + module are staged for the first rebar subdomain.)
 
+## Re-homing mechanics (from ADR 0048)
+
+These resources were adopted from snap's shared terraform rather than recreated. The
+decision is [ADR 0048](../../docs/adr/0048-rehome-snap-shared-infra.md); the mechanics that
+matter when you touch them:
+
+**Import, never recreate.** Each live object was `terraform import`ed into rebar's state
+(`rebar-tfstate-896586841071`) and then applied as a **retag-only** change
+(`project=snap-demo` → `Project=rebar`) — no destroy/replace, no secret rotation. The
+check is a post-import `terraform plan` showing only tag diffs, then a clean `plan` (no
+changes) after apply. Expect that same shape from any future import here.
+
+**Physical names stay `snap-demo-*`** (`local.legacy_name_prefix = "snap-demo"`). Renaming
+a Lambda, IAM role, or API forces destroy+recreate — new ARNs, CloudFront churn, SSO
+downtime. The misleading name is a deliberate tradeoff; a rename is a separate migration,
+not something to do incidentally. See the name-preservation note in `auth_sso.tf`.
+
+**Secret handling.** The cookie-signing secret is an SSM SecureString managed with
+`ignore_changes = [value]` — the "existence + type, not value" contract, with the live
+value preserved on import and read by the Lambda at runtime.
+`random_password.auth_origin_secret` is retained because its value must stay identical in
+the Lambda env and the CloudFront origin header; it was imported with its live value, and
+`ignore_changes = [special]` suppresses the import-default replacement that would
+otherwise rotate it. **Do not remove either `ignore_changes`** — that rotates a live
+secret.
+
+**Release from snap's state.** The 18 resources were `terraform state rm`'d from snap's
+shared state (forgets, never destroys), making rebar the single owner. A marker in snap's
+dead repo (`infra/shared/RE-HOMED-TO-REBAR.md`) records this and warns against re-applying
+snap's config. **If snap's config is ever re-applied, it will fight rebar for these
+resources** — check that marker before touching anything in the dead repo.
+
+**Operator follow-ups.** The Google OAuth client must keep
+`https://auth.solutions.navateam.com/_callback` registered. The edge-gate Lambda source
+now lives in rebar's repo and drift CI rebuilds the zip, so future Lambda changes go
+through rebar, not snap.
+
+**Not adopted** (snap's to retire): the `github_deploy` role, VPC/ECS/ECR/ALB/SES/RDS, the
+audit dashboard and its `audit_sso_gate` instance, the leftover RDS manual snapshot, and
+the `snap-demo-tfstate` bucket.
+
 ## Secrets
 
 | Secret | Where | Managed by | Consumed by |

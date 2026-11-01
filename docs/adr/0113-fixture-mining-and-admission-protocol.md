@@ -85,28 +85,27 @@ unbalanced and emits no spec.
 ### 6. Change-triggered execution — mined fixtures stay off the weekly cron
 
 Rubric regressions arrive with commits, not with time, so mined-fixture evaluation is
-**change-triggered**: it runs on rubric-change commits (the `eval-changed-rubrics` CI job,
-selecting criteria whose rubric changed since the base ref) and is deliberately excluded
-from the weekly live sweep. This keeps provider-token spend proportional to actual rubric
-churn instead of paying a fixed weekly cost for criteria nobody touched. The execution
-surface is portable: the selection and dry-run preview run in-process with no CI provider
-required, so the rule is not bound to any one CI system.
+**change-triggered**: it runs on rubric-change commits and is deliberately excluded from
+the weekly live sweep. This keeps provider-token spend proportional to actual rubric churn
+instead of paying a fixed weekly cost for criteria nobody touched. The execution surface is
+portable: the selection and dry-run preview run in-process with no CI provider required, so
+the rule is not bound to any one CI system.
 
 ### 7. The gap-only heal loop and its `unreliable-criterion:` breaker
 
 The scheduled heal loop is **gap-only**: it mines only criteria that the gate routes but
 that still lack an eval spec. A criterion already covered by a spec is out of scope. A
 criterion the loop cannot mine reliably is quarantined behind a breaker rather than retried
-forever: a per-criterion failure counter reaching the threshold (default 3 — reproduction
-failures and emitter `skipped-unbalanced` results accrue the same counter), or a single
-runner declaration that
-the criterion is un-minable (`container-material-unrecoverable` for container criteria,
-`not-inline-admissible` for the inline-unadmissible class), file exactly one open ticket
-titled `unreliable-criterion: <criterion-id>`. That ticket excludes the criterion from
-future selection until a human resolves it, so a criterion that cannot be mined stops
-burning budget instead of failing silently every run. Filing is idempotent — a re-run while
-the ticket is open files no duplicate — and the loop advances its due-stamp only after the
-configured interval, so it is safe to invoke on a schedule.
+forever, filing exactly one open ticket titled `unreliable-criterion: <criterion-id>` that
+excludes the criterion from future selection until a human resolves it — so a criterion
+that cannot be mined stops burning budget instead of failing silently every run. Filing is
+idempotent, and the loop advances its due-stamp only after the configured interval, so it
+is safe to invoke on a schedule.
+
+The operating procedure for both — the CI job and its selection, the heal commands and
+ledger, the breaker thresholds, and how a human resolves a breaker ticket — is
+[infra/runbooks/plan-review-eval-ops.md](../../infra/runbooks/plan-review-eval-ops.md)
+§"Heal loop and the unreliable-criterion breaker".
 
 ### 8. Mined fixtures live in this repository, not as packaged defaults
 

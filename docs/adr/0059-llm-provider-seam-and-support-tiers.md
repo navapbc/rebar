@@ -612,25 +612,19 @@ The warning compares the MARKED PREFIX, not total `input_tokens` (`structured_ru
 
 ### 8. The Bedrock model-id trap set (record it once so it is not rediscovered)
 
-- Plain foundation-model ids are refused on-demand (§4).
-- `list-foundation-models` does not list inference profiles.
-- `global.` profiles are a valid MEASURED form — do not pin `us.` in IAM.
-- **VERSIONED ids broke provider qualification**: the old "already provider-qualified" test was
-  `":" in model`, and a versioned Bedrock id contains a colon in its version suffix, so a
-  configured `provider="bedrock"` was silently dropped. Fixed by the membership rule (§3). The
-  operational sting: the canonical id is what the AWS console displays, so `…-v1:0` is the
-  string an operator will paste.
-- **The inverse also bites**: unversioned haiku is INVALID on Bedrock — the valid form carries
-  the version suffix, else `ValidationException: The provided model identifier is invalid`. The
-  suffixes are NOT uniform across models, which is why
-  `.github/llm-providers/bedrock.toml` instructs taking every new id VERBATIM from
-  `aws bedrock list-inference-profiles`.
-- **`temperature` is FATAL on some Bedrock models**: `us.anthropic.claude-opus-4-7` +
-  `temperature=0` → 400 `'temperature' is deprecated for this model`; the identical call without
-  it succeeds. Root asymmetry: `_drop_unsupported_sampling_settings` exists ONLY in pydantic-ai's
-  `models/anthropic.py`, NOT in `models/bedrock.py` — so the direct-Anthropic path degrades
-  gracefully and the Bedrock path hard-fails. Same defect, two symptoms. Handled as a capability
-  (`_MODEL_ID_CAPABILITY_OVERRIDES`, §2) rather than a provider branch.
+Bedrock refuses plain foundation-model ids on-demand (§4), `list-foundation-models` does
+not list inference profiles, and `global.` profiles are a valid measured form. Version
+suffixes are not uniform across models, so every new id is taken verbatim from
+`aws bedrock list-inference-profiles`; the colon in a versioned id once broke provider
+qualification under the old `":" in model` test, fixed by the membership rule (§3).
+`temperature` is fatal on some Bedrock models because
+`_drop_unsupported_sampling_settings` exists only in pydantic-ai's `models/anthropic.py`
+and not `models/bedrock.py` — handled as a capability
+(`_MODEL_ID_CAPABILITY_OVERRIDES`, §2) rather than a provider branch.
+
+The operator-facing trap list is
+[infra/runbooks/bedrock-access.md](../../infra/runbooks/bedrock-access.md)
+§"Which model id to use".
 
 ### 9. The IMDS finding: measure first, change nothing
 
@@ -666,31 +660,25 @@ Two things survive as durable content:
 ### 10. Where the seam is actually running
 
 **The production review bot runs on Bedrock. This is landed, not planned** — story
-`eb6e-f43a-e86b-443a` is CLOSED. `infra/compose/docker-compose.yml` sets the three class slots to
-Bedrock inference profiles (`:186-188`) plus `REBAR_LLM_BEDROCK_REGION` (`:151`), and
-`REBAR_LLM_MODEL` is deliberately absent so the per-pass split survives (see
-[`0057-model-classes-and-the-rebar-llm-model-deprecation.md`](0057-model-classes-and-the-rebar-llm-model-deprecation.md)).
+`eb6e-f43a-e86b-443a` is CLOSED. Observed on a real Gerrit change (1329) that received
+`LLM-Review +1`: the verdict sidecar's `provider_provenance` reads `provider='bedrock'`,
+`model='bedrock:us.anthropic.claude-sonnet-4-6'`, `prompt_cache_style='bedrock'`, and the
+per-call usage log showed **8/8 calls on `bedrock:` inference profiles and ZERO
+direct-Anthropic calls**, with `frontier` resolving to the opus profile and `standard` to
+the sonnet profile, and nonzero `cache_read` on three calls. That is the seam, the class
+split, the tier stamp and Bedrock prompt caching all exercised together by the gate that
+guards `main`.
 
-Observed on a real Gerrit change (1329) that received `LLM-Review +1`: the verdict sidecar's
-`provider_provenance` reads `provider='bedrock'`,
-`model='bedrock:us.anthropic.claude-sonnet-4-6'`, `prompt_cache_style='bedrock'`. The per-call
-usage log for that vote showed **8/8 calls on `bedrock:` inference profiles and ZERO
-direct-Anthropic calls**, with `frontier` resolving to the opus profile and `standard` to the
-sonnet profile, and nonzero `cache_read` on three calls (386,204 / 308,003 / 149,162). That is the
-seam, the class split, the tier stamp and Bedrock prompt caching all exercised together by the
-gate that guards `main`.
+Local development also selects Bedrock through `rebar.toml`'s `[llm.model_classes]` table,
+so a local gate run dogfoods the provider production uses without a per-developer opt-in.
+That table was added by bug `d2ce-36f5-fd08-4e40`; before it, every local gate silently
+resolved to `anthropic:claude-*` while the production bot ran on Bedrock — the exact
+dogfooding gap this epic exists to close. **Read `d2ce`'s state before quoting this
+paragraph as current** — it is the ticket that establishes it.
 
-**Local development also selects Bedrock, through the project's own config file.** `rebar.toml`
-is this project's authoritative config, and its `[llm.model_classes]` table names the same three
-Bedrock inference-profile ids as `.github/llm-providers/bedrock.toml`, so a local gate run
-dogfoods the provider production uses without any per-developer opt-in. That table was added by
-bug `d2ce-36f5-fd08-4e40`; before it, `rebar.toml` carried no `[llm]` table at all and every
-local gate silently resolved to `anthropic:claude-*` while the production bot ran on Bedrock —
-the exact dogfooding gap this epic exists to close, left open on the path developers and coding
-agents hit most. The documented escape hatch is one line, `REBAR_LLM_CONFIG_FILE` pointed at the
-Anthropic overlay, because `REBAR_LLM_CONFIG_FILE` OUTRANKS the project file; the cost of the
-default is that a contributor without Bedrock access must use it. **Read `d2ce`'s state before
-quoting this paragraph as current** — it is the ticket that establishes it.
+The current compose wiring and the revert procedure are in
+[infra/runbooks/review-bot-ops.md](../../infra/runbooks/review-bot-ops.md)
+§"Kill-switch: revert the LLM path from Bedrock to direct Anthropic".
 
 ---
 

@@ -31,9 +31,6 @@ bucket must exist before the backend can initialize. We break the cycle with a
 (`rebar-tfstate-896586841071`) — versioned, encrypted (SSE-S3/AES256), with all
 public access blocked, and `lifecycle { prevent_destroy = true }`. It is applied
 once by hand; its bucket name then feeds the main config's `backend "s3"` block.
-Tearing the bootstrap down requires an explicit state migration of the main
-config back to local state first — destroying it casually would orphan the
-remote state.
 
 ### 2. S3-native locking via `use_lockfile`, no DynamoDB (gated on TF >= 1.10)
 
@@ -102,10 +99,12 @@ drift class.
 
 ## Consequences
 
-- Bringing up the environment is a two-step apply: `infra/bootstrap` once
-  (local state), then `infra/terraform` (remote state). Operators must populate
-  the seven `/rebar/prod/*` secrets before the instance-bringing apply or
-  cloud-init fails fast.
+- Bringing up the environment is a two-step apply (`infra/bootstrap` once against
+  local state, then `infra/terraform` against remote state), with the seven
+  `/rebar/prod/*` secrets populated before the instance-bringing apply or
+  cloud-init fails fast. Procedure:
+  [infra/runbooks/provision-restore.md](../../infra/runbooks/provision-restore.md)
+  §"Provision from scratch".
 - Downstream stories have a stable, documented contract: the parameter
   namespace, the single-owner role/DLM resources, and the prevent_destroy /
   ignore_changes guards are fixed here and referenced, not duplicated.

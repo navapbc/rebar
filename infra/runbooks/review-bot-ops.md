@@ -261,6 +261,22 @@ or malformed), backfill is degraded: the cursor does NOT advance and no vote is
 cast — the live webhook path still works, and a missed change stays vote-less =
 unsubmittable (never submittable-but-unreviewed). Restore events-log to recover.
 
+### Break-glass: clear a wedged `refs/reconciler/lock`
+
+Per [ADR 0031](../../docs/adr/0031-reconciler-ref-lock.md), clear a wedged lock by writing
+the released marker over it — for example with `rebar`'s own `release` against the observed
+tip. Deleting the ref instead:
+
+```sh
+git push origin :refs/reconciler/lock
+```
+
+still frees a git remote, but a live holder's next renew then fails, and on an S3 remote a
+delete has no compare at all. Prefer the released-marker write.
+
+Break-glass is rarely necessary: the relative-duration lease means a crashed holder's lock
+becomes steal-able automatically after one lease interval.
+
 ## Merge-change ops (feature-branch flow — epic 88ab / ADR-0025)
 
 Feature-branch work (CONTRIBUTING.md §4) adds one review shape the bot must handle: the
@@ -383,6 +399,20 @@ API** without rebuilding the image or touching Gerrit.
 > below therefore appear in `docker-compose.yml` only from the cutover commit onward; if
 > `docker compose exec review-bot env | grep REBAR_LLM_` shows no class-slot overrides,
 > the bot is still on the direct-Anthropic path and there is nothing to revert.
+
+### Current wiring (what you are reverting from)
+
+`infra/compose/docker-compose.yml` sets the three class slots to Bedrock inference
+profiles plus `REBAR_LLM_BEDROCK_REGION`. **The removed `REBAR_LLM_MODEL` is deliberately
+absent** so the per-pass class split survives — do not reintroduce it when reverting; the
+lever below is the class-slot vars, never a single global model var.
+
+Local development also selects Bedrock: `rebar.toml`'s `[llm.model_classes]` table names
+the same three Bedrock inference-profile ids as `.github/llm-providers/bedrock.toml`, so a
+local gate run dogfoods the provider production uses with no per-developer opt-in. The
+escape hatch for a contributor without Bedrock access is one line —
+`REBAR_LLM_CONFIG_FILE` pointed at the Anthropic overlay, which **outranks** the project
+file.
 
 ### The lever: delete the three class-slot env vars, recreate the container
 
@@ -566,6 +596,9 @@ sudo systemctl disable --now rebar-autodeploy.timer     # stop auto-deploy
 ```
 The manual deploy path (`compose-up.sh`, `setup-*.sh`, `materialize-g2p-config.sh`) is
 unchanged and still works. Re-enable with `systemctl enable --now rebar-autodeploy.timer`.
+
+**On a fresh install the units ship DISABLED** (`install-autodeploy.sh`). Enable only after
+a manual dry-run — `systemctl start rebar-autodeploy.service` — is confirmed healthy.
 
 **Bot-code rollback (manual):** `docker tag compose-review-bot:prev compose-review-bot:latest
 && (cd infra/compose && docker compose up -d review-bot)` restores the prior image.

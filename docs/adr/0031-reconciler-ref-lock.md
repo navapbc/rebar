@@ -159,12 +159,13 @@ timeout raises `RefLockTimeoutError`, also treated as HELD.
 
 ### Operator break-glass
 
-A wedged lock is cleared by writing the released marker over it (see the commit-chain amendment
-below), for example with `rebar`'s own `release` against the observed tip. Deleting the ref
-(`git push origin :refs/reconciler/lock`) still frees a git remote, but a live holder's next
-renew then fails, and on an S3 remote a delete has no compare at all. C2's relative-duration
-lease makes break-glass rarely necessary — a crashed holder's lock becomes steal-able after one
-lease interval automatically.
+A wedged lock is cleared by writing the released marker over it (see the commit-chain
+amendment below) rather than by deleting the ref. C2's relative-duration lease makes
+break-glass rarely necessary — a crashed holder's lock becomes steal-able after one lease
+interval automatically.
+
+Procedure: [infra/runbooks/review-bot-ops.md](../../infra/runbooks/review-bot-ops.md)
+§"Break-glass: clear a wedged `refs/reconciler/lock`".
 
 ## Lease self-healing (C2 — extends this module)
 

@@ -57,28 +57,16 @@ Each matrix scenario asserts a single observable criterion against the exact cod
 implements it (see the module docstring for the seam per scenario). The deterministic
 scenarios need no network; they run green offline and are the durable, re-runnable proof.
 
-### 3. Eventual-consistency discipline for live probes
+### 3. Eventual-consistency discipline and the report contract live in the runbook
 
-Jira's search index lags both a create and a delete by an **unbounded** interval. Two rules
-fall out and are encoded in the harness:
+Jira's search index lags both a create and a delete by an **unbounded** interval, so live
+probes must poll until an issue is index-visible before mutating it and must never assert
+on post-mutation index state. `scripts/run_live_matrix.py` is the one-command entry point
+and derives both report artifacts.
 
-- **Before mutating a just-created issue, poll until it is index-visible** (`_poll_until_visible`,
-  key search then summary fallback) — a create+immediate-delete otherwise races the index and
-  acli emits a *confusing* `AcliMutationError("Issue does not exist or you do not have
-  permission to see it")` (NOT a 403), which reads as a false permission failure.
-- **Never assert on post-mutation index state.** The authoritative signal for the
-  delete-permission probe is the *delete's own return value* (`{"status": "deleted"}`; acli
-  raises a loud `PermissionError` on a real 403). A follow-up search-is-empty (or a re-delete)
-  assertion is flaky because the index-convergence delay is unbounded and a re-delete of an
-  already-gone key re-raises the same eventual-consistency false-failure.
-
-### 4. Report
-
-`scripts/run_live_matrix.py` is the one-command entry point: it runs
-`pytest -m live --junitxml=reports/d01e-live-matrix.junit.xml` (the JUnit XML, a CI artifact
-path) and derives the JSON summary at `reports/d01e-live-matrix.report.json` (totals +
-per-test outcome/duration). Both are gitignored run artifacts; the
-durable evidence (pass/fail table + live run ids) is recorded on ticket d01e.
+The operator procedure — invocation, environment, the index-lag rules and their confusing
+false-permission symptom, the report paths, and the leak log — is
+[infra/runbooks/reconciler-live-matrix.md](../../infra/runbooks/reconciler-live-matrix.md).
 
 ## Consequences
 

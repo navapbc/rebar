@@ -111,32 +111,24 @@ Tier 0).
 
 ### 6. Tier selection is required, not advisory, at review time
 
-| Change | Required tier(s) |
-| --- | --- |
-| Pass-3 code, threshold, or routing change | Tier 0, always |
-| Pass-2 question or prompt change | Tier 1 (N≥40) + Tier 0 |
-| Pass-1 criterion-prompt change | Tier 2 single-criterion (N=20) + downstream |
-| Finder system prompt or chunking strategy change | Tier 2 full mode |
+Which tier a given change requires is single-sourced in
+[`docs/plan-review-gate.md`](../plan-review-gate.md) §"Validating a gate change: which
+replay tier, and what counts as noise".
 
 The report file path attached as evidence is named in the commit message under a
 `plan-review-eval:` trailer — advisory (no CI enforcement), to keep the convention
 portable to projects without this harness.
 
-## Cost table (observed, from the commissioning ledger)
+## Cost
 
-| Tier / mode | Sample N | Model | Cost | Per-sample |
-| --- | --- | --- | --- | --- |
-| Tier 0 | full corpus (3,758 replayed rows) | n/a — deterministic recompute | $0 | $0 |
-| Tier 1 | 60 | `bedrock:us.anthropic.claude-sonnet-4-6` | $6.72 | $0.112 |
-| Tier 2, full mode | 20 | `bedrock:us.anthropic.claude-opus-4-8` | $6.96–$11.83 across runs | ~$0.35–$0.59 |
-| Tier 2, single-criterion (1-TURN, e.g. `E2`) | 20 | `bedrock:us.anthropic.claude-opus-4-8` | $1.85 | $0.093 |
-| Tier 2, single-sample diagnostic | 1 | `bedrock:us.anthropic.claude-opus-4-8` | $0.27 | $0.27 |
+Replay tiers are priced per sample, with Tier 2 single-criterion mode under the
+$0.25/sample ceiling that applies to `1-TURN`/`2-STEP` criteria and `AGENT`-tier runs
+priced at their real production rate. All commissioning spend against this epic's tickets
+stayed within each ticket's own declared ceiling.
 
-Tier 2 single-criterion mode's $0.093/sample sits well under the $0.25/sample ceiling
-that applies to `1-TURN`/`2-STEP` criteria; an `AGENT`-tier `--criteria` run (including
-the G3/G4 container split) is priced at its real production rate and reported
-separately, with no fixed per-sample ceiling assumed. All commissioning spend against
-this epic's tickets stayed within each ticket's own declared ceiling (see the ledger).
+Invocation and the observed cost table are in
+[infra/runbooks/plan-review-eval-ops.md](../../infra/runbooks/plan-review-eval-ops.md)
+§"Replay tiers: invocation and budget".
 
 ## Consequences
 
