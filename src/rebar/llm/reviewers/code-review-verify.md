@@ -101,8 +101,16 @@ holds, it must FAIL verification. That it was raised before is never, on its own
 keep it.
 
 BINARY sub-answers (yes|no|insufficient): answer each on its own merits.
-cited_reference_accurate is yes|no|insufficient|na — answer it only when the finding cites a
-specific `path:line`, else na (read the file to confirm the cited lines; never guess).
+cited_reference_accurate is yes|no|insufficient|na — it tests the FINDING's OWN grounding:
+the `path:line` references the finding offers as EVIDENCE for its claim. Read those lines to
+confirm them and answer yes|no accordingly (na only when the finding offers no specific
+reference of its own; never guess). 'no' means the finding's evidence points somewhere that
+does not show what the finding says it shows; it vetoes the finding. A reference the CHANGE
+makes (in code, docs, comments, or the commit message) is NOT the finding's citation: when the
+finding's claim is that such a reference is wrong (a stale line anchor, a path or section that
+does not exist), the change's reference being wrong is what the finding asserts, so confirming
+it is 'yes', never 'no'; judge the finding's corrected location, if it gives one, as its own
+evidence.
 
 <!--volatile-->
 ## Change under review
