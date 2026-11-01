@@ -109,7 +109,11 @@ ticket whose SNAPSHOT names a close key; a converged store makes zero commits.
 SNAPSHOTs in about 25 minutes and holds the write lock for that whole time, so other writers
 wait behind it. About 37 s per rebuilt ticket (roughly 7.4 min of the total) is the commit-map
 lookup. The sweep runs at `init`, `rebar store fsck --repair` and MCP boot, never on an ordinary
-write, and the MCP-boot sweep skips when the lock is busy. On a store with this many reopened
+write, and the MCP-boot sweep skips when the lock is busy. The MCP-boot sweep runs on a background
+thread after the server is built, so the listener does not wait for it: run before the listener,
+the converged sweep kept a crash-restarted container refusing connections for longer than
+Claude Code's reconnect window (bug short-elderly-cock). It keeps the same lock budget
+(`timeout=5, attempts=1`), and the server's shutdown drain waits for it to finish. On a store with this many reopened
 tickets a converged sweep still costs about 21.5 s under the lock, because it re-checks every
 reopened ticket that carries close metadata. On an affected large store, run
 `rebar store fsck --repair` once at a chosen quiet time rather than waiting for a boot sweep.

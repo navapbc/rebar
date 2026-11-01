@@ -279,39 +279,97 @@ def store_status() -> dict[str, Any]:
 
 
 def run_startup_store_sweep() -> None:
-    """Run the idempotent ensure registry at boot, best-effort.
+    """Run the idempotent ensure registry at boot, best-effort, in the calling thread.
 
     The sweep owns a short-lived lock and skips contention rather than delaying service;
     no lock survives into serving. Missing stores, imports, and sweep failures log and
-    continue, while removed load-bearing inputs still abort startup.
+    continue, while removed load-bearing inputs still abort startup. ``main()`` uses
+    :func:`start_startup_store_sweep` so the listener does not wait for it.
     """
+    tracker = _resolve_startup_tracker()
+    if tracker is not None:
+        _sweep_store(tracker)
+
+
+def start_startup_store_sweep(gauge: InFlightGauge | None) -> threading.Thread | None:
+    """Start the boot ensure sweep on a daemon thread and return it (``None``: no store).
+
+    The converged sweep costs about 20 s on a large store (``snapshot-close-metadata``),
+    and running it before the listener left a crash-restarted container refusing
+    connections longer than Claude Code's reconnect window (bug short-elderly-cock).
+    Path resolution stays synchronous so a removed load-bearing input still aborts
+    startup. The thread holds ``gauge`` from before it starts until it ends, so the
+    SIGTERM drain and :func:`run_mcp`'s idle wait both wait for it.
+    """
+    tracker = _resolve_startup_tracker()
+    if tracker is None:
+        return None
+    release = gauge.hold() if gauge is not None else (lambda: None)
+
+    def _run() -> None:
+        try:
+            _sweep_store(tracker)
+        finally:
+            release()
+
+    thread = threading.Thread(target=_run, name="rebar-mcp-boot-sweep", daemon=True)
+    started = False
+    try:
+        thread.start()
+        started = True
+    finally:
+        if not started:
+            release()  # the thread never ran, so nothing else will release its hold
+    return thread
+
+
+def _sweep_store(tracker: str) -> None:
+    """Run the ensure registry with the boot lock budget; log and continue on failure."""
+    from rebar._deprecations import RemovedInputError
+
+    try:
+        from rebar._store import ensures as _ensures
+
+        _ensures.run_ensures(tracker, timeout=5, attempts=1)
+    except RemovedInputError:
+        if threading.current_thread() is threading.main_thread():
+            raise
+        # A background thread cannot abort startup; make the removed input loud instead.
+        logging.getLogger("rebar").error("startup ensure-sweep hit a removed input", exc_info=True)
+    except Exception:
+        logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
+
+
+def _resolve_startup_tracker() -> str | None:
+    """The tracker path to sweep, or ``None`` after warning that no store exists.
+
+    Removed load-bearing inputs propagate; any other resolution failure is logged."""
     from rebar._deprecations import RemovedInputError
 
     try:
         from rebar import config as _config
-        from rebar._store import ensures as _ensures
 
         tracker = str(_config.tracker_dir())
         if os.path.isdir(tracker):
-            _ensures.run_ensures(tracker, timeout=5, attempts=1)
-        else:
-            # Log-and-continue is the right posture (a missing store must not abort boot),
-            # but combined with a /health probe that could not see the store it meant a
-            # container serving NO tracker was indistinguishable from a healthy one, and
-            # nothing in the pipeline ever reported it (bug mobile-groovy-badger). One line
-            # naming the path is the difference between a silent misconfiguration and a
-            # greppable one.
-            logging.getLogger("rebar").warning(
-                "startup: no ticket store at %s — tracker tools will report the store as "
-                "uninitialized until it is provisioned",
-                tracker,
-            )
+            return tracker
+        # Log-and-continue is the right posture (a missing store must not abort boot),
+        # but combined with a /health probe that could not see the store it meant a
+        # container serving NO tracker was indistinguishable from a healthy one, and
+        # nothing in the pipeline ever reported it (bug mobile-groovy-badger). One line
+        # naming the path is the difference between a silent misconfiguration and a
+        # greppable one.
+        logging.getLogger("rebar").warning(
+            "startup: no ticket store at %s — tracker tools will report the store as "
+            "uninitialized until it is provisioned",
+            tracker,
+        )
     except RemovedInputError:
         # A removed, still-set, load-bearing input must fail MCP startup hard rather than be
         # swallowed into a silent boot.
         raise
     except Exception:
         logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
+    return None
 
 
 def register_health_route(mcp: Any, gauge: InFlightGauge) -> None:
