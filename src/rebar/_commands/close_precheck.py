@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from rebar import config
-from rebar._commands import close_disposition, txn
+from rebar._commands import close_disposition, close_scope, txn
 from rebar._commands._seam import CommandError
 from rebar._store import freshness
 
@@ -157,11 +157,11 @@ def _check_work_landed(
     *,
     metrics: dict[str, int] | None = None,
     ticket_view: Any | None = None,
-) -> None:
+) -> list[str]:
     """The two DET landing checks, kept out of ``_completion_precheck`` so that function
     stays within its complexity ceiling: (1) a ticket recording ``file_impact`` must have a
     referencing commit at all, and (2) the linked commits' diffs must stay inside the
-    declared impact."""
+    declared impact. Returns the landed commits it accepted (``[]`` when no impact applies)."""
     from rebar._engine_support import field_reads
 
     started_ns = time.monotonic_ns() if metrics is not None else 0
@@ -169,7 +169,7 @@ def _check_work_landed(
     if not _union_file_impact(accepted_ids, tracker, **view_kwargs):
         if metrics is not None:
             metrics["landing_check_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
-        return
+        return []
     referencing = (
         _referencing_commits(accepted_ids, tracker, code_root)
         if metrics is None and ticket_view is None
@@ -231,6 +231,7 @@ def _check_work_landed(
     )
     if metrics is not None:
         metrics["landing_check_ms"] = (time.monotonic_ns() - started_ns) // 1_000_000
+    return landed
 
 
 def _attached_commit_shas(
@@ -438,11 +439,33 @@ def _applicable_close_classes(ticket_type: str) -> str:
     return ", ".join(c for c in txn.CLOSE_CLASSES if c in close_disposition.ADMINISTRATIVE_CLASSES)
 
 
+def ref_source_label(ref: str | None, code_root: str) -> str:
+    """Name where a completion target comes from: the caller's ref, or the process HEAD."""
+    return f"explicit ref {ref!r}" if ref is not None else f"HEAD of {code_root}"
+
+
+def _verification_tree(ref: str | None, ref_source: str, code_root: str) -> tuple[str | None, str]:
+    """Return the tree SHA the verifier will read and a label naming where it came from."""
+    from rebar._snapshot.repo_snapshot import resolve_ref
+
+    label = ref_source or ref_source_label(ref, code_root)
+    try:
+        return resolve_ref(ref or "HEAD", code_root, fetch=False), label
+    except Exception:  # noqa: BLE001 — unresolvable here; the verifier reports its own error
+        return None, label
+
+
 def _verification_fail_message(
-    ticket_id: str, ticket_type: str, result: dict, items: list, lines: list[str]
+    ticket_id: str,
+    ticket_type: str,
+    result: dict,
+    items: list,
+    lines: list[str],
+    *,
+    tree: str = "",
 ) -> str:
     """Explain a completion failure. Label evidence-search exhaustion as
-    insufficient evidence and append the verdict's remediation."""
+    insufficient evidence, name the verified tree, and append the verdict's remediation."""
     noun = "criterion" if len(items) == 1 else "criteria"
     if result.get("evidence_sufficient") is False:
         headline = (
@@ -455,6 +478,8 @@ def _verification_fail_message(
             "criteria; not closing.\n"
         )
     message = headline + "\n".join(lines)
+    if tree:
+        message += f"\n  Verified tree: {tree}"
     guidance = result.get("remediation")
     if guidance:
         message += "\n\n  " + guidance
@@ -587,6 +612,7 @@ def _completion_precheck(
     close_class: str = "",
     ref: str | None = None,
     metrics: dict[str, int] | None = None,
+    ref_source: str = "",
 ):
     """Return the pre-close verdict and durable completion expectation.
     Use a signed completion PASS, a deterministic disposition, or an
@@ -656,7 +682,7 @@ def _completion_precheck(
         resolved_id, accepted_ids = _resolved_completion_scope(
             ticket_id, tracker, **view_kwargs, **metrics_kwargs
         )
-        _check_work_landed(
+        landed = _check_work_landed(
             ticket_id,
             resolved_id,
             accepted_ids,
@@ -664,6 +690,10 @@ def _completion_precheck(
             code_root,
             **view_kwargs,
             **metrics_kwargs,
+        )
+        tree_sha, tree_source = _verification_tree(ref, ref_source, code_root)
+        close_scope.ensure_tree_contains_landed(
+            ticket_id, landed or [], code_root, tree_sha, tree_source
         )
         result = _verify_with_duration_metrics(
             ticket_id,
@@ -689,7 +719,10 @@ def _completion_precheck(
         # Surface the verdict's remediation guidance (set by reconcile_verdict on every FAIL) so
         # the caller is pointed at the evidence channel — documenting proof that a requirement is
         # met as a comment on the ticket — rather than left with only the bare list of criteria.
-        message = _verification_fail_message(ticket_id, ticket_type, result, items, lines)
+        verified_sha = result.get("verified_at_sha") or tree_sha or "unresolved"
+        message = _verification_fail_message(
+            ticket_id, ticket_type, result, items, lines, tree=f"{verified_sha} ({tree_source})"
+        )
         # Persist the FAIL verdict to a durable, queryable sidecar (ticket 24ec) BEFORE the
         # raise, so a completion FAIL leaves an artifact (mirroring the plan-review
         # REVIEW_RESULT sidecar) instead of vanishing. Best-effort: emit swallows its own

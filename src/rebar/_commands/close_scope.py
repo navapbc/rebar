@@ -21,13 +21,20 @@ The expansion is intentionally narrow.  A random relationship does not broaden
 the gate; only a ticket already closed with a close class and naming a live
 replacement can add that replacement, and the ordinary no-reference failure still
 fires when the expanded scope contains no commit.
+
+The module also owns the last evidence check before the verifier runs: the tree
+the verifier will read must contain at least one of the commits the precheck
+accepted (bug wieldable-runtish-moorhen).
 """
 
 from __future__ import annotations
 
 import os
+import subprocess
 from collections import deque
 from typing import Any
+
+from rebar._commands._seam import CommandError
 
 
 def replacement_target_for_closed_disposition(
@@ -146,3 +153,57 @@ def expand_with_disposition_replacements(
                 expanded.add(resolved)
                 queue.append(resolved)
     return expanded
+
+
+def _commit_present(sha: str, code_root: str) -> bool:
+    """Whether ``sha`` names a commit object in this clone."""
+    probe = subprocess.run(
+        ["git", "-C", code_root, "cat-file", "-e", f"{sha}^{{commit}}"],
+        capture_output=True,
+        check=False,
+    )
+    return probe.returncode == 0
+
+
+def _contains(tree_sha: str, sha: str, code_root: str) -> bool:
+    """Whether commit ``sha`` is ``tree_sha`` or one of its ancestors.
+
+    Any git failure for a commit known to be present counts as "not contained", so an
+    unreadable verification tree refuses rather than passing through to the verifier.
+    """
+    probe = subprocess.run(
+        ["git", "-C", code_root, "merge-base", "--is-ancestor", sha, tree_sha],
+        capture_output=True,
+        check=False,
+    )
+    return probe.returncode == 0
+
+
+def ensure_tree_contains_landed(
+    ticket_id: str, landed: list[str], code_root: str, tree_sha: str | None, tree_source: str
+) -> None:
+    """Refuse a close whose verification tree contains none of the accepted landed commits.
+
+    The precheck may accept a commit from the upstream refs (stale-clone refresh) or an
+    attached SHA, while the verifier reads ``tree_sha``: by default the HEAD of the process
+    running the close, which over MCP is the server's checkout, not the caller's worktree.
+    Verifying a tree that lacks the work yields confident findings about the wrong code, so
+    the mismatch is reported before any verifier cost. Attached SHAs absent from this clone
+    cannot be compared and are left out; with no comparable commit there is nothing to check.
+    """
+    if not tree_sha:
+        return
+    present = [sha for sha in dict.fromkeys(landed) if _commit_present(sha, code_root)]
+    if not present or any(_contains(tree_sha, sha, code_root) for sha in present):
+        return
+    shown = ", ".join(present[:5]) + (f" (+{len(present) - 5} more)" if len(present) > 5 else "")
+    raise CommandError(
+        f"Error: cannot close {ticket_id}: completion verification would read tree "
+        f"{tree_sha} ({tree_source}), which contains none of the commits the close precheck "
+        f"accepted as this ticket's landed work: {shown}. Verifying it would judge different "
+        "code from the code that landed. Over MCP the default tree is the server process's "
+        "checkout, not your worktree. Retry with ref=<a commit containing the work> (CLI: "
+        f"--ref <sha>), for example ref={present[0]}, or close from a checkout whose HEAD "
+        "contains it.",
+        returncode=1,
+    )
