@@ -168,7 +168,43 @@ def tracker_dir(root: str | os.PathLike[str] | None = None) -> Path:
             # tickets-boundary-ok: the ConfigError-only default INSIDE tracker_dir() itself
             name = ".tickets-tracker"
         base = repo_root(root)
+    return _join_store_path(name, base)
+
+
+def _join_store_path(name: str, base: Path) -> Path:
+    """Join a relative store name to ``base``; an absolute name relocates the store."""
     return Path(name) if os.path.isabs(name) else base / name
+
+
+def peer_tracker_dir(root: str | os.PathLike[str]) -> Path:
+    """Resolve ANOTHER checkout's store path, reading only its ``tracker.dir``.
+
+    A linked worktree uses this to find the main checkout's shared store. Unlike
+    :func:`tracker_dir` it does not compose or validate that checkout's config, so
+    keys the caller's tree does not know are never reported against the caller
+    (nosophobic-zebraic-waterbug). Precedence: env override, ``--config`` override,
+    the last raw user/project layer that sets it, else the schema default.
+    """
+    env = tracker_dir_override()
+    if env:
+        return Path(env)
+    name = (_CLI_OVERRIDES or {}).get("tracker", {}).get("dir") or _raw_tracker_dir(root)
+    return _join_store_path(name, repo_root(root))
+
+
+def _raw_tracker_dir(root: str | os.PathLike[str]) -> str:
+    """The raw-layer ``tracker.dir`` for ``root``, else the schema default."""
+    name = TrackerConfig().dir
+    try:
+        for layer in raw_layers(root):
+            section = layer.raw.get("tracker")
+            value = section.get("dir") if isinstance(section, dict) else None
+            if isinstance(value, str) and value:
+                name = value
+    except ConfigError:
+        # An unreadable file falls back to the default, as tracker_dir() does.
+        return TrackerConfig().dir
+    return name
 
 
 def tickets_branch(root: str | os.PathLike[str] | None = None) -> str:

@@ -140,7 +140,10 @@ def push_tickets_branch(
     tree intact.  Strict callers receive :class:`PushDeliveryError` instead.
     """
     remote_ref = "origin/tickets"
-    mode = _push_mode(os.path.dirname(base_path))  # base_path is .../.tickets-tracker
+    # Push policy belongs to the CALLER's repo root (None == discover), not the store's
+    # parent: from a linked worktree that parent is the main checkout, whose config is
+    # not the caller's (nosophobic-zebraic-waterbug).
+    mode = _push_mode(None)
     if mode == "off":
         _raise_if_strict(
             strict,
@@ -182,7 +185,8 @@ def push_tickets_branch(
         return
 
     # Resolve the synchronous destination from the main repo; malformed config
-    # skips delivery rather than guessing a branch or remote.
+    # skips delivery rather than guessing a branch or remote. The destination is the
+    # shared store's, so it stays on the store's parent, where the async child also runs.
     from rebar.config import ConfigError, tickets_branch, tickets_remote
 
     try:

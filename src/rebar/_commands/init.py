@@ -463,12 +463,14 @@ def _main_worktree_tracker(repo: str) -> str | None:
 
     The caller decides whether the resolved path exists and is initialized.
     """
-    from rebar.config import tracker_dir
+    from rebar.config import peer_tracker_dir
 
     wl = _git(repo, "worktree", "list", "--porcelain").stdout
     for line in wl.splitlines():
         if line.startswith("worktree "):
-            return str(tracker_dir(line[len("worktree ") :]))
+            # Read only the main checkout's tracker.dir: validating its whole config
+            # would report its keys against this worktree (nosophobic-zebraic-waterbug).
+            return str(peer_tracker_dir(line[len("worktree ") :]))
     return None
 
 
