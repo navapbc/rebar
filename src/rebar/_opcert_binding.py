@@ -43,6 +43,12 @@ class OpcertBinding(Protocol):
 
 _BOUND: ContextVar[OpcertBinding | None] = ContextVar("rebar_opcert_binding", default=None)
 _PUSH_MODE: ContextVar[str | None] = ContextVar("rebar_opcert_push_mode", default=None)
+# A hold factory for work that outlives the request that started it: calling it counts
+# the work and returns its release. Bound by the MCP server so a background daemon keeps
+# the SIGTERM drain open and the signer's key copy alive (bug external-taxonomic-iguanodon).
+_WORK_HOLD: ContextVar[Callable[[], Callable[[], None]] | None] = ContextVar(
+    "rebar_opcert_work_hold", default=None
+)
 
 
 def current_binding() -> OpcertBinding | None:
@@ -78,6 +84,20 @@ def bound_signer(binding: OpcertBinding | None, *, push_mode: str | None = "off"
         _BOUND.reset(bound_token)
 
 
+@contextlib.contextmanager
+def tracked_work(hold: Callable[[], Callable[[], None]] | None) -> Iterator[None]:
+    """Make :func:`spawn_context_daemon` count every daemon started in this block.
+
+    ``hold`` is called in the spawning thread and returns the release the daemon calls when
+    it ends. ``None`` leaves daemons uncounted (every non-server caller).
+    """
+    token = _WORK_HOLD.set(hold)
+    try:
+        yield
+    finally:
+        _WORK_HOLD.reset(token)
+
+
 def spawn_context_daemon(
     target: Callable[[], object], *, name: str | None = None
 ) -> threading.Thread:
@@ -99,6 +119,25 @@ def spawn_context_daemon(
     cannot be entered twice, and copying inside the thread would copy the wrong one).
     """
     ctx = contextvars.copy_context()
-    thread = threading.Thread(target=lambda: ctx.run(target), name=name, daemon=True)
-    thread.start()
+    # Count the daemon BEFORE it starts, in the spawning thread: the request that spawned it
+    # may return (dropping its own count) before the daemon runs a single line.
+    hold = _WORK_HOLD.get()
+    release = hold() if hold is not None else _no_release
+
+    def _run() -> None:
+        try:
+            ctx.run(target)
+        finally:
+            release()
+
+    thread = threading.Thread(target=_run, name=name, daemon=True)
+    try:
+        thread.start()
+    except BaseException:
+        release()
+        raise
     return thread
+
+
+def _no_release() -> None:
+    return None

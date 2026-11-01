@@ -555,10 +555,19 @@ reducer already resolved the cross-clone race deterministically by UUID, and
 `status_fork_resolutions` is permanent derived state that survives compaction. Counting it
 would pin a busy store's `fsck` at exit 1 forever with nothing to repair.
 
+`UNCERTIFIED_CLOSE` is report-only too. It names a ticket that is closed with
+`completion_expectation: "required"` but carries no `completion-verifier` attestation. A
+forced close records `force_bypassed` and an administrative disposition records
+`disposition`, so neither is reported; this state means the close's STATUS commit landed and
+its completion signature did not (for example, the process was killed between the two writes).
+Run completion verification on the closed ticket (`rebar verify-completion <id>`, or
+`verify_completion_start` over MCP) to sign it without reopening. It is never counted, so
+historical findings cannot pin a store's `fsck` at exit 1.
+
 `--output json`'s `issue_count` is the COUNTED subset of `issues[]` (the items with
 `counted: true`) and therefore AGREES with the exit code: 0 when the run exits 0, ≥ 1 when
 it exits 1. Every report-only kind — `PUSH_PENDING`, `STATUS_FORK_RESOLVED`,
-`TRACKER_DIRTY_TMP_EVENT`, and any `WARN:` line — is carried in `issues[]` with
+`UNCERTIFIED_CLOSE`, `TRACKER_DIRTY_TMP_EVENT`, and any `WARN:` line — is carried in `issues[]` with
 `counted: false` and never contributes to `issue_count`. A consumer that wants the old
 "every emitted line" total can still compute `len(issues)`. An uninitialized or absent
 tracker is reported as a single counted `not_initialized` issue, so its JSON payload is

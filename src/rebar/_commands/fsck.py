@@ -54,6 +54,7 @@ _STRUCTURED_KINDS = {
     "snapshot_stale_channel",
     "orphan_event",
     "status_fork_resolved",
+    "uncertified_close",
 }
 
 # The dirty-tracker wedge classes (fsck_tracker_health check 4.10). Their lines carry a
@@ -73,7 +74,9 @@ _DIRTY_HEAD_RE = re.compile(r"^(\d+) path\(s\): (.*)$")
 _NEVER_COUNTED_TRACKER_DIRTY_KINDS = frozenset(
     kind.lower() for _key, kind, _blurb, counted in _DIRTY_LINE_SPECS if not counted
 )
-_NEVER_COUNTED_SCAN_KINDS = frozenset({"push_pending", "status_fork_resolved", "warn"})
+_NEVER_COUNTED_SCAN_KINDS = frozenset(
+    {"push_pending", "status_fork_resolved", "uncertified_close", "warn"}
+)
 _NEVER_COUNTED_KINDS = _NEVER_COUNTED_SCAN_KINDS | _NEVER_COUNTED_TRACKER_DIRTY_KINDS
 
 

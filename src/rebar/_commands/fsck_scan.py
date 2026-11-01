@@ -109,17 +109,49 @@ def _check_create_events(
         elif state.get("status") == "error":
             lines.append(f"MISSING_CREATE: {ticket_id} — no CREATE event found")
             issues += 1
-        # Surface a resolved cross-clone STATUS/claim race (audit reliability #1, story
-        # 3003). The reducer records these in derived state; report the most recent one.
-        if state and state.get("status_fork_resolutions"):
-            last = state["status_fork_resolutions"][-1]
-            lines.append(
-                f"STATUS_FORK_RESOLVED: {ticket_id} — concurrent claim/status race resolved "
-                f"(dropped uuid={last.get('dropped_uuid')})"
-            )
-            # Resolved status forks are report-only derived state. The reducer has already
-            # settled them, and ``fsck._NEVER_COUNTED_KINDS`` excludes them from JSON totals.
+        if state:
+            lines += _report_only_lines(ticket_id, state)
     return lines, issues, signed_total, unsigned_total
+
+
+def _report_only_lines(ticket_id: str, state: dict) -> list[str]:
+    """Per-ticket findings that ``fsck._NEVER_COUNTED_KINDS`` excludes from JSON totals."""
+    lines: list[str] = []
+    # Surface a resolved cross-clone STATUS/claim race (audit reliability #1, story
+    # 3003). The reducer records these in derived state; report the most recent one.
+    # Resolved status forks are report-only derived state: the reducer already settled them.
+    if state.get("status_fork_resolutions"):
+        last = state["status_fork_resolutions"][-1]
+        lines.append(
+            f"STATUS_FORK_RESOLVED: {ticket_id} — concurrent claim/status race resolved "
+            f"(dropped uuid={last.get('dropped_uuid')})"
+        )
+    uncertified = _uncertified_close_line(ticket_id, state)
+    if uncertified:
+        lines.append(uncertified)
+    return lines
+
+
+def _uncertified_close_line(ticket_id: str, state: dict) -> str | None:
+    """Report a closed, completion-required ticket that carries no completion certificate.
+
+    A forced close records ``completion_expectation=force_bypassed`` and an administrative
+    disposition records ``disposition``, so ``required`` without a ``completion-verifier``
+    attestation means the signature never landed: on the non-bundled close path the STATUS
+    commit and the signature are separate writes (bug external-taxonomic-iguanodon).
+    Report-only, because historical findings must not pin every store's fsck at exit 1;
+    verifying the closed ticket signs it without reopening.
+    """
+    if state.get("status") != "closed" or state.get("completion_expectation") != "required":
+        return None
+    attestations = state.get("attestations")
+    if isinstance(attestations, dict) and "completion-verifier" in attestations:
+        return None
+    return (
+        f"UNCERTIFIED_CLOSE: {ticket_id} — closed with completion_expectation=required but no "
+        "completion-verifier attestation; run `rebar verify-completion <id>` (MCP: "
+        "verify_completion_start) on the closed ticket to certify it"
+    )
 
 
 def _check_index_lock(tracker: str, no_mutate: bool) -> list[str]:

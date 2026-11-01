@@ -1,7 +1,9 @@
 """MCP health, certified-op instrumentation, and graceful shutdown (ADR 0104).
 
-The in-flight gauge counts only billable certified tools so SIGTERM retirement can
-drain them. Unauthenticated ``/health`` remains outside auth/transport middleware and
+The in-flight gauge counts the billable certified tools, the tools that sign with the
+bound op-cert key, and the background daemons they start, so SIGTERM retirement can
+drain them before the key copy is deleted.
+Unauthenticated ``/health`` remains outside auth/transport middleware and
 therefore also reports a real startup ``initialize`` handshake; HTTP 200 alone is not
 request-path proof. Shutdown grace is a module constant rather than config surface.
 """
@@ -32,6 +34,16 @@ from rebar._mcp_startup_handshake import (
 CERTIFIED_TOOLS = frozenset({"review_plan", "verify_completion", "review_code", "scan_spec"})
 """The certified, long-running LLM tools (``register_llm_tools`` in ``_mcp_llm.py``).
 Only these move the in-flight gauge; ``sign_review`` is excluded (it runs no LLM)."""
+
+SIGNING_TOOLS = frozenset({"transition_ticket", "sign_manifest", "sign_review"})
+"""Non-LLM tools whose body can sign with the bound op-cert key: ``transition_ticket``
+closes with a completion certificate, ``sign_manifest`` signs any op-cert kind, and
+``sign_review`` signs a plan-review certificate. Retirement cut a close off between its
+STATUS commit and its signature, leaving it closed and uncertified like a forced close
+(bug external-taxonomic-iguanodon)."""
+
+DRAINED_TOOLS = CERTIFIED_TOOLS | SIGNING_TOOLS
+"""Every tool the SIGTERM drain waits for and refuses once draining has begun."""
 
 DEFAULT_SHUTDOWN_GRACE_SECONDS = 1200
 """Upper bound (seconds) a retiring process waits for the gauge to drain before it
@@ -98,9 +110,27 @@ class InFlightGauge:
         with self._lock:
             self._value -= 1
 
+    def hold(self) -> Callable[[], None]:
+        """Count already-accepted background work; return its idempotent release.
+
+        Unlike :meth:`track` this never refuses while draining: the request that started
+        the work was already accepted, so the work is waited for, not rejected.
+        """
+        self._increment()
+        released = [False]
+
+        def _release() -> None:
+            with self._lock:
+                if released[0]:
+                    return
+                released[0] = True
+                self._value -= 1
+
+        return _release
+
     @contextlib.contextmanager
     def track(self, tool_name: str) -> Iterator[None]:
-        if tool_name not in CERTIFIED_TOOLS:
+        if tool_name not in DRAINED_TOOLS:
             yield
             return
         with self._lock:
@@ -129,7 +159,8 @@ def _wrap_tool_fn(fn: Callable[..., Any], gauge: InFlightGauge, name: str):
 
 
 def instrument_certified_tools(mcp: Any, gauge: InFlightGauge) -> None:
-    """Replace each certified tool's ``fn`` with a gauge-tracking wrapper.
+    """Replace each drained tool's ``fn`` (:data:`DRAINED_TOOLS`) with a gauge-tracking
+    wrapper.
 
     All four certified tools are sync ``def``; a missing one (a build that did not
     register the LLM tools) is skipped. An already-async CERTIFIED tool here is
@@ -142,7 +173,7 @@ def instrument_certified_tools(mcp: Any, gauge: InFlightGauge) -> None:
     manager = getattr(mcp, "_tool_manager", None)
     if manager is None:
         return
-    for name in CERTIFIED_TOOLS:
+    for name in sorted(DRAINED_TOOLS):
         tool = manager.get_tool(name)
         if tool is None:
             continue
@@ -159,6 +190,19 @@ def instrument_certified_tools(mcp: Any, gauge: InFlightGauge) -> None:
 # FastMCP otherwise runs sync tools on the ASGI loop, making health and initialize wait
 # behind multi-minute calls. AnyIO workers preserve signer ContextVars and apply their
 # bounded thread limiter while leaving the event loop responsive.
+
+
+@contextlib.contextmanager
+def serving_gauge(gauge: InFlightGauge | None) -> Iterator[None]:
+    """Count every daemon spawned while serving against ``gauge`` (``None``: uncounted).
+
+    The transport enters this where it runs requests, so tool calls (AnyIO workers copy
+    the context) and their ``spawn_context_daemon`` children see it.
+    """
+    from rebar._opcert_binding import tracked_work
+
+    with tracked_work(gauge.hold if gauge is not None else None):
+        yield
 
 
 def _thread_offloaded(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -318,6 +362,7 @@ from rebar._mcp_serving import (  # noqa: E402
     make_sigterm_handler,
     run_http_with_grace,
     run_mcp,
+    wait_for_idle,
 )
 
 __all__ = [
@@ -332,4 +377,6 @@ __all__ = [
     "run_mcp",
     "run_startup_handshake",
     "select_probe_host",
+    "serving_gauge",
+    "wait_for_idle",
 ]
