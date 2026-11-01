@@ -536,8 +536,28 @@ def ensure_ac_boxes_checked(
         "Resolve each item before closing, then check the box (edit the description).\n"
         "Items with done-evidence outside the snapshot may be tagged [non-codebase] "
         "to exempt them from this check.\n"
+        f"{_misplaced_tag_note(offenders)}"
         'To override: --force="<reason>"',
         returncode=1,
+    )
+
+
+def _misplaced_tag_note(offenders: list[str]) -> str:
+    """The close-precheck paragraph for unchecked lines whose tag is not at the start of the
+    checkbox text (bug ef13), or ``""`` when there are none. The tag only counts at the start
+    (ADR 0043), so such a line is not exempt; moving the tag is a material plan edit."""
+    from rebar.llm.plan_review.det_operator_attested import misplaced_tag_lines
+
+    misplaced = misplaced_tag_lines(offenders)
+    if not misplaced:
+        return ""
+    items_fmt = "\n".join(f"  {ln}" for ln in misplaced)
+    return (
+        "These items carry a [non-codebase] tag that is not at the start of the checkbox "
+        f"text, so it does not count:\n{items_fmt}\n"
+        "Move the tag to the start of the checkbox text (- [ ] [non-codebase] <criterion>). "
+        "That edit changes the reviewed plan and stales a signed plan-review attestation, so "
+        "run 'rebar review-plan' before closing again.\n"
     )
 
 

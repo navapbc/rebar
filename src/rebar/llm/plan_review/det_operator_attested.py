@@ -178,3 +178,39 @@ def operator_evidence_issues(ac_lines: list[str]) -> list[str]:
             "instead of failing to find code proof."
         )
     return issues
+
+
+# Misplaced-tag lint (bug ef13, ADR-0043). The tag counts ONLY at the start of the checkbox
+# text; anywhere else it fails safe to the codebase bar, and that rule is unchanged. This adds
+# visibility: a line carrying the exact token elsewhere is reported so the author can move it
+# while the move is still cheap (before certification). A mention inside a backtick code span
+# is prose, not a tag. The start-position guard keeps `- [ ] [non-codebase]` with no criterion
+# text yet (which the tag regex rejects for its empty capture) from being called misplaced.
+_TAG_TOKEN_RE = re.compile(r"\[(?:non-codebase|operator-attested)\]", re.IGNORECASE)
+_TAG_AT_START_RE = re.compile(
+    r"^\s*-\s*\[[ xX]?\]\s*\[(?:non-codebase|operator-attested)\]", re.IGNORECASE
+)
+_CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
+
+
+def misplaced_tag_lines(ac_lines: list[str]) -> list[str]:
+    """Return the AC checklist lines (as produced by :func:`ac_item_lines`) that carry the exact
+    tag token somewhere other than the start of the checkbox text, ignoring mentions inside
+    backtick code spans. Every consumer of :data:`_OPERATOR_ATTESTED_TAG_RE` treats such a line
+    as untagged. Deterministic and side-effect-free."""
+    return [
+        line
+        for line in ac_lines
+        if not _TAG_AT_START_RE.match(line) and _TAG_TOKEN_RE.search(_CODE_SPAN_RE.sub(" ", line))
+    ]
+
+
+def misplaced_tag_issues(ac_lines: list[str]) -> list[str]:
+    """Advisory coaching strings (one per misplaced tag) for ``p6_ac_quality``. Never blocks."""
+    return [
+        f"AC item {line.strip()[:100]!r} carries a [non-codebase] tag that is not at the start "
+        "of the checkbox text, so it is treated as untagged and judged by the codebase bar. "
+        "Move the tag to the start of the checkbox text (`- [ ] [non-codebase] <criterion>`), "
+        "or put a mere mention of the tag in backticks."
+        for line in misplaced_tag_lines(ac_lines)
+    ]
