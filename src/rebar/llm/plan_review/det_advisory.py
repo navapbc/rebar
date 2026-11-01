@@ -170,6 +170,10 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     # the RAW plan text (not just checkbox lines) to see the indented continuation line.
     prov_issues = det_measurement_provenance.provenance_issues(ctx.plan_text)
     issues.extend(prov_issues)
+    # Misplaced-tag lint (bug ef13): a tag anywhere but the start of the checkbox text is
+    # treated as untagged; say so at plan time. ADVISORY coaching only (p6 never blocks).
+    misplaced_issues = det_operator_attested.misplaced_tag_issues(items)
+    issues.extend(misplaced_issues)
     # Cross-ticket citation edge-verify lint (story 266e): a `[rebar:<id>]` citation whose
     # cited id is not a VERIFIED upstream prerequisite of P (P.depends_on(C) or C.blocks(P)).
     # ADVISORY coaching only (p6 never blocks); Layer-2 (the LLM finders) owns crediting.
@@ -200,6 +204,7 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
         "verify_lint_abstained": lint_abstained,
         "operator_attested_gaps": len(oa_issues),
         "provenance_gaps": len(prov_issues),
+        "misplaced_tag_gaps": len(misplaced_issues),
         "citation_gaps": len(cit_issues),
     }
     if not issues:
