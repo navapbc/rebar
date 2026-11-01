@@ -26,18 +26,29 @@ _OUTPUT_SCHEMA = "completion_verdict"
 # points callers at the evidence path defined by the criterion kind: repository proof for the
 # codebase-verifiable default, or a concrete ticket attestation for an exactly tagged
 # non-codebase criterion. Kept deliberately generic and focused on completing or documenting
-# the work rather than bypassing the gate.
+# the work rather than bypassing the gate. The tag form and provenance line it spells out are
+# the ones the close precheck enforces (txn.ensure_attested_items_valid), and it says that
+# adding them stales the plan review: the tag is reviewed plan material by design (tickets
+# f680 and 2f56), so the guidance, not the fingerprint, is what bug 81f2 fixed.
 COMPLETION_REMEDIATION_GUIDANCE = (
     "How to resolve the unmet criteria: use the evidence path that matches each one. For "
     "codebase-verifiable work, complete any unfinished work and make its proof discoverable "
-    "in the repository. For evidence that inherently lives outside the repository, mark the "
-    "criterion with the exact `[non-codebase]` tag and add a comment to this ticket that "
-    "documents the concrete artifacts that meet it (commands and their output, links, or the "
-    "reasoning that ties the evidence to the criterion). The completion verifier reads this "
-    "ticket's comments, so properly tagged evidence you record there is taken into account on "
-    "the next verification. An untagged external criterion cannot be satisfied by a ticket "
-    "comment alone. Then re-verify. Note that a finding reporting a ticket record as absent "
-    "means it was NOT VISIBLE IN THE TICKET SNAPSHOT THE VERIFIER READ — that snapshot is "
+    "in the repository. For evidence that inherently lives outside the repository, the "
+    "criterion needs the exact `[non-codebase]` tag at the start of the checkbox text, "
+    "`- [ ] [non-codebase] <criterion>`, and an indented continuation line directly under it, "
+    "`provenance: environment=<v>; principal=<v>; "
+    "privilege_posture=<production-equivalent|broader|narrower>; "
+    "instrument=<live-call|simulation|static-analysis> — <justification>`. If the reviewed "
+    "plan did not already carry both, add them in one description edit: that edit changes the "
+    "reviewed plan and stales the plan-review attestation, so run `rebar review-plan` on this "
+    "ticket before closing again. Then add a comment to this ticket that documents the "
+    "concrete artifacts that meet the criterion (commands and their output, links, or the "
+    "reasoning that ties the evidence to the criterion); comments are non-material, so a "
+    "criterion tagged before review needs only the comment. The completion verifier reads "
+    "this ticket's comments, so properly tagged evidence you record there is taken into "
+    "account on the next verification. An untagged external criterion cannot be satisfied by "
+    "a ticket comment alone. Then re-verify. Note that a finding reporting a ticket record as "
+    "absent means it was NOT VISIBLE IN THE TICKET SNAPSHOT THE VERIFIER READ — that snapshot is "
     "pinned when the run starts, so a record written after the pin, or not yet committed to "
     "the store, reads as missing even though it exists; re-verify after the write lands "
     "rather than re-recording evidence you already wrote."
