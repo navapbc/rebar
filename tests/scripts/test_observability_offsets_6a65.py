@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -101,7 +101,7 @@ def _environment(tmp_path: Path, target: str) -> tuple[dict[str, str], dict[str,
     repl_log = tmp_path / "replication.log"
     repl_log.write_text("[ERROR]\n" * 7)
 
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -134,8 +134,8 @@ def _values(log: Path, target: str) -> list[int]:
 def _run_twice(
     env: dict[str, str],
 ) -> tuple[subprocess.CompletedProcess, subprocess.CompletedProcess]:
-    first = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
-    second = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    first = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
     return first, second
 
 
@@ -145,9 +145,9 @@ def test_failed_publish_retains_offset_and_retries_accumulated_delta(
 ) -> None:
     env, paths = _environment(tmp_path, target)
 
-    first = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    first = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
     offset_after_failure = paths[offset_variable].read_bytes()
-    second = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
     assert first.returncode == second.returncode == 0
     assert paths["failed"].exists()
@@ -168,9 +168,9 @@ def test_shrunken_journal_holds_the_offset_across_a_failed_publish(tmp_path: Pat
     # Cursor at the journal's end: nothing new has arrived, so the delta is a genuine 0.
     paths["VOTER_OFFSET_FILE"].write_bytes(b"10 42\n")
 
-    first = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    first = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
     offset_after_failure = paths["VOTER_OFFSET_FILE"].read_bytes()
-    second = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
     assert first.returncode == second.returncode == 0
     assert (_total(offset_after_failure), _total(paths["VOTER_OFFSET_FILE"].read_bytes())) == (

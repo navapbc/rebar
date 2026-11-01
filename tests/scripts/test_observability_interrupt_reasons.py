@@ -16,7 +16,7 @@ import textwrap
 from pathlib import Path
 
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -89,7 +89,7 @@ def _environment(tmp_path: Path, journal_lines: list[str]) -> tuple[dict[str, st
     # absent file, is a cold start. REPL_OFFSET_FILE greps a log file and keeps the bare form.
     for name in _OFFSET_VARIABLES:
         (offsets / name.lower()).write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -116,7 +116,7 @@ def _values(log: Path, metric: str) -> list[int]:
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    return run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
 
 def test_each_reason_is_counted_into_its_own_metric(tmp_path: Path) -> None:

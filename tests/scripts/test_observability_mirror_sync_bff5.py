@@ -15,7 +15,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _GERRIT_SHA = "a" * 40
@@ -83,7 +83,7 @@ def _environment(
     if repl_log_lines is not None:
         repl_log.write_text(repl_log_lines)
 
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -106,7 +106,7 @@ def _values(log: Path, metric: str) -> list[int]:
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
     assert result.returncode == 0
     return result
 

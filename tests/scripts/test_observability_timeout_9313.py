@@ -37,6 +37,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _observability_harness import observability_env, run_observability
 
 pytestmark = pytest.mark.unit
 
@@ -137,19 +138,21 @@ def probe(tmp_path: Path):
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
-    import os
 
-    env = {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "AWS_LOG": str(aws_log),
-        "FIND_LOG": str(find_log),
-        "GRANT_LOG": str(grant_log),
-        # No real filesystem stands behind $DOCKER_ROOT here, so the census's cross-device
-        # check has nothing to stat; the dedicated tests below cover it.
-        "DOCKER_DU_OVERLAY2_DEVCHECK_SKIP": "1",
-        "REPL_LOG": str(tmp_path / "replication.log"),
-        **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
-    }
+    env = observability_env(tmp_path)
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "AWS_LOG": str(aws_log),
+            "FIND_LOG": str(find_log),
+            "GRANT_LOG": str(grant_log),
+            # No real filesystem stands behind $DOCKER_ROOT here, so the census's cross-device
+            # check has nothing to stat; the dedicated tests below cover it.
+            "DOCKER_DU_OVERLAY2_DEVCHECK_SKIP": "1",
+            "REPL_LOG": str(tmp_path / "replication.log"),
+            **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
+        }
+    )
     for name in _OFFSET_VARIABLES:
         (offsets / name.lower()).write_text("0\n")
     (tmp_path / "replication.log").write_text("")
@@ -158,13 +161,12 @@ def probe(tmp_path: Path):
         run_env = dict(env)
         if extra:
             run_env.update(extra)
-        result = subprocess.run(
+        result = run_observability(
             ["bash", str(SCRIPT), *(args or [])],
             env=run_env,
             capture_output=True,
             text=True,
             timeout=300,
-            check=False,
         )
         return result
 
@@ -485,30 +487,30 @@ def test_clamp_hands_an_exhausted_budget_to_the_expensive_call(tmp_path: Path) -
     )
     _stub(bin_dir, "du", "printf '1024\\t%s\\n' \"${@: -1}\"; exit 0")
 
-    import os
-
     offsets = tmp_path / "offsets"
     offsets.mkdir()
-    env = {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "GRANT_LOG": str(grants),
-        "DOCKER_ROOT": "/var/lib/docker",
-        "REPL_LOG": str(tmp_path / "missing.log"),
-        # No discretionary budget at all, so every clamped call must get the 1 s floor.
-        "PROBE_DEADLINE_SEC": "10",
-        "PROBE_TAIL_RESERVE_SEC": "10",
-        **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
-    }
+    env = observability_env(tmp_path)
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "GRANT_LOG": str(grants),
+            "DOCKER_ROOT": "/var/lib/docker",
+            "REPL_LOG": str(tmp_path / "missing.log"),
+            # No discretionary budget at all, so every clamped call must get the 1 s floor.
+            "PROBE_DEADLINE_SEC": "10",
+            "PROBE_TAIL_RESERVE_SEC": "10",
+            **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
+        }
+    )
     for name in _OFFSET_VARIABLES:
         (offsets / name.lower()).write_text("0\n")
 
-    result = subprocess.run(
+    result = run_observability(
         ["bash", str(SCRIPT)],
         env=env,
         capture_output=True,
         text=True,
         timeout=120,
-        check=False,
     )
     assert result.returncode == 0, result.stderr
 
@@ -557,22 +559,23 @@ def test_budget_is_granted_in_full_when_it_is_available(tmp_path: Path) -> None:
     )
     _stub(bin_dir, "du", "printf '1024\\t%s\\n' \"${@: -1}\"; exit 0")
 
-    import os
-
     offsets = tmp_path / "offsets"
     offsets.mkdir()
-    env = {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "GRANT_LOG": str(grants),
-        "DOCKER_ROOT": "/var/lib/docker",
-        "REPL_LOG": str(tmp_path / "missing.log"),
-        **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
-    }
+    env = observability_env(tmp_path)
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "GRANT_LOG": str(grants),
+            "DOCKER_ROOT": "/var/lib/docker",
+            "REPL_LOG": str(tmp_path / "missing.log"),
+            **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
+        }
+    )
     for name in _OFFSET_VARIABLES:
         (offsets / name.lower()).write_text("0\n")
 
-    result = subprocess.run(
-        ["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=120, check=False
+    result = run_observability(
+        ["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=120
     )
     assert result.returncode == 0, result.stderr
 
@@ -603,20 +606,21 @@ def _hook_env(tmp_path: Path, *, imds_hangs: bool, cached_region: str | None):
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
     _stub(bin_dir, "logger", 'printf \'%s\\n\' "$*" >> "$LOGGER_LOG"; exit 0')
 
-    import os
-
     region_cache = tmp_path / "probe-region"
     if cached_region is not None:
         region_cache.write_text(cached_region + "\n")
 
-    env = {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "AWS_LOG": str(aws_log),
-        "LOGGER_LOG": str(log_log),
-        "CURL_LOG": str(curl_log),
-        "REGION_CACHE": str(region_cache),
-        "SERVICE_RESULT": "timeout",
-    }
+    env = observability_env(tmp_path)
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "AWS_LOG": str(aws_log),
+            "LOGGER_LOG": str(log_log),
+            "CURL_LOG": str(curl_log),
+            "REGION_CACHE": str(region_cache),
+            "SERVICE_RESULT": "timeout",
+        }
+    )
     return env, aws_log, log_log, curl_log
 
 
@@ -630,13 +634,12 @@ def test_truncation_hook_needs_no_network_when_the_region_is_cached(tmp_path: Pa
     exists to report is worth nothing.
     """
     env, aws_log, _, curl_log = _hook_env(tmp_path, imds_hangs=True, cached_region="us-east-1")
-    result = subprocess.run(
+    result = run_observability(
         ["bash", str(SCRIPT), "--report-exit"],
         env=env,
         capture_output=True,
         text=True,
         timeout=60,
-        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert _values(aws_log, "probe_truncated") == ["1"], (
@@ -654,13 +657,12 @@ def test_truncation_hook_reports_to_journald_when_no_region_can_be_resolved(
 ) -> None:
     """Degraded is not silent, and an empty --region is worse than an honest journald line."""
     env, aws_log, log_log, _ = _hook_env(tmp_path, imds_hangs=True, cached_region=None)
-    result = subprocess.run(
+    result = run_observability(
         ["bash", str(SCRIPT), "--report-exit"],
         env=env,
         capture_output=True,
         text=True,
         timeout=60,
-        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "probe_truncated=1" in log_log.read_text(), (
@@ -676,13 +678,12 @@ def test_truncation_hook_does_not_rerun_the_prologue(tmp_path: Path) -> None:
     """ExecStopPost runs on EVERY stop, including successful ones."""
     env, aws_log, _, curl_log = _hook_env(tmp_path, imds_hangs=False, cached_region="us-east-1")
     env["SERVICE_RESULT"] = "success"
-    result = subprocess.run(
+    result = run_observability(
         ["bash", str(SCRIPT), "--report-exit"],
         env=env,
         capture_output=True,
         text=True,
         timeout=60,
-        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert _values(aws_log, "probe_truncated") == ["0"]
@@ -746,31 +747,31 @@ def test_main_probe_uses_cached_metadata_when_imds_fails(tmp_path: Path) -> None
     _stub(bin_dir, "du", "printf '1024\\t%s\\n' \"${@: -1}\"; exit 0")
     _stub(bin_dir, "free", 'printf "        total used free\\nMem:     1000 400 600\\n"; exit 0')
 
-    import os
-
     offsets = tmp_path / "offsets"
     offsets.mkdir()
-    env = {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "AWS_LOG": str(aws_log),
-        "LOGGER_LOG": str(logger_log),
-        "REGION_CACHE": str(region_cache),
-        "INSTANCE_ID_CACHE": str(instance_cache),
-        "DOCKER_DU_OVERLAY2_DEVCHECK_SKIP": "1",
-        "REPL_LOG": str(tmp_path / "replication.log"),
-        **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
-    }
+    env = observability_env(tmp_path)
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "AWS_LOG": str(aws_log),
+            "LOGGER_LOG": str(logger_log),
+            "REGION_CACHE": str(region_cache),
+            "INSTANCE_ID_CACHE": str(instance_cache),
+            "DOCKER_DU_OVERLAY2_DEVCHECK_SKIP": "1",
+            "REPL_LOG": str(tmp_path / "replication.log"),
+            **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
+        }
+    )
     for name in _OFFSET_VARIABLES:
         (offsets / name.lower()).write_text("0\n")
     (tmp_path / "replication.log").write_text("")
 
-    result = subprocess.run(
+    result = run_observability(
         ["bash", str(SCRIPT)],
         env=env,
         capture_output=True,
         text=True,
         timeout=120,
-        check=False,
     )
     assert result.returncode == 0, result.stderr
     published = aws_log.read_text()
@@ -816,30 +817,30 @@ def test_main_probe_refreshes_cached_metadata_from_imds(tmp_path: Path) -> None:
     _stub(bin_dir, "du", "printf '1024\\t%s\\n' \"${@: -1}\"; exit 0")
     _stub(bin_dir, "free", 'printf "        total used free\\nMem:     1000 400 600\\n"; exit 0')
 
-    import os
-
     offsets = tmp_path / "offsets"
     offsets.mkdir()
-    env = {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "AWS_LOG": str(aws_log),
-        "REGION_CACHE": str(region_cache),
-        "INSTANCE_ID_CACHE": str(instance_cache),
-        "DOCKER_DU_OVERLAY2_DEVCHECK_SKIP": "1",
-        "REPL_LOG": str(tmp_path / "replication.log"),
-        **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
-    }
+    env = observability_env(tmp_path)
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "AWS_LOG": str(aws_log),
+            "REGION_CACHE": str(region_cache),
+            "INSTANCE_ID_CACHE": str(instance_cache),
+            "DOCKER_DU_OVERLAY2_DEVCHECK_SKIP": "1",
+            "REPL_LOG": str(tmp_path / "replication.log"),
+            **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
+        }
+    )
     for name in _OFFSET_VARIABLES:
         (offsets / name.lower()).write_text("0\n")
     (tmp_path / "replication.log").write_text("")
 
-    result = subprocess.run(
+    result = run_observability(
         ["bash", str(SCRIPT)],
         env=env,
         capture_output=True,
         text=True,
         timeout=120,
-        check=False,
     )
 
     assert result.returncode == 0, result.stderr

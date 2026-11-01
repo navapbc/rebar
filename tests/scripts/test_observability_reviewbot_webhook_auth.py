@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import textwrap
 from pathlib import Path
 
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -56,7 +55,7 @@ def test_reviewbot_webhook_auth_rejections_publish_from_health_payload(tmp_path:
     _stub(bin_dir, "timeout", 'exec "$@"')
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
 
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -69,8 +68,8 @@ def test_reviewbot_webhook_auth_rejections_publish_from_health_payload(tmp_path:
         }
     )
 
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
-    repeated = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    repeated = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
     assert (result.returncode, repeated.returncode) == (0, 0)
     published = [
@@ -129,7 +128,7 @@ def test_reviewbot_webhook_auth_rejections_survive_process_counter_reset(tmp_pat
 
     offset = tmp_path / "reviewbot-webhook-auth-offset"
     offset.write_text("17\n")
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -142,7 +141,7 @@ def test_reviewbot_webhook_auth_rejections_survive_process_counter_reset(tmp_pat
         }
     )
 
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
     assert result.returncode == 0
     published = [

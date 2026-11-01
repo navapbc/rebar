@@ -8,13 +8,12 @@ bare-total behavior.
 
 from __future__ import annotations
 
-import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -94,7 +93,7 @@ def _environment(tmp_path: Path, seeded_offset: int) -> tuple[dict[str, str], di
     base_file = tmp_path / "journal-base"
     base_file.write_text("500\n")
 
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -125,7 +124,7 @@ def test_shrinking_journal_publishes_zero_not_the_remaining_total(
     """Do not re-announce surviving markers after a vacuum."""
     env, paths = _environment(tmp_path, seeded_offset=99)
 
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
     assert result.returncode == 0
     published = _values(paths["aws_log"], target)
@@ -143,11 +142,11 @@ def test_markers_after_a_rotation_still_publish(tmp_path: Path) -> None:
     """Count new markers after reseeding."""
     env, paths = _environment(tmp_path, seeded_offset=99)
 
-    first = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    first = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
     # Add one new marker after reseeding.
     journal = Path(env["JOURNAL_FILE"])
     journal.write_text(journal.read_text() + 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 2}\n')
-    second = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
     assert (first.returncode, second.returncode) == (0, 0)
     # The lost-cursor interval is silent; the next counts only the new marker.
