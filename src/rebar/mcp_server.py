@@ -558,16 +558,15 @@ def main() -> None:
 
     install_stderr_handler("rebar")
 
-    # Boot store sweep + the no-store warning; see _mcp_health.run_startup_store_sweep.
-    from rebar._mcp_health import run_startup_store_sweep
-
-    run_startup_store_sweep()
-
     # Load config once; a malformed config (ConfigError) may propagate and fail startup
     # (fail-closed). The transport selection drives both build_server and run().
     cfg = rebar.config.compose_config()
     server = build_server(cfg)
-    from rebar._mcp_health import run_mcp
+    from rebar._mcp_health import _GAUGE_ATTR, run_mcp, start_startup_store_sweep
+
+    # Boot store sweep + the no-store warning, off the pre-listen path and held on the
+    # drain gauge (bug short-elderly-cock); see _mcp_health.start_startup_store_sweep.
+    start_startup_store_sweep(getattr(server, _GAUGE_ATTR, None))
 
     # Bind a valid box signer inside the serving thread; unprovisioned runs
     # retain env/genesis signing.
