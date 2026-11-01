@@ -148,6 +148,10 @@ EXEMPT = {
     "evals/plan-review-gate/runs/e6_selfconsistency_inputs.jsonl",
     "evals/plan-review-gate/runs/exp2_agentic.jsonl",
     "evals/plan-review-gate/runs/operator_attested_ac_corpus.jsonl",
+    # Cached LLM digests of historical ticket descriptions, several of which discuss the
+    # retired flag. The duplicate-retrieval benchmark re-derives against these exact bytes,
+    # so rewriting them would break its reproducibility rather than fix a caller.
+    "evals/similar-tickets/digests.json",
     # This mined fixture records review-sidecar plan text describing the 24f7
     # rename. Changing the old flag in that frozen input corrupts its score.
     "evals/plan-review-gate/fixtures/eval_specs/plan-review-T6.eval.yaml",

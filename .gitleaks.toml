@@ -65,3 +65,19 @@ regexTarget = "match"
 regexes = [
   '''-----BEGIN[ A-Z]*PRIVATE KEY-----(?:\\\\n|\\n|\n)x(?:\\\\n|\\n|\n)-----END[ A-Z]*PRIVATE KEY-----''',
 ]
+
+[[allowlists]]
+description = """
+The `key_entities` field of the similar-ticket digest corpus
+(evals/similar-tickets/digests.json). It is one of the four model-authored digest
+fields (DIGEST_FIELDS in evals/similar-tickets/measure.py) and holds a prose list of
+symbols, file paths and ticket aliases — e.g. "pre-heal-a118-20260710T005736Z" or
+"pycontribs/jira". generic-api-key fires only because the identifier happens to begin
+with "key", and the detector whole-file-scans a changed file, so every future edit to
+the corpus would force-BLOCK. Scoped to that exact identifier, never a path exclusion:
+a real credential under any credential-named identifier still trips.
+"""
+regexTarget = "match"
+regexes = [
+  '''key_entities"\s*:\s*"[^"]*''',
+]
