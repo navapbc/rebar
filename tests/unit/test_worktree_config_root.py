@@ -122,6 +122,107 @@ def test_worktree_write_uses_worktree_sync_push(
     assert pushes == []
 
 
+def _write_main(main: Path, *, branch: str = "mainbranch", remote: str = "mainremote") -> None:
+    """Main config: the store's branch/remote plus a key the worktree's code does not know."""
+    (main / "rebar.toml").write_text(
+        f'[tracker]\ndir = "custom-store"\nbranch = "{branch}"\n\n'
+        f'[sync]\npush = "off"\nremote = "{remote}"\n\n'
+        "[llm]\nmain_only_unknown_key = 1\n"
+    )
+    config.reset_config_cache()
+
+
+def _push_always_in(worktree: Path) -> None:
+    (worktree / "rebar.toml").write_text('[sync]\npush = "always"\n')
+    config.reset_config_cache()
+
+
+def _unknown_key_warnings(messages: list[str]) -> list[str]:
+    return [m for m in messages if "unknown key" in m]
+
+
+def test_sync_read_takes_store_branch_remote_without_main_config_warnings(
+    checkouts: tuple[Path, Path], config_warnings: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rebar._store import sync
+
+    main, _worktree = checkouts
+    _write_main(main)
+    fetched: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        sync,
+        "_coordinated_fetch",
+        lambda _tracker, remote, refspec: fetched.append((remote, refspec)) is not None,
+    )
+
+    sync.reconverge(str(main / "custom-store"))
+
+    assert fetched == [("mainremote", "+refs/heads/mainbranch:refs/remotes/mainremote/mainbranch")]
+    assert not _unknown_key_warnings(config_warnings), config_warnings
+
+
+def test_write_takes_store_destination_without_main_config_warnings(
+    checkouts: tuple[Path, Path], config_warnings: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main, worktree = checkouts
+    _write_main(main)
+    _push_always_in(worktree)
+    pushes: list[tuple[str, ...]] = []
+
+    def fake_git(_base: str, *args: str, **_kwargs: object) -> subprocess.CompletedProcess:
+        if args and args[0] == "push":
+            pushes.append(args)
+        out = "file:///remote\n" if args[:2] == ("remote", "get-url") else ""
+        return subprocess.CompletedProcess(args, 0, out, "")
+
+    monkeypatch.setattr(push, "_git", fake_git)
+
+    push.push_tickets_branch(str(main / "custom-store"), strict=True)
+
+    assert pushes == [("push", "mainremote", "HEAD:mainbranch")]
+    assert not _unknown_key_warnings(config_warnings), config_warnings
+
+
+def test_invalid_store_branch_is_still_refused(
+    checkouts: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main, worktree = checkouts
+    _write_main(main, branch="bad..branch")
+    _push_always_in(worktree)
+    monkeypatch.setattr(
+        push,
+        "_git",
+        lambda _base, *args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, "2\n" if args[:2] == ("rev-list", "--count") else "", ""
+        ),
+    )
+
+    with pytest.raises(PushDeliveryError) as caught:
+        push.push_tickets_branch(str(main / "custom-store"), strict=True)
+
+    assert caught.value.reason == "invalid-destination"
+
+
+def test_invalid_store_remote_is_still_refused(checkouts: tuple[Path, Path]) -> None:
+    main, _worktree = checkouts
+    _write_main(main, remote="-bad")
+
+    with pytest.raises(config.ConfigError):
+        config.store_tickets_remote(main)
+
+
+def test_store_remote_env_override_wins(
+    checkouts: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main, _worktree = checkouts
+    _write_main(main)
+    monkeypatch.setenv("REBAR_SYNC_REMOTE", "envremote")
+    config.reset_config_cache()
+
+    assert config.store_tickets_remote(main) == "envremote"
+    assert config.store_tickets_branch(main) == "mainbranch"
+
+
 def test_peer_tracker_dir_defaults_without_config(tmp_path: Path) -> None:
     root = tmp_path.resolve()
     _git(root, "init", "-q")

@@ -114,10 +114,10 @@ def _require_s3_helper_for_configured_remote(base_path: str) -> None:
 
     Skip this best-effort check when config or git is unavailable.
     """
-    from rebar.config import ConfigError, tickets_remote
+    from rebar.config import ConfigError, store_tickets_remote
 
     try:
-        remote = tickets_remote(os.path.dirname(base_path))
+        remote = store_tickets_remote(os.path.dirname(base_path))
     except ConfigError:
         return
     try:
@@ -187,11 +187,11 @@ def push_tickets_branch(
     # Resolve the synchronous destination from the main repo; malformed config
     # skips delivery rather than guessing a branch or remote. The destination is the
     # shared store's, so it stays on the store's parent, where the async child also runs.
-    from rebar.config import ConfigError, tickets_branch, tickets_remote
+    from rebar.config import ConfigError, store_tickets_branch, store_tickets_remote
 
     try:
-        branch = tickets_branch(os.path.dirname(base_path))
-        remote = tickets_remote(os.path.dirname(base_path))
+        branch = store_tickets_branch(os.path.dirname(base_path))
+        remote = store_tickets_remote(os.path.dirname(base_path))
     except ConfigError as exc:
         _raise_if_strict(strict, "invalid-destination", str(exc), base_path, remote_ref)
         return

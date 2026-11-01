@@ -62,8 +62,8 @@ def _arm(monkeypatch: pytest.MonkeyPatch, tracker: Path) -> None:
     # A real git-dir location so push_state's durable marker can be written and read.
     (tracker / ".git").mkdir(exist_ok=True)
     monkeypatch.setattr(push, "_push_mode", lambda _root=None: "always")
-    monkeypatch.setattr(config, "tickets_branch", lambda _root=None: "tickets")
-    monkeypatch.setattr(config, "tickets_remote", lambda _root=None: "origin")
+    monkeypatch.setattr(config, "store_tickets_branch", lambda _root=None: "tickets")
+    monkeypatch.setattr(config, "store_tickets_remote", lambda _root=None: "origin")
     monkeypatch.setattr(lock, "write_lock", _open_lock)
     monkeypatch.setattr(lock, "check_no_rebase_in_progress", lambda _base: None)
     monkeypatch.setattr(

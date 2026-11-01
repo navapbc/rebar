@@ -644,8 +644,8 @@ def test_push_invokes_heal_once_then_converges(tmp_path: Path, monkeypatch) -> N
     tracker = tmp_path / ".tickets-tracker"
     tracker.mkdir()
     monkeypatch.setattr(push, "_push_mode", lambda _root=None: "always")
-    monkeypatch.setattr(config, "tickets_branch", lambda _root=None: "tickets")
-    monkeypatch.setattr(config, "tickets_remote", lambda _root=None: "origin")
+    monkeypatch.setattr(config, "store_tickets_branch", lambda _root=None: "tickets")
+    monkeypatch.setattr(config, "store_tickets_remote", lambda _root=None: "origin")
 
     state = {"pushes": 0, "heals": 0}
 

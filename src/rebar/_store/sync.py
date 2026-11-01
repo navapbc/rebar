@@ -209,15 +209,16 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
         return
     tracker = _lock.canonical_tracker(tracker)
 
-    # Resolve store branch and remote from the tracker's parent; malformed
-    # config skips this best-effort sync.
-    from rebar.config import ConfigError, tickets_branch, tickets_remote
+    # Resolve store branch and remote from the tracker's parent, reading only those
+    # 2 keys so the rest of that checkout's config is not reported against a
+    # linked-worktree caller; malformed values skip this best-effort sync.
+    from rebar.config import ConfigError, store_tickets_branch, store_tickets_remote
 
     try:
         # repo-root-ok: branch/remote of the STORE's own git repo (git -C tracker), not code config
-        branch = tickets_branch(os.path.dirname(str(tracker)))
+        branch = store_tickets_branch(os.path.dirname(str(tracker)))
         # repo-root-ok: branch/remote of the STORE's own git repo (git -C tracker), not code config
-        remote_name = tickets_remote(os.path.dirname(str(tracker)))
+        remote_name = store_tickets_remote(os.path.dirname(str(tracker)))
     except ConfigError:
         return
 
