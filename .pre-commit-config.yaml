@@ -28,10 +28,12 @@ repos:
       - id: check-toml
       - id: check-merge-conflict
       - id: check-added-large-files
-        # uv.lock and .test_durations are committed, machine-generated files (~875 KB,
-        # ticket ce5d; the pytest-split profile, story e873); exclude them rather than
-        # raise the global cap for human-authored files.
-        exclude: ^(uv\.lock|\.test_durations)$
+        # uv.lock, .test_durations and the similar-ticket digest cache are committed,
+        # machine-generated files (~875 KB, ticket ce5d; the pytest-split profile, story
+        # e873; the 630 cached LLM digests that make the retrieval benchmark reproducible
+        # without model access, story c670); exclude them rather than raise the global cap
+        # for human-authored files.
+        exclude: ^(uv\.lock|\.test_durations|evals/similar-tickets/digests\.json)$
       # Fail a commit made directly on main/master AT COMMIT TIME, so the repo's
       # "land through Gerrit, never commit to main" rule (enforced server-side by the
       # GitHub ruleset + Gerrit gates) also fails fast locally instead of only at push.
