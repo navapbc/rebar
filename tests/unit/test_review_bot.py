@@ -13,6 +13,7 @@ import dataclasses
 import datetime
 import json
 import logging
+import os
 import pathlib
 import shutil
 import subprocess
@@ -2110,6 +2111,10 @@ def test_force_exit_deadline_stays_within_the_stop_grace_band():
     )
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="SIGKILL and the fcntl leg of the store write lock are POSIX-only",
+)
 def test_sigkill_during_a_store_write_orphans_the_mkdir_lock(tmp_path):
     """Show that SIGKILL can orphan the mkdir leg of the write lock.
 

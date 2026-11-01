@@ -417,6 +417,16 @@ def _in_guarded_tier(item: pytest.Item) -> bool:
 
 _REAL_SOCKET_CONNECT = socket.socket.connect
 
+# Code objects of the stdlib's in-process socketpair builders. On Windows (no AF_UNIX
+# socketpair) ``socket.socketpair`` is ``_fallback_socketpair`` (3.12+) or a same-shaped
+# ``socketpair`` (3.11); both connect an AF_INET loopback pair to a listener they just
+# created. Elsewhere ``socket.socketpair`` never calls connect, so listing it allows nothing.
+_LOCAL_SOCKETPAIR_CODES = frozenset(
+    builder.__code__
+    for builder in (getattr(socket, "_fallback_socketpair", None), socket.socketpair)
+    if hasattr(builder, "__code__")
+)
+
 
 def _guard_socket_connect(self: socket.socket, *args: object, **kwargs: object) -> object:
     """Block real network (AF_INET/AF_INET6); allow local IPC (e.g. AF_UNIX).
@@ -425,8 +435,16 @@ def _guard_socket_connect(self: socket.socket, *args: object, **kwargs: object) 
     3.14 — reaches its server process over an ``AF_UNIX`` socket, which is local IPC and
     never touches the network. Blocking every address family broke that (and any other
     ``AF_UNIX`` use), so the guard is scoped to the internet families only.
+
+    The stdlib socketpair fallback is local IPC too: on Windows every asyncio event loop
+    builds its self-pipe from it, so blocking it failed ``asyncio.run`` before any test
+    code ran. Only a connect made directly by that stdlib function passes; any other
+    AF_INET/AF_INET6 connect, loopback included, is still refused.
     """
-    if self.family in (socket.AF_INET, socket.AF_INET6):
+    if (
+        self.family in (socket.AF_INET, socket.AF_INET6)
+        and sys._getframe(1).f_code not in _LOCAL_SOCKETPAIR_CODES
+    ):
         raise RuntimeError(
             "Network access is forbidden in unit/scripts tests. "
             "Mock the network call (e.g. unittest.mock.patch('urllib.request.urlopen')) "
