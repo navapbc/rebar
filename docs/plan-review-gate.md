@@ -190,7 +190,9 @@ priority = validity × impact                                ∈ [0, 1]
 ```
 
 Decision rules: the only veto is `cited_reference_accurate == "no"` (fires only
-when a finding cites a specific code reference) → **dropped**; `validity < 0.5` →
+when the finding's OWN evidence cites a specific code reference and the verifier refutes
+it; a finding that correctly reports a wrong citation in the plan is not vetoed) →
+**dropped**; `validity < 0.5` →
 **dropped**; else **block** iff the criterion has opted into blocking *and*
 `priority ≥ block_threshold` (a criterion left at its `0.95` default ⇒ near-certain
 *and* high-impact); else **advisory**. Three dogfood-data calibrations have run (stories
