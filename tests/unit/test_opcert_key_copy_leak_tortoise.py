@@ -26,7 +26,7 @@ pytestmark = pytest.mark.unit
 #: The modules that composed signers without cleaning them up before the fix.
 _SIGNER_MODULES = (
     "tests/unit/test_opcert_service.py",
-    "tests/unit/test_opcert_service_integrity_heldout.py",
+    "tests/unit/test_opcert_service_integrity.py",
 )
 
 

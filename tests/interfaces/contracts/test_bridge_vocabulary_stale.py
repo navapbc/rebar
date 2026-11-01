@@ -32,9 +32,9 @@ _WHOLE_FILE_ALLOWLIST = {
     ".test_durations",
     "CHANGELOG.md",
     "docs/release-notes.md",
-    "tests/interfaces/contracts/test_bridge_vocabulary_stale_heldout.py",
+    "tests/interfaces/contracts/test_bridge_vocabulary_stale.py",
     "tests/interfaces/facades/test_bridge_vocabulary.py",
-    "tests/interfaces/facades/test_bridge_vocabulary_e2e_heldout.py",
+    "tests/interfaces/facades/test_bridge_vocabulary_e2e.py",
     "tests/interfaces/facades/test_bridge_status.py",
     "tests/unit/test_identity_ac7_bff8.py",
 }
