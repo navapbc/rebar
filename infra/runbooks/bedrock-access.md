@@ -137,6 +137,26 @@ If this *succeeds*, the scope is too broad — the policy is meant to permit `an
 your request with the ID or ARN of an inference profile.` The shipped default is
 `rebar.llm.config.DEFAULT_BEDROCK_MODEL_ID`.
 
+### The model-id trap set
+
+Recorded once so it is not rediscovered (from
+[ADR 0059](../../docs/adr/0059-llm-provider-seam-and-support-tiers.md) §8):
+
+- Plain foundation-model ids are refused on-demand — use an inference profile.
+- `list-foundation-models` does **not** list inference profiles. Use
+  `aws bedrock list-inference-profiles`.
+- `global.` profiles are a valid measured form — **do not pin `us.` in IAM.**
+- **Take every new id VERBATIM from `aws bedrock list-inference-profiles`.** Version
+  suffixes are **not uniform across models**: unversioned haiku is invalid on Bedrock
+  (`ValidationException: The provided model identifier is invalid`), while the canonical
+  id an operator pastes from the AWS console carries the `…-v1:0` suffix. That colon in
+  the version suffix once broke provider qualification, when the "already
+  provider-qualified" test was `":" in model` and a configured `provider="bedrock"` was
+  silently dropped.
+- `temperature` is **fatal** on some models — see the next section.
+
+`.github/llm-providers/bedrock.toml` encodes this verbatim-id rule.
+
 ## Checking prompt caching actually works
 
 Caching is **model-dependent and fails silently** — an ineffective cache reports `cache_read=0` and

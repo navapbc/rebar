@@ -28,34 +28,26 @@ state `rebar-tfstate-896586841071`) rather than tearing them down, so the domain
 survives and rebar owns the dependency it relies on. Mechanics:
 
 1. **Import, don't recreate.** Each live object was `terraform import`ed into rebar's
-   state, then applied — a **retag-only** change (`project=snap-demo` → `Project=rebar`),
-   no destroy/replace, no secret rotation. Verified by a post-import `terraform plan`
-   that showed only tag diffs and a clean `plan` (no changes) after apply.
-2. **Preserve physical names.** The live resources keep their `snap-demo-*` names
-   (`local.legacy_name_prefix = "snap-demo"`). Renaming a Lambda / IAM role / API forces
-   destroy+recreate (new ARNs, CloudFront churn, SSO downtime); the misleading name is a
-   deliberate, documented tradeoff, and a rename is left as a separate future migration.
-   Only ownership + the tag moved.
-3. **Adopt the OIDC provider only, not snap's deploy role.** snap's `github_deploy` role
-   (ECR/ECS push for snap's app) is snap-specific; rebar keeps its own
-   `rebar-terraform-plan` role and points its trust at the now-managed
-   `aws_iam_openid_connect_provider.github.arn`.
-4. **Cookie-signing secret uses rebar's SSM idiom.** snap generated it with
-   `random_password` + a `data` read for baking into edge bundles. rebar manages the SSM
-   SecureString directly with `ignore_changes = [value]` (the same "existence + type, not
-   value" contract as `ssm.tf`): the live value is preserved on import and the Lambda
-   reads it at runtime. Only `random_password.auth_origin_secret` is retained (its value
-   must stay identical in the Lambda env and the CloudFront origin header); it was
-   imported with its live value, and `ignore_changes = [special]` suppresses the
-   import-default replacement that would otherwise rotate it.
+   state and applied as a retag-only change — no destroy/replace, no secret rotation.
+2. **Preserve physical names.** The live resources keep their `snap-demo-*` names, because
+   renaming forces destroy+recreate and SSO downtime; the misleading name is a deliberate
+   tradeoff and a rename is left as a separate future migration.
+3. **Adopt the OIDC provider only, not snap's deploy role.** snap's `github_deploy` role is
+   snap-specific; rebar keeps its own `rebar-terraform-plan` role and points its trust at
+   the now-managed `aws_iam_openid_connect_provider.github.arn`.
+4. **Cookie-signing secret uses rebar's SSM idiom** — an SSM SecureString managed with
+   `ignore_changes = [value]` (the "existence + type, not value" contract), with
+   `random_password.auth_origin_secret` retained and pinned so neither value rotates.
 5. **Release from snap's state.** The 18 resources were `terraform state rm`'d from snap's
-   shared state (forgets, never destroys), making rebar the single owner; a marker in
-   snap's dead repo (`infra/shared/RE-HOMED-TO-REBAR.md`) records this and warns against
-   re-applying snap's config.
-6. **Adopt the reusable `sso-gate` module as code.** The auth host mints the cookie; the
-   per-subdomain viewer-request gate enforces it. snap's only live gate protected its
-   audit dashboard (not adopted), but the reusable `modules/sso-gate` primitive + its
-   edge-gate Lambda source are copied in so rebar subdomains can opt into the SSO later.
+   shared state (forgets, never destroys), making rebar the single owner.
+6. **Adopt the reusable `sso-gate` module as code.** The auth host mints the cookie and the
+   per-subdomain viewer-request gate enforces it, so rebar subdomains can opt into the SSO
+   later.
+
+The mechanics an operator needs when touching these resources — the import check, the
+`ignore_changes` pins, the `RE-HOMED-TO-REBAR.md` marker, and the operator follow-ups — are
+in [infra/runbooks/sso-auth-host.md](../../infra/runbooks/sso-auth-host.md)
+§"Re-homing mechanics (from ADR 0048)".
 
 ## Consequences
 - rebar owns its OIDC dependency; a snap teardown can no longer break rebar's drift CI.
@@ -65,6 +57,3 @@ survives and rebar owns the dependency it relies on. Mechanics:
 - **Not adopted** (remain snap's, to be torn down with it): the `github_deploy` role,
   VPC/ECS/ECR/ALB/SES/RDS, the audit dashboard, and its `audit_sso_gate` instance. The
   leftover RDS manual snapshot and the `snap-demo-tfstate` bucket are snap's to retire.
-- **Operator follow-ups:** the Google OAuth client must keep
-  `https://auth.solutions.navateam.com/_callback` registered; the Lambda source now lives
-  in rebar's repo (drift CI rebuilds the zip), so future Lambda changes go through rebar.

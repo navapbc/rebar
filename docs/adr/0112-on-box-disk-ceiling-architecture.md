@@ -238,17 +238,29 @@ authority from ADR 0079/0104.
   filesystem — otherwise the volume's failure mode is silently reverting to the state this ADR
   exists to prevent.
 
-## Open items
+## Open items — resolved
 
-- The concurrency cap's **default value** is not fixed by this ADR. It must be derived from a
-  measured peak concurrent hold (snapshot bytes + per-review clone bytes + gate RSS) against the
-  8 GiB / scratch-volume budgets, in S6.
-- Whether the congestion refusal reuses ADR 0077's `low-disk` first-line tag vocabulary or adds a
-  sibling sub-reason is left to S6; either way it routes through ADR 0069's retryable path.
-- Enforcement of op-cert environment binding remains **advisory** (ADR 0104 decision 3 —
-  `verify.require_environment` + `verify.opcert_enforce_since` are both unset in the committed
-  `rebar.toml`). Nothing in this ADR changes that, and the fast-fail path must not be the thing
-  that flips it.
+Every item below was resolved by a child of epic `6202-e1c7-c57f-4897`; all of its stories
+are closed.
+
+- **The concurrency cap's default value** — resolved by S6, story `09da-343c-1ee9-480c`
+  ("Fast-fail gate admission above a configurable concurrency cap"), which derived it from
+  a measured peak concurrent hold against the 8 GiB / scratch-volume budgets.
+- **Whether the congestion refusal reuses ADR 0077's `low-disk` tag vocabulary or adds a
+  sibling sub-reason** — also settled by S6 (`09da-343c-1ee9-480c`); either way it routes
+  through ADR 0069's retryable path.
+- **Op-cert environment binding remains advisory** (ADR 0104 decision 3 —
+  `verify.require_environment` + `verify.opcert_enforce_since` are both unset in the
+  committed `rebar.toml`). This is unchanged and is not an open item against this ADR:
+  nothing here flips it, and the fast-fail path must not be the thing that does.
+
+The resulting operator procedures live in the runbooks, not here:
+[infra/runbooks/gate-scratch-mount.md](../../infra/runbooks/gate-scratch-mount.md) (S1, the
+dedicated gate-scratch volume), and in
+[infra/runbooks/review-bot-ops.md](../../infra/runbooks/review-bot-ops.md) the four cap
+sections — "Docker storage caps and their per-generator alarms", "The journald disk ceiling
+and its alarms", "The `/var/tmp` bound and its alarms", and "Writable container layers and
+their alarms".
 
 ## Prior art / grounding
 

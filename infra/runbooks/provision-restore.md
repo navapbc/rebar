@@ -92,6 +92,12 @@ Order matters — secrets before the instance, infra before compose.
 1. **Bootstrap state backend** (only if the S3 state bucket/lock is gone):
    `cd infra/bootstrap && terraform init && terraform apply` — creates
    `rebar-tfstate-896586841071`. Normally already exists; skip.
+
+   **Never tear the bootstrap down casually.** It carries
+   `lifecycle { prevent_destroy = true }` for a reason: the main config's
+   `backend "s3"` block points at this bucket, so destroying it orphans the remote
+   state. Tearing it down requires an explicit state migration of `infra/terraform`
+   back to local state **first**.
 2. **Populate secrets.** The SSM SecureString slots under `/rebar/prod/*`
    (`infra/terraform/ssm.tf`) are placeholders (`CHANGEME`). Set the real values
    BEFORE the apply — `user_data.sh` fails fast on a `CHANGEME` sentinel:

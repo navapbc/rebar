@@ -60,9 +60,10 @@ and already hand-applied. Config auto-apply is a documented **v2** follow-up.
 
 ## Back-out
 
-`systemctl disable --now rebar-autodeploy.timer`. The manual deploy path (`compose-up.sh` /
-`setup-*.sh`) is unchanged. Units ship DISABLED (`install-autodeploy.sh`); the operator enables
-only after a manual dry-run (`systemctl start rebar-autodeploy.service`) is confirmed healthy.
+Auto-deploy is disabled by stopping its timer; the manual deploy path is unchanged, and
+units ship disabled so an operator opts in only after a confirmed dry-run. Procedure:
+[infra/runbooks/review-bot-ops.md](../../infra/runbooks/review-bot-ops.md)
+§"Continuous auto-deploy (epic 88ab / story 8903)".
 
 ## Consequences
 

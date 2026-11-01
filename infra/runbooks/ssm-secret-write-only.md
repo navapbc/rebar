@@ -139,9 +139,11 @@ Jira DC probe after an LLM key rotation) and read the logs before revoking the o
 
 ## REMEDIATE the existing exposure (one-time operator cutover)
 
-This is the deferred operator work (a `task` linked `discovered_from` `finedrawn-closed-stud`). Run
-it **after** the `value_wo` code change lands, and coordinate with the separate `rubied` apply that
-seeds the 4 new MCP-PAT SSM params so the scrub covers those too.
+**This cutover ran** — task `gnarly-sinistrous-groundhog` (`097b-de23-bf12-4c38`), closed. The steps
+below are retained as the procedure to repeat if a future apply reintroduces a plaintext slot, and
+as the record of what was done. Run it **after** the `value_wo` code change lands, and coordinate
+with the separate `rubied` apply that seeds the 4 new MCP-PAT SSM params so the scrub covers those
+too.
 
 1. **Apply the migration.** Use `scripts/terraform_prod.py` to plan and apply the `value_wo`
    change. On this **first** apply, `value_wo_version` goes absent → `1` for each migrated slot,

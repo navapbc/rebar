@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Run the d01e live-validation matrix and emit its JUnit + JSON reports (ADR 0037 §4).
+"""Run the d01e live-validation matrix and emit its JUnit + JSON reports.
+
+Decision: ADR 0085 (archived into ADR 0121 §20).
+Operator procedure: infra/runbooks/reconciler-live-matrix.md.
 
 One command makes the harness's report contract true end-to-end: it runs
 ``tests/integration/test_reconcile_live_e2e.py -m live`` with ``--junitxml`` pointed at
