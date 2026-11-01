@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,9 +31,11 @@ class _CountingGateFake(FakeRunner):
 
     name = "fake"
 
-    def __init__(self) -> None:
+    def __init__(self, *, block: bool = True) -> None:
         super().__init__()
         self.calls = 0
+        # block=False emits no Pass-1 finding, so the review PASSes and signs.
+        self.block = block
 
     def run(self, req) -> dict:  # type: ignore[override]
         from rebar.llm import findings as _f
@@ -75,7 +79,7 @@ class _CountingGateFake(FakeRunner):
                         "suggested_fix": "Name the exact behavior change and its call sites.",
                     }
                 ]
-                if _BLOCK_CRITERION in ids
+                if self.block and _BLOCK_CRITERION in ids
                 else []
             )
             payload = {"analysis": "", "findings": found}
@@ -266,3 +270,109 @@ def test_code_change_reruns_full_review(repo: Path) -> None:
     v2 = rebar.llm.review_plan(tid, runner=runner, repo_root=str(repo))
     assert runner.calls > first_calls  # code drifted → full re-review
     assert v2["coverage"].get("verdict_reuse") is not True
+
+
+# ── a file_impact edit is a material change for BOTH reuse shortcuts (bug c3c0) ──
+# The description-edit tests above prove the shortcuts step aside when the plan TEXT moves;
+# these pin the same for a `file_impact` edit — the edit in the c3c0 incident — so dropping
+# `file_impact` from the material basis would fail here instead of silently reusing a
+# verdict for the old plan.
+def _write_and_commit(repo: Path, *names: str) -> None:
+    """Commit the files a test's `file_impact` names, so they exist at the reviewed SHA."""
+    for name in names:
+        (repo / name).write_text("v = 1\n")
+    subprocess.run(["git", "add", *names], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "impact files"], cwd=repo, check=True, capture_output=True
+    )
+
+
+def _impact(*paths: str) -> list[dict[str, str]]:
+    return [{"path": p, "reason": "code under review"} for p in paths]
+
+
+def _signed_pass_on_one_path(repo: Path) -> tuple[str, int]:
+    """A ticket whose one-path plan earned a signed PASS; returns (id, signed_at)."""
+    _write_and_commit(repo, "a.py", "b.py")
+    tid = _make_blocked(repo)
+    rebar.set_file_impact(tid, _impact("a.py"), repo_root=str(repo))
+    v1 = rebar.llm.review_plan(tid, runner=_CountingGateFake(block=False), repo_root=str(repo))
+    assert v1["verdict"] == "PASS" and v1["signature"]["signed"] is True
+    status = rebar.llm.plan_review_status(tid, repo_root=str(repo))
+    assert status["verdict"] == "certified"
+    return tid, status["signed_at"]
+
+
+def test_file_impact_edit_bypasses_idempotent_reuse(repo: Path) -> None:
+    tid, _ = _signed_pass_on_one_path(repo)
+    runner = _CountingGateFake(block=False)
+    rebar.set_file_impact(tid, _impact("a.py", "b.py"), repo_root=str(repo))
+
+    v2 = rebar.llm.review_plan(tid, runner=runner, repo_root=str(repo))
+    assert runner.calls > 0  # the widened plan got a full review, not the old attestation
+    assert v2["coverage"].get("idempotent_skip") is not True
+    assert v2["verdict"] == "PASS" and v2["signature"]["signed"] is True
+    assert rebar.llm.plan_review_status(tid, repo_root=str(repo))["verdict"] == "certified"
+
+
+def test_file_impact_edit_bypasses_verdict_reuse(repo: Path) -> None:
+    _write_and_commit(repo, "a.py", "b.py")
+    tid = _make_blocked(repo)
+    rebar.set_file_impact(tid, _impact("a.py"), repo_root=str(repo))
+    runner = _CountingGateFake()
+    assert rebar.llm.review_plan(tid, runner=runner, repo_root=str(repo))["verdict"] == "BLOCK"
+    first_calls = runner.calls
+
+    rebar.set_file_impact(tid, _impact("a.py", "b.py"), repo_root=str(repo))
+    v2 = rebar.llm.review_plan(tid, runner=runner, repo_root=str(repo))
+    assert runner.calls > first_calls  # fingerprint moved with file_impact → full re-review
+    assert v2["coverage"].get("verdict_reuse") is not True
+
+
+def test_gate_status_keeps_run_verdict_apart_from_stale_attestation(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The c3c0 payload: after a file_impact edit, a fresh review BLOCKs. The run's own verdict
+    # is BLOCK; `durable` is the ticket's signed-approval currency, still the earlier (now
+    # stale) attestation because a BLOCK never signs. Both must be reported, as separate fields.
+    import anyio
+    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.server import Settings
+
+    from rebar import _mcp_inflight as inflight
+    from rebar import _mcp_llm
+    from rebar.llm import gate_runs
+
+    tid, first_signed_at = _signed_pass_on_one_path(repo)
+    rebar.set_file_impact(tid, _impact("a.py", "b.py"), repo_root=str(repo))
+
+    real_review_plan = rebar.llm.review_plan
+    runner = _CountingGateFake()
+
+    def _review_with_block_runner(ticket_id, **kwargs):
+        return real_review_plan(ticket_id, runner=runner, repo_root=str(repo), **kwargs)
+
+    monkeypatch.setattr(rebar.llm, "review_plan", _review_with_block_runner)
+    inflight.reset_registry()
+    Settings.model_rebuild()
+    mcp = FastMCP("c3c0-gate-status")
+    _mcp_llm.register_llm_tools(
+        mcp, SimpleNamespace(allow_llm=lambda: True, readonly=lambda: False)
+    )
+
+    async def _start() -> dict:
+        return await mcp._tool_manager.call_tool("review_plan_start", {"ticket_id": tid})
+
+    job_id = anyio.run(_start)["job_id"]
+    deadline = time.monotonic() + 120
+    out = gate_runs.gate_run_status(job_id)
+    while out["status"] in ("running", "attaching") and time.monotonic() < deadline:
+        time.sleep(0.05)
+        out = gate_runs.gate_run_status(job_id)
+
+    assert runner.calls > 0  # a real review ran; nothing was replayed
+    assert out["status"] == "passed"  # the run completed ...
+    assert out["verdict"] == "BLOCK"  # ... with ITS OWN verdict
+    assert out["durable"]["verdict"] == "stale-material"  # the prior, now-stale approval
+    assert out["durable"]["signed_at"] == first_signed_at
+    assert out["findings"]["readable"] is True  # the job's own REVIEW_RESULT sidecar
