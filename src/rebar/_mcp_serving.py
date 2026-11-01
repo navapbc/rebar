@@ -18,6 +18,7 @@ from rebar._mcp_health import (
     DEFAULT_UVICORN_BACKSTOP_SECONDS,
     InFlightGauge,
     install_startup_handshake,
+    serving_gauge,
 )
 from rebar._mcp_opcert_health import (
     _OPCERT_STATUS_ATTR,
@@ -43,6 +44,23 @@ def drain_then_exit(
     while gauge.value > 0 and monotonic() < deadline:
         sleep(poll_interval)
     exit_fn()
+
+
+def wait_for_idle(
+    gauge: InFlightGauge,
+    *,
+    poll_interval: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Block until the gauge reads 0, so no drained tool or daemon is still running.
+
+    :func:`run_mcp` calls this before returning, so ``mcp_server.main()``'s
+    ``binding.cleanup()`` never deletes the key copy under a close or gate that is still
+    signing (bug external-taxonomic-iguanodon). It has no deadline of its own: each counted
+    operation is bounded by its own cap, and the container stop timeout bounds the rest.
+    """
+    while gauge.value > 0:
+        sleep(poll_interval)
 
 
 def make_sigterm_handler(
@@ -109,7 +127,7 @@ def run_http_with_grace(
     def _serve() -> None:
         # push_mode=None: sign under the box environment but leave the outbound push policy
         # to env/config, so the box still auto-pushes its ticket writes to the shared store.
-        with bound_signer(opcert_binding, push_mode=None):
+        with bound_signer(opcert_binding, push_mode=None), serving_gauge(gauge):
             server.run()
 
     thread = threading.Thread(target=_serve, name="rebar-mcp-http")
@@ -136,8 +154,19 @@ def run_mcp(server: Any, mcp_cfg: Any, *, opcert_binding: Any = None) -> None:
     setattr(server, _OPCERT_STATUS_ATTR, opcert_signing_status(opcert_binding))
     run_startup_opcert_check(opcert_binding)
 
+    gauge = getattr(server, _GAUGE_ATTR, None)
+    try:
+        _run_transport(server, mcp_cfg, gauge, opcert_binding)
+    finally:
+        # Work a stopped transport abandoned keeps running on its worker; wait for it so
+        # the caller's signer cleanup cannot pull the key out from under it.
+        if gauge is not None:
+            wait_for_idle(gauge)
+
+
+def _run_transport(server: Any, mcp_cfg: Any, gauge: Any, opcert_binding: Any) -> None:
+    """Serve one transport: HTTP with the bounded drain, or stdio."""
     if mcp_cfg.transport == "http":
-        gauge = getattr(server, _GAUGE_ATTR, None)
         if gauge is None:
             # build_server always wire_health()s the gauge; a missing one means this
             # server was assembled another way. Log it (an empty gauge would silently
@@ -154,5 +183,5 @@ def run_mcp(server: Any, mcp_cfg: Any, *, opcert_binding: Any = None) -> None:
     else:
         from rebar._opcert_binding import bound_signer
 
-        with bound_signer(opcert_binding, push_mode=None):
+        with bound_signer(opcert_binding, push_mode=None), serving_gauge(gauge):
             server.run(transport="stdio")

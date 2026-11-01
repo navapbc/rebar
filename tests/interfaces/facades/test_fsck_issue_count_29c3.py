@@ -39,6 +39,10 @@ _NEVER_COUNTED = {
         "STATUS_FORK_RESOLVED: aaaa-bbbb-cccc-dddd — concurrent claim/status race "
         "resolved (dropped uuid=x)"
     ),
+    "uncertified_close": (
+        "UNCERTIFIED_CLOSE: aaaa-bbbb-cccc-dddd — closed with completion_expectation=required "
+        "but no completion-verifier attestation"
+    ),
     "tracker_dirty_tmp_event": (
         "TRACKER_DIRTY_TMP_EVENT: 1 path(s): .tmp-event-x — orphaned event staging file(s)"
     ),
@@ -220,7 +224,12 @@ def test_never_counted_kinds_is_exactly_scan_plus_dirty_components() -> None:
     )
     # The scan/health kinds are the known inline is_issue=False decisions; a NEW one added
     # at a production site without updating this set is exactly the drift this pins against.
-    assert fsck_mod._NEVER_COUNTED_SCAN_KINDS == {"push_pending", "status_fork_resolved", "warn"}
+    assert fsck_mod._NEVER_COUNTED_SCAN_KINDS == {
+        "push_pending",
+        "status_fork_resolved",
+        "uncertified_close",
+        "warn",
+    }
 
 
 def test_counted_tally_equals_exit_code_tally_for_every_never_counted_kind() -> None:

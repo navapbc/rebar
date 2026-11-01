@@ -738,6 +738,22 @@ signed, or dead, and a blind re-run launches a **second, double-billed** LLM pas
   `basis_ref` is a different key (a legitimately distinct run), and a re-call **after** the
   first completes re-invokes (the slot is purged on completion).
 
+**What is durable when the transport dies.** A `-32001` or `Transport closed` ends the
+client's wait, not the server's work: the tool body keeps running on its worker, and its
+store writes land as they would have. Container retirement (autodeploy's `docker stop`) does
+not cut that work off either. The SIGTERM drain waits for the LLM gates, for the tools that
+sign with the box key (`transition_ticket`, `sign_manifest`, `sign_review`), and for every
+background gate or workflow daemon, and the server deletes its signing-key copy only after
+that work ends. What is **not** guaranteed: on the default (non-bundled) close path the
+`STATUS → closed` commit and the completion signature are two separate writes, so a process
+killed outright between them (an out-of-memory kill, or the stop timeout expiring) leaves a
+ticket that is closed with `completion_expectation: "required"` and no completion
+certificate. `rebar store fsck` reports that state as `UNCERTIFIED_CLOSE`, and running
+completion verification on the closed ticket (`verify_completion_start`, or
+`rebar verify-completion <id>`) signs it without reopening. After a `-32001` on a close, check
+`verify_completion_status` before assuming the certificate exists (bug
+`external-taxonomic-iguanodon`).
+
 Never wrap either gate in a shell `timeout` (see AGENTS.md's bounding section): they are
 bounded workloads that terminate with a verdict — background them if you must keep working,
 but let them finish.

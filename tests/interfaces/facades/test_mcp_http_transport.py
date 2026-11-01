@@ -538,8 +538,9 @@ def test_gauge_begin_draining_refuses_new_certified_ops_2f46():
             with gauge.track("verify_completion"):
                 pass
         assert gauge.value == 1  # the refused op never incremented the gauge
-        # A non-certified name is a no-op context either way — never blocked.
-        with gauge.track("sign_review"):
+        # An undrained name is a no-op context either way — never blocked. (sign_review is
+        # drained since it signs with the bound key: bug external-taxonomic-iguanodon.)
+        with gauge.track("list_tickets"):
             pass
     assert gauge.value == 0  # the pre-existing op still drains normally to completion
 
