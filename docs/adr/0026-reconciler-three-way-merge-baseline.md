@@ -2,7 +2,9 @@
 
 > **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0026 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0026; the others were reassigned to 0079 (was `0026-autodeploy-on-box-timer.md`). See [RENUMBERING.md](RENUMBERING.md).
 
-- **Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §5; kept verbatim as the evidence record.
+
+- **Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 - **Context:** Epic *Level-triggered bridge convergence* (`3006-e198-13db-4e1f`);
   documents the invariant introduced by commit `16870dbec` before the convergence
   redesign (children `444d`/`5854`/`13eb`/`8de5`) touches it. Lesson **L1**.

@@ -1,6 +1,8 @@
 # ADR 0004: Reconciler producer↔consumer snapshot contract (anti-change-detector guardrail)
 
-- **Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §1; kept verbatim as the evidence record.
+
+- **Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 - **Context:** Epic *Close the Jira-sync producer↔consumer & tested-vs-shipped
   test-coverage gap class* (`f89d-e54d-203d-4ee0`), story B (`8937-eed3-c881-4ea1`);
   builds on the hermetic fixtures of story A (`fe57-7712-1e3f-45f4`,

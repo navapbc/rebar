@@ -1,6 +1,8 @@
 # ADR 0099 — Binding-store internal ownership behind one unchanged facade
 
-**Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §9; kept verbatim as the evidence record.
+
+**Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 **Date:** 2026-08-18
 **Ticket:** `patterned-fossillike-betafish` / `0eb8-08bd-f9cb-4798` (S1, authored this ADR)
 **Finalized by:** `likeminded-wearproof-barracuda` / `ef69-e27b-d02d-4eef` (S3 T3)

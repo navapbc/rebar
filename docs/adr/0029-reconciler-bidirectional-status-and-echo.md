@@ -2,7 +2,9 @@
 
 > **Context landed (2026-09-07).** The redesign this record precedes — epic `3006-e198-13db-4e1f` (file-lens-jewel) and child `444d-c21f-2c82-4622` (port-jar-withe, archived→Done) — is closed, and the archived-not-status-looped guardrail of Decision 2 is live (`inbound_differ.py`, "ADR 0029 #2"). Decisions 1–4 remain in force: [ADR 0103](0103-reconciler-operation-coordination.md) and [ADR 0107](0107-reconciler-typed-mutation-payload-contract.md) consume this arbitration unchanged. Not superseded.
 
-- **Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §6; kept verbatim as the evidence record.
+
+- **Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 - **Context:** Epic *Level-triggered bridge convergence* (`3006-e198-13db-4e1f`).
   Documents the status-round-trip + echo invariants before the redesign (child `444d`
   archived→Done introduces a new outbound status write) touches them. Lessons

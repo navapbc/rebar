@@ -1,6 +1,8 @@
 # ADR 0094 — Reconciler last-pass two-witness status
 
-**Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §11; kept verbatim as the evidence record.
+
+**Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 **Date:** 2026-08-09
 **Relates to:** [ADR 0031](0031-reconciler-ref-lock.md), [ADR 0092](0092-bridge-primary-vocabulary-compatibility-adapters.md)
 

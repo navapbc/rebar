@@ -2,7 +2,9 @@
 
 > **Renumbered by story 0743:** previously ADR 0036 (a number shared by 2 ADRs — a collision); reassigned to 0084 to make ADR numbers unique. See [RENUMBERING.md](RENUMBERING.md).
 
-**Status:** Accepted (epic adept-hedge-stain / 943f — C4)
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §13; kept verbatim as the evidence record.
+
+**Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted (epic adept-hedge-stain / 943f — C4))
 **Date:** 2026-07-08
 
 ## Context

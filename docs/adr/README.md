@@ -66,6 +66,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0103 — Reconciler logical-operation coordination (single retry budget + observe-before-replay)](0103-reconciler-operation-coordination.md)
 - [0107 — Reconciler typed mutation payload: a discriminated union by `(direction, action)`](0107-reconciler-typed-mutation-payload-contract.md)
 - [0118 — Adaptive snapshot cadence by byte/replay cost](0118-adaptive-snapshot-cadence.md)
+- [0121 — Reconciler architecture: consolidated decision record](0121-reconciler-architecture-consolidated-record.md)
 
 ## LLM framework
 

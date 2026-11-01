@@ -1,6 +1,8 @@
 # ADR 0055 — The Jira-family sub-seam, shared `jira` provenance, and the Data Center horizon
 
-**Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §16; kept verbatim as the evidence record.
+
+**Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 **Date:** 2026-07-30
 **Relation:** AMENDS [`0083-reconciler-vendor-adapter-seam.md`](0083-reconciler-vendor-adapter-seam.md).
 That ADR's two-layer model (backend-neutral core + `adapters/<backend>/`), its phasing
