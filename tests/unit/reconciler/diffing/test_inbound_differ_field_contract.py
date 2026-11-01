@@ -43,7 +43,8 @@ def test_outbound_to_inbound_field_contains_parent(inbound_differ: ModuleType) -
         "_OUTBOUND_TO_INBOUND_FIELD must contain 'parent'. "
         "outbound_differ emits 'parent' (Jira REST); inbound_differ emits "
         "'parent_id' (local). The map is the canonicalization bridge. "
-        "See 183fd51ac2 and docs/designs/sync-hardening-proposal.md Item 3."
+        "See story a130-2b7c-429c-43d1 and the CONTRACT block in inbound_differ.py; "
+        "symmetry rules live in _field_contract.py."
     )
     assert field_map["parent"] == "parent_id", (
         f"_OUTBOUND_TO_INBOUND_FIELD['parent'] must be 'parent_id', got {field_map['parent']!r}"

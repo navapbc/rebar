@@ -165,14 +165,14 @@ def test_ticket_dirs_prose_is_not_an_acceptor(tmp_path: Path) -> None:
 
 
 def test_a_hyphenated_file_path_is_not_an_alias_acceptor(tmp_path: Path) -> None:
-    """A hyphen-joined FILE NAME must not read as a word-triple alias: the b047 close
-    verification found a live raw SHA masked by 'docs/designs/sync-hardening-proposal.md'
-    accepting its block."""
+    """A hyphen-joined FILE NAME must not read as a word-triple alias: a hyphenated file
+    name like `docs/plan-review-gate.md` must not accept a block (a phantom design-doc path
+    masked a live raw SHA in the b047 close verification)."""
     _write(
         tmp_path,
         "src/mod.py",
         "# Canonical reference: 183fd51ac2; pending consolidation per\n"
-        "# docs/designs/sync-hardening-proposal.md Item 3.\nX = 1\n",
+        "# docs/plan-review-gate.md section 3.\nX = 1\n",
     )
     assert _run(tmp_path).returncode == 1
 

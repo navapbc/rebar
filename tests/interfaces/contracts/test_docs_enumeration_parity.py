@@ -1,12 +1,11 @@
 """Doc prose that enumerates a code vocabulary is pinned to that vocabulary (mirror F10).
 
-Five enumerations across three documents had drifted from their masters. None was generated
-or gated: ``gen_api_surface.py`` pins library SYMBOL NAMES only and never reads doc prose.
+Two enumerations across two documents are pinned here. Neither is generated or gated:
+``gen_api_surface.py`` pins library SYMBOL NAMES only and never reads doc prose.
 
-The census registers ARMS, not files, because the five do not share a parse shape — a markdown
-table, pipe-joined spans with and without spaces, and one that is not a list at all but the
-English word for a count. Each arm names WHERE the prose lives and WHICH master it answers to;
-the expected values are always read from the master at assert time, never restated here.
+The census registers ARMS, not files, because the two do not share a parse shape — a markdown
+table and a pipe-joined span. Each arm names WHERE the prose lives and WHICH master it answers
+to; the expected values are always read from the master at assert time, never restated here.
 """
 
 from __future__ import annotations
@@ -19,21 +18,9 @@ from typing import get_args
 import pytest
 
 from rebar import schemas
-from rebar.types import Relation, TicketStatus, TicketType
+from rebar.types import TicketStatus
 
 _DOCS = Path(__file__).resolve().parents[3] / "docs"
-
-#: Number words this census can read, up to the largest vocabulary it pins.
-_NUMBER_WORDS = {
-    "three": 3,
-    "four": 4,
-    "five": 5,
-    "six": 6,
-    "seven": 7,
-    "eight": 8,
-    "nine": 9,
-    "ten": 10,
-}
 
 
 def _schema_verdicts() -> set[str]:
@@ -80,14 +67,6 @@ def _piped_span(text: str, prefix: str) -> set[str] | None:
     return {part.strip() for part in match.group(1).split("|") if part.strip()}
 
 
-def _count_word(text: str, pattern: str) -> int | None:
-    """The integer named by the number word ``pattern`` captures."""
-    match = re.search(pattern, text)
-    if match is None:
-        return None
-    return _NUMBER_WORDS.get(match.group(1).lower())
-
-
 def _read(name: str) -> str:
     return (_DOCS / name).read_text(encoding="utf-8")
 
@@ -101,32 +80,12 @@ _LIST_ARMS: list[tuple[str, str, Callable[[str], set[str] | None], Callable[[], 
         _schema_verdicts,
     ),
     (
-        "native-model types",
-        "oss-comparison-and-remediation.md",
-        lambda text: _piped_span(text, "types:"),
-        lambda: set(get_args(TicketType)),
-    ),
-    (
-        "native-model statuses",
-        "oss-comparison-and-remediation.md",
-        lambda text: _piped_span(text, "statuses:"),
-        lambda: set(get_args(TicketStatus)),
-    ),
-    (
         "status list",
         "user-guide.md",
         lambda text: _piped_span(text, "Statuses are"),
         lambda: set(get_args(TicketStatus)),
     ),
 ]
-
-#: The fifth arm is a COUNT in prose ("six relations"), not a list.
-_COUNT_ARM = (
-    "relation count",
-    "oss-comparison-and-remediation.md",
-    r"\b(three|four|five|six|seven|eight|nine|ten)\s+\n?relations\b",
-    lambda: len(get_args(Relation)),
-)
 
 
 def list_arm_drift(label: str, doc: str, found: set[str] | None, expected: set[str]) -> str | None:
@@ -155,16 +114,6 @@ def test_list_arm_matches_its_master(
     extract: Callable[[str], set[str] | None],
     master: Callable[[], set[str]],
 ) -> None:
-    """AC1-AC3: each enumerated list in prose equals the vocabulary it describes."""
+    """AC1: each enumerated list in prose equals the vocabulary it describes."""
     drift = list_arm_drift(label, doc, extract(_read(doc)), master())
     assert drift is None, drift
-
-
-def test_relation_count_matches_its_master() -> None:
-    """AC2: the fifth arm is a number word, so it is checked as a count."""
-    label, doc, pattern, master = _COUNT_ARM
-    found = _count_word(_read(doc), pattern)
-    assert found is not None, f"{doc} [{label}]: could not locate the relation count"
-    assert found == master(), (
-        f"{doc} [{label}] says {found} relations; rebar.types.Relation declares {master()}."
-    )

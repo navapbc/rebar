@@ -336,7 +336,8 @@ scenario_7() {
 		_evi 7 "neg_probes=skipped reason=NEG_USER_unset (set to a non-feature-branch-drivers account to probe ACL refusals)"
 	fi
 	# (a) concurrency + (d) webhook backfill are asserted via the S3-precedent
-	# concurrency.group cancel-in-progress (docs/88ab-feature-branch-evidence.md AC5)
+	# concurrency.group cancel-in-progress (story will-tile-plum 2e8a-1a3b-66bf-4cd1 AC5;
+	# evidence comment on epic elfish-chair-lug)
 	# and the reconciler runbook; recorded here as evidence pointers.
 	_evi 7 "concurrency=cancel-in-progress(gerrit-verify.yaml, AC5 change234) webhook_backfill=reconciler(runbook)"
 	pass "s7: negatives probed; concurrency + webhook-backfill recorded (see evidence)"
