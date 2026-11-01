@@ -188,9 +188,15 @@ Answer `na` for a sub-question that genuinely does not apply to this finding's s
 path_reachable for a purely structural/organisational finding) — it is then EXCLUDED from the
 validity score rather than guessed as insufficient. Do not na evidence_entails_finding.
 
-cited_reference_accurate is yes|no|insufficient|na — for a finding that
-cites a specific code reference, VERIFY the citation with read_file/search_files and answer
-yes|no accordingly (na only when the finding cites no specific reference). Be atomic: answer
+cited_reference_accurate is yes|no|insufficient|na — it tests the FINDING's OWN grounding:
+the code/file references the finding offers as EVIDENCE for its claim. VERIFY those with
+read_file/search_files and answer yes|no accordingly (na only when the finding offers no
+specific reference of its own). 'no' means the finding's evidence points somewhere that does
+not show what the finding says it shows; it vetoes the finding. A reference the PLAN makes is
+NOT the finding's citation: when the finding's claim is that a plan citation is wrong (a path
+that does not exist, a mis-measured line), the plan's citation being wrong is what the finding
+asserts, so confirming it is 'yes', never 'no'; judge the finding's corrected location, if it
+gives one, as its own evidence. Be atomic: answer
 each sub-question on its own merits. 'insufficient' is allowed and honest. Be DECISIVE — a few
 targeted searches/reads per code-grounded finding, then judge it. Verdict-with-citation, never
 verdict-with-fix.
