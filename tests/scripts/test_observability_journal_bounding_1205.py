@@ -31,7 +31,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "infra" / "scripts" / "observability.sh"
@@ -176,7 +176,7 @@ def _environment(
 
     state = tmp_path / "state"
     state.mkdir()
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -192,7 +192,7 @@ def _environment(
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(SCRIPT)], env=env, timeout=180, check=False)
+    return run_observability(["bash", str(SCRIPT)], env=env, timeout=180)
 
 
 def _values(log: Path, metric: str) -> list[int]:
@@ -318,7 +318,7 @@ def _render_units(tmp_path: Path) -> dict[str, str]:
     unit_dir.mkdir()
     _stub(bin_dir, "systemctl", "exit 0")
     _stub(bin_dir, "install", "exit 0")
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update({"PATH": f"{bin_dir}:{env['PATH']}", "UNIT_DIR": str(unit_dir)})
 
     result = subprocess.run(["bash", str(INSTALLER)], env=env, timeout=60, check=False)
@@ -419,7 +419,7 @@ def test_probe_terminates_when_a_sibling_dependency_hangs(tmp_path: Path) -> Non
     # bound; an unbounded one waits out the sleep. Anything between is host load, not a
     # verdict, and a tight ceiling here would fail under a busy machine rather than under a
     # regression.
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=180, check=False)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=180)
 
     assert result.returncode == 0
 

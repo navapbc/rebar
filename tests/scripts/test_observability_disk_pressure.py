@@ -13,7 +13,7 @@ import textwrap
 from pathlib import Path
 
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -103,7 +103,7 @@ def _environment(
         # cold-start at the tail and publish 0. The replication log keeps a bare total.
         for name, path in paths.items():
             path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -137,7 +137,7 @@ def _values(log: Path, metric: str) -> list[int]:
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    return run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
 
 def test_disk_pressure_markers_are_counted_into_their_own_metric(tmp_path: Path) -> None:

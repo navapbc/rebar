@@ -7,12 +7,21 @@ script's healthy path.
 
 from __future__ import annotations
 
-import os
-import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
 import pytest
+
+# `_observability_harness` lives in `tests/`, which the root `tests/conftest.py` normally puts on
+# `sys.path`. This module is also loaded as a `pytest_plugins` entry by a NESTED pytest run rooted
+# outside `tests/` (tests/unit/test_fixture_env_repr_security.py), where that conftest never
+# loads; same explicit bootstrap as tests/interfaces/facades/test_cli.py.
+_TESTS_DIR = Path(__file__).resolve().parents[1]
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from _observability_harness import observability_env, run_observability  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -56,26 +65,28 @@ def healthy_env(tmp_path: Path) -> dict[str, str]:
     off = tmp_path / "offsets"
     off.mkdir()
     # Redirect every persisted offset file away from the real host (/var/lib/rebar).
-    env = {
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "REPL_OFFSET_FILE": str(off / "repl"),
-        "VOTER_OFFSET_FILE": str(off / "voter"),
-        "MERGE_OFFSET_FILE": str(off / "merge"),
-        "DEPLOY_OFFSET_FILE": str(off / "deploy"),
-        "G2P_OFFSET_FILE": str(off / "g2p"),
-        "REPL_LOG": str(off / "nonexistent-replication-log"),
-    }
+    env = observability_env(tmp_path)
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "REPL_OFFSET_FILE": str(off / "repl"),
+            "VOTER_OFFSET_FILE": str(off / "voter"),
+            "MERGE_OFFSET_FILE": str(off / "merge"),
+            "DEPLOY_OFFSET_FILE": str(off / "deploy"),
+            "G2P_OFFSET_FILE": str(off / "g2p"),
+            "REPL_LOG": str(off / "nonexistent-replication-log"),
+        }
+    )
     return env
 
 
 def test_observability_exits_zero_on_healthy_run(healthy_env: dict[str, str]) -> None:
-    result = subprocess.run(
+    result = run_observability(
         ["bash", str(SCRIPT)],
         env=healthy_env,
         capture_output=True,
         text=True,
         timeout=60,
-        check=False,
     )
     assert result.returncode == 0, (
         "observability.sh must exit 0 on a healthy run so the systemd oneshot is "

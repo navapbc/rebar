@@ -7,13 +7,12 @@ log-file counter keeps its separate bare-total state.
 
 from __future__ import annotations
 
-import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -92,7 +91,7 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
     repl_log = tmp_path / "replication.log"
     repl_log.write_text("[ERROR]\n" * _MARKERS_IN_JOURNAL)
 
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -129,7 +128,7 @@ def test_cold_start_publishes_zero_and_seeds_the_offset(
     """A counter's first run must announce 0, not the journal it inherited."""
     env, paths = _environment(tmp_path)
 
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
     assert result.returncode == 0
     # 0, NOT the journal's marker count — everything there predates this counter.
@@ -148,11 +147,11 @@ def test_markers_after_initialisation_still_publish(tmp_path: Path) -> None:
     """Seeding must not be sticky: the next genuinely-new marker publishes 1."""
     env, paths = _environment(tmp_path)
 
-    subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
     # One more marker of every kind lands after the counters initialised.
     paths["markers"].write_text(f"{_MARKERS_IN_JOURNAL + 1}\n")
     paths["repl_log"].write_text("[ERROR]\n" * (_MARKERS_IN_JOURNAL + 1))
-    second = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
     assert second.returncode == 0
     for target, offset_variable, per_interval in _TARGETS:

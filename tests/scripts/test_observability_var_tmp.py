@@ -17,6 +17,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _observability_harness import observability_env, run_observability
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
@@ -144,7 +145,7 @@ def _environment(
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -165,7 +166,7 @@ def _environment(
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(SCRIPT)], env=env, timeout=180, check=False)
+    return run_observability(["bash", str(SCRIPT)], env=env, timeout=180)
 
 
 def _values(log: Path, metric: str) -> list[int]:
@@ -335,7 +336,7 @@ def test_the_probe_finds_the_cap_script_under_its_installed_name(tmp_path: Path)
     # against an unreachable cap script. The cap script's own default is 4 GiB, so the expected
     # percentage is unchanged.
     env.pop("VAR_TMP_MAX_BYTES", None)
-    assert subprocess.run(["bash", str(probe)], env=env, timeout=180, check=False).returncode == 0
+    assert run_observability(["bash", str(probe)], env=env, timeout=180).returncode == 0
 
     # The budget was readable, so the percent is on the air rather than silently skipped.
     assert _one(aws_log, "var_tmp_used_percent") == 25

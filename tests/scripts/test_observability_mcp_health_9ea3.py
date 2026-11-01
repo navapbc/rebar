@@ -7,12 +7,11 @@ script's CloudWatch command arguments without network or real curl."""
 from __future__ import annotations
 
 import shlex
-import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -82,7 +81,7 @@ def _environment(
     repl_log = tmp_path / "replication.log"
     repl_log.write_text("")
 
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -105,7 +104,7 @@ def _values(log: Path, metric: str) -> list[int]:
 
 
 def _run(env: dict[str, str]) -> None:
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
     assert result.returncode == 0
 
 

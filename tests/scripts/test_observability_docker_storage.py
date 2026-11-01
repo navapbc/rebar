@@ -20,7 +20,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 pytestmark = pytest.mark.unit
 
@@ -143,7 +143,7 @@ def _environment(
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -161,7 +161,7 @@ def _environment(
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(SCRIPT)], env=env, timeout=120, check=False)
+    return run_observability(["bash", str(SCRIPT)], env=env, timeout=120)
 
 
 def _values(log: Path, metric: str) -> list[int]:
