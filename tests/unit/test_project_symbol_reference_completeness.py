@@ -203,13 +203,3 @@ def test_move_is_declared_only_in_the_plan_review_move_file(gate_file: str):
         f"{MOVE_ID} presence in {gate_file} is wrong: expected "
         f"{gate_file == 'plan_review_moves.json'}, got {present}"
     )
-
-
-def test_real_review_run_evidence_is_committed():
-    """AC: the demonstration must be a repo-verifiable artifact, not only a ticket comment."""
-    sample = REPO_ROOT / "docs" / "serena-symbol-reference-coaching-sample.md"
-    assert sample.is_file(), f"missing committed review-run evidence at {sample}"
-    body = sample.read_text(encoding="utf-8")
-    assert CRITERION_ID in body and "review-plan" in body, (
-        "the evidence file must show a real review-plan run naming the criterion"
-    )

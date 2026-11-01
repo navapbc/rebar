@@ -1,7 +1,8 @@
 # Remediation-plan validation experiments
 
-Reproducible prototypes backing the **Experimental validation** section of
-[`../remediation-implementation-plan.md`](../remediation-implementation-plan.md).
+Reproducible prototypes backing the **Experimental validation** section of the
+remediation implementation plan, which is preserved as a comment on epic
+`hoary-datum-cop` (`0b32-bc94-5ea1-482a`).
 Each was run during the proven-art review to validate feasibility and surface
 gotchas before committing to an implementation approach. Results are summarized
 in the plan's scorecard; the scripts here let you reproduce them.

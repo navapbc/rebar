@@ -55,7 +55,6 @@ These pages explain supported use of rebar without requiring knowledge of its im
 - **[session-id-shims.md](session-id-shims.md)**. Session provenance capture for supported coding agents.
 - **[ticket-model.md](ticket-model.md)**. Ticket status, hierarchy, links, tags, and lifecycle concepts.
 - **[user-guide.md](user-guide.md)**. Task-oriented guide for routine ticket work.
-- **[writing-a-passing-plan.md](writing-a-passing-plan.md)**. Entry point for plans that must pass the plan-review gate.
 
 ### Contributors
 
@@ -71,7 +70,6 @@ These pages explain the development process, maintenance contracts, and contribu
 - **[jira-fixtures.md](jira-fixtures.md)**. Jira fixture capture, replay, and maintenance procedure.
 - **[local-dev-env.md](local-dev-env.md)**. Checkout-specific environment setup for development commands and gates.
 - **[mutation-testing.md](mutation-testing.md)**. Mutation testing workflow and interpretation.
-- **[passing-code-review.md](passing-code-review.md)**. Entry point for preparing and previewing a Gerrit code review.
 - **[plan-review-criteria-guide.md](plan-review-criteria-guide.md)**. Generated registry of plan-review criteria and detection detail.
 - **[reuse-surface.md](reuse-surface.md)**. Library API and reusable subsystem reference.
 - **[review-policy.md](review-policy.md)**. Meaning of the Gerrit `LLM-Review` and `Verified` votes.
@@ -123,19 +121,13 @@ The generated [security reference](security.md) also provides credential and pro
 
 These pages preserve analyses that inform future work without defining current behavior.
 
-- **[oss-comparison-and-remediation.md](oss-comparison-and-remediation.md)**. Comparison with open source ticket systems and a prioritized remediation strategy.
-- **[remediation-implementation-plan.md](remediation-implementation-plan.md)**. Implementation companion for the open source comparison.
-
 Additional research includes the [task decomposition survey](research/task-decomposition-sota-2026.md) and the [experiment index](../evals/README.md). Detailed experiment records cover the [plan-review gate](../evals/plan-review-gate/README.md), [code grounding](../evals/code-grounding-spike/README.md), and [workflow remediation prototypes](../evals/workflow-remediation-pocs/README.md).
 
 ### Historical evidence
 
 These pages preserve completed migrations, contract changes, and validation results. They do not define maintained guidance.
 
-- **[88ab-feature-branch-evidence.md](88ab-feature-branch-evidence.md)**. Validation record for the Gerrit feature branch workflow.
 - **[bash-migration.md](bash-migration.md)**. Record of the completed Bash to Python migration.
-- **[dco-rollout-evidence.md](dco-rollout-evidence.md)**. End-to-end validation record for DCO enforcement.
 - **[release-notes.md](release-notes.md)**. Preserved contract changes for agents and maintainers.
-- **[serena-symbol-reference-coaching-sample.md](serena-symbol-reference-coaching-sample.md)**. Recorded plan-review runs for symbol reference coaching.
 
 The [archive index](archive/README.md) covers completed planning and handoff records. Frozen plan-review corpora are indexed under [recorded runs](../evals/plan-review-gate/runs/README.md). Calibration evidence includes the [trust boundary](../evals/calibration/T5c_trust_boundary.md), [completion floor](../evals/calibration/completion_floor.md), and [plan kind sets](../evals/calibration/plan_v5_kind_sets.md). Third-party license texts are preserved under [licenses](licenses/).

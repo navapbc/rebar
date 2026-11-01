@@ -12,11 +12,11 @@ a review- and experiment-validated implementation plan and file it as rebar epic
 
 | Artifact | Path |
 |----------|------|
-| OSS comparison + remediation strategy | `docs/oss-comparison-and-remediation.md` |
-| Detailed implementation plan (validated) | `docs/remediation-implementation-plan.md` |
-| Reproducible experiments + stdlib guard artifact | `docs/experiments/` (`README.md`, `hlc_prototype.py`, `event_write_guard.py`) |
+| OSS comparison + remediation strategy | comment on epic `hoary-datum-cop` (`0b32-bc94-5ea1-482a`) |
+| Detailed implementation plan (validated) | comment on epic `hoary-datum-cop` (`0b32-bc94-5ea1-482a`) |
+| Reproducible experiments + stdlib guard artifact | `evals/` (`README.md`, `hlc_prototype.py`, `event_write_guard.py`) |
 | 7 rebar epics (shared `tickets` store) | tagged `oss-remediation` (ids below) |
-| This session log | `docs/2026-06-13-oss-comparison-session-log.md` |
+| This session log | `docs/archive/2026-06-13-oss-comparison-session-log.md` |
 
 ## 1. Comparison & analysis
 
@@ -36,7 +36,8 @@ dstask/taskwarrior, with Redmine/GitLab/Fossil as best-practice references.
 
 ## 2. Plan + adversarial review loop (7 rounds, Opus reviewer)
 
-Wrote `docs/remediation-implementation-plan.md` and ran it through an
+Wrote the remediation implementation plan (now a comment on epic
+`hoary-datum-cop`) and ran it through an
 adversarial review-and-remediate loop until **no MAJOR findings**:
 
 - R1: 6 MAJOR (false tag-delta premise; HLC width/sort/topology/lock bugs;
