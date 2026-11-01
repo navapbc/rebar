@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ import rebar
 from rebar.attest import dsse
 from rebar.opcert_service import jobs
 from rebar.opcert_service.config import OpcertServiceConfig
-from rebar.opcert_service.keyprov import compose_signer
+from rebar.opcert_service.keyprov import OpcertSigner, compose_signer
 
 pytestmark = pytest.mark.unit
 
@@ -57,10 +58,11 @@ def _make_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, 
     return str(src), tid, main_head
 
 
-def _signer(tmp_path: Path):
+@pytest.fixture
+def signer(tmp_path: Path) -> Iterator[OpcertSigner]:
     """Compose a startup signer from a fresh Ed25519 key (the post-6f14 seam that replaces the
     old per-job ``ssm_fetcher``). Principal is the same ``nava-opcert-test-1`` env id ``_cfg``
-    signs under."""
+    signs under. Teardown removes the temp-dir key copy (bug balladic-fattening-tortoise)."""
     key = tmp_path / "envkey"
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "", "-q", "-C", "env"],
@@ -69,7 +71,9 @@ def _signer(tmp_path: Path):
     )
     key.chmod(0o600)
     kcfg = OpcertServiceConfig(env_id="nava-opcert-test-1", key_path=str(key))
-    return compose_signer(kcfg)
+    composed = compose_signer(kcfg)
+    yield composed
+    composed.cleanup()
 
 
 def _cfg(source_url: str) -> OpcertServiceConfig:
@@ -91,14 +95,14 @@ def _pass_completion(tid, rr):
 # ─────────────────────────── integrity: server derives bound values ───────────
 
 
-def test_completion_pass_binds_server_derived_values(tmp_path, monkeypatch):
+def test_completion_pass_binds_server_derived_values(tmp_path, monkeypatch, signer):
     src, tid, main_head = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
     fields = jobs.run_job(
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        signer=_signer(tmp_path),
+        signer=signer,
         verify_completion_fn=_pass_completion,
     )
     assert fields["status"] == "completed"
@@ -120,7 +124,7 @@ def test_completion_pass_binds_server_derived_values(tmp_path, monkeypatch):
 # ─────────────────────────── the server never pushes ──────────────────────────
 
 
-def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch):
+def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch, signer):
     src, tid, _main = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
     before = _run(src, "rev-parse", "tickets")
@@ -140,7 +144,7 @@ def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch):
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        signer=_signer(tmp_path),
+        signer=signer,
         verify_completion_fn=gate,
     )
     assert fields["status"] == "completed"
@@ -155,7 +159,7 @@ def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch):
 # ─────────────────────────── key materialization + cleanup ────────────────────
 
 
-def test_key_is_0600_and_gate_sees_no_env_key(tmp_path, monkeypatch):
+def test_key_is_0600_and_gate_sees_no_env_key(tmp_path, monkeypatch, signer):
     """Post-6f14: the composed signer key is 0600 and process-owned, and the gate runs WITHOUT
     ``REBAR_OPCERT_KEY_PATH``/``REBAR_OPCERT_ENV_ID`` leaking into ``os.environ`` (the binding is
     threaded context-locally, not via a process-global env patch)."""
@@ -163,7 +167,6 @@ def test_key_is_0600_and_gate_sees_no_env_key(tmp_path, monkeypatch):
     monkeypatch.delenv("REBAR_OPCERT_ENV_ID", raising=False)
     src, tid, _main = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
-    signer = _signer(tmp_path)
     assert oct(os.stat(signer.key_path).st_mode & 0o777) == "0o600"
     seen: dict = {}
 
@@ -189,12 +192,11 @@ def test_key_is_0600_and_gate_sees_no_env_key(tmp_path, monkeypatch):
     assert not os.path.exists(signer.key_path)
 
 
-def test_signer_key_survives_a_raised_gate_and_cleanup_removes_it(tmp_path, monkeypatch):
+def test_signer_key_survives_a_raised_gate_and_cleanup_removes_it(tmp_path, monkeypatch, signer):
     """A gate raising mid-run maps to ``error`` and does NOT tear down the process-owned signer
     key (the signer is composed once at startup, not per job); ``cleanup`` removes it."""
     src, tid, _main = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
-    signer = _signer(tmp_path)
 
     def boom(tid_, rr):
         raise RuntimeError("gate blew up mid-run")
@@ -216,14 +218,14 @@ def test_signer_key_survives_a_raised_gate_and_cleanup_removes_it(tmp_path, monk
 # ─────────────────────────── per-kind verdict mapping ─────────────────────────
 
 
-def test_completion_fail_completes_with_null_envelope(tmp_path, monkeypatch):
+def test_completion_fail_completes_with_null_envelope(tmp_path, monkeypatch, signer):
     src, tid, _main = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
     fields = jobs.run_job(
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        signer=_signer(tmp_path),
+        signer=signer,
         verify_completion_fn=lambda t, r: {"verdict": "FAIL", "findings": [{"criterion": "x"}]},
     )
     assert fields["status"] == "completed"
@@ -235,7 +237,7 @@ def test_completion_fail_completes_with_null_envelope(tmp_path, monkeypatch):
     ("exc_name", "err_class"),
     [("LLMUnavailableError", jobs.ERR_LLM_UNAVAILABLE), ("LLMError", jobs.ERR_LLM_ERROR)],
 )
-def test_completion_llm_raise_maps_to_error(tmp_path, monkeypatch, exc_name, err_class):
+def test_completion_llm_raise_maps_to_error(tmp_path, monkeypatch, signer, exc_name, err_class):
     src, tid, _main = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
     from rebar.llm import errors as _errors
@@ -249,7 +251,7 @@ def test_completion_llm_raise_maps_to_error(tmp_path, monkeypatch, exc_name, err
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        signer=_signer(tmp_path),
+        signer=signer,
         verify_completion_fn=raiser,
     )
     assert fields["status"] == "error"
@@ -259,14 +261,14 @@ def test_completion_llm_raise_maps_to_error(tmp_path, monkeypatch, exc_name, err
 
 
 @pytest.mark.parametrize("verdict", ["BLOCK", "INDETERMINATE"])
-def test_plan_review_nonpass_completes_with_null_envelope(tmp_path, monkeypatch, verdict):
+def test_plan_review_nonpass_completes_with_null_envelope(tmp_path, monkeypatch, signer, verdict):
     src, tid, _main = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
     fields = jobs.run_job(
         ticket_id=tid,
         kind="plan-review",
         cfg=cfg,
-        signer=_signer(tmp_path),
+        signer=signer,
         review_plan_fn=lambda t, r: {"verdict": verdict},
     )
     assert fields["status"] == "completed"
@@ -274,7 +276,7 @@ def test_plan_review_nonpass_completes_with_null_envelope(tmp_path, monkeypatch,
     assert fields["envelope"] is None
 
 
-def test_plan_review_pass_signs_internally_and_returns_envelope(tmp_path, monkeypatch):
+def test_plan_review_pass_signs_internally_and_returns_envelope(tmp_path, monkeypatch, signer):
     src, tid, _main_head = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
 
@@ -294,7 +296,7 @@ def test_plan_review_pass_signs_internally_and_returns_envelope(tmp_path, monkey
         ticket_id=tid,
         kind="plan-review",
         cfg=cfg,
-        signer=_signer(tmp_path),
+        signer=signer,
         review_plan_fn=review_plan_signs,
     )
     assert fields["status"] == "completed"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,7 @@ import rebar
 from rebar.attest import dsse
 from rebar.opcert_service import jobs
 from rebar.opcert_service.config import OpcertServiceConfig
-from rebar.opcert_service.keyprov import compose_signer
+from rebar.opcert_service.keyprov import OpcertSigner, compose_signer
 
 pytestmark = pytest.mark.unit
 
@@ -52,7 +53,9 @@ def _make_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, 
     return str(src), tid, main_head
 
 
-def _signer(tmp_path: Path):
+@pytest.fixture
+def signer(tmp_path: Path) -> Iterator[OpcertSigner]:
+    """A composed signer whose temp-dir key copy is removed at teardown."""
     key = tmp_path / "envkey"
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "", "-q", "-C", "env"],
@@ -60,7 +63,9 @@ def _signer(tmp_path: Path):
         capture_output=True,
     )
     key.chmod(0o600)
-    return compose_signer(OpcertServiceConfig(env_id="nava-opcert-test-1", key_path=str(key)))
+    composed = compose_signer(OpcertServiceConfig(env_id="nava-opcert-test-1", key_path=str(key)))
+    yield composed
+    composed.cleanup()
 
 
 def _cfg(source_url: str) -> OpcertServiceConfig:
@@ -76,7 +81,7 @@ def _cfg(source_url: str) -> OpcertServiceConfig:
 
 
 def test_signed_cert_binds_server_derived_commit_and_never_pushes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signer: OpcertSigner
 ) -> None:
     source_url, tid, main_head = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(source_url)
@@ -87,7 +92,7 @@ def test_signed_cert_binds_server_derived_commit_and_never_pushes(
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        signer=_signer(tmp_path),
+        signer=signer,
         verify_completion_fn=lambda _t, _r: {"verdict": "PASS", "model": "fake", "runner": "fake"},
     )
 

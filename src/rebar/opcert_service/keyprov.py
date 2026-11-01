@@ -67,10 +67,13 @@ def compose_signer(cfg: OpcertServiceConfig) -> OpcertSigner:
     runtime_dir = tempfile.mkdtemp(prefix="rebar-opcert-")
     os.chmod(runtime_dir, 0o700)
     copy_path = os.path.join(runtime_dir, _KEY_COPY_NAME)
+    # Any escape before the signer exists — a rejected key, an OSError writing the copy, or an
+    # interrupt during validation — must not strand a private-key copy in the shared temp dir
+    # (bug balladic-fattening-tortoise): no owner would ever call ``cleanup()`` on it.
     try:
         _write_copy(copy_path, key_bytes)
         _validate_key_file(copy_path)
-    except OpcertKeyError:
+    except BaseException:
         shutil.rmtree(runtime_dir, ignore_errors=True)
         raise
     return OpcertSigner(key_path=copy_path, principal=cfg.env_id, runtime_dir=runtime_dir)
