@@ -412,6 +412,26 @@ def _trigger_compaction(
     compact_trigger.maybe_compact(tracker, ticket_id, repo_root=repo_root_str)
 
 
+def _refresh_close_material(tracker: str, force_close: str) -> None:
+    """Sync the clone once before an unforced close reads its gate material (bug 833e-3827).
+
+    Read tools refresh at most once a minute, so a clone that serves both reads and closes
+    (the MCP server) can still hold a description another clone already edited. The close
+    then judged AC boxes, plan material, and landed work from that older copy. This forces
+    one best-effort fetch past the throttle, like plan review's gate reads
+    (ticket glandulous-minor-aurochs). It
+    keeps the ``sync.pull=off`` and local-read opt-outs and swallows every failure, so an
+    unreachable origin leaves the close judging local state as before. It runs before the
+    write lock is taken; the gate checks after it stay local. A forced close bypasses those
+    gates, so it skips the fetch.
+    """
+    if force_close:
+        return
+    from rebar._engine_support import reads as ticket_reads
+
+    ticket_reads.ensure_fresh(tracker, force=True)
+
+
 def _hint_disposition_alternative(close_class: str) -> None:
     """Suggest the attested disposition path for an administrative-shaped force close.
 
@@ -539,6 +559,7 @@ def close_ticket(
         # Name the target first: after pinning, a default HEAD looks like an explicit SHA.
         ref_source = close_precheck.ref_source_label(ref, str(config.repo_root(repo_root)))
         ref = _pin_completion_ref(ref, repo_root)
+        _refresh_close_material(tracker, force_close)
         from rebar.reducer import reduce_ticket as _reduce
 
         ticket_state = _reduce(os.path.join(tracker, ticket_id)) or {}

@@ -642,6 +642,14 @@ remote-tracking ref (`behind` / `diverged`). Note that `fsck` stays silent on *m
 behind* because a writer ff-adopts on its next push — a gate is a pure reader and never
 triggers that adoption, which is why this is the sharpest signal available to it.
 
+The assertion itself stays local. An unforced close runs one best-effort sync *before*
+it: `transition_close._refresh_close_material` calls `ensure_fresh(tracker, force=True)`
+before the close reads ticket type, plan material, AC boxes, or landed work, outside the
+write lock (bug `silvan-hysterical-lamb`). A failed or opted-out sync changes nothing, so the
+gate still does not depend on the remote. What changes is that a reachable remote's edits
+are adopted first instead of waiting for the next throttled read; see
+[Read-freshness policy](#read-freshness-policy-uniform-across-cli-library-and-mcp).
+
 The probe fails **open**, the gate fails **closed**. A diagnostic that cannot read its own
 inputs must not convince a healthy store that it is broken (the same posture
 `push_state.read_status` takes), but once staleness is *established* the gate declines,
@@ -851,6 +859,15 @@ so CLI reads synced but library/MCP reads did **not** — making MCP (the primar
 agent surface) the *stalest* interface. Collapsing the dual read path
 (story 23d2-e0f3 Rec 2) moved
 freshness into the native read path so all three interfaces agree.
+
+**Gate material reads skip the throttle once.** A one-minute lag is acceptable for a list,
+but a gate that judges a ticket must not judge text another clone already replaced. Plan
+review (its review-start snapshot and the pre-lock collect in `sign_manifest`) and every
+unforced close call `ensure_fresh(tracker, force=True)`. `force` skips only the age check:
+the opt-outs below still apply, the marker is still written, and a failed fetch is still
+swallowed. The close sync runs before the close reads anything and outside the write lock,
+so an MCP server whose read tools have not synced recently still judges AC boxes against an
+edit pushed from a worktree (bug `silvan-hysterical-lamb`). A forced close skips it.
 
 **Opt out** of the fetch when you want a pure-local replay (offline, hot loops,
 or when a write already synced): set `REBAR_SYNC_PULL=off` (the `sync.pull` policy,
