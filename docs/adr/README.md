@@ -156,3 +156,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0117 — Bot alert recovery closes use attested dispositions, not force](0117-bot-alert-disposition.md)
 - [0119 — The MCP tool surface is derived from the library facade (MCP only)](0119-mcp-surface-derived-from-library.md)
 - [0120 — Consolidate the CLI verb surface by hard cutover](0120-cli-verb-consolidation.md)
+- [0122 — Similar-ticket retrieval: embed the LLM digest, surfaced at k=5](0122-similar-ticket-retrieval.md)

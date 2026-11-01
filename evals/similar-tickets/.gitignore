@@ -1,0 +1,6 @@
+# Titan embedding caches: 14 MB each, regenerable from digests.json.
+vectors-digest.json
+vectors-raw.json
+*.bak
+__pycache__/
+corpus-text.json
