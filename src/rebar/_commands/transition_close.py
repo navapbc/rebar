@@ -20,6 +20,7 @@ from typing import Any
 
 from rebar import config
 from rebar._commands import (
+    close_precheck,
     scratch,
     txn,
 )
@@ -535,6 +536,8 @@ def close_ticket(
     plan_review_recheck = None
     if target_status == "closed" and current_status != "idea":
         # Pin the default or explicit ref once, then pass its SHA through verification and signing.
+        # Name the target first: after pinning, a default HEAD looks like an explicit SHA.
+        ref_source = close_precheck.ref_source_label(ref, str(config.repo_root(repo_root)))
         ref = _pin_completion_ref(ref, repo_root)
         from rebar.reducer import reduce_ticket as _reduce
 
@@ -573,6 +576,7 @@ def close_ticket(
             close_class=close_class,
             ref=ref,
             metrics=close_metrics,
+            ref_source=ref_source,
         )
         if precheck_result is not None and not isinstance(precheck_result, dict):
             raise CommandError(

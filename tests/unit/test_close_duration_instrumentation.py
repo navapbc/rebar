@@ -418,7 +418,7 @@ def test_check_work_landed_records_duration_and_threads_metrics_once(monkeypatch
         ),
         "calls": calls,
     } == {
-        "result": None,
+        "result": ["ref-sha"],
         "metrics": {
             "sentinel": 7,
             "history_child": 11,

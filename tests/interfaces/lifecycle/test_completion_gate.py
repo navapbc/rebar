@@ -327,6 +327,12 @@ def _set_impact(tid: str, repo: Path) -> None:
     rebar.set_file_impact(tid, [{"path": "src/x.py", "reason": "touched"}], repo_root=str(repo))
 
 
+def _rev_parse(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(repo), check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
 def _commit_ref(repo: Path, ref: str) -> None:
     """Empty commit whose message carries a ``rebar-ticket: <ref>`` trailer."""
     subprocess.run(
@@ -372,7 +378,12 @@ def test_file_impact_with_referencing_commit_closes(rebar_repo: Path, monkeypatc
 def test_file_impact_close_fetches_before_rejecting_stale_clone(
     rebar_repo: Path, tmp_path: Path, monkeypatch
 ) -> None:
-    """A server clone whose HEAD lags its remote must fetch before claiming no commit exists."""
+    """A server clone whose HEAD lags its remote must fetch before claiming no commit exists.
+
+    The fetched commit is not in the HEAD tree the verifier would read, so the close names it
+    instead of the misleading "no commit references it" (bug wieldable-runtish-moorhen), and
+    targeting it with ``ref`` closes.
+    """
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
     tid = _make(rebar_repo)
@@ -388,8 +399,13 @@ def test_file_impact_close_fetches_before_rejecting_stale_clone(
         check=True,
     )
     subprocess.run(["git", "remote", "add", "origin", str(upstream)], cwd=rebar_repo, check=True)
+    landed = _rev_parse(upstream)
 
-    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert landed in ei.value.stderr and "no commit references it" not in ei.value.stderr
+
+    rebar.transition(tid, "in_progress", "closed", ref=landed, repo_root=str(rebar_repo))
 
     assert _status(tid, rebar_repo) == "closed"
 
@@ -418,8 +434,13 @@ def test_file_impact_close_succeeds_when_local_and_remote_branch_names_differ(
         check=True,
     )
     subprocess.run(["git", "remote", "add", "origin", str(upstream)], cwd=rebar_repo, check=True)
+    landed = _rev_parse(upstream)
 
-    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert landed in ei.value.stderr and "no commit references it" not in ei.value.stderr
+
+    rebar.transition(tid, "in_progress", "closed", ref=landed, repo_root=str(rebar_repo))
 
     assert _status(tid, rebar_repo) == "closed"
 

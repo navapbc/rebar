@@ -1476,6 +1476,22 @@ changes which tree is pinned, not whether pinning happens. A completion attestat
 `verified_at_sha` can therefore legitimately be older than current HEAD, because it records
 the tree verified at close entry while main may advance before the attestation is read.
 
+**Over MCP, the default verification tree is the server process's checkout, not your
+worktree.** "HEAD" means the HEAD of the process running the close. For `transition_ticket`
+and `verify_completion_start` that process is the MCP server, so an agent working in a linked
+worktree has its close verified against whatever commit the server's checkout is on. To
+verify the commit that landed, pass `ref=<landed sha>` to `verify_completion_start` and
+`transition_ticket` (CLI `--ref <sha>`). Two safeguards make a wrong-tree read visible:
+
+- Before the verifier runs, the close checks that the verification tree contains at least one
+  of the commits the precheck accepted as the ticket's landed work (a `rebar-ticket:` commit,
+  including one found only on a refreshed remote ref, or an attached commit present in the
+  clone). If it contains none, the close refuses, names the tree's SHA and the landed commits,
+  and suggests the `ref` to use. No per-criterion findings are produced from the wrong tree.
+- A completion FAIL names the tree it verified: `Verified tree: <40-char sha> (HEAD of
+  <path>)` or `(explicit ref '<ref>')`. Line-cited findings are claims about that tree; when it
+  is not the commit that holds the work, re-run with `ref` rather than editing code.
+
 **Stacked-epic recipe.** When landing a stack where each story is its own commit, close each story
 against **its own commit** — `rebar transition <story-id> closed --ref <story-sha>` (or check that
 commit out) — while your worktree stays at the epic tip. Each story's scope acceptance-criteria are
