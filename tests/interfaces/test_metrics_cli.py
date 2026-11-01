@@ -3,6 +3,9 @@
 Tier: interface (real CLI subprocess + temp store). Pins the capstone contract:
 the command emits JSON whose `metrics` map contains an entry for EVERY registered
 metric id, each a value or an `unavailable` object. Text format / isolation held out.
+
+Held-out oracles merged from test_metrics_cli_heldout: Held-out contracts for the `rebar
+metrics` command (ticket 9a5a). WITHHELD.
 """
 
 from __future__ import annotations
@@ -11,6 +14,7 @@ import json
 import subprocess
 import sys
 from datetime import date
+from pathlib import Path
 
 import pytest
 from _subprocess_env import subprocess_env
@@ -269,7 +273,6 @@ def test_metrics_cli_names_missing_producers(rebar_repo, monkeypatch, capsys):
     )
 
 
-# Held-out oracle re-applied after implementation.
 def test_oracle_git_history_metrics_are_registered_and_rendered_by_cli(rebar_repo):
     p = _cli(
         "metrics",
@@ -293,3 +296,63 @@ def test_oracle_git_history_metrics_are_registered_and_rendered_by_cli(rebar_rep
             assert entry["confidence"] == "high"
         else:
             assert entry["unavailable"]["reason"]
+
+
+# ── held-out oracles (merged from test_metrics_cli_heldout) ──
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _cli_heldout(*args: str, cwd: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "rebar.cli", *args],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        check=False,
+    )
+
+
+def test_unpopulated_metric_is_unavailable(rebar_repo):
+    repo = str(rebar_repo)
+    p = _cli_heldout(
+        "metrics", "--since", "2026-01-01", "--until", "2026-07-01", "--output", "json", cwd=repo
+    )
+    assert p.returncode == 0, p.stderr
+    metrics = json.loads(p.stdout)["metrics"]
+    # A fresh store has no accrued data, so at least one metric must be `unavailable`
+    # with a non-empty reason.
+    unavail = [m for m in metrics.values() if "unavailable" in m]
+    assert unavail, "a fresh store should report at least one unavailable metric"
+    assert unavail[0]["unavailable"].get("reason")
+
+
+def test_text_output_lists_every_metric(rebar_repo):
+    repo = str(rebar_repo)
+    p = _cli_heldout(
+        "metrics", "--since", "2026-01-01", "--until", "2026-07-01", "--output", "text", cwd=repo
+    )
+    assert p.returncode == 0, p.stderr
+    # One line per registered metric id (a human summary, not JSON).
+    for spec in REGISTRY:
+        assert spec.id in p.stdout, f"text output missing metric {spec.id}"
+    assert "unavailable" in p.stdout
+
+
+def test_command_does_not_import_adapters():
+    # Portability guard: the core command must stay harness-agnostic — no adapter IMPORT.
+    # Parse the AST and inspect import statements (a docstring/comment mentioning the
+    # adapters is fine — only an actual import breaks isolation).
+    import ast
+
+    src = (_ROOT / "src" / "rebar" / "_commands" / "metrics.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported += [n.name for n in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            imported.append(node.module or "")
+    assert not any("adapters" in mod for mod in imported), (
+        f"metrics.py imports an adapter: {imported}"
+    )
