@@ -58,7 +58,6 @@
     "autouse_fixture::tests/unit/reconciler/orchestrate/test_main_entry.py::_git_repo": 1,
     "autouse_fixture::tests/unit/reconciler/orchestrate/test_reconcile_main.py::_git_repo": 1,
     "autouse_fixture::tests/unit/reconciler/state/test_backend_scalar_surface.py::_clean": 1,
-    "autouse_fixture::tests/unit/reconciler/state/test_backend_scalar_surface_heldout.py::_clean": 1,
     "autouse_fixture::tests/unit/reconciler/state/test_config_file_wiring.py::_clean": 1,
     "autouse_fixture::tests/unit/reconciler/state/test_config_jira_wiring.py::_clean": 1,
     "autouse_fixture::tests/unit/reconciler/state/test_ev3c_env_renames.py::_clean": 1,
