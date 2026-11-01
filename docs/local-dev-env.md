@@ -507,8 +507,8 @@ Verify with `command -v scc` and `command -v jscpd`.
 
 ```sh
 make check     # lint + typecheck — the tight loop (~40 s); NOT the pre-push gate
-make verify    # THE PRE-PUSH GATE: lint + typecheck + the default suite (20-25 min)
-make test      # default test suite (excludes integration + external), -n 4 --dist worksteal
+make verify    # THE PRE-PUSH GATE: lint + typecheck + the default and integration tiers (25-30 min)
+make test      # default tier (-n 4 --dist worksteal), then integration tier (--dist loadgroup)
 make format    # the ONLY target that rewrites files
 ```
 
@@ -540,7 +540,9 @@ deliberately: it is cheaper than a 15–20 minute `Verified -1` round trip, and 
 local command that can honestly be called "I verified this".
 
 Measured twice on one six-performance-core host at the default `PYTEST_WORKERS=4`: 22 min 25 s
-and 26 min 04 s wall (lint ~27 s, typecheck ~10 s, ~19.2k tests). The spread is host load, so
+and 26 min 04 s wall (lint ~27 s, typecheck ~10 s, ~19.2k tests), before `make test` also ran
+the integration tier that CI's gating cell runs after the default tier; that tier added 200
+tests and ~3 min 40 s on the same host, so plan for 25-30 minutes. The spread is host load, so
 plan for the top of the range rather than the faster figure. Raise it for a bigger box
 (`make test PYTEST_WORKERS=8`); do **not** reach for `-n auto`, which resolves to the logical
 CPU count and over-subscribes badly — on that same host `auto` (18 workers) was still at 7%

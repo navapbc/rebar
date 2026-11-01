@@ -533,7 +533,7 @@ import-convention:  ## ERRORS ONLY: bare-pytest import convention guards (python
 	@# `tests.`-rooted imports that fail under `make test` and CI.
 	pytest tests/unit/test_tests_import_convention.py tests/unit/test_scripts_import_convention.py -q
 
-verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + typecheck + import convention + default suite. Costs 20-25 min, not seconds.
+verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + typecheck + import convention + default and integration tiers. Costs 25-30 min, not seconds.
 	@# Bug 1035-bed7-c855-4732. `make lint` is what AGENTS.md names, what the pre-commit hook
 	@# runs, and what every contributor treats as the local proxy for CI — but it is only the
 	@# check-only half. Three gates enforced solely by pytest (test_mechanism_delta,
@@ -546,13 +546,14 @@ verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + type
 	@# with that population: the same drift defect one level up, and exactly the shape
 	@# check_deploy_manifest.py exists to catch.
 	@#
-	@# Instead this is complete by construction. `test` runs `-m "not integration and not
-	@# external"`, which is EXACTLY what CI's gating cell selects: DEFAULT_SUITE_MARKS
-	@# (_build-and-test.yml) is matrix-conditional, and the ubuntu-latest/py3.13 cell — the
-	@# one that also collects coverage — resolves to that same string. The other two Ubuntu
-	@# cells run a strict subset (`... and not repo_policy`) and macOS runs the
-	@# platform_compat subset, so this is a superset of every cell. Nothing to enumerate,
-	@# nothing to drift.
+	@# Instead this is complete by construction. `test` runs the same two pytest selections
+	@# as CI's gating ubuntu-latest/py3.13 cell, in the same order: the default tier
+	@# (`-m "not integration and not external"`, what DEFAULT_SUITE_MARKS in
+	@# _build-and-test.yml resolves to for that cell) and then the integration tier
+	@# (`-m integration`). The other two Ubuntu cells run a strict subset of the default tier
+	@# (`... and not repo_policy`) and macOS runs the platform_compat subset, each plus the
+	@# integration tier, so this is a superset of every cell. test_ci_workflow_parity.py
+	@# asserts both properties against the workflow, so the two cannot drift silently.
 	@#
 	@# It is SEPARATE from `lint` and from the pre-commit hook on purpose: the suite is far
 	@# too slow for a commit gate, which is why these gates live in pytest in the first
@@ -560,7 +561,9 @@ verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + type
 	@#
 	@# COST IS PART OF THE CONTRACT. Measured twice on one 6-performance-core host at the
 	@# default PYTEST_WORKERS=4: 22 min 25 s and 26 min 04 s wall (lint ~27 s + typecheck
-	@# ~10 s + ~19.2k tests). The spread is host load, which is why this quotes a RANGE
+	@# ~10 s + ~19.2k tests), before the integration tier was added (bug a8af-ac33-74aa-4ccd);
+	@# that tier measured 200 tests in ~3 min 40 s at -n 4 on the same host, so plan for
+	@# 25-30 min. The spread is host load, which is why this quotes a RANGE
 	@# rather than the faster number — under-promising the cost is how a target gets killed
 	@# mid-run. Stated here, in `make help`, in AGENTS.md and in
 	@# docs/local-dev-env.md, because a contributor who expects `make lint`'s 27 s and gets
@@ -572,7 +575,7 @@ verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + type
 	@# make + ruff + mypy + pytest over this checkout only: no CI provider required
 	@# (project.portability).
 
-test:  ## Run the default test suite (excludes integration + external), parallelised like CI.
+test:  ## Run the default suite, then the integration tier (excludes external), parallelised like CI.
 	@# Bug 1035-bed7-c855-4732. CI runs this tier under `-n 4 --dist worksteal` while a local
 	@# run was SERIAL — a local/CI divergence of the same class as the one this bug is about,
 	@# and the reason a full local suite cost ~29 min and so went unrun.
@@ -585,6 +588,13 @@ test:  ## Run the default test suite (excludes integration + external), parallel
 	@# this suite forks git/bash/pytest subprocesses of its own. The same tree at `-n 4`
 	@# finished in 22 min 13 s. Override for a bigger box: `make test PYTEST_WORKERS=8`.
 	pytest -m "not integration and not external" -n $(PYTEST_WORKERS) --dist worksteal -q
+	@# Bug a8af-ac33-74aa-4ccd. CI's gating cell runs a SECOND pytest step after the
+	@# default tier: the integration tier, under `--dist loadgroup --max-worker-restart=0`
+	@# (_build-and-test.yml "Run the integration tier"). Running only the line above let
+	@# `make verify` pass a tree whose integration-marked policy test failed every CI cell.
+	@# Measured on a 6-performance-core host: 200 tests, ~3 min 40 s at -n 4.
+	@# test_ci_workflow_parity.py asserts these two lines equal the cell's pytest steps.
+	pytest -m integration -n $(PYTEST_WORKERS) --dist loadgroup --max-worker-restart=0 -q
 
 # mechanism-ok: ci_gate scanner-integration — aa9e-3d35 advisory native-scanner lane.
 scanner-integration:  ## Install pinned native review scanners, then run the nine real scanner contracts.

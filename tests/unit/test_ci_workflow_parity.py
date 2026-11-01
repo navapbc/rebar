@@ -691,6 +691,19 @@ def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
     return [line.strip() for line in proc.stdout.splitlines() if "::" in line]
 
 
+def _default_suite_routes(selector_expression: str) -> dict[str, str]:
+    """The ``macos`` / ``primary`` / ``non_primary`` selections of the matrix expression."""
+    expression = re.fullmatch(
+        r"\$\{\{\s*matrix\.os == 'macos-latest'\s*&&\s*"
+        r"'(?P<macos>[^']+)'\s*\|\|\s*\(\s*"
+        r"matrix\.python-version == '3\.13'\s*&&\s*"
+        r"'(?P<primary>[^']+)'\s*\|\|\s*'(?P<non_primary>[^']+)'\s*\)\s*\}\}",
+        selector_expression,
+    )
+    assert expression is not None, f"unrecognised default-suite selector: {selector_expression}"
+    return expression.groupdict()
+
+
 def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
     """Route policy nodes by selector, without a new job or pytest session."""
     import yaml
@@ -706,17 +719,10 @@ def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
         for key, value in default_step.get("env", {}).items()
         if isinstance(value, str) and _DEFAULT_SELECTION in value and "repo_policy" in value
     )
-    expression = re.fullmatch(
-        r"\$\{\{\s*matrix\.os == 'macos-latest'\s*&&\s*"
-        r"'(?P<macos>[^']+)'\s*\|\|\s*\(\s*"
-        r"matrix\.python-version == '3\.13'\s*&&\s*"
-        r"'(?P<primary>[^']+)'\s*\|\|\s*'(?P<non_primary>[^']+)'\s*\)\s*\}\}",
-        selector_expression,
-    )
-    assert expression is not None
-    assert expression.group("macos") == "platform_compat and not external"
-    assert expression.group("primary") == _DEFAULT_SELECTION
-    assert expression.group("non_primary") == f"{_DEFAULT_SELECTION} and not repo_policy"
+    routes = _default_suite_routes(selector_expression)
+    assert routes["macos"] == "platform_compat and not external"
+    assert routes["primary"] == _DEFAULT_SELECTION
+    assert routes["non_primary"] == f"{_DEFAULT_SELECTION} and not repo_policy"
     assert f'pytest -m "${selector_key}"' in default_step["run"]
 
     pytest_steps = [
@@ -1345,3 +1351,133 @@ def test_ci_reachable_make_recipes_reject_bash_only_constructs() -> None:
     violations = _bash_only_make_recipe_violations(seeded)
     assert violations == ["lint: set -o pipefail"]
     assert not _bash_only_make_recipe_violations(recipes)
+
+
+# --------------------------------------------------------------------------- #
+# `make test` is the locally checkable half of Verified (bug 1035-bed7-c855-4732),
+# so it must run every pytest selection CI's gating cell runs. The gating cell's
+# `test` job runs TWO pytest steps (default tier, then integration tier); a Makefile
+# that ran only the first stayed green while CI failed (bug a8af-ac33-74aa-4ccd).
+# --------------------------------------------------------------------------- #
+
+_GATING_CELL = ("ubuntu-latest", "3.13")
+_PYTEST_SELECTION = re.compile(
+    r"""(?m)^\s*pytest\s+-m\s+(?:"(?P<dq>[^"]+)"|'(?P<sq>[^']+)'|(?P<bare>[^\s"']+))"""
+)
+_PYTEST_DIST = re.compile(r"--dist\s+(?P<mode>[A-Za-z]+)")
+_MARK_EXPR_KEYWORDS = {"and", "or", "not"}
+
+
+def _pytest_selections(run: str) -> list[tuple[str, str]]:
+    """``(marker expression, --dist mode)`` for each ``pytest -m`` command in ``run``."""
+    matches = list(_PYTEST_SELECTION.finditer(run))
+    selections: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        expression = match.group("dq") or match.group("sq") or match.group("bare")
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(run)
+        dist = _PYTEST_DIST.search(run, match.end(), end)
+        selections.append((expression, dist.group("mode") if dist else ""))
+    return selections
+
+
+def _make_test_selections(makefile_text: str) -> list[tuple[str, str]]:
+    """The selections the Makefile ``test`` recipe runs, in order."""
+    return _pytest_selections(_live_make_lines(_make_recipe_bodies(makefile_text)["test"]))
+
+
+def _matrix_cells(job: dict) -> list[tuple[str, str]]:
+    """Every ``(os, python-version)`` cell of a job's matrix after ``exclude``."""
+    matrix = job["strategy"]["matrix"]
+    excluded = {(e["os"], e["python-version"]) for e in matrix.get("exclude", [])}
+    return [
+        (os_name, version)
+        for os_name in matrix["os"]
+        for version in matrix["python-version"]
+        if (os_name, version) not in excluded
+    ]
+
+
+def _cell_selections(workflow: dict, os_name: str, version: str) -> list[tuple[str, str]]:
+    """The selections one matrix cell's ``test`` job runs, with ``$VAR`` marks resolved."""
+    selections: list[tuple[str, str]] = []
+    for step in workflow["jobs"]["test"]["steps"]:
+        for expression, dist in _pytest_selections(step.get("run", "")):
+            if expression.startswith("$"):
+                routes = _default_suite_routes(step["env"][expression.lstrip("$")])
+                if os_name == "macos-latest":
+                    expression = routes["macos"]
+                elif version == "3.13":
+                    expression = routes["primary"]
+                else:
+                    expression = routes["non_primary"]
+            selections.append((expression, dist))
+    return selections
+
+
+def _selects(expression: str, assignment: dict[str, bool]) -> bool:
+    """Whether pytest's own ``-m`` evaluator selects a node carrying ``assignment``'s marks."""
+    from _pytest.mark.expression import Expression
+
+    return Expression.compile(expression).evaluate(lambda name, **_: assignment.get(name, False))
+
+
+def _uncovered_cell_selections(
+    make_selections: list[tuple[str, str]], cell_selections: list[tuple[str, str]]
+) -> list[dict[str, bool]]:
+    """Mark combinations a cell selects that no ``make test`` selection selects."""
+    import itertools
+
+    expressions = [e for e, _ in make_selections] + [e for e, _ in cell_selections]
+    names = sorted(
+        {t for e in expressions for t in re.findall(r"[A-Za-z_]\w*", e)} - _MARK_EXPR_KEYWORDS
+    )
+    gaps: list[dict[str, bool]] = []
+    for values in itertools.product((False, True), repeat=len(names)):
+        assignment = dict(zip(names, values, strict=True))
+        if any(_selects(e, assignment) for e, _ in cell_selections) and not any(
+            _selects(e, assignment) for e, _ in make_selections
+        ):
+            gaps.append(assignment)
+    return gaps
+
+
+def test_make_test_runs_exactly_the_gating_cells_pytest_selections() -> None:
+    """`make test` runs the gating cell's pytest selections, in order, with the same --dist."""
+    import yaml
+
+    gating = _cell_selections(yaml.safe_load(_read(_BAT_YML)), *_GATING_CELL)
+    assert len(gating) >= 2, f"expected the default and integration steps, found {gating}"
+    assert _make_test_selections(_read(_MAKEFILE)) == gating, (
+        "Makefile `test` must run the same `pytest -m` selections as CI's gating "
+        f"{_GATING_CELL} cell ({gating}); otherwise `make verify` can pass a tree CI fails."
+    )
+
+
+def test_make_test_selection_is_a_superset_of_every_matrix_cell() -> None:
+    """Every node any matrix cell selects is selected by some `make test` invocation."""
+    import yaml
+
+    workflow = yaml.safe_load(_read(_BAT_YML))
+    make_selections = _make_test_selections(_read(_MAKEFILE))
+    cells = _matrix_cells(workflow["jobs"]["test"])
+    assert _GATING_CELL in cells
+    gaps = {
+        cell: _uncovered_cell_selections(make_selections, _cell_selections(workflow, *cell))
+        for cell in cells
+    }
+    assert not any(gaps.values()), f"marker combinations CI runs but `make test` skips: {gaps}"
+
+
+def test_selection_parity_detects_a_makefile_without_the_integration_tier() -> None:
+    """The pre-fix recipe (default tier only) is reported as missing integration nodes."""
+    import yaml
+
+    pre_fix = (
+        "test:  ## default suite\n"
+        '\tpytest -m "not integration and not external" -n $(PYTEST_WORKERS) --dist worksteal -q\n'
+    )
+    make_selections = _make_test_selections(pre_fix)
+    gating = _cell_selections(yaml.safe_load(_read(_BAT_YML)), *_GATING_CELL)
+    assert make_selections != gating
+    gaps = _uncovered_cell_selections(make_selections, gating)
+    assert gaps and all(gap["integration"] for gap in gaps)

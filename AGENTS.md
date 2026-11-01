@@ -31,17 +31,19 @@ artifact and docs drift, whole-tree AST policy scans (roughly seventy modules). 
 three separate changes were pushed red by exactly those tests after their authors ran
 `make lint` and `make typecheck` and saw green (bug `1035-bed7-c855-4732`). **`make verify`**
 = `lint` + `typecheck` + the bare-`pytest` `import-convention` guard + `test`, and
-`make test` selects exactly what CI's gating `ubuntu-latest, py3.13` cell selects
-(`not integration and not external`) — a superset of every other matrix cell — so it is
-the locally checkable half of `Verified`, with nothing to enumerate and nothing to drift.
+`make test` runs exactly the two pytest selections CI's gating `ubuntu-latest, py3.13` cell
+runs, in order — the default tier (`not integration and not external`), then the integration
+tier (`-m integration`) — a superset of every other matrix cell, so it is the locally
+checkable half of `Verified`. `tests/unit/test_ci_workflow_parity.py` asserts both against
+the workflow, so the two cannot drift silently (bug `a8af-ac33-74aa-4ccd`).
 The import-convention guard is intentionally called out and run with the **BARE `pytest`
 console script**: `python -m pytest` injects the checkout root onto `sys.path`, so it can
 false-green `tests.`-rooted imports that fail under `make test` and CI.
 
-**It costs 20-25 minutes** (measured twice on one six-performance-core host at the default
-`PYTEST_WORKERS=4`: 22 min 25 s and 26 min 04 s wall for lint + typecheck + ~19.2k tests --
-the spread is host load, so plan for the top of the range; `make test PYTEST_WORKERS=8` on a
-bigger box).
+**It costs 25-30 minutes** (measured twice on one six-performance-core host at the default
+`PYTEST_WORKERS=4`: 22 min 25 s and 26 min 04 s wall for lint + typecheck + ~19.2k tests,
+plus ~3 min 40 s for the 200-test integration tier -- the spread is host load, so plan for
+the top of the range; `make test PYTEST_WORKERS=8` on a bigger box).
 That is the price of the contract, and it is stated here so you can plan for it rather than
 kill it: it is still cheaper than a 15–20 minute `Verified -1` round trip, and it is the only
 local command that lets you say "I verified this" and be right. Run it once before
