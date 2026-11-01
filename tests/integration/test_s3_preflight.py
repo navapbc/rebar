@@ -67,8 +67,8 @@ def _wire_push(
     monkeypatch: pytest.MonkeyPatch, remote_url: str, *, mode: str = "always", **kw
 ) -> None:
     monkeypatch.setattr(push, "_push_mode", lambda _root=None: mode)
-    monkeypatch.setattr(config, "tickets_branch", lambda _root=None: "tickets")
-    monkeypatch.setattr(config, "tickets_remote", lambda _root=None: "origin")
+    monkeypatch.setattr(config, "store_tickets_branch", lambda _root=None: "tickets")
+    monkeypatch.setattr(config, "store_tickets_remote", lambda _root=None: "origin")
     monkeypatch.setattr(push, "_git", _fake_git_factory(remote_url, **kw))
 
 

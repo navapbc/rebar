@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
+from rebar._config_coercion import _as_git_ref, _as_git_remote
 from rebar._config_schema import _RESERVED_SECTIONS as _RESERVED_SECTIONS
 from rebar._config_schema import _SECTION_CLASSES as _SECTION_CLASSES
 
@@ -192,19 +194,76 @@ def peer_tracker_dir(root: str | os.PathLike[str]) -> Path:
     return _join_store_path(name, repo_root(root))
 
 
+def _raw_layer_value(root: str | os.PathLike[str], section: str, key: str) -> object | None:
+    """Walk the raw user/project layers for ONE key; the last layer that sets it wins.
+
+    No section is coerced or validated here, so unrelated keys never warn. A
+    non-table section, or an unreadable file, raises ``ConfigError``; the caller
+    decides whether that fails closed.
+    """
+    found: object | None = None
+    for layer in raw_layers(root):
+        table = layer.raw.get(section)
+        if table is None:
+            continue
+        if not isinstance(table, dict):
+            raise ConfigError(f"rebar config ({layer.path}): [{section}] must be a table")
+        if key in table:
+            found = table[key]
+    return found
+
+
 def _raw_tracker_dir(root: str | os.PathLike[str]) -> str:
     """The raw-layer ``tracker.dir`` for ``root``, else the schema default."""
-    name = TrackerConfig().dir
     try:
-        for layer in raw_layers(root):
-            section = layer.raw.get("tracker")
-            value = section.get("dir") if isinstance(section, dict) else None
-            if isinstance(value, str) and value:
-                name = value
+        value = _raw_layer_value(root, "tracker", "dir")
     except ConfigError:
         # An unreadable file falls back to the default, as tracker_dir() does.
         return TrackerConfig().dir
-    return name
+    return value if isinstance(value, str) and value else TrackerConfig().dir
+
+
+def _store_value(
+    root: str | os.PathLike[str],
+    section: str,
+    key: str,
+    default: str,
+    validate: Callable[[Any, str], str],
+) -> str:
+    """Resolve one shared-store key for ``root`` without composing its whole config.
+
+    A bound snapshot for ``root`` wins; otherwise CLI > env > raw layers > default,
+    the same precedence as :func:`load_config`. The chosen value is validated, so a
+    malformed one still raises ``ConfigError`` (fail closed).
+    """
+    snapshot = _bound_snapshot_for_root(root)
+    if snapshot is not None:
+        return str(snapshot.values[section][key])
+    value = (_CLI_OVERRIDES or {}).get(section, {}).get(key)
+    if value is None:
+        value = env_overrides().get(section, {}).get(key)
+    if value is None:
+        value = _raw_layer_value(root, section, key)
+    return validate(default if value is None else value, f"{section}.{key}")
+
+
+def store_tickets_branch(root: str | os.PathLike[str]) -> str:
+    """The shared store's ticket branch, read from the checkout that owns the store.
+
+    Reads only ``tracker.branch`` (validated as a git ref), so keys elsewhere in
+    that checkout's config are not reported against a linked-worktree caller
+    (nosophobic-zebraic-waterbug). Raises ``ConfigError`` on a malformed value.
+    """
+    return _store_value(root, "tracker", "branch", TrackerConfig().branch, _as_git_ref)
+
+
+def store_tickets_remote(root: str | os.PathLike[str]) -> str:
+    """The shared store's sync remote, read from the checkout that owns the store.
+
+    Reads only ``sync.remote`` (validated as a git remote name); see
+    :func:`store_tickets_branch`. Raises ``ConfigError`` on a malformed value.
+    """
+    return _store_value(root, "sync", "remote", SyncConfig().remote, _as_git_remote)
 
 
 def tickets_branch(root: str | os.PathLike[str] | None = None) -> str:

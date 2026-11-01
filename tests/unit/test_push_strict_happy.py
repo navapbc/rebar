@@ -19,8 +19,8 @@ def test_strict_policy_decline_raises_catchable_delivery_error(
     tracker = tmp_path / ".tickets-tracker"
     tracker.mkdir()
     monkeypatch.setattr(push, "_push_mode", lambda _root=None: "always")
-    monkeypatch.setattr(config, "tickets_branch", lambda _root=None: "tickets")
-    monkeypatch.setattr(config, "tickets_remote", lambda _root=None: "origin")
+    monkeypatch.setattr(config, "store_tickets_branch", lambda _root=None: "tickets")
+    monkeypatch.setattr(config, "store_tickets_remote", lambda _root=None: "origin")
 
     def fake_git(_base: str, *args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         if args[:2] == ("remote", "get-url"):

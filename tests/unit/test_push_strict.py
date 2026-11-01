@@ -23,8 +23,8 @@ def _completed(args: tuple[str, ...], rc: int = 0, out: str = "", err: str = "")
 def _common(monkeypatch: pytest.MonkeyPatch, tracker: Path) -> None:
     tracker.mkdir(exist_ok=True)
     monkeypatch.setattr(push, "_push_mode", lambda _root=None: "always")
-    monkeypatch.setattr(config, "tickets_branch", lambda _root=None: "tickets")
-    monkeypatch.setattr(config, "tickets_remote", lambda _root=None: "origin")
+    monkeypatch.setattr(config, "store_tickets_branch", lambda _root=None: "tickets")
+    monkeypatch.setattr(config, "store_tickets_remote", lambda _root=None: "origin")
 
 
 def _delivery_error(call: Callable[[], None], reason: str) -> Exception:
@@ -67,7 +67,7 @@ def test_strict_invalid_destination_and_missing_remote_fail_without_changing_def
     def invalid_branch(_root=None):
         raise config.ConfigError("broken destination config")
 
-    monkeypatch.setattr(config, "tickets_branch", invalid_branch)
+    monkeypatch.setattr(config, "store_tickets_branch", invalid_branch)
     monkeypatch.setattr(
         push,
         "_git",
@@ -81,7 +81,7 @@ def test_strict_invalid_destination_and_missing_remote_fail_without_changing_def
     assert "broken destination config" in str(error)
     assert push.push_tickets_branch(str(tracker)) is None
 
-    monkeypatch.setattr(config, "tickets_branch", lambda _root=None: "tickets")
+    monkeypatch.setattr(config, "store_tickets_branch", lambda _root=None: "tickets")
 
     def missing_git(_base: str, *args: str, **_kwargs: object):
         if args[:2] == ("remote", "get-url"):
