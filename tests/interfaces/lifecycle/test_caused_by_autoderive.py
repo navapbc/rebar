@@ -1,11 +1,17 @@
 """Interface coverage for explicit and blame-derived caused_by on bug close. The library and
 CLI must write a link through the closed-source path; this file owns single-culprit and
-ambiguous-blame cases."""
+ambiguous-blame cases.
+
+Held-out oracles merged from test_caused_by_autoderive_heldout: Held-out caused_by coverage: the
+library close facade writes the link, and the user guide advises a blame hunt. The companion file
+owns the single-culprit and ambiguous-blame cases.
+"""
 
 from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -52,8 +58,6 @@ def test_explicit_caused_by_on_bug_close(rebar_repo) -> None:
     assert rebar.show_ticket(bug, repo_root=repo)["status"] == "closed"
 
 
-# --- single-culprit + ambiguous blame auto-derivation (AC1 & AC2 live here, not just the
-# --- held-out companion): the AC names this file as the proof of blame auto-derivation.
 def _git(repo, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
 
@@ -111,3 +115,32 @@ def test_ambiguous_blame_draws_no_autolink(rebar_repo) -> None:
     assert p.returncode == 0, p.stderr
     # No >50% dominant culprit -> no auto caused_by link.
     assert _caused_by_targets(bug, repo) == []
+
+
+# ── held-out oracles (merged from test_caused_by_autoderive_heldout) ──
+
+
+def test_library_facade_threads_caused_by(rebar_repo) -> None:
+    repo = str(rebar_repo)
+    culprit = rebar.create_ticket("task", "culprit", repo_root=repo)
+    bug = rebar.create_ticket("bug", "bug", repo_root=repo)
+    rebar.transition(bug, "open", "in_progress", repo_root=repo)
+
+    # The library facade must accept and thread caused_by (parallel to ed13's close_class).
+    rebar.transition(
+        bug, "in_progress", "closed", close_class="regression", caused_by=culprit, repo_root=repo
+    )
+    assert culprit in _caused_by_targets(bug, repo)
+
+
+def test_user_guide_has_blame_hunt_advisory() -> None:
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        ug = parent / "docs" / "user-guide.md"
+        if ug.exists():
+            text = ug.read_text(encoding="utf-8").lower()
+            assert "caused-by" in text or "caused_by" in text, (
+                "user-guide must mention the caused-by advisory"
+            )
+            return
+    raise AssertionError("could not locate docs/user-guide.md")

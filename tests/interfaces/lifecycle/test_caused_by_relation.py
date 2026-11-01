@@ -4,6 +4,9 @@ Tier: interface (library facade over a real temp store). This is the happy-path
 oracle — it pins the one new capability: `caused_by` is an accepted 7th relation
 that round-trips into a ticket's deps. Directionality / non-cycle / back-compat
 contracts live in the held-out companion.
+
+Held-out oracles merged from test_caused_by_relation_heldout: Held-out contracts for the
+`caused_by` relation (ticket 0b96). WITHHELD.
 """
 
 from __future__ import annotations
@@ -50,3 +53,73 @@ def test_caused_by_link_round_trips(rebar_repo) -> None:
 
     # The relation is accepted and appears verbatim on the source ticket's deps.
     assert (culprit, "caused_by") in _rels(bug, repo)
+
+
+# ── held-out oracles (merged from test_caused_by_relation_heldout) ──
+
+
+def test_caused_by_is_directional(rebar_repo) -> None:
+    repo = str(rebar_repo)
+    bug = rebar.create_ticket("bug", "bug", repo_root=repo)
+    culprit = rebar.create_ticket("task", "culprit", repo_root=repo)
+    # force: this contract pins DIRECTIONALITY, not commit evidence; the fixture
+    # repo's history has no commit referencing the culprit, so an unforced link
+    # would trip the (orthogonal) caused_by referencing-commit check.
+    rebar.link(bug, culprit, "caused_by", force="held-out directionality contract", repo_root=repo)
+
+    # Forward edge on the source; NO reciprocal on the target.
+    assert (culprit, "caused_by") in _rels(bug, repo)
+    assert all(rel != "caused_by" for _, rel in _rels(culprit, repo))
+
+    # Contrast: relates_to IS reciprocal (appears on both).
+    x = rebar.create_ticket("task", "x", repo_root=repo)
+    y = rebar.create_ticket("task", "y", repo_root=repo)
+    rebar.link(x, y, "relates_to", repo_root=repo)
+    assert (y, "relates_to") in _rels(x, repo)
+    assert (x, "relates_to") in _rels(y, repo)
+
+
+def test_caused_by_is_non_cycle_inducing(rebar_repo) -> None:
+    # Teeth for the graph/_graph.py non-cycle-tuple fix: establish a REAL blocking
+    # edge a->b, then draw the reverse caused_by edge b->a. This must NOT raise,
+    # because caused_by is non-cycle-inducing. If caused_by were (wrongly) treated
+    # as blocking — i.e. missing from the non-cycle tuple — the cycle check would
+    # see a->b (blocks) closing with b->a and raise CyclicDependencyError.
+    repo = str(rebar_repo)
+    a = rebar.create_ticket("bug", "a", repo_root=repo)
+    b = rebar.create_ticket("task", "b", repo_root=repo)
+    rebar.link(a, b, "blocks", repo_root=repo)  # real blocking edge a -> b
+    # reverse caused_by must NOT raise (forced past the orthogonal referencing-commit check)
+    rebar.link(b, a, "caused_by", force="held-out non-cycle contract", repo_root=repo)
+    assert (a, "caused_by") in _rels(b, repo)
+
+
+def test_blocking_cycle_still_rejected(rebar_repo) -> None:
+    # Control: the real blocking relations still enforce acyclicity.
+    repo = str(rebar_repo)
+    x = rebar.create_ticket("task", "x", repo_root=repo)
+    y = rebar.create_ticket("task", "y", repo_root=repo)
+    rebar.link(x, y, "blocks", repo_root=repo)
+    with pytest.raises(rebar.RebarError):
+        rebar.link(y, x, "blocks", repo_root=repo)
+
+
+def test_bogus_relation_still_rejected(rebar_repo) -> None:
+    repo = str(rebar_repo)
+    a = rebar.create_ticket("task", "a", repo_root=repo)
+    b = rebar.create_ticket("task", "b", repo_root=repo)
+    with pytest.raises(rebar.RebarError, match="invalid relation"):
+        rebar.link(a, b, "not_a_real_relation", repo_root=repo)
+
+
+@pytest.mark.parametrize(
+    "relation",
+    ["blocks", "depends_on", "relates_to", "duplicates", "supersedes", "discovered_from"],
+)
+def test_legacy_relations_still_work(rebar_repo, relation: str) -> None:
+    # Additive change must not break the pre-existing six relations.
+    repo = str(rebar_repo)
+    a = rebar.create_ticket("task", "a", repo_root=repo)
+    b = rebar.create_ticket("task", "b", repo_root=repo)
+    rebar.link(a, b, relation, repo_root=repo)
+    assert (b, relation) in _rels(a, repo)
