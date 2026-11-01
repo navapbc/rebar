@@ -21,6 +21,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _observability_harness import observability_env, run_observability
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
@@ -151,7 +152,7 @@ def _environment(
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -190,7 +191,7 @@ def _install_units(unit_dir: Path) -> None:
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(["bash", str(SCRIPT)], env=env, timeout=180, check=False)
+    return run_observability(["bash", str(SCRIPT)], env=env, timeout=180)
 
 
 def _values(log: Path, metric: str) -> list[int]:
@@ -385,7 +386,7 @@ def test_the_probe_finds_the_cap_script_under_its_installed_name(tmp_path: Path)
     # The defining property of the layout: the name the OLD code looked for is absent.
     assert not (installed / "container-cap.sh").exists()
 
-    assert subprocess.run(["bash", str(probe)], env=env, timeout=180, check=False).returncode == 0
+    assert run_observability(["bash", str(probe)], env=env, timeout=180).returncode == 0
 
     # The share was readable, so the percent is on the air rather than silently skipped.
     assert _values(aws_log, "container_writable_used_percent")

@@ -12,7 +12,7 @@ import textwrap
 from pathlib import Path
 
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -80,7 +80,7 @@ def _environment(tmp_path: Path, data_mount: Path) -> tuple[dict[str, str], Path
     for name in _OFFSET_VARIABLES:
         (offsets / name.lower()).write_text("0\n")
 
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",
@@ -111,7 +111,7 @@ def _values(log: Path, metric: str) -> list[int]:
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    return run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
 
 
 def _plant(directory: Path, kib: int) -> None:

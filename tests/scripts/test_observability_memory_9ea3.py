@@ -9,12 +9,11 @@ script's CloudWatch command arguments.
 
 from __future__ import annotations
 
-import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
-from _subprocess_env import subprocess_env
+from _observability_harness import observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 
@@ -84,7 +83,7 @@ def _environment(
     offsets = tmp_path / "offsets"
     offsets.mkdir()
 
-    env = subprocess_env()
+    env = observability_env(tmp_path)
     # PREPENDED so the stubs shadow any ambient `free`/`docker`/`timeout` — the script
     # itself still needs the real interpreter and coreutils on PATH. Every command the
     # memory section touches has a stub here, so no ambient binary can answer for it and
@@ -129,7 +128,7 @@ def _dimensioned(log: Path, metric: str) -> dict[str, list[int]]:
 
 
 def _run(env: dict[str, str]) -> None:
-    result = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60, check=False)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
     assert result.returncode == 0
 
 
