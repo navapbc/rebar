@@ -2,7 +2,9 @@
 
 > **Amended (2026-09-04) — see §Amendment.** The compatibility adapters this ADR kept were removed by ticket `82bb-439b-1c42-4abd`; only the engine-only `--filter-local-ids` post-filter survives.
 
-**Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §19; kept verbatim as the evidence record.
+
+**Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 **Date:** 2026-08-08
 
 ## Context

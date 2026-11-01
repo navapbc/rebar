@@ -1,6 +1,8 @@
 # ADR 0096 — Complete Pandoc corpus replay belongs in external integration
 
-**Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §18; kept verbatim as the evidence record.
+
+**Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 **Date:** 2026-08-14
 **Supersedes:** the testing-assurance clause in
 [ADR 0095](0095-dc-segmenting-wiki-renderer.md) that required every conversion

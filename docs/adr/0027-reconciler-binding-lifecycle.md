@@ -1,6 +1,8 @@
 # ADR 0027: Reconciler binding lifecycle (pending → confirmed → retired; adoption gating)
 
-- **Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §8; kept verbatim as the evidence record.
+
+- **Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 - **Context:** Epic *Level-triggered bridge convergence* (`3006-e198-13db-4e1f`).
   Documents the binding-store identity + retirement invariants before the redesign
   (children `5854` adoption, `13eb` GC) touches them. Lessons **L9, L10, L11, L14, L15**.

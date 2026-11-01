@@ -1,6 +1,8 @@
 # ADR 0060 — Keep bridge state committed, but make its formats cheap
 
-- **Status:** Accepted (epic `0303-692c-55dc-4a18`; story `abb6-bf87-89de-4042`)
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §3; kept verbatim as the evidence record.
+
+- **Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted (epic `0303-692c-55dc-4a18`; story `abb6-bf87-89de-4042`))
 - **Date:** 2026-08-03
 
 ## Context

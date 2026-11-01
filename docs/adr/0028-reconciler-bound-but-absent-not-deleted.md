@@ -1,6 +1,8 @@
 # ADR 0028: Bound-but-absent ≠ deleted (membership is not value; confirm before destroy)
 
-- **Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §7; kept verbatim as the evidence record.
+
+- **Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 - **Context:** Epic *Level-triggered bridge convergence* (`3006-e198-13db-4e1f`).
   Documents the fetch-window + absence invariants before the redesign (children
   `13eb` GC, `444d` terminal transition) touches them. Lessons **L13, L16, L17**.

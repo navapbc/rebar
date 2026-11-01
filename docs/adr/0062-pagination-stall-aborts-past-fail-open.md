@@ -1,6 +1,8 @@
 # ADR 0062 — A stalled pager must abort PAST fail-open handlers
 
-- **Status:** Accepted (epic `b5bc-f4f7-3433-4181`; ticket `9ce8-8ff1-0832-4825`)
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §14; kept verbatim as the evidence record.
+
+- **Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted (epic `b5bc-f4f7-3433-4181`; ticket `9ce8-8ff1-0832-4825`))
 - **Date:** 2026-08-07
 
 ## Context

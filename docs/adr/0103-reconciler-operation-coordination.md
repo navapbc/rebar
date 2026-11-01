@@ -1,9 +1,8 @@
 # ADR 0103 — Reconciler logical-operation coordination (single retry budget + observe-before-replay)
 
-- **Status:** Accepted (finalized by RP-03 S5 T3 `a735-052e-8eca-4aeb`; supersedes the
-  provisional status once the observe-before-replay step was validated end-to-end against
-  portable verified-fake Cloud and Data Center passes in
-  `tests/unit/rebar_reconciler/mutate/test_reconciler_coordinator.py`)
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §12; kept verbatim as the evidence record.
+
+- **Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted (finalized by RP-03 S5 T3 `a735-052e-8eca-4aeb`; supersedes the provisional status once the observe-before-replay step was validated end-to-end against portable verified-fake Cloud and Data Center passes in `tests/unit/rebar_reconciler/mutate/test_reconciler_coordinator.py`))
 - **Date:** 2026-08-24 (finalized 2026-08-26)
 
 ## Context

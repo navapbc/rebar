@@ -1,6 +1,8 @@
 # ADR 0097 — Many-to-many tracker projects
 
-**Status:** Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §4; kept verbatim as the evidence record.
+
+**Status:** Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 **Date:** 2026-08-14
 **Supersedes:** N/A
 **Superseded by:** N/A

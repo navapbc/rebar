@@ -6,7 +6,9 @@
 > longer governs test routing. This ADR's production renderer, pin, platform,
 > safety, degradation, immutability, and cutover decisions remain authoritative.
 
-Status: Accepted
+> **Archived (2026-09-07).** Consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) §17; kept verbatim as the evidence record.
+
+Status: Archived — consolidated into [ADR 0121](0121-reconciler-architecture-consolidated-record.md) (was: Accepted)
 Date: 2026-08-12
 Ticket: `271c-e88f-3220-4c9b` (epic `708d-0767-1a51-4928`)
 
