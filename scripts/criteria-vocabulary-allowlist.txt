@@ -14,5 +14,5 @@ tests/scripts/test_migrate_success_criteria.py	36	migration positive, edge and b
 tests/unit/test_code_review_artifact.py	1	historical criterion citation
 tests/unit/test_criteria_vocabulary_reviewers.py	3	permanent carve-out regression test
 tests/unit/test_eval_solver.py	1	legacy-heading negative probe
-tests/unit/test_eval_solver_criteria_heading_heldout.py	3	legacy-heading behavioral probes
+tests/unit/test_eval_solver_criteria_heading.py	3	legacy-heading behavioral probes
 tests/unit/test_registry_version_rotation.py	1	registry-version migration regression
