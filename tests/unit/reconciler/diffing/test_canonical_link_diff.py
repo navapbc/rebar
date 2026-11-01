@@ -1,6 +1,11 @@
 """The SupportsLinks port maps vendor links into canonical relations and back to wire
 payloads. These tests preserve the outbound ADD payload and relation-based
-comparison."""
+comparison.
+
+Held-out oracles merged from test_canonical_link_diff_heldout: Held-out link-edge oracle:
+deduplicate either direction, skip unmapped relations, ignore unknown remote types, and swap
+depends_on direction.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,7 @@ from types import ModuleType
 import pytest
 
 pytestmark = pytest.mark.unit
+
 
 _REC = Path(__file__).resolve().parents[4] / "src" / "rebar" / "reconciler"
 
@@ -52,7 +58,6 @@ def ol() -> ModuleType:
     return importlib.import_module("rebar.reconciler.outbound_links")
 
 
-# ── link_payload_for_relation (emission translation) ─────────────────────────
 def test_link_payload_for_relation_blocks(backend) -> None:
     assert backend.link_payload_for_relation("blocks") == ("Blocks", False)
 
@@ -65,13 +70,11 @@ def test_link_payload_for_relation_unmapped_is_none(backend) -> None:
     assert backend.link_payload_for_relation("duplicates") is None
 
 
-# ── map_remote_links (canonical set) ─────────────────────────────────────────
 def test_map_remote_links_canonicalizes_a_blocks_link(backend) -> None:
     canonical = set(backend.map_remote_links({"issuelinks": [_link("Blocks", outward="DIG-9")]}))
     assert ("blocks", "DIG-9", "Blocks") in canonical
 
 
-# ── _diff_links ADD golden (canonical path, capability injected) ─────────────
 def test_diff_links_emits_add_with_todays_payload(ol, backend) -> None:
     bs = _BS({"loc-1": "DIG-1", "tgt": "DIG-9"})
     ticket = {"ticket_id": "loc-1", "deps": [_dep("tgt", "blocks")]}
@@ -86,3 +89,70 @@ def test_diff_links_emits_add_with_todays_payload(ol, backend) -> None:
             "link_uuid": "u1",
         }
     ]
+
+
+# ── held-out oracles (merged from test_canonical_link_diff_heldout) ──
+
+
+def _adds(ol, backend, ticket, jira_fields, bs):
+    return ol._diff_links(ticket, jira_fields, bs, backend)
+
+
+def test_existing_link_dedups_no_emit(ol, backend) -> None:
+    """A dep already present remotely (Blocks -> DIG-9) emits nothing (golden: [])."""
+    bs = _BS({"loc-1": "DIG-1", "tgt": "DIG-9"})
+    ticket = {"ticket_id": "loc-1", "deps": [_dep("tgt", "blocks")]}
+    out = _adds(ol, backend, ticket, {"issuelinks": [_link("Blocks", outward="DIG-9")]}, bs)
+    assert out == []
+
+
+def test_unmapped_relation_is_skipped(ol, backend) -> None:
+    """A relation with no vendor link type (duplicates) emits nothing (golden: [])."""
+    bs = _BS({"loc-1": "DIG-1", "tgt": "DIG-9"})
+    ticket = {"ticket_id": "loc-1", "deps": [_dep("tgt", "duplicates")]}
+    assert _adds(ol, backend, ticket, {"issuelinks": []}, bs) == []
+
+
+def test_unknown_remote_link_type_ignored_for_matching(ol, backend) -> None:
+    """An unknown remote link type (no canonical relation) is ignored for matching: it does
+    not dedup a local dep, so the dep still emits its ADD."""
+    bs = _BS({"loc-1": "DIG-1", "tgt": "DIG-9"})
+    ticket = {"ticket_id": "loc-1", "deps": [_dep("tgt", "blocks")]}
+    out = _adds(ol, backend, ticket, {"issuelinks": [_link("Mentions", outward="DIG-9")]}, bs)
+    assert out == [
+        {
+            "action": "add",
+            "type": "Blocks",
+            "to_key": "DIG-9",
+            "relation": "blocks",
+            "swap": False,
+            "link_uuid": "u1",
+        }
+    ]
+
+
+def test_depends_on_emits_swap_true(ol, backend) -> None:
+    """depends_on maps to Jira 'Blocks' with swap=True (direction preserved)."""
+    bs = _BS({"loc-1": "DIG-1", "tgt": "DIG-9"})
+    ticket = {"ticket_id": "loc-1", "deps": [_dep("tgt", "depends_on")]}
+    out = _adds(ol, backend, ticket, {"issuelinks": []}, bs)
+    assert out == [
+        {
+            "action": "add",
+            "type": "Blocks",
+            "to_key": "DIG-9",
+            "relation": "depends_on",
+            "swap": True,
+            "link_uuid": "u1",
+        }
+    ]
+
+
+def test_dedup_is_direction_agnostic(ol, backend) -> None:
+    """A local blocks->K dep dedups against an INWARD Blocks link from K (not just outward):
+    the ADD dedup matches on (vendor_type, remote_key) regardless of direction, preserving
+    today's _existing_jira_links semantics (golden: [])."""
+    bs = _BS({"loc-1": "DIG-1", "tgt": "DIG-9"})
+    ticket = {"ticket_id": "loc-1", "deps": [_dep("tgt", "blocks")]}
+    out = _adds(ol, backend, ticket, {"issuelinks": [_link("Blocks", inward="DIG-9")]}, bs)
+    assert out == []

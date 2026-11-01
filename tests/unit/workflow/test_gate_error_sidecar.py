@@ -7,6 +7,9 @@ core new behavior: when a gate hits an infrastructure exception, a dedicated
 is persisted — ADDITIVELY, without changing the gate's existing outcome (plan-review
 still degrades to INDETERMINATE). Completion-path / reader-isolation / no-false-positive
 contracts live in the held-out companion.
+
+Held-out oracles merged from test_gate_error_sidecar_heldout: Held-out contracts for the gate
+ERROR sidecar (ticket 8bc5). WITHHELD.
 """
 
 from __future__ import annotations
@@ -201,3 +204,140 @@ def test_completion_non_recovery_failure_does_not_persist_gate_error(store):
         )
 
     assert _gate_errors(tid, store, "COMPLETION_VERDICT") == []
+
+
+# ── held-out oracles (merged from test_gate_error_sidecar_heldout) ──
+
+
+class _OutageRunner_heldout:
+    name = "outage"
+
+    def preflight(self) -> None:
+        raise LLMUnavailableError("simulated systemic provider outage")
+
+    def run(self, req):
+        raise LLMUnavailableError("simulated systemic provider outage")
+
+
+class _BrokenRunner:
+    """Raises a NON-infra exception — must NOT be recorded as a gate error."""
+
+    name = "broken"
+
+    def preflight(self) -> None:
+        raise RuntimeError("a plain bug, not an infra outage")
+
+    def run(self, req):
+        raise RuntimeError("a plain bug, not an infra outage")
+
+
+def _scan(ticket_id: str, repo_root: str, suffix: str) -> list[dict]:
+    from rebar import config as _config
+    from rebar._ids import resolve_ticket_dir_name
+
+    tracker = str(_config.tracker_dir(repo_root))
+    ticket_dir = os.path.join(tracker, resolve_ticket_dir_name(ticket_id, tracker))
+    out = []
+    for f in sorted(os.listdir(ticket_dir)):
+        if f.endswith(f"-{suffix}.json") and not f.startswith("."):
+            with open(os.path.join(ticket_dir, f), encoding="utf-8") as fh:
+                out.append(json.load(fh)["data"])
+    return out
+
+
+def _gate_errors_heldout(ticket_id: str, repo_root: str, suffix: str) -> list[dict]:
+    return [p for p in _scan(ticket_id, repo_root, suffix) if p.get("schema") == "gate_error_v1"]
+
+
+def _new_ticket(store: str) -> str:
+    return rebar.create_ticket(
+        "task",
+        "work ticket",
+        description="A well-formed ticket.\n\n## Acceptance Criteria\n- [ ] x",
+        repo_root=store,
+    )
+
+
+def test_completion_gate_outage_records_error_and_reraises(store):
+    from rebar.llm.workflow import gate_dispatch
+
+    tid = _new_ticket(store)
+    # The completion gate FAIL-CLOSES: it must re-raise the outage...
+    with pytest.raises(LLMUnavailableError):
+        gate_dispatch.produce_completion_verdict(
+            tid,
+            graph=False,
+            repo_root=store,
+            cfg=LLMConfig.from_env(repo_root=store),
+            runner=_OutageRunner_heldout(),
+        )
+    # ...AND still have persisted a gate_error_v1 record before propagating.
+    errs = _gate_errors_heldout(tid, store, "COMPLETION_VERDICT")
+    assert errs, "completion-gate outage must persist a gate_error_v1 record before re-raising"
+    assert errs[0]["verdict"] == "ERROR"
+
+
+def test_existing_verdict_readers_skip_gate_error_record(store):
+    from rebar.llm.plan_review import review_plan
+    from rebar.llm.plan_review import sidecar as pr_sidecar
+
+    tid = _new_ticket(store)
+    review_plan(
+        tid,
+        source="local",
+        repo_root=store,
+        config=LLMConfig.from_env(repo_root=store),
+        runner=_OutageRunner_heldout(),
+        sign=False,
+        emit_sidecar=True,
+    )
+    # The schema-guarded verdict reader must NOT surface the gate_error_v1 record
+    # (it guards plan_review_result_v1/v2 only) — so ERROR never pollutes verdict reads.
+    latest = pr_sidecar.latest_review_result(tid, repo_root=store)
+    if latest is not None:
+        assert latest.get("schema") != "gate_error_v1"
+        assert latest.get("verdict") != "ERROR"
+
+
+def test_gate_error_verdict_not_coerced_to_fail(store):
+    # The dedicated ERROR builder must NOT route through reconcile_verdict (which
+    # coerces any non-PASS to FAIL) — the persisted verdict stays "ERROR".
+    from rebar.llm.plan_review import review_plan
+
+    tid = _new_ticket(store)
+    review_plan(
+        tid,
+        source="local",
+        repo_root=store,
+        config=LLMConfig.from_env(repo_root=store),
+        runner=_OutageRunner_heldout(),
+        sign=False,
+        emit_sidecar=True,
+    )
+    errs = _gate_errors_heldout(tid, store, "REVIEW_RESULT")
+    assert errs
+    assert errs[0]["verdict"] == "ERROR"
+    assert errs[0]["verdict"] != "FAIL"
+
+
+def test_non_infra_exception_writes_no_gate_error(store):
+    # Only an infra outage (LLMUnavailableError) produces a gate_error record; a plain
+    # bug (any other exception) must not be mislabeled as an infra diagnosis interval.
+    from rebar.llm.plan_review import review_plan
+
+    tid = _new_ticket(store)
+    try:
+        review_plan(
+            tid,
+            source="local",
+            repo_root=store,
+            config=LLMConfig.from_env(repo_root=store),
+            runner=_BrokenRunner(),
+            sign=False,
+            emit_sidecar=True,
+        )
+    except Exception:  # noqa: BLE001 — a non-infra failure may surface however the gate handles it
+        pass
+    assert not _gate_errors_heldout(tid, store, "REVIEW_RESULT"), (
+        "a non-infra exception must not write a gate_error record"
+    )
