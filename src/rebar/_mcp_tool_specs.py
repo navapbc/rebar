@@ -314,7 +314,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         created, but claiming it needs a review that refuses the description as-is. A
         non-null duplicate_warning means another ticket with the same normalized title
         was created inside the recency window — advisory only; the named candidate may
-        already cover this work.""",
+        already cover this work. similar_tickets ranks existing tickets that resemble
+        this one in wording rather than in exact title, most relevant first, each scored
+        0 to 1 with 1 most relevant — also advisory, and empty when retrieval is off,
+        matches nothing, or fails.""",
         strip=("source",),
         pins=_CREATED_BY_MCP,
         post=(with_push,),

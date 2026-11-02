@@ -88,11 +88,16 @@ def test_create_confirmation_carries_alias_id_and_title(repo: Path) -> None:
     assert line == f"created {alias} ({tid}): confirmation subject"
 
 
-def test_create_legacy_json_shape_is_unchanged(repo: Path) -> None:
+def test_create_json_shape_keeps_every_legacy_key(repo: Path) -> None:
+    """The legacy trio survives; ``similar_tickets`` is the one documented addition.
+
+    Pinned as equality rather than a subset so a second key cannot slip in behind
+    this one unannounced, which is what the original form of this test guarded.
+    """
     proc = _cli("create", "task", "json shape", "--output", "json", repo=repo)
     assert proc.returncode == 0, proc.stderr
     doc = json.loads(proc.stdout)
-    assert set(doc) == {"id", "alias", "title"}
+    assert set(doc) == {"id", "alias", "title", "similar_tickets"}
     assert doc["title"] == "json shape"
 
 
