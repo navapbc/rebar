@@ -694,10 +694,13 @@ def _reset_config_cache() -> None:
     hot path). Tests reconfigure env/files freely between cases, so clear the caches
     around each test — no resolved Config or parsed-TOML entry leaks across tests."""
     from rebar import config as _cfg
+    from rebar._ids import reset_binding_reverse_cache
 
     _cfg.reset_config_cache()
+    reset_binding_reverse_cache()
     yield
     _cfg.reset_config_cache()
+    reset_binding_reverse_cache()
 
 
 @pytest.fixture(scope="session", autouse=True)
