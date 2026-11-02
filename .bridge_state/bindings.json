@@ -91430,9 +91430,17 @@
       "updated_at": "2026-08-15T15:12:46Z"
     },
     "d895-4001-a7f8-48d7": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Problem\n\n`rebar.similar.index.validity_key(embedding_model, digest_prompt_commit)` folds the embedding model together with `embedding.DIGEST_PROMPT_COMMIT` \u2014 a hand-written commit string \u2014 to decide when a stored vector is still comparable.\n\nThe prompt text it is meant to identify does NOT live at that commit. It is vendored into `embedding.DIGEST_PROMPT`. Nothing holds the two in step, so editing the prompt without also moving the pin leaves every stored vector describing text the tier no longer produces, and `unvectored_ids` keeps reporting the corpus as covered. The failure is silent: ranking still returns results, they are just computed against stale text.\n\nThis is not hypothetical. The vendored prompt ALREADY deviates from `f147e08242f` in four places (discovered while remediating 2041's code review), one of which \u2014 appending \", as JSON\" to the final instruction \u2014 changes what the model emits. The pin asserted an identity the text did not have, and only a line-by-line diff against the commit surfaced it.\n\n# Approach\n\nFold a hash of the shipped `DIGEST_PROMPT` into the key material so the identity is computed from the artifact rather than asserted alongside it. Keep the commit pin as human-readable provenance; it stops being load-bearing.\n\nPreserve `validity_key`'s two-argument shape and its \"one opaque digest, not two columns\" docstring rationale \u2014 the change is to what the second argument is derived from, not to the function's design.\n\n`tests/unit/test_similar_tickets_index.py::test_changing_the_pinned_digest_prompt_commit_invalidates_them_likewise` monkeypatches `DIGEST_PROMPT_COMMIT` and asserts invalidation. If callers switch to a value computed at import time, that monkeypatch no longer reaches it, so the test must be reworked to exercise the new derivation rather than deleted.\n\n# Acceptance criteria\n\n- [ ] Editing `DIGEST_PROMPT` by one character, with `DIGEST_PROMPT_COMMIT` unchanged,\n      produces a different validity key. A test pins this.\n- [ ] Changing `embedding_model` still produces a different key (existing behaviour,\n      still covered).\n- [ ] The reworked `test_changing_the_pinned_digest_prompt_commit_invalidates_them_likewise`\n      asserts against the derivation actually in use, and fails if the prompt hash is\n      dropped from the key material.\n- [ ] No vector built before this change is read under its old key: the derivation\n      change invalidates them, which is the intended behaviour and is asserted.\n- [ ] `make verify` passes.\n\n# Out of scope\n\nRe-aligning `DIGEST_PROMPT` to `f147e08242f`. The four deviations are deliberate and are now documented at the definition site; three of them correct statements that became false when the overlap subsystem was deleted.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Derive the similar-ticket validity key from the digest prompt text, not a commit pin"
+      },
       "created_at": "2026-11-02T14:34:22Z",
       "jira_id": "4597973",
       "jira_key": "REB-6884",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-02T14:34:26Z"
     },
@@ -109595,6 +109603,7 @@
     "1787891756287003001": "__rebar_unknown_comment_id__",
     "1787893226845483646": "__rebar_unknown_comment_id__",
     "1787893313554866745": "__rebar_unknown_comment_id__",
+    "1787893758481284854": "__rebar_unknown_comment_id__",
     "1787896082155100484": "__rebar_unknown_comment_id__",
     "1787902458318728001": "__rebar_unknown_comment_id__",
     "1787905372467067001": "__rebar_unknown_comment_id__",
@@ -113228,7 +113237,8 @@
     "1793619292709056602": "__rebar_unknown_comment_id__",
     "1793622054764497299": "__rebar_unknown_comment_id__",
     "1793624601182939550": "__rebar_unknown_comment_id__",
-    "1793626540275732824": "__rebar_unknown_comment_id__"
+    "1793626540275732824": "__rebar_unknown_comment_id__",
+    "1793633059309305001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
