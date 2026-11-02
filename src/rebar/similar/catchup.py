@@ -71,6 +71,33 @@ AFTER ``live_entries`` read the mtime now persisted in ``dirstate``. The next ca
 therefore sees a moved mtime for exactly the directories it just indexed and re-hashes
 them; the hash is unchanged, so nothing is re-indexed and the stored mtime converges.
 The run after that is fully warm.
+
+Two different keys, and which addresses what
+--------------------------------------------
+
+Two identifiers run through this module and they are NOT interchangeable:
+
+* ``dir_name`` -- the ticket DIRECTORY's name on disk. It is what ``live_entries``
+  enumerates, what the diff is computed over, and the primary key of ``dirstate``.
+  It addresses the directory, and nothing else.
+* ``ticket_id`` -- the id the REDUCED state reports, which is what ``_document``
+  returns as ``doc[0]`` and what the ``docs`` row is inserted under. It is also the
+  ``id`` :func:`~rebar.similar.lexical.find_similar` returns and compares against
+  ``exclude_id``. It addresses the ``docs`` row, and nothing else.
+
+They are equal for every ticket rebar itself writes, because a ticket directory is
+named for its canonical id. They are not guaranteed equal: nothing in the schema or
+the store walk enforces it, and ``_document``'s ``or dir_name`` fallback exists
+precisely because the reduced state is the authority.
+
+So the removal path cannot delete the ``docs`` row by directory name. By the time a
+directory is in ``removed`` it is gone from disk, so the reduced id cannot be computed
+again -- only recovered. That is why each ``dirstate`` row records the key its ``docs``
+row was inserted under, and why :func:`_drop_removed` reads it back and clears the same
+key set :func:`_reindex` clears. Keying ``docs`` on ``dir_name`` instead would be the
+simpler-looking fix and is the wrong one: it would change the id ``find_similar``
+returns, and silently break self-exclusion, for exactly the divergent-name tickets
+this is about.
 """
 
 from __future__ import annotations
@@ -85,6 +112,11 @@ from .index import drop_vectors
 logger = logging.getLogger(__name__)
 
 UNKNOWN_MTIME = -1
+
+#: One persisted ``dirstate`` row: ``(dir_mtime_ns, dir_hash, ticket_id)``. The third
+#: element is the key the directory's ``docs`` row was inserted under, or ``None`` when
+#: the directory produced no document.
+_StoredState = dict[str, tuple[int, str, str | None]]
 """Stands in for a directory mtime that could not be read. Not a real mtime, and so
 never equal to one and never equal to another unknown: see ``_changed``."""
 
@@ -146,7 +178,7 @@ def _document(tracker: str, dir_name: str) -> tuple[str, str, str, str] | None:
 
 
 def _changed(
-    tracker: str, live: dict[str, int], stored: dict[str, tuple[int, str]]
+    tracker: str, live: dict[str, int], stored: _StoredState
 ) -> dict[str, tuple[int, str]]:
     """The directories needing attention, as ``{dir_name: (mtime_ns, dir_hash)}``.
 
@@ -168,8 +200,14 @@ def _changed(
     return out
 
 
-def _reindex(conn: sqlite3.Connection, tracker: str, dir_name: str) -> int:
-    """Rewrite one ticket's document. Returns 1 when a row was indexed, else 0."""
+def _reindex(conn: sqlite3.Connection, tracker: str, dir_name: str) -> str | None:
+    """Rewrite one ticket's document. Returns the key it was indexed under, else ``None``.
+
+    The returned key is what the caller persists in ``dirstate.ticket_id``, so that a
+    later removal can address this exact ``docs`` row. Returning it -- rather than
+    letting the caller recompute it -- is the point: once the directory is gone the
+    key cannot be derived again.
+    """
     doc = _document(tracker, dir_name)
     # FTS5 has no upsert, so re-indexing is delete-then-insert; the pair is inside the
     # caller's transaction, so no reader ever observes the gap. Both keys are cleared
@@ -183,12 +221,30 @@ def _reindex(conn: sqlite3.Connection, tracker: str, dir_name: str) -> int:
     # an explicit build reaches it.
     drop_vectors(conn, keys)
     if doc is None:
-        return 0
+        return None
     conn.execute(
         "INSERT INTO docs (ticket_id, alias, title, description) VALUES (?, ?, ?, ?)",
         doc,
     )
-    return 1
+    return doc[0]
+
+
+def _drop_removed(conn: sqlite3.Connection, removed: list[str], stored: _StoredState) -> None:
+    """Delete the index rows for directories that have gone away.
+
+    The ``docs`` row may have been inserted under the reduced ticket id rather than the
+    directory name, and the directory is gone so that id cannot be recomputed. It is
+    read back from ``dirstate`` instead, and the same key SET that :func:`_reindex`
+    clears is cleared here -- the two paths run identical key logic rather than merely
+    agreeing by inspection.
+    """
+    for dir_name in removed:
+        previous = stored.get(dir_name)
+        recorded = previous[2] if previous is not None else None
+        keys = {dir_name} | ({recorded} if recorded else set())
+        conn.executemany("DELETE FROM docs WHERE ticket_id = ?", [(k,) for k in keys])
+        conn.execute("DELETE FROM dirstate WHERE dir_name = ?", (dir_name,))
+        drop_vectors(conn, keys)
 
 
 def _apply(
@@ -196,26 +252,24 @@ def _apply(
     tracker: str,
     changed: dict[str, tuple[int, str]],
     removed: list[str],
-    stored: dict[str, tuple[int, str]],
+    stored: _StoredState,
 ) -> tuple[int, int]:
     """Apply the diff in place, inside one transaction. Returns (indexed, dropped)."""
     indexed = 0
     conn.execute("BEGIN IMMEDIATE")
     try:
-        for dir_name in removed:
-            conn.execute("DELETE FROM docs WHERE ticket_id = ?", (dir_name,))
-            conn.execute("DELETE FROM dirstate WHERE dir_name = ?", (dir_name,))
-            drop_vectors(conn, [dir_name])
+        _drop_removed(conn, removed, stored)
         for dir_name, (mtime_ns, dir_hash) in changed.items():
             previous = stored.get(dir_name)
             if previous is None or previous[1] != dir_hash:
-                indexed += _reindex(conn, tracker, dir_name)
-            conn.execute(
-                "INSERT INTO dirstate (dir_name, dir_mtime_ns, dir_hash) VALUES (?, ?, ?) "
-                "ON CONFLICT(dir_name) DO UPDATE SET "
-                "  dir_mtime_ns = excluded.dir_mtime_ns, dir_hash = excluded.dir_hash",
-                (dir_name, mtime_ns, dir_hash),
-            )
+                indexed_key = _reindex(conn, tracker, dir_name)
+                indexed += 1 if indexed_key is not None else 0
+                _record_dirstate(conn, dir_name, mtime_ns, dir_hash, indexed_key)
+            else:
+                # The hash is unchanged, so the document was not rewritten and the
+                # recorded key still addresses it. Only the mtime pre-filter moves;
+                # overwriting ticket_id here would discard a live key.
+                _touch_dirstate(conn, dir_name, mtime_ns, dir_hash)
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
@@ -223,13 +277,38 @@ def _apply(
     return indexed, len(removed)
 
 
+def _record_dirstate(
+    conn: sqlite3.Connection, dir_name: str, mtime_ns: int, dir_hash: str, ticket_id: str | None
+) -> None:
+    """Persist a directory's state including the key its ``docs`` row was indexed under."""
+    conn.execute(
+        "INSERT INTO dirstate (dir_name, dir_mtime_ns, dir_hash, ticket_id) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(dir_name) DO UPDATE SET "
+        "  dir_mtime_ns = excluded.dir_mtime_ns, dir_hash = excluded.dir_hash,"
+        "  ticket_id = excluded.ticket_id",
+        (dir_name, mtime_ns, dir_hash, ticket_id),
+    )
+
+
+def _touch_dirstate(conn: sqlite3.Connection, dir_name: str, mtime_ns: int, dir_hash: str) -> None:
+    """Refresh only the mtime pre-filter, leaving the recorded ``docs`` key intact."""
+    conn.execute(
+        "INSERT INTO dirstate (dir_name, dir_mtime_ns, dir_hash) VALUES (?, ?, ?) "
+        "ON CONFLICT(dir_name) DO UPDATE SET "
+        "  dir_mtime_ns = excluded.dir_mtime_ns, dir_hash = excluded.dir_hash",
+        (dir_name, mtime_ns, dir_hash),
+    )
+
+
 def catch_up(tracker: str | os.PathLike[str], conn: sqlite3.Connection) -> dict[str, Any]:
     """Reconcile the index with the store. Returns ``{indexed, dropped, scanned}``."""
     root = str(tracker)
     live = live_entries(root)
-    stored = {
-        row[0]: (row[1], row[2])
-        for row in conn.execute("SELECT dir_name, dir_mtime_ns, dir_hash FROM dirstate").fetchall()
+    stored: _StoredState = {
+        row[0]: (row[1], row[2], row[3])
+        for row in conn.execute(
+            "SELECT dir_name, dir_mtime_ns, dir_hash, ticket_id FROM dirstate"
+        ).fetchall()
     }
 
     changed = _changed(root, live, stored)
