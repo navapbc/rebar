@@ -54,5 +54,5 @@ Subcommands:
   init                  Initialize the ticket system.
   scratch               Manage per-ticket scratch values (set/get/clear).
   delete                Delete a ticket (destructive; requires --user-approved).
-  store                 Check, repair, measure, migrate, and compact the ticket store.
+  store                 Check, repair, measure, migrate, compact, and index the ticket store.
   grounding-info        Print the code-grounding oracle contract (dimensions/kinds/reasons/backends).

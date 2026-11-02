@@ -30,7 +30,7 @@ def build(*, prog: str) -> argparse.ArgumentParser:
 
     parser = build_argument_parser(
         prog=prog,
-        description="Check, repair, measure, migrate, and compact the ticket store.",
+        description="Check, repair, measure, migrate, compact, and index the ticket store.",
         epilog="Run 'rebar store <subcommand> --help' for a subcommand's options.",
         formatter_class=RebarHelpFormatter,
         allow_abbrev=False,
