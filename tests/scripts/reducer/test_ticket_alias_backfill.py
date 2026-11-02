@@ -5,14 +5,19 @@ index. Malformed or unavailable inputs degrade as specified.
 """
 
 import json
+import os
 import time
 import uuid
 from pathlib import Path
 
+from rebar import _ids
 from rebar._alias import compute_alias, compute_genesis_alias
 from rebar._ids import (
+    _load_binding_reverse,
     _resolve_via_binding_store,
     _scan_alias,
+    binding_jira_key_map,
+    reset_binding_reverse_cache,
     resolve_ticket_id,
 )
 from rebar.reducer import reduce_ticket
@@ -180,6 +185,105 @@ def test_resolver_jira_key_corrupt_bindings_file_returns_none(tmp_path):
     (bs / "bindings.json").write_text("{ not valid json")
     assert _resolve_via_binding_store("REB-310", str(tmp_path)) is None
     assert resolve_ticket_id("REB-310", str(tmp_path)) is None
+
+
+def _write_live_shaped_bindings(tracker: Path) -> dict:
+    """Plant a bindings.json with the live store's shape; return the whole document."""
+    doc = {
+        "bindings": {
+            f"abcd-efab-1234-{i:04d}": {
+                "baseline": {"assignee": None, "description": "x" * 50, "status": "To Do"},
+                "jira_key": f"REB-{i}",
+                "state": "confirmed",
+            }
+            for i in range(3)
+        },
+        "comment_ids": {"1781950526440784001": "__rebar_unknown_comment_id__"},
+        "reverse": {f"REB-{i}": f"abcd-efab-1234-{i:04d}" for i in range(3)},
+        "version": 1,
+    }
+    bs = tracker / ".bridge_state"
+    bs.mkdir(parents=True, exist_ok=True)
+    (bs / "bindings.json").write_text(json.dumps(doc, indent=2))
+    return doc
+
+
+def test_binding_reverse_parse_matches_whole_file_load(tmp_path):
+    """The reverse-only parse returns exactly the document's ``reverse`` index."""
+    doc = _write_live_shaped_bindings(tmp_path)
+    assert _load_binding_reverse(str(tmp_path)) == doc["reverse"]
+    assert binding_jira_key_map(str(tmp_path)) == {v: k for k, v in doc["reverse"].items()}
+
+
+def test_binding_reverse_conflict_marker_inside_bindings_returns_empty(tmp_path):
+    """A git conflict marker inside the ``bindings`` section is a corrupt store: the
+    loader still validates the whole file and degrades to ``{}``, never raising."""
+    _write_live_shaped_bindings(tmp_path)
+    path = tmp_path / ".bridge_state" / "bindings.json"
+    text = path.read_text()
+    marked = text.replace(
+        '"state": "confirmed"', '<<<<<<< ours\n"state": "confirmed"\n=======\n>>>>>>> theirs', 1
+    )
+    assert marked != text and marked.index("<<<<<<<") < marked.index('"reverse"')
+    path.write_text(marked)
+    assert _load_binding_reverse(str(tmp_path)) == {}
+    assert _resolve_via_binding_store("REB-0", str(tmp_path)) is None
+
+
+def test_binding_reverse_non_object_and_bad_encoding_return_empty(tmp_path):
+    """A non-object top level and undecodable bytes are corrupt stores, not errors."""
+    bs = tmp_path / ".bridge_state"
+    bs.mkdir()
+    (bs / "bindings.json").write_text("[]")
+    assert _load_binding_reverse(str(tmp_path)) == {}
+    (bs / "bindings.json").write_bytes(b'{"reverse": {"REB-1": "\xff\xfe"}}')
+    assert _load_binding_reverse(str(tmp_path)) == {}
+
+
+def _count_json_loads(monkeypatch) -> list[int]:
+    calls = [0]
+    real_load = _ids.json.load
+
+    def counting_load(*args, **kwargs):
+        calls[0] += 1
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(_ids.json, "load", counting_load)
+    return calls
+
+
+def test_binding_reverse_cached_until_file_changes(tmp_path, monkeypatch):
+    """Repeated calls on an unchanged store parse it once per process."""
+    doc = _write_live_shaped_bindings(tmp_path)
+    calls = _count_json_loads(monkeypatch)
+    for _ in range(3):
+        assert _load_binding_reverse(str(tmp_path)) == doc["reverse"]
+    binding_jira_key_map(str(tmp_path))
+    _resolve_via_binding_store("REB-0", str(tmp_path))
+    assert calls[0] == 1
+
+
+def test_binding_reverse_rewrite_is_picked_up(tmp_path, monkeypatch):
+    """A rewrite that changes the size, or keeps the size but changes the mtime,
+    is read on the next call."""
+    _write_bindings(tmp_path, {"REB-1": "abcd-efab-1234-0001"})
+    path = tmp_path / ".bridge_state" / "bindings.json"
+    assert _load_binding_reverse(str(tmp_path)) == {"REB-1": "abcd-efab-1234-0001"}
+    calls = _count_json_loads(monkeypatch)
+
+    _write_bindings(tmp_path, {"REB-10": "abcd-efab-1234-0001"})  # size changes
+    assert _load_binding_reverse(str(tmp_path)) == {"REB-10": "abcd-efab-1234-0001"}
+
+    st = path.stat()
+    _write_bindings(tmp_path, {"REB-20": "abcd-efab-1234-0001"})  # same size
+    assert path.stat().st_size == st.st_size
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+    assert _load_binding_reverse(str(tmp_path)) == {"REB-20": "abcd-efab-1234-0001"}
+    assert calls[0] == 2
+
+    reset_binding_reverse_cache()
+    path.unlink()
+    assert _load_binding_reverse(str(tmp_path)) == {}
 
 
 def test_resolver_jira_key_binding_to_missing_dir_returns_none(tmp_path):

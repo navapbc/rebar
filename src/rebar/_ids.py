@@ -81,6 +81,53 @@ def _existing_ticket_dir_name(tracker_dir: str, name: str) -> str | None:
     return None
 
 
+# Parsed reverse index per bindings path, stored with the (mtime_ns, size) of the
+# file it was parsed from. A call whose current stat matches reuses the map, so a
+# long-lived process (the MCP server) parses an unchanged store once; a rewrite
+# changes the token and is re-read. Cleared between tests by the autouse
+# ``_reset_config_cache`` fixture via :func:`reset_binding_reverse_cache`.
+_BINDING_REVERSE_CACHE: dict[str, tuple[int, int, dict]] = {}
+
+
+def reset_binding_reverse_cache() -> None:
+    """Drop every cached reverse index so the next read re-parses from disk."""
+    _BINDING_REVERSE_CACHE.clear()
+
+
+def _keep_reverse_only(pairs: list[tuple[str, object]]) -> dict:
+    """``object_pairs_hook`` that keeps only what the reverse index needs.
+
+    An object with no nested object (a leaf such as the ``reverse`` map itself) is
+    kept whole. An object that contains a nested object is reduced to its
+    ``reverse`` key, so each binding entry and the ``bindings`` map are discarded
+    as soon as they are parsed while the top-level document keeps ``reverse``.
+    The decoder still scans the whole file, so any syntax error anywhere fails.
+    """
+    if any(isinstance(value, dict) for _, value in pairs):
+        return {key: value for key, value in pairs if key == "reverse"}
+    return dict(pairs)
+
+
+def _parse_binding_reverse(bindings_path: str) -> tuple[int, int, dict] | None:
+    """Parse ``bindings_path``'s reverse index with its (mtime_ns, size) token.
+
+    ``None`` when the file cannot be opened. A corrupt document (any JSON or
+    encoding error, a non-object top level, or a non-dict ``reverse``) parses to
+    ``{}``.
+    """
+    try:
+        with open(bindings_path, encoding="utf-8") as f:
+            st = os.fstat(f.fileno())
+            try:
+                data = json.load(f, object_pairs_hook=_keep_reverse_only)
+            except ValueError:  # JSONDecodeError and UnicodeDecodeError
+                data = None
+    except OSError:
+        return None
+    reverse = data.get("reverse") if isinstance(data, dict) else None
+    return st.st_mtime_ns, st.st_size, reverse if isinstance(reverse, dict) else {}
+
+
 def _load_binding_reverse(tracker_dir: str) -> dict:
     """Load the binding store's reverse index ``{jira_key → local_id}``, or ``{}``.
 
@@ -89,16 +136,22 @@ def _load_binding_reverse(tracker_dir: str) -> dict:
     yields ``{}`` (Jira mapping simply unavailable — never raises). Shared by
     :func:`_resolve_via_binding_store` (id resolution) and
     :func:`binding_jira_key_map` (search enrichment) so both read the mapping the
-    same way.
+    same way. The returned map is cached per process and shared: treat it as
+    read-only.
     """
     bindings_path = os.path.join(tracker_dir, ".bridge_state", "bindings.json")
     try:
-        with open(bindings_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
+        st = os.stat(bindings_path)
+    except OSError:
         return {}
-    reverse = data.get("reverse")
-    return reverse if isinstance(reverse, dict) else {}
+    hit = _BINDING_REVERSE_CACHE.get(bindings_path)
+    if hit is not None and hit[:2] == (st.st_mtime_ns, st.st_size):
+        return hit[2]
+    parsed = _parse_binding_reverse(bindings_path)
+    if parsed is None:
+        return {}
+    _BINDING_REVERSE_CACHE[bindings_path] = parsed
+    return parsed[2]
 
 
 def binding_jira_key_map(tracker_dir: str) -> dict[str, str]:
