@@ -3,6 +3,15 @@
 **Status:** Accepted
 **Date:** 2026-10-31
 
+> **Amended by task `b505-d66e-86b3-4446` (`weaponed-handheld-centipede`).** Three additions,
+> none of which change the adopted candidate or the k=5 operating point: retrieval is recorded
+> as **two-tiered** — a lexical FTS5 default needing no model provider, and this embedding tier
+> as an **opt-in** upgrade; the embedding tier is recorded as **provider-agnostic**, with the
+> benchmarked Bedrock pair named as the configuration measured rather than the one required;
+> and the **measured latency** figures are reported, each with the conditions that produced it.
+> The deployment precondition below is narrowed to constrain the embedding tier rather than the
+> index as a whole.
+
 ## Context
 
 Agents working this store repeatedly re-discover work that already has a ticket. `rebar search`
@@ -102,8 +111,7 @@ recall@10. At k=5 the lexical difference is noise; at k=10 the semantic differen
 
 ## Decision
 
-**Adopt `vector`: embed the LLM digest paragraph with `amazon.titan-embed-text-v2:0` and surface
-the top 5.**
+**Adopt `vector`: embed the LLM digest paragraph and surface the top 5.**
 
 Justified from the semantic stratum, as the epic requires: at k=5, `vector` is the only candidate
 that distinguishably beats the zero-cost `fts5` baseline on the stratum the feature exists to
@@ -116,6 +124,48 @@ earns its keep.
 advantage disappears into noise (p=0.3438) while `fts5`'s lexical advantage becomes significant
 (p=0.0000) — at that operating point the evidence favours keeping `fts5` and building nothing.
 A future change to the surfaced count invalidates this ADR and must re-run `--paired`.
+
+### Retrieval is two-tiered: a lexical default and an opt-in embedding upgrade
+
+The measurement above compares retrieval quality. It does not by itself decide what runs in an
+installation that has no model provider configured, and that is a separate decision this ADR
+records explicitly, because `vector` cannot run there at all.
+
+**The lexical FTS5 tier is the default, and it requires no model provider.** It needs no
+credentials, no network and no configuration; it is available in every installation of rebar.
+Its measured semantic recall@5 of 0.823 is the baseline every number above is quoted against,
+so the default tier is not a degraded mode bolted on afterwards — it is the candidate `vector`
+had to beat, shipped.
+
+**The embedding tier is opt-in.** It is enabled by configuring an embedding model, and it
+replaces only the scoring function over the same index, the same freshness key and the same
+catch-up rule. When no model is configured, when the configured provider denies or times out,
+or when the configured backend's optional dependency is not installed, retrieval returns the
+lexical tier's results rather than failing.
+
+This split is what keeps similar-ticket surfacing portable. A feature whose only path needs a
+model provider would be unavailable to any installation without one; a feature whose default
+path is lexical is available everywhere, and improves measurably where a provider exists. The
+lexical tier is therefore a deliberate tier with its own measured number, not a fallback and
+not dead code.
+
+### The embedding tier is provider-agnostic
+
+The models named throughout this ADR — `amazon.titan-embed-text-v2:0` for embedding and
+`bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0` for the digest — are **the configuration
+that was benchmarked**, named so the measurement is reproducible. They are not a property of
+the architecture and not a requirement of adoption.
+
+Both are resolved from configured provider-qualified model strings through
+`pydantic_ai.embeddings.infer_embedding_model` and the equivalent chat-model seam rebar already
+uses in `src/rebar/llm/providers.py`, so another provider's models are a configuration change
+rather than a code change. rebar must run against a wide variety of providers and models, and
+an architecture record that pinned one vendor's pair would misstate the system it governs.
+
+What the measurement establishes is that *embedding a digest* beats lexical retrieval at k=5
+on this fixture. It does not establish that any particular embedding model reproduces 0.876 —
+a different model is a different measurement, and re-running `evals/similar-tickets/measure.py`
+is what would settle it.
 
 ### Keeping the digest step is the weakest link, and is recorded as such
 
@@ -151,18 +201,53 @@ dropped. Work is bounded by write volume since the last run, not by corpus size,
 has fallen behind catches up incrementally without a full rebuild, and a cold start is just the
 case where every ticket is missing.
 
-**Embedding model.** `amazon.titan-embed-text-v2:0`, 1,024 dimensions, cosine similarity.
+**Embedding model.** Configured as a provider-qualified model string and resolved through
+`infer_embedding_model`. The benchmarked configuration was `amazon.titan-embed-text-v2:0`,
+1,024 dimensions, cosine similarity; cosine over the resulting vectors is the architecture, the
+model is not.
 
-**Digest.** `bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0`, prompt pinned at commit
+**Digest.** Configured the same way; benchmarked with
+`bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0`. Prompt pinned at commit
 `f147e08242f`, input capped at 40,000 chars. Four fields — `propositions`, `key_entities`,
 `problem_keywords`, `component_or_area` — concatenated into the paragraph that is embedded.
 (The field weights 3.0 / 2.0 / 2.0 / 1.0 apply only to the rejected `digest` BM25F candidate.)
 
 **Query.** Title plus the first 200 chars of the description.
 
+### Measured latency, and why each figure carries its conditions
+
+A bare millisecond figure is a property of the machine that produced it, not of the code. The
+same store and the same code measured a warm-query p95 of roughly 100 ms on an idle developer
+box and 545 ms on a shared CI runner — a 5x spread from hardware alone
+(`tests/integration/test_similar_tickets_scale.py`). Every figure below is therefore stated with
+the store size, the host, and the sample count, so a reader can tell what would have to be
+re-measured on their own hardware rather than treating these as guarantees.
+
+All four were produced by the lexical tier's scale test on a synthetic **10,000-ticket** store,
+on the **idle macOS development host** the sibling index story was built on — not on CI:
+
+| measurement | figure | samples |
+| --- | --- | --- |
+| cold catch-up p95 | 12,455 ms | n=5 |
+| cold full rebuild | 16,940 ms | single run |
+| warm query p95 | 120.8 ms | n=25 |
+| ticket directories hashed per warm query, steady state | 0 | n=25 |
+
+The cold figures are the price of building the index from nothing at that store size; the
+catch-up rule means they are paid once, and thereafter work tracks write volume rather than
+corpus size.
+
+The zero in the last row is the only one of the four that is hardware-independent, and it is the
+one the test asserts on. The warm p95 is asserted as a ratio against the cold rebuild measured in
+the same run on the same host, so the hardware cancels; it is not asserted against an absolute
+budget, because an earlier 500 ms budget that measured 107 ms locally measured 545 ms on
+`macos-latest` and had to be replaced.
+
 ### Per-ticket cost
 
-Measured over the 630-ticket corpus:
+Measured over the 630-ticket corpus, with the benchmarked model pair. Another provider's models
+carry their own token accounting and their own rates; the step structure is what this table
+records, not the vendor:
 
 | step | model | per ticket | corpus total |
 | --- | --- | --- | --- |
@@ -177,7 +262,11 @@ to the raw text; that saving is what the unresolved `vector` vs `vector-raw` com
 weighed against. Token counts are given rather than dollars because the counts are measured and
 durable while the rates are not; multiply by the current Bedrock rates at adoption time.
 
-### Deployment precondition
+### Deployment precondition for the embedding tier
+
+This section constrains the **embedding tier only**. The lexical default tier invokes no model,
+so none of it applies there: an operator with no Bedrock grant, no credentials and no network
+still gets similar-ticket retrieval.
 
 The digest and the embedding run under **different Bedrock model families**, and the Gerrit
 instance role did not originally admit both. `infra/terraform/iam_s7.tf` scoped
@@ -194,10 +283,15 @@ that gap in general. A policy simulator cannot close it either, because Converse
 call from the instance role proves access; `infra/runbooks/bedrock-access.md` §4 is the probe that
 makes it.
 
-Adopting this architecture therefore depends on that grant being applied before the index can be
-built anywhere but a developer's own credentials. This is a deployment precondition, not a
-follow-up: the measurement above was produced under a local principal that already had Titan
-access, which is why the gap did not surface during the benchmark.
+Enabling the **embedding tier on this deployment** therefore depends on that grant being applied.
+This is a precondition on that tier, not on the index: the index itself builds and serves under
+the lexical tier with no grant at all, and no credentials beyond the developer's own are needed
+to run it anywhere. The benchmark did not surface the gap because it ran under a local principal
+that already had Titan access.
+
+An installation configuring a **different provider** has a different precondition — whatever that
+provider requires to authorize both the digest and the embedding call — and the Bedrock-specific
+paragraphs above do not describe it.
 
 ## Consequences
 
