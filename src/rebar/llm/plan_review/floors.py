@@ -2,21 +2,21 @@
 (ticket 02b7 moved these five functions out of ``rebar.llm.plan_review`` to clear the
 800-line module-size cap; see that module's docstring for the gate this is part of).
 
-These are pure relocation targets — no logic changed. They are re-imported into
-``rebar.llm.plan_review`` (see that module's re-export block) so every existing
-caller and every ``monkeypatch.setattr(plan_review, "...")`` target keeps working
-unchanged; this module is not meant to be imported directly by consumers.
+They are re-imported into ``rebar.llm.plan_review`` (see that module's re-export block) so
+every existing caller and every ``monkeypatch.setattr(plan_review, "...")`` target keeps
+working; this module is not meant to be imported directly by consumers. The blocking
+fix-unit grouping has since moved from a lexical key to one set-level grouping sub-call
+(bug longish-ripe-snowyowl).
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Any
 
 from rebar.llm.config import LLMConfig
 from rebar.llm.runner import Runner
-
-from . import sidecar
 
 logger = logging.getLogger(__name__)
 
@@ -194,30 +194,156 @@ def _classify_completion(
         return {}
 
 
-def _group_blocking_fix_units(verdict: dict[str, Any]) -> None:
-    """Blocking fix-unit grouping (story 5e64): one plan defect co-cited by N criteria mints N
-    blocking findings (observed x10, ticket a879). STAMP-ONLY — no finding ever leaves
-    ``verdict["blocking"]`` (the sidecar's ``build_payload`` concatenates the existing buckets, so
-    moving findings would silently drop them): every finding in a multi-member group gains
-    ``group_id`` (the criteria-free :func:`sidecar.fix_unit_key`) and ``is_primary``; the primary
-    (highest priority; ties: alphabetically-first sorted criteria entry, then lowest id; missing
-    priority sorts as 0.0) also gains ``group_criteria`` (the group's criteria union). Only the
-    CLI renderer collapses a group to its primary — library/MCP consumers see all findings."""
-    blocking = verdict.get("blocking") or []
-    groups: dict[str, list[dict[str, Any]]] = {}
+# ── Blocking fix-unit grouping (bug longish-ripe-snowyowl, superseding the lexical 5e64 key) ────
+# One set-level LLM call over a verdict's BLOCKING findings returns the groups that state the same
+# defect (the bakeoff's step-B shape: no pairwise votes, no transitive chaining, a finding in at
+# most one group). STAMP-ONLY and FAIL-OPEN: any error or invalid output stamps nothing.
+def _fix_unit_groups_model() -> type:
+    """The grouping structured-output model: groups of finding ids that state one defect.
+    Fields are permissive so a malformed answer reaches :func:`_valid_fix_unit_groups`, which
+    rejects the whole answer, instead of failing inside the runner."""
+    from pydantic import BaseModel, Field
+
+    class FixUnitGroup(BaseModel):
+        defect: str = Field(default="", description="One sentence naming the shared defect.")
+        members: list[str] = Field(
+            default_factory=list,
+            description="The ids (exactly as listed) of the findings that state this defect.",
+        )
+
+    class FixUnitGroupsOutput(BaseModel):
+        groups: list[FixUnitGroup] = Field(default_factory=list)
+
+    return FixUnitGroupsOutput
+
+
+def register_contracts() -> None:
+    """Register the grouping contract (idempotent) before any grouping sub-call runs."""
+    from rebar.llm import contracts
+
+    contracts.register_contract("plan_review_fix_unit_groups", _fix_unit_groups_model)
+
+
+register_contracts()
+
+
+def _fix_unit_listing(blocking: list[dict[str, Any]]) -> str:
+    """The id-keyed listing of the blocking findings the grouping call sees."""
+    lines: list[str] = []
     for f in blocking:
-        groups.setdefault(sidecar.fix_unit_key(f), []).append(f)
-    for key, members in groups.items():
-        if len(members) < 2:
-            continue
+        crits = ", ".join(f.get("criteria") or []) or "-"
+        loc = " ".join(str(f.get("location") or "").split()) or "-"
+        text = " ".join(str(f.get("finding") or "").split())
+        lines.append(f"- id={f.get('id')} [{crits}] at {loc} :: {text}")
+    return "\n".join(lines)
 
-        def _rank(f: dict[str, Any]) -> tuple[float, str, str]:
-            crits = sorted(f.get("criteria") or [])
-            return (-(f.get("priority") or 0.0), crits[0] if crits else "", str(f.get("id") or ""))
 
-        members.sort(key=_rank)
-        union = sorted({c for f in members for c in (f.get("criteria") or [])})
-        for i, f in enumerate(members):
-            f["group_id"] = key
-            f["is_primary"] = i == 0
-        members[0]["group_criteria"] = union
+def _request_fix_unit_groups(
+    blocking: list[dict[str, Any]], *, ctx, cfg: LLMConfig, runner: Runner | None
+) -> dict[str, Any] | None:
+    """Run the ONE grouping sub-call; the raw structured result, or None when it raised.
+    Standard verifier class, greedy sampling so a re-review re-groups the same way."""
+    from dataclasses import replace
+
+    from rebar.llm.runner import RunRequest, get_runner
+
+    from . import passes
+
+    try:
+        from rebar.llm.plan_review import _verifier_cfg  # lazy: avoid package cycle
+
+        runner_sel = runner or get_runner(cfg)
+        vcfg = replace(_verifier_cfg(cfg), temperature=0.0)
+        req = RunRequest.for_structured(
+            system_prompt=passes._resolve_system(
+                passes.PASS_FIX_UNIT_GROUPING, ctx.plan_text, vcfg
+            ),
+            instructions=(
+                f"## Blocking findings (by id)\n{_fix_unit_listing(blocking)}\n\n"
+                "Emit one group per defect that two or more of these findings state."
+            ),
+            config=vcfg,
+            reviewers=["plan-fix-unit-grouping"],
+            output_schema="plan_review_fix_unit_groups",
+            bounds=RunRequest.INHERIT_POLICY,
+        )
+        raw = runner_sel.run(req)
+    except Exception:
+        logger.warning("fix-unit grouping sub-call failed; no groups stamped", exc_info=True)
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _valid_fix_unit_groups(raw: dict[str, Any], known: set[str]) -> list[list[str]] | None:
+    """The validated member-id groups (each >= 2 distinct ids), or None when the answer must be
+    rejected whole: ``groups`` not a list, a malformed group, an id not in ``known``, or one id
+    in two groups. Single-member groups carry no grouping and are ignored."""
+    groups = raw.get("groups")
+    if not isinstance(groups, list):
+        return None
+    seen: set[str] = set()
+    out: list[list[str]] = []
+    for g in groups:
+        members = g.get("members") if isinstance(g, dict) else None
+        if not isinstance(members, list) or not all(isinstance(m, str) for m in members):
+            return None
+        ids = list(dict.fromkeys(members))
+        if not set(ids) <= known or seen & set(ids):
+            return None
+        seen.update(ids)
+        if len(ids) >= 2:
+            out.append(ids)
+    return out
+
+
+def _stamp_fix_unit(members: list[dict[str, Any]]) -> None:
+    """Stamp one group: every member gains ``group_id`` + ``is_primary``; the primary (highest
+    priority; ties: alphabetically-first sorted criteria entry, then lowest id; missing priority
+    sorts as 0.0) also gains ``group_criteria`` (the criteria union)."""
+
+    def _rank(f: dict[str, Any]) -> tuple[float, str, str]:
+        crits = sorted(f.get("criteria") or [])
+        return (-(f.get("priority") or 0.0), crits[0] if crits else "", str(f.get("id") or ""))
+
+    members = sorted(members, key=_rank)
+    basis = "\n".join(sorted(str(f.get("id")) for f in members))
+    key = "g" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+    union = sorted({c for f in members for c in (f.get("criteria") or [])})
+    for i, f in enumerate(members):
+        f["group_id"] = key
+        f["is_primary"] = i == 0
+    members[0]["group_criteria"] = union
+
+
+def _group_blocking_fix_units(
+    verdict: dict[str, Any], *, ctx, cfg: LLMConfig, runner: Runner | None = None
+) -> None:
+    """Group a verdict's BLOCKING findings that state one defect (one defect co-cited by N
+    criteria mints N blocking findings; bug longish-ripe-snowyowl). Runs ONE grouping sub-call
+    only when there are >= 2 blocking findings with unique ids. STAMP-ONLY — no finding leaves
+    ``verdict["blocking"]``, no decision, bucket, count or verdict string changes; only the CLI
+    renderer collapses a group to its primary. FAIL-OPEN: a raising call or an invalid answer
+    (malformed, unknown id, overlapping groups) stamps nothing and is logged.
+    ``coverage.fix_unit_grouping`` records the outcome and the call's usage."""
+    blocking = verdict.get("blocking") or []
+    if len(blocking) < 2:
+        return
+    ids = [str(f.get("id") or "") for f in blocking]
+    if "" in ids or len(set(ids)) != len(ids):
+        logger.warning("fix-unit grouping skipped: blocking finding ids are missing or repeated")
+        return
+    raw = _request_fix_unit_groups(blocking, ctx=ctx, cfg=cfg, runner=runner)
+    groups = _valid_fix_unit_groups(raw, set(ids)) if raw is not None else None
+    record: dict[str, Any] = {"status": "failed", "groups": 0, "usage": {}}
+    if raw is not None:
+        record["usage"] = raw.get("_usage") or {}
+    if groups is None:
+        if raw is not None:
+            logger.warning("fix-unit grouping answer rejected (malformed, unknown id, or overlap)")
+    else:
+        by_id = dict(zip(ids, blocking, strict=True))
+        for members in groups:
+            _stamp_fix_unit([by_id[m] for m in members])
+        record["status"] = "grouped" if groups else "no_groups"
+        record["groups"] = len(groups)
+    verdict.setdefault("coverage", {})["fix_unit_grouping"] = record

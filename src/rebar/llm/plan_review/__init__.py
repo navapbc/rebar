@@ -522,8 +522,10 @@ def _run_plan_review(
         ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
 
-    # Blocking fix-unit grouping (story 5e64) — stamp-only, before the emit so stamps persist.
-    _group_blocking_fix_units(verdict)
+    # Blocking fix-unit grouping (story 5e64; one set-level LLM call since bug
+    # longish-ripe-snowyowl) — stamp-only and fail-open, after every drop so no group names a
+    # dropped finding, and before the emit so the stamps persist.
+    _group_blocking_fix_units(verdict, ctx=ctx, cfg=cfg, runner=runner)
 
     _finalize_signature(
         verdict,
