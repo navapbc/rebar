@@ -293,6 +293,31 @@ def test_a_directory_that_will_not_reduce_is_recorded_without_a_document(
     assert catch_up(tracker, conn) == {"indexed": 0, "dropped": 0, "scanned": 1}
 
 
+def test_a_settled_index_finds_work_again_once_one_dirstate_row_is_falsified(
+    tracker: Path,
+) -> None:
+    """The negative control for the settled-index claim the scale suite asserts.
+
+    BOTH columns have to be falsified. ``_changed`` skips any directory whose stored
+    ``dir_mtime_ns`` still equals the live one and never hashes it, so a wrong
+    ``dir_hash`` alone is unreachable and the control would pass while demonstrating
+    nothing. A stale mtime alone reaches the hash, which then matches, so it re-hashes
+    and still indexes nothing. Only the pair makes the index re-write the document.
+    """
+    _write_ticket(tracker, "1111-1111-1111-1111", "ptarmigan")
+    conn = _indexed(tracker)
+    try:
+        assert catch_up(tracker, conn) == {"indexed": 0, "dropped": 0, "scanned": 1}
+        conn.execute(
+            "UPDATE dirstate SET dir_mtime_ns = 0, dir_hash = 'not-the-hash' WHERE dir_name = ?",
+            ("1111-1111-1111-1111",),
+        )
+        conn.commit()
+        assert catch_up(tracker, conn) == {"indexed": 1, "dropped": 0, "scanned": 1}
+    finally:
+        conn.close()
+
+
 # --- failure disposition -----------------------------------------------------------
 
 
