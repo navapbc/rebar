@@ -1146,16 +1146,16 @@ options:
 
 ```
 Usage: rebar store [-h]
-                   {fsck,fsck-recover,doctor,maintenance,footprint,export,import,compact}
+                   {fsck,fsck-recover,doctor,maintenance,footprint,build-vectors,export,import,compact}
                    ...
 
-Check, repair, measure, migrate, and compact the ticket store.
+Check, repair, measure, migrate, compact, and index the ticket store.
 
 options:
   -h, --help            show this help message and exit
 
 commands:
-  {fsck,fsck-recover,doctor,maintenance,footprint,export,import,compact}
+  {fsck,fsck-recover,doctor,maintenance,footprint,build-vectors,export,import,compact}
     fsck                Check store integrity (JSON validity, CREATE presence,
                         index.lock).
     fsck-recover        Recover the tracker worktree (dangling commits,
@@ -1166,6 +1166,8 @@ commands:
                         refusal + audit.
     footprint           Measure Git, checkout, allocation, and whole-clone
                         tracker footprint.
+    build-vectors       Digest and embed indexed tickets for the opt-in similar-
+                        ticket tier.
     export              Export the store as NDJSON (one ticket per line).
     import              Import tickets from export NDJSON for a clean rebar-to-
                         rebar migration.

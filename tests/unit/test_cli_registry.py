@@ -102,7 +102,7 @@ def test_store_footprint_is_an_unmounted_read_only_member() -> None:
 
 def test_store_member_table_validates_clean_with_unique_names() -> None:
     names = [r.name for r in _registry.STORE_ROUTES]
-    assert len(names) == len(set(names)) == 8
+    assert len(names) == len(set(names)) == 9
     assert tuple(_registry.validate(_registry.STORE_ROUTES)) == ()
     # A member name is not a top-level spelling, so no member shadows a ROUTES entry.
     assert all(_registry.route_for(name) is None for name in names)

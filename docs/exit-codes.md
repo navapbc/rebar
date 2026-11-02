@@ -167,6 +167,7 @@ guarantee `2`).
 | `store fsck-recover` | 0 | — | — | no ticket id; `--detect-only` exits **3** if stale rebase found; bad args → 2 |
 | `store maintenance` | 0 | — | — | no ticket id; **1** = refused (unpushed ticket commits, or `origin/tickets` missing so they cannot be ruled out) without `--force=<reason>`; bad args / no tracker → 2 |
 | `store footprint` | 0 | — | — | no ticket id; opt-in descriptive read; **1** = configured tracker/source cannot be measured; bad args → 2 |
+| `store build-vectors` | 0 | — | — | no ticket id; opt-in; **0** when no `[llm] embedding_model` is configured (not opting in is not an error); **1** = the build was entered and could not run (provider unreachable, index unopenable); bad args → 2 |
 | `show --field` | 0 | 1 | — | one JSON line per id; with `--output llm` → 2 (was `get-file-impact`/`get-verify-commands`) |
 | `init` | 0 | — | — | idempotent |
 | `link` | 0 | 1 | — | missing relation arg → 1 |
