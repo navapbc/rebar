@@ -26195,6 +26195,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-22T20:35:59Z"
     },
+    "3d6f-1f34-1a7c-4dd1": {
+      "created_at": "2026-11-02T05:32:48Z",
+      "jira_id": "4597941",
+      "jira_key": "REB-6860",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T05:32:51Z"
+    },
     "3d7a-7795-efde-4df7": {
       "baseline": {
         "assignee": {
@@ -29524,6 +29531,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:54Z"
     },
+    "458e-c5b2-96ef-4f8d": {
+      "created_at": "2026-11-02T05:32:51Z",
+      "jira_id": "4597942",
+      "jira_key": "REB-6861",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T05:32:54Z"
+    },
     "458f-5b67-961e-4e80": {
       "baseline": {
         "assignee": null,
@@ -31028,9 +31042,17 @@
       "updated_at": "2026-09-04T22:49:13Z"
     },
     "4932-ea62-cf4f-451b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\n\n`src/rebar/similar/index.py` recovers from a corrupt or version-stale index by calling `_discard(path)` \u2014 which unlinks the database file and its `-wal`/`-shm` sidecars \u2014 and then rebuilding via `_open_one`. That path carries **no lock**.\n\nEvery other write in the subsystem serializes on sqlite's own write lock: `catchup.py` opens its transaction with `BEGIN IMMEDIATE` under a `busy_timeout`, and `catchup.py`'s module docstring states \"Concurrent reconcilers serialize on sqlite's write lock.\" The discard-and-rebuild path is an unlocked twin of that write path \u2014 `os.unlink` is not covered by a sqlite lock, and there is no flock or `threading.Lock` anywhere under `src/rebar/similar`.\n\n## Why two executors can reach it at once\n\n`open_index` is called independently by each MCP request handler on the create path (`src/rebar/_mcp_serving.py` serves concurrent handlers on a worker thread). `_open_one` raises `StaleIndex`/`sqlite3.DatabaseError` for **both** callers before either has finished rebuilding, so both enter the recovery branch.\n\n## Harm\n\nTwo interleavings, both silent:\n\n1. Executor B's `os.unlink(path + \"-wal\")` removes the WAL sidecar of executor A's live\n   connection, leaving A's FTS5 state inconsistent.\n2. Executor A commits its catch-up rows into an inode that B's later unlink has detached. The\n   on-disk index then silently loses those rows and serves empty results until the next full\n   rebuild.\n\nBoth produce exactly the failure mode ADR 0122's design set out to avoid: a silently frozen index is indistinguishable from a healthy index that matched nothing.\n\n## Acceptance criteria\n\n- [ ] The discard-and-rebuild path in `src/rebar/similar/index.py` is serialized against\n      itself, so two concurrent callers that both observe a corrupt or stale index produce\n      one rebuild rather than two interleaved ones.\n- [ ] A test starts two threads that both hit the recovery branch on the same index path\n      (barrier-synchronized, as `test_concurrent_catch_up_runs_leave_a_sound_index_holding_both_tickets`\n      already does for the normal write path) and asserts afterwards that\n      `PRAGMA integrity_check` returns `ok` and that every ticket written before the\n      corruption is still retrievable.\n- [ ] That test fails against the current unsynchronized implementation.\n- [ ] If the chosen fix adds a lock, it carries a `# mechanism-ok: lock <name> \u2014 <reason>`\n      marker at its definition site, since the mechanism-delta ratchet fails on any\n      unadmitted new mechanism.\n- [ ] `make verify` passes.\n\n## Provenance\n\nFound by `rebar review-code` as an advisory finding on ticket `47c8-97ac-eff3-4e88`'s change (Change-Id `I3e1c9d8fa0c95a152b9be91ed8357a6ad2389e73`). Three sibling advisories from the same review \u2014 a `limit <= 0` off-by-one, an `UNKNOWN_MTIME` sentinel compared by equality, and an inaccurate warm-path docstring \u2014 were fixed inside 47c8 itself. This one is deferred because it is a design change to the recovery path rather than a localized correction, and because the race predates the reviewed change in shape: it is a property of the recovery branch, not of the new indexing code.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Serialize the similar-index discard-and-rebuild path"
+      },
       "created_at": "2026-11-02T04:33:12Z",
       "jira_id": "4597940",
       "jira_key": "REB-6859",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-02T04:33:16Z"
     },
@@ -34988,6 +35010,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T01:11:46Z"
+    },
+    "529c-ffa4-5227-4324": {
+      "created_at": "2026-11-02T05:32:56Z",
+      "jira_id": "4597943",
+      "jira_key": "REB-6862",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T05:33:00Z"
     },
     "52b0-6a6a-c66b-4c59": {
       "baseline": {
@@ -73430,6 +73459,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T22:37:10Z"
     },
+    "adc7-2aba-2995-439a": {
+      "created_at": "2026-11-02T05:33:00Z",
+      "jira_id": "4597944",
+      "jira_key": "REB-6863",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T05:33:03Z"
+    },
     "add5-54b2-bff4-42cd": {
       "baseline": {
         "assignee": null,
@@ -101562,7 +101598,7 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\nThe Gerrit instance role cannot invoke the Titan embedding model. `infra/terraform/iam_s7.tf` grants `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` (`:11-14`) against exactly two Anthropic Claude ARNs (`:15-18`). The sibling embedding story's opt-in tier calls Titan from that role, and the call is denied.\n\nThis task widens that one statement so the configured default works in this deployment. It is not a feature blocker: the lexical tier the sibling index story builds requires no model provider at all, so similar-ticket retrieval works without this change everywhere, including here.\n\n## Approach\n\n### Widen the existing statement\n\nThe single statement at `iam_s7.tf:9-19` gains the Titan embedding model ARN alongside its two Claude ARNs. The actions already include `bedrock:InvokeModel` (`:12`), which is what Bedrock authorizes an embedding call against, so no action is added.\n\nA second statement is not introduced. The two grants share one role, one action set and one purpose \u2014 invoking a scoped set of Bedrock models \u2014 and splitting them would double the surface a reader must check to answer what this role can invoke.\n\n### Rename the sid\n\nThe sid is `ConverseAnthropicClaudeOnly` (`:10`). Once the statement grants a non-Anthropic model, that name is false, and a false sid is worse than a vague one because it is the string an auditor reads to decide whether the grant matches its description. It is renamed to describe what the statement actually permits: invoking a scoped set of Bedrock models.\n\nThe header comment (`:1-6`) carries the same claim in prose \u2014 \"a Claude-only Bedrock policy\" (`:1`) and \"constraining the Anthropic model\" (`:4`) \u2014 and is corrected with it.\n\n### The runbook's sid occurrences belong to a different role, and are left alone\n\n`infra/runbooks/bedrock-ci-oidc.md` contains the same sid string twice, and **neither occurrence is this role**:\n\n- `:130` sits inside a JSON block the runbook introduces at `:123` as inline policy `rebar-external-ci-bedrock-converse`.\n- `:239` is `data \"aws_iam_policy_document\" \"external_ci_bedrock_converse\"`, attached at `:251-254` to role `gha_external_ci_bedrock`, tagged `Ticket = \"f124\"` (`:233`).\n\nBoth describe the external-CI OIDC role, whose resources (`:245-246`) are Claude-only and stay Claude-only \u2014 it does not call Titan. The runbook justifies that restriction at `:158-159` as \"the least-privilege oracle\", and that justification remains true for that role. Renaming its sid would make an accurately-named grant describe a widening it never received, and editing the `:130` JSON would change the policy operators are instructed to create in AWS.\n\nSo both occurrences are left exactly as they are.\n\n### The claim that actually breaks\n\n`:145` states the JSON block is \"`iam_s7.tf`'s `aws_iam_policy_document.bedrock_converse`, verbatim in shape.\" Adding the Titan ARN to `iam_s7.tf` makes that false, and no sid edit can repair it \u2014 the two resource lists diverge. That sentence is rewritten to state the relationship that is true afterwards: the same shape as `iam_s7.tf`'s statement, which additionally grants the Titan embedding ARN.\n\nThis is the only runbook edit.\n\n### ADR 0122's ARN count\n\n`docs/adr/0122-similar-ticket-retrieval.md:184` states the statement \"lists exactly two resource ARNs (`:15-18`)\". That citation is accurate today and this change falsifies the count, so the sentence is updated here rather than left for a reader to trip over.\n\n### Applied state is not assumed\n\nBug `1c39-96d4-8f9e-4d38` records that `iam_s7.tf` was not verified as applied before landing, so this task's Terraform claims are \"declared\", not \"live\". A policy simulator cannot settle it either: Converse authorizes against `bedrock:InvokeModel` while `bedrock:Converse` exists as a distinct simulatable action that simulates as denied, as `infra/runbooks/bedrock-access.md` records. Only a real call proves access, which is why the operator attestation below is a separate, explicitly non-codebase criterion.\n\n## Acceptance Criteria\n\n- [ ] `infra/terraform/iam_s7.tf`'s `bedrock_converse` statement lists the Titan embedding model ARN. Checked by: reading the resource list.\n- [ ] That statement still lists both Claude ARNs present before this change. Checked by: reading the resource list.\n- [ ] `infra/terraform/iam_s7.tf` contains exactly one statement in `data.aws_iam_policy_document.bedrock_converse`. Checked by: reading the document block.\n- [ ] The statement's actions are unchanged from before this change. Checked by: diffing the actions list.\n- [ ] The statement's sid does not assert an Anthropic-only or Claude-only restriction. Checked by: reading the sid.\n- [ ] The header comment at `infra/terraform/iam_s7.tf:1-6` does not describe the policy as Claude-only or Anthropic-constrained. Checked by: reading the comment.\n- [ ] `infra/runbooks/bedrock-ci-oidc.md:130` is unchanged. Checked by: the change's diff not touching that line.\n- [ ] `infra/runbooks/bedrock-ci-oidc.md:239` is unchanged. Checked by: the change's diff not touching that line.\n- [ ] `infra/runbooks/bedrock-ci-oidc.md` no longer claims the documented external-CI policy is `iam_s7.tf`'s statement verbatim in shape. Checked by: reading the sentence at the `:145` location.\n- [ ] That same sentence states that `iam_s7.tf`'s statement additionally grants the Titan embedding ARN. Checked by: reading it.\n- [ ] `docs/adr/0122-similar-ticket-retrieval.md` no longer states the statement lists exactly two resource ARNs. Checked by: reading the sentence at the `:184` location.\n- [ ] `terraform validate` exits 0 against `infra/terraform/`. Checked by: running it.\n- [ ] `terraform fmt -check` exits 0 against `infra/terraform/`. Checked by: running it.\n- [ ] No file under `src/rebar/` is modified. Checked by: the change's diff.\n- [ ] `[non-codebase]` An operator applies this Terraform and records an attestation on this ticket containing the Gerrit change number, the revision SHA, the UTC timestamp, the dimension count returned by a real Titan embedding call from the Gerrit instance role, and the operator's identity. Checked by: the comment being present on this ticket.",
+        "description": "## Context / Problem\n\nThe Gerrit instance role cannot invoke the Titan embedding model. `infra/terraform/iam_s7.tf` grants `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` (`:11-14`) against exactly two Anthropic Claude ARNs (`:15-18`). The sibling embedding story's opt-in tier calls Titan from that role, and the call is denied.\n\nThis task widens that one statement so the configured default works in this deployment. It is not a feature blocker: the lexical tier the sibling index story builds requires no model provider at all, so similar-ticket retrieval works without this change everywhere, including here.\n\n## Approach\n\n### Widen the existing statement\n\nThe single statement at `iam_s7.tf:9-19` gains the Titan embedding model ARN alongside its two Claude ARNs. The actions already include `bedrock:InvokeModel` (`:12`), which is what Bedrock authorizes an embedding call against, so no action is added.\n\nA second statement is not introduced. The two grants share one role, one action set and one purpose \u2014 invoking a scoped set of Bedrock models \u2014 and splitting them would double the surface a reader must check to answer what this role can invoke.\n\n### Rename the sid\n\nThe sid is `ConverseAnthropicClaudeOnly` (`:10`). Once the statement grants a non-Anthropic model, that name is false, and a false sid is worse than a vague one because it is the string an auditor reads to decide whether the grant matches its description. It is renamed to describe what the statement actually permits: invoking a scoped set of Bedrock models.\n\nThe header comment (`:1-6`) carries the same claim in prose \u2014 \"a Claude-only Bedrock policy\" (`:1`) and \"constraining the Anthropic model\" (`:4`) \u2014 and is corrected with it.\n\n### The runbook's sid occurrences belong to a different role, and are left alone\n\n`infra/runbooks/bedrock-ci-oidc.md` contains the same sid string twice, and **neither occurrence is this role**:\n\n- `:130` sits inside a JSON block the runbook introduces at `:123` as inline policy `rebar-external-ci-bedrock-converse`.\n- `:239` is `data \"aws_iam_policy_document\" \"external_ci_bedrock_converse\"`, attached at `:251-254` to role `gha_external_ci_bedrock`, tagged `Ticket = \"f124\"` (`:233`).\n\nBoth describe the external-CI OIDC role, whose resources (`:245-246`) are Claude-only and stay Claude-only \u2014 it does not call Titan. The runbook justifies that restriction at `:158-159` as \"the least-privilege oracle\", and that justification remains true for that role. Renaming its sid would make an accurately-named grant describe a widening it never received, and editing the `:130` JSON would change the policy operators are instructed to create in AWS.\n\nSo both occurrences are left exactly as they are.\n\n### The claim that actually breaks\n\n`:145` states the JSON block is \"`iam_s7.tf`'s `aws_iam_policy_document.bedrock_converse`, verbatim in shape.\" Adding the Titan ARN to `iam_s7.tf` makes that false, and no sid edit can repair it \u2014 the two resource lists diverge. That sentence is rewritten to state the relationship that is true afterwards: the same shape as `iam_s7.tf`'s statement, which additionally grants the Titan embedding ARN.\n\nThis is the only runbook edit.\n\n### ADR 0122's ARN count\n\n`docs/adr/0122-similar-ticket-retrieval.md:184` states the statement \"lists exactly two resource ARNs (`:15-18`)\". That citation is accurate today and this change falsifies the count, so the sentence is updated here rather than left for a reader to trip over.\n\n### Applied state is not assumed\n\nNo Gerrit gate applies this Terraform, so this task's Terraform claims are \"declared\", not \"live\". `.github/workflows/terraform-drift.yml` triggers on `pull_request`, a daily `schedule` and `workflow_dispatch` \u2014 none of which a Gerrit change fires \u2014 and its own header states it \"does not contribute to the Gerrit Verified label\". Applies are manual, via `scripts/terraform_prod.py`. A policy simulator cannot settle it either: Converse authorizes against `bedrock:InvokeModel` while `bedrock:Converse` exists as a distinct simulatable action that simulates as denied, as `infra/runbooks/bedrock-access.md` records. Only a real call proves access, which is why the operator attestation below is a separate, explicitly non-codebase criterion.\n\n## Acceptance Criteria\n\n- [x] `infra/terraform/iam_s7.tf`'s `bedrock_converse` statement lists the Titan embedding model ARN. Checked by: reading the resource list.\n- [x] That statement still lists both Claude ARNs present before this change. Checked by: reading the resource list.\n- [x] `infra/terraform/iam_s7.tf` contains exactly one statement in `data.aws_iam_policy_document.bedrock_converse`. Checked by: reading the document block.\n- [x] The statement's actions are unchanged from before this change. Checked by: diffing the actions list.\n- [x] The statement's sid does not assert an Anthropic-only or Claude-only restriction. Checked by: reading the sid.\n- [x] The header comment at `infra/terraform/iam_s7.tf:1-6` does not describe the policy as Claude-only or Anthropic-constrained. Checked by: reading the comment.\n- [x] `infra/runbooks/bedrock-ci-oidc.md:130` is unchanged. Checked by: the change's diff not touching that line.\n- [x] `infra/runbooks/bedrock-ci-oidc.md:239` is unchanged. Checked by: the change's diff not touching that line.\n- [x] `infra/runbooks/bedrock-ci-oidc.md` no longer claims the documented external-CI policy is `iam_s7.tf`'s statement verbatim in shape. Checked by: reading the sentence at the `:145` location.\n- [x] That same sentence states that `iam_s7.tf`'s statement additionally grants the Titan embedding ARN. Checked by: reading it.\n- [x] `docs/adr/0122-similar-ticket-retrieval.md` no longer states the statement lists exactly two resource ARNs. Checked by: reading the sentence at the `:184` location.\n- [x] `terraform validate` exits 0 against `infra/terraform/`. Checked by: running it.\n- [x] `terraform fmt -check` exits 0 against `infra/terraform/`. Checked by: running it.\n- [x] No file under `src/rebar/` is modified. Checked by: the change's diff.\n- [ ] `[non-codebase]` An operator applies this Terraform and records an attestation on this ticket containing the Gerrit change number, the revision SHA, the UTC timestamp, the dimension count returned by a real Titan embedding call from the Gerrit instance role, and the operator's identity. Checked by: the comment being present on this ticket.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Grant the Gerrit instance role InvokeModel on the Titan embedding model"
@@ -113039,7 +113075,9 @@
     "1793582956333759001": "__rebar_unknown_comment_id__",
     "1793583425261393001": "__rebar_unknown_comment_id__",
     "1793585466950591416": "__rebar_unknown_comment_id__",
-    "1793586834187103929": "__rebar_unknown_comment_id__"
+    "1793586834187103929": "__rebar_unknown_comment_id__",
+    "1793594124407534717": "__rebar_unknown_comment_id__",
+    "1793594735263853225": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -118400,6 +118438,10 @@
     "REB-6857": "f10f-c24a-3cfa-449e",
     "REB-6859": "4932-ea62-cf4f-451b",
     "REB-686": "jira-reb-686",
+    "REB-6860": "3d6f-1f34-1a7c-4dd1",
+    "REB-6861": "458e-c5b2-96ef-4f8d",
+    "REB-6862": "529c-ffa4-5227-4324",
+    "REB-6863": "adc7-2aba-2995-439a",
     "REB-687": "jira-reb-687",
     "REB-688": "1464-bd32-07a3-4225",
     "REB-689": "4a4c-6fb2-67c8-41d4",
