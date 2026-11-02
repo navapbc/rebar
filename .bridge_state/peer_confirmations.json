@@ -10663,6 +10663,15 @@
       "source_id": "39a2-4832-e436-4850",
       "target_id": "c6bd-b10e-74f1-407f"
     },
+    "39bc-072e-9ebf-461d|fe94-2e22-ea9e-46f7|depends_on": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1793662360494495974,
+      "link_id": "51743",
+      "relation": "depends_on",
+      "source": "snapshot",
+      "source_id": "39bc-072e-9ebf-461d",
+      "target_id": "fe94-2e22-ea9e-46f7"
+    },
     "39c1-2a32-b564-4b4b|1a9f-50c0-e7a5-4fda|relates_to": {
       "direction": "snapshot",
       "first_confirmed_at": 1786807014030497449,
@@ -42495,6 +42504,15 @@
       "source": "backfill",
       "source_id": "fe78-24d9-6076-4088",
       "target_id": "e211-63ef-bc96-4609"
+    },
+    "fe94-2e22-ea9e-46f7|39bc-072e-9ebf-461d|blocks": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1793662360494491085,
+      "link_id": "51743",
+      "relation": "blocks",
+      "source": "snapshot",
+      "source_id": "fe94-2e22-ea9e-46f7",
+      "target_id": "39bc-072e-9ebf-461d"
     },
     "fe94-2e22-ea9e-46f7|6b48-37ea-a714-4545|blocks": {
       "direction": "snapshot",
