@@ -243,15 +243,25 @@ def _documented_subcommands() -> list[str]:
     return names
 
 
-def _live_route_names() -> set[str]:
-    from rebar._cli._registry import ROUTES
+#: Parent commands whose members are themselves registered routes, so a row naming a member
+#: can be checked against that registry instead of against the bare parent name. Only `store`
+#: has such a registry today; the other nested parents dispatch through their own parsers.
+_NESTED_REGISTRIES = ("store",)
 
-    return {route.name for route in ROUTES if not route.retired}
+
+def _live_route_names() -> set[str]:
+    from rebar._cli._registry import ROUTES, STORE_ROUTES
+
+    names = {route.name for route in ROUTES if not route.retired}
+    names |= {f"store {route.name}" for route in STORE_ROUTES if not route.retired}
+    return names
 
 
 def test_every_live_route_is_documented_and_every_doc_row_names_a_real_route() -> None:
     """Compare route membership in both directions: each live route appears in the table, and
-    each table row begins with a live top-level route. Nested invocations share that route."""
+    each table row names a live route. A row under a parent with its own member registry
+    (`_NESTED_REGISTRIES`) is matched on its two-token prefix, so a member that no longer
+    exists is caught; rows under the other nested parents still match on the parent alone."""
     documented = _documented_subcommands()
     assert documented, "parsed no rows from the per-command table — the parser has drifted"
     live = _live_route_names()
@@ -261,11 +271,15 @@ def test_every_live_route_is_documented_and_every_doc_row_names_a_real_route() -
         for name in live
         if name not in set(documented) and name.replace("-", " ", 1) not in set(documented)
     )
-    orphaned = sorted({row for row in documented if row.split()[0] not in live})
+    row_keys = {
+        row: (" ".join(row.split()[:2]) if row.split()[0] in _NESTED_REGISTRIES else row.split()[0])
+        for row in documented
+    }
+    orphaned = sorted({row for row, key in row_keys.items() if key not in live})
     assert not undocumented and not orphaned, (
         "docs/exit-codes.md's per-command table has drifted from the live CLI. "
         f"live routes with no doc row: {undocumented}; "
-        f"doc rows whose first token is not a live route: {orphaned}"
+        f"doc rows that do not name a live route: {orphaned}"
     )
 
 

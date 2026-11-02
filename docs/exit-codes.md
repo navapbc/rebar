@@ -8,11 +8,15 @@ for what each code means and which code each subcommand emits.
 `tests/interfaces/lifecycle/test_exit_codes.py` pins it, and it is worth being exact
 about how much: that test exercises the load-bearing exit paths (0/1/2/10/11) against
 the live CLI, and — mirror F12 — cross-checks this file's per-command table against the
-route registry, so a route with no row here, or a row naming a command that no longer
-exists, fails the build. It does NOT verify the per-command exit values in the table
-below; those columns are hand-authored. Until 2026-09 this file claimed a stronger
-guarantee than any test made, and the table had drifted in both directions while
-carrying that claim.
+route registry. That cross-check covers top-level routes and the members of `store`
+(the one nested group with its own route registry): either a route with no row here, or
+a row naming a `store` member that no longer exists, fails the build. Rows under the
+other nested parents — `bridge`, `check`, `deps`, `list`, `resolve`, `show` — are
+checked only as far as the parent command, because those members are not registered
+routes; keeping those rows current is a convention, not a gate. The test does NOT
+verify the per-command exit values in the table below; those columns are hand-authored.
+Until 2026-09 this file claimed a stronger guarantee than any test made, and the table
+had drifted in both directions while carrying that claim.
 
 This contract is **frozen** as of the 2026-06-09 breaking-change window. Changes
 to an emitted code are contract changes and must be called out in release notes.
