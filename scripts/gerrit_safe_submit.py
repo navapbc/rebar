@@ -3,8 +3,9 @@
 
 Exit codes:
   0  submitted.
-  2  refused: the revision is stale (checked before submitting, or shown by re-reading
-     the change after Gerrit answered 409), or Gerrit refused the submit with 409 for
+  2  refused: --revision is not a full 40-character commit SHA (checked before any
+     Gerrit request), or the revision is stale (checked before submitting, or shown by
+     re-reading the change after Gerrit answered 409), or Gerrit refused the submit with 409 for
      another reason (merge conflict, unmet submit requirement). stderr says which and
      prints Gerrit's response.
   3  refused before submitting: a required vote is missing, comments are unresolved,
@@ -113,6 +114,10 @@ def _label_ok(change: dict, label: str) -> bool:
     return bool(info.get("approved"))
 
 
+def _is_full_sha(revision: str) -> bool:
+    return len(revision) == 40 and all(ch in "0123456789abcdefABCDEF" for ch in revision)
+
+
 def _revision_matches(current: str | None, inspected: str) -> bool:
     return bool(current) and len(inspected) == 40 and current == inspected
 
@@ -139,6 +144,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-url", default=BASE_URL)
     parser.add_argument("--hashtag", default=_session_hashtag())
     args = parser.parse_args(argv)
+    if not _is_full_sha(args.revision):
+        print(
+            f"refusing submit: --revision {args.revision!r} is not a full 40-character "
+            "commit SHA; pass the full SHA of the patch set whose votes you inspected "
+            "(e.g. `git rev-parse HEAD`)",
+            file=sys.stderr,
+        )
+        return 2
 
     host = urllib.parse.urlparse(args.base_url).hostname or "rebar.solutions.navateam.com"
     try:

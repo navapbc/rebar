@@ -123,11 +123,11 @@ def test_safe_submit_refuses_stale_revision_before_submit(monkeypatch, capsys):
 
     def fake_request(base_url: str, method: str, path: str, auth: str, body=None) -> dict:
         calls.append((method, path, body))
-        return {"current_revision": "cafebabe", "labels": {}}
+        return {"current_revision": "cafebabe" * 5, "labels": {}}
 
     monkeypatch.setattr(safe_submit, "_request", fake_request)
 
-    assert safe_submit.main(["2764", "--revision", "deadbeef", "--hashtag", ""]) == 2
+    assert safe_submit.main(["2764", "--revision", "deadbeef" * 5, "--hashtag", ""]) == 2
 
     assert all(not path.endswith("/submit") for _, path, _ in calls)
     assert "refusing stale submit" in capsys.readouterr().err
@@ -193,7 +193,13 @@ def test_safe_submit_refuses_unresolved_comments(monkeypatch):
     assert all(not path.endswith("/submit") for _, path, _ in calls)
 
 
-def test_safe_submit_refuses_abbreviated_revision_prefix(monkeypatch):
+def _assert_form_refusal(err: str) -> None:
+    assert "not a full 40-character commit SHA" in err
+    assert "git rev-parse HEAD" in err
+    assert "stale" not in err
+
+
+def test_safe_submit_refuses_abbreviated_revision_prefix(monkeypatch, capsys):
     safe_submit = _safe_submit_module()
 
     calls: list[tuple[str, str, dict | None]] = []
@@ -208,6 +214,36 @@ def test_safe_submit_refuses_abbreviated_revision_prefix(monkeypatch):
     assert safe_submit.main(["2764", "--revision", "deadbeef", "--hashtag", ""]) == 2
 
     assert all(not path.endswith("/submit") for _, path, _ in calls)
+    _assert_form_refusal(capsys.readouterr().err)
+
+
+@pytest.mark.parametrize(
+    "revision",
+    [
+        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeeg",  # 40 chars, one non-hex
+        "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef0",  # 41 hex chars
+        "",
+        "HEAD",
+    ],
+)
+def test_safe_submit_refuses_malformed_revision_without_gerrit_request(
+    monkeypatch, capsys, revision
+):
+    safe_submit = _safe_submit_module()
+
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(safe_submit, "_credential", lambda host: ("user", "pass"))
+
+    def fake_request(base_url: str, method: str, path: str, auth: str, body=None) -> dict:
+        calls.append((method, path, body))
+        return dict(_GREEN_DETAIL)
+
+    monkeypatch.setattr(safe_submit, "_request", fake_request)
+
+    assert safe_submit.main(["2764", "--revision", revision, "--hashtag", ""]) == 2
+
+    assert calls == []
+    _assert_form_refusal(capsys.readouterr().err)
 
 
 def test_safe_submit_names_missing_git_credential(monkeypatch, capsys):
