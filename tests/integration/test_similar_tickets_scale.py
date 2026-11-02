@@ -15,6 +15,14 @@ Three claims are under test, each one a thing the unit tier cannot reach:
 The 10,000-ticket store is synthesized by writing event files directly. Going through
 ``rebar.create_ticket`` would cost one git commit each (measured at 110 ms, so about
 18 minutes) to produce a store the reducer folds identically.
+
+Every assertion in this module was swept for vacuity (ticket 458e-c5b2-96ef-4f8d). The
+cold test carried a pair that could not fail -- its percentile figure is computed from
+measured durations, so being a float and being positive were guaranteed by
+construction -- and both are gone, replaced by the convergence claim that test now
+makes. Two assertions were examined and KEPT because each can fail: ``assert not
+present`` fails if a credential survives ``delenv``, and ``assert results`` fails if
+the credential-free query ranks nothing.
 """
 
 from __future__ import annotations
@@ -208,7 +216,7 @@ def test_a_warm_query_hashes_nothing_and_undercuts_the_cold_rebuild_it_avoids(
     )
 
 
-def test_the_cold_catch_up_cost_at_that_scale_is_emitted_as_a_number(
+def test_the_cold_rebuild_settles_so_an_immediate_second_catch_up_indexes_nothing(
     large_store: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Cold cost is reported, not budgeted -- it is paid once per index lifetime.
@@ -216,6 +224,14 @@ def test_the_cold_catch_up_cost_at_that_scale_is_emitted_as_a_number(
     The sample is small because each rebuild indexes every ticket in the store; the
     95th percentile of ``COLD_RUNS`` samples is therefore its maximum, which is the
     conservative reading and is stated here rather than left to be inferred.
+
+    The assertion is convergence, not duration. Re-indexing moves each directory's
+    mtime after ``live_entries`` read it, so the run after a rebuild re-hashes every
+    directory it just indexed (``catchup.py`` module docstring). Those hashes are
+    unchanged, so that run must index nothing and drop nothing -- and it must have
+    looked at the whole store while concluding so, which is what ``scanned`` pins
+    down. Without that third clause a catch-up over an empty store would satisfy the
+    other two.
     """
     samples = []
     for _ in range(COLD_RUNS):
@@ -237,8 +253,16 @@ def test_the_cold_catch_up_cost_at_that_scale_is_emitted_as_a_number(
             f"\ncold catch-up over {MIN_TICKETS} tickets: "
             f"median={statistics.median(samples):.0f} ms p95={p95:.0f} ms (n={COLD_RUNS})"
         )
-    assert isinstance(p95, float)
-    assert p95 > 0.0
+
+    conn = open_index(large_store)
+    assert conn is not None
+    try:
+        settled = catch_up(large_store, conn)
+    finally:
+        conn.close()
+    assert settled["indexed"] == 0
+    assert settled["dropped"] == 0
+    assert settled["scanned"] >= MIN_TICKETS
 
 
 def test_a_query_ranks_with_every_provider_credential_removed(
