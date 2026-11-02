@@ -629,7 +629,7 @@
    "readOnlyHint": false,
    "title": null
   },
-  "description": "Create a ticket; returns {id, alias} (agents get the alias without\n        a second show()). A non-null description_warning means the description exceeds\n        the plan-review admission cap while the claim gate is on \u2014 the ticket was still\n        created, but claiming it needs a review that refuses the description as-is. A\n        non-null duplicate_warning means another ticket with the same normalized title\n        was created inside the recency window \u2014 advisory only; the named candidate may\n        already cover this work.",
+  "description": "Create a ticket; returns {id, alias} (agents get the alias without\n        a second show()). A non-null description_warning means the description exceeds\n        the plan-review admission cap while the claim gate is on \u2014 the ticket was still\n        created, but claiming it needs a review that refuses the description as-is. A\n        non-null duplicate_warning means another ticket with the same normalized title\n        was created inside the recency window \u2014 advisory only; the named candidate may\n        already cover this work. similar_tickets ranks existing tickets that resemble\n        this one in wording rather than in exact title, most relevant first, each scored\n        0 to 1 with 1 most relevant \u2014 also advisory, and empty when retrieval is off,\n        matches nothing, or fails.",
   "inputSchema": {
    "properties": {
     "assignee": {

@@ -153,14 +153,21 @@ verify.auto_resume_max             = 2       # bounded auto-resume for the compl
                                              # count, remaining unmet) rides the close output and the
                                              # durable COMPLETION_VERDICT sidecar record.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
-verify.suggest_duplicate_tickets   = false   # ADVISORY create-time duplicate journal ONLY
-                                             # (ticket eac3): a create whose normalized
-                                             # title matches another create inside a 600 s window
-                                             # is surfaced (candidate id + status) on the
-                                             # creating surface's own channel — CLI stderr,
-                                             # library logger + `duplicate_warning` result key,
-                                             # MCP result field. O(window) via a small journal
-                                             # sidecar; never blocks or fails the create.
+verify.suggest_duplicate_tickets   = false   # ADVISORY create-time duplicate advice (tickets
+                                             # eac3, 80a5). Two probes, one setting. Exact: a
+                                             # create whose normalized title matches another
+                                             # create inside a 600 s window is surfaced
+                                             # (candidate id + status) — O(window) via a small
+                                             # journal sidecar. Ranked: `similar_tickets` lists
+                                             # existing tickets resembling the new one in
+                                             # wording, scored 0 to 1 with 1 most relevant, from
+                                             # the lexical index. Both ride the creating
+                                             # surface's own channel — CLI stderr, library
+                                             # logger + `duplicate_warning` / `similar_tickets`
+                                             # result keys, MCP result fields. Neither blocks
+                                             # or fails the create. Non-graph artifact types
+                                             # (session_log, code_review, identity) are not
+                                             # ranked.
 verify.require_ticket_for_commit   = false   # CI Verified gate: every commit to main must reference a rebar
                                              # ticket that RESOLVES in the store (rebar-ticket: <id> trailer or a
                                              # leading <id>:; alias/full/short/Jira). env

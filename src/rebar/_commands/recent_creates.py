@@ -21,6 +21,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
+# Imported at module scope so tests substitute the probe by patching this name on this
+# module -- the same seam the normalized-title probe's own tests already use.
+from rebar.reducer._api import _NON_GRAPH_ARTIFACT_TYPES
+from rebar.similar import find_similar
+
 logger = logging.getLogger("rebar")
 
 _JOURNAL_NAME = "recent-creates.json"
@@ -156,4 +161,68 @@ def duplicate_create_warning(
         f"(status {status}, created {age_s}s ago). Advisory only — {new_ref} was still "
         f"created; if it duplicates {cand_ref}, record it with: "
         f"rebar link {new_ref} {cand_ref} duplicates"
+    )
+
+
+def similar_tickets_advisory(
+    tracker: Any,
+    *,
+    ticket_id: str,
+    ticket_type: str,
+    title: str,
+    description: str | None,
+    cfg_root: str,
+) -> list[dict[str, Any]]:
+    """Ranked tickets resembling a create that has already landed, or ``[]``.
+
+    The normalized-title probe above catches only byte-identical titles. This one ranks
+    by text, so a duplicate filed in different words is visible too.
+
+    Non-graph artifact types are skipped: a ranked list of similar *tickets* means
+    nothing for a session log, a code-review artifact or an identity, and probing would
+    force an index catch-up on a write that never touches the ticket graph. The
+    classification is the one those types already carry elsewhere, not a new one.
+
+    The new ticket's own id is excluded, because catch-up has indexed it by now and it
+    would otherwise rank as its own top match.
+    """
+    try:
+        if ticket_type in _NON_GRAPH_ARTIFACT_TYPES:
+            return []
+        from rebar.config import compose_config
+
+        if not compose_config(cfg_root).verify.suggest_duplicate_tickets:
+            return []
+        return find_similar(
+            str(tracker),
+            title=title,
+            description=description or "",
+            exclude_id=ticket_id,
+        )
+    except Exception:  # an advisory notice must never fail a completed write
+        logger.debug("similar-ticket probe failed for %s", ticket_id, exc_info=True)
+        return []
+
+
+def format_similar_tickets(results: object, *, new_ref: str) -> str | None:
+    """Render :func:`similar_tickets_advisory` output for a stderr channel, or ``None``.
+
+    ``None`` for anything empty or unrecognized, so a caller emits nothing rather than an
+    empty heading. ``score`` runs 0 to 1 with 1 most relevant.
+    """
+    if not isinstance(results, list) or not results:
+        return None
+    lines = [
+        f"  {r.get('alias') or r.get('id')}  (score {float(r.get('score', 0.0)):.2f})  "
+        f"{r.get('title', '')}"
+        for r in results
+        if isinstance(r, dict)
+    ]
+    if not lines:
+        return None
+    return (
+        "possibly similar tickets (score 0-1, 1 most relevant):\n"
+        + "\n".join(lines)
+        + f"\nAdvisory only — {new_ref} was still created; if it duplicates one of these, "
+        f"record it with: rebar link {new_ref} <id> duplicates"
     )

@@ -274,6 +274,7 @@ class CreateResult(TypedDict):
     title: NotRequired[str]
     description_warning: NotRequired[str | None]
     duplicate_warning: NotRequired[str | None]
+    similar_tickets: NotRequired[list[dict[str, Any]]]
     push_status: NotRequired[PushStatus]
 
 

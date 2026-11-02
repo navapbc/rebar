@@ -8,13 +8,12 @@ remain re-exported here so pre-split ``rebar`` and ``_lib_writes`` imports resol
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import wraps
-from typing import TYPE_CHECKING, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from rebar import config
 from rebar._commands.gates import log_advisory_warning as _warn_advisory
-from rebar._commands.gates import log_description_cap_warning as _warn_description_cap
 from rebar._errors import ConcurrencyError, RebarError
 
 # ── Re-exports of the concerns split out of this module ──────────────────────
@@ -71,6 +70,18 @@ def init_repo(
 
 
 # ── Write path (subprocess → dispatcher) ─────────────────────────────────────
+def _log_create_advisories(advisories: Mapping[str, Any]) -> None:
+    """Log the text advisories a create produced, on the library channel.
+
+    Generic over the advisory set (ticket 80a5-cbb1-ef06-4ba5): every value is offered to
+    the shared advisory logger, which logs the strings and ignores structured values such
+    as ``similar_tickets``. Those are carried on the returned dict instead, where a caller
+    can render them.
+    """
+    for value in advisories.values():
+        _warn_advisory(value)
+
+
 @overload
 def create_ticket(
     ticket_type: str,
@@ -168,16 +179,18 @@ def create_ticket(
             returncode=exc.returncode,
             stderr=exc.message,
         ) from None
-    warning = _warn_description_cap(res.get("description_warning"))
-    dup_warning = _warn_advisory(res.get("duplicate_warning"))
+    advisories = composer.create_advisories(res)
+    _log_create_advisories(advisories)
     if not return_alias:
         return res["id"]
-    return {
-        "id": res["id"],
-        "alias": res["alias"] or "",
-        "description_warning": warning,
-        "duplicate_warning": dup_warning,
-    }
+    return cast(
+        "CreateResult",
+        {
+            "id": res["id"],
+            "alias": res["alias"] or "",
+            **advisories,
+        },
+    )
 
 
 def idea(
@@ -220,16 +233,18 @@ def idea(
             returncode=exc.returncode,
             stderr=exc.message,
         ) from None
-    warning = _warn_description_cap(res.get("description_warning"))
-    dup_warning = _warn_advisory(res.get("duplicate_warning"))
+    advisories = composer.create_advisories(res)
+    _log_create_advisories(advisories)
     if not return_alias:
         return res["id"]
-    return {
-        "id": res["id"],
-        "alias": res["alias"] or "",
-        "description_warning": warning,
-        "duplicate_warning": dup_warning,
-    }
+    return cast(
+        "CreateResult",
+        {
+            "id": res["id"],
+            "alias": res["alias"] or "",
+            **advisories,
+        },
+    )
 
 
 def _normalize_transition_force(force: str | None) -> str | None:

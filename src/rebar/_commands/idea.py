@@ -80,7 +80,16 @@ def idea_cli(argv: list[str], *, repo_root=None) -> int:
         return exc.returncode
 
     if fmt == "json":
-        print(js_safe_dumps({"id": res["id"], "alias": res["alias"], "title": res["title"]}))
+        print(
+            js_safe_dumps(
+                {
+                    "id": res["id"],
+                    "alias": res["alias"],
+                    "title": res["title"],
+                    "similar_tickets": res.get("similar_tickets") or [],
+                }
+            )
+        )
     else:
         # Normalized confirmation (ticket 6bda-9d58-8546-4638): one line keeping the
         # old form's idea marker, alias, id, and title.
@@ -88,7 +97,15 @@ def idea_cli(argv: list[str], *, repo_root=None) -> int:
 
         confirm_created("idea ", res)
     # This surface calls create_core directly, so it emits the create advisories itself
-    # (ticket eac3): same stderr channel as create_cli, stdout stays pure, exit stays 0.
+    # (tickets eac3, 80a5): same stderr channel as create_cli, stdout stays pure, exit
+    # stays 0.
+    from rebar._commands import recent_creates
+
     composer._warn_stderr(res.get("description_warning"))
     composer._warn_stderr(res.get("duplicate_warning"))
+    composer._warn_stderr(
+        recent_creates.format_similar_tickets(
+            res.get("similar_tickets"), new_ref=res["alias"] or res["id"]
+        )
+    )
     return 0

@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 import sys
 import uuid as _uuid
+from collections.abc import Mapping
+from typing import Any
 
 from rebar._commands._seam import (
     CommandError,
@@ -248,13 +250,44 @@ def create_core(
         title=title,
         cfg_root=cfg_root,
     )
+    # Ranked similar-ticket advisory (ticket 80a5-cbb1-ef06-4ba5). Same disposition as the
+    # two advisories above — computed after the event lands, never able to fail the write —
+    # but it catches duplicates worded differently, which title equality cannot see.
+    from rebar._commands.recent_creates import similar_tickets_advisory
+
+    similar = similar_tickets_advisory(
+        tracker,
+        ticket_id=ticket_id,
+        ticket_type=ticket_type,
+        title=title,
+        description=description,
+        cfg_root=cfg_root,
+    )
     return {
         "id": ticket_id,
         "alias": alias or None,
         "title": title,
         "description_warning": warning,
         "duplicate_warning": dup_warning,
+        "similar_tickets": similar,
     }
+
+
+#: The keys of a ``create_core`` result that identify the ticket it created. Everything
+#: else in that result is a post-write advisory.
+CREATE_IDENTITY_KEYS = ("id", "alias", "title")
+
+
+def create_advisories(res: Mapping[str, Any]) -> dict[str, Any]:
+    """The advisory part of a ``create_core`` result: whatever is not identity.
+
+    Defined as the complement of :data:`CREATE_IDENTITY_KEYS` rather than as a list of
+    known advisory names, so a surface that carries advisories through this helper picks
+    up a newly added one without being edited (ticket 80a5-cbb1-ef06-4ba5). Before this,
+    every return site hand-copied advisory keys one at a time, and an advisory added to
+    ``create`` was silently dropped from ``idea``.
+    """
+    return {k: v for k, v in res.items() if k not in CREATE_IDENTITY_KEYS}
 
 
 def _match_long_opt(args: list[str], i: int, name: str):
@@ -438,7 +471,16 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
         return exc.returncode
 
     if fmt == "json":
-        print(js_safe_dumps({"id": res["id"], "alias": res["alias"], "title": res["title"]}))
+        print(
+            js_safe_dumps(
+                {
+                    "id": res["id"],
+                    "alias": res["alias"],
+                    "title": res["title"],
+                    "similar_tickets": res.get("similar_tickets") or [],
+                }
+            )
+        )
     else:
         # Normalized confirmation (ticket 6bda-9d58-8546-4638): one line, all the
         # data the old two-line form carried (alias, id, title).
@@ -460,11 +502,19 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             "(the file-impact-coverage gate will otherwise flag it).",
             file=sys.stderr,
         )
-    # Same stderr channel for the description-cap heads-up (ticket 594b) and the
-    # duplicate-title advisory (ticket eac3): the create already succeeded, so both are
-    # advisory and the exit code stays 0.
+    # Same stderr channel for the description-cap heads-up (ticket 594b), the
+    # duplicate-title advisory (ticket eac3), and the ranked similar-ticket advisory
+    # (ticket 80a5): the create already succeeded, so all are advisory and the exit
+    # code stays 0.
+    from rebar._commands import recent_creates
+
     _warn_stderr(res.get("description_warning"))
     _warn_stderr(res.get("duplicate_warning"))
+    _warn_stderr(
+        recent_creates.format_similar_tickets(
+            res.get("similar_tickets"), new_ref=res["alias"] or res["id"]
+        )
+    )
     return 0
 
 
