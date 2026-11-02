@@ -88,6 +88,37 @@ grep -c 'Cannot email' /var/gerrit/site/logs/error_log
 # then exercise it: comment on any open change, wait ~30s, re-run. Count unchanged = fixed.
 ```
 
+### Config-only apply (one key, Gerrit restart only)
+
+`compose-up.sh` does more than re-seed the file: its `docker compose up -d --build`
+rebuilds every service image and starts the `compose-mcp-1` boot backend beside a
+live blue-green MCP container. When the change is only a `gerrit.config` key, set
+that key in the live file and restart only Gerrit instead. This was first used for
+`receive.checkReferencedObjectsAreReachable` (bug 794d-b458-5d78-42c4).
+
+```sh
+# On the box (SSM), as root. KEY/VALUE are the committed key and value.
+cfg=/var/gerrit/site/etc/gerrit.config
+cp -p "$cfg" "$cfg.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+git config -f "$cfg" "$KEY" "$VALUE"
+git config -f "$cfg" --get "$KEY"        # must print VALUE
+chown 1000:1000 "$cfg"
+
+# Do not restart while a push or submit is in flight: the queue should hold only
+# periodic tasks, and the request log should show no receive-pack or submit in the
+# last minute.
+ssh -i /root/.ssh/gerrit_admin -p 29418 admin@localhost gerrit show-queue -w
+tail -n 50 /var/gerrit/site/logs/httpd_log | grep -E 'git-receive-pack|/submit'
+
+docker restart compose-gerrit-1           # Gerrit only; no image build, no other service
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/config/server/version   # 200
+```
+
+Keep the live value equal to `infra/compose/gerrit.config`, so a later
+`compose-up.sh` re-seed changes nothing. Back-out: `git config -f "$cfg" --unset "$KEY"`
+(or restore the `.bak-*` copy), restart the Gerrit container the same way, and check
+for HTTP 200.
+
 ## If we ever need mail back
 
 Two credible paths. Neither is a one-line change; budget accordingly.

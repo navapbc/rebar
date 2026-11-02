@@ -4,6 +4,14 @@ Use this runbook when Gerrit rejects a push with `remote unpack failed: error Mi
 blob <sha>` or a full connectivity check reports missing objects in
 `/var/gerrit/site/git/rebar.git`.
 
+First check whether the named object is readable on the host
+(`sudo -u ec2-user git --git-dir=/var/gerrit/site/git/rebar.git cat-file -t <sha>`). If it
+is readable and full fsck passes, this is not object-store damage: do not snapshot or repair.
+That rejection came from JGit's receive reachability check refusing a thin-pack delta base,
+which `receive.checkReferencedObjectsAreReachable = false` in `infra/compose/gerrit.config`
+turns off (see `docs/gerrit-aws-setup.md`). If it recurs with that setting live, record the
+object id and the Gerrit `error_log` stack on an incident ticket.
+
 ## Safety boundary
 
 - Do not restart Gerrit unless the incident owner explicitly approves it.

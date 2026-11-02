@@ -16,6 +16,7 @@ _COMPOSE_UP = _REPO / "infra" / "scripts" / "compose-up.sh"
 _AUTODEPLOY = _REPO / "infra" / "scripts" / "autodeploy.sh"
 _JGIT_MATERIALIZER = _REPO / "infra" / "scripts" / "materialize-gerrit-jgit-config.sh"
 _JGIT_CONFIG = _REPO / "infra" / "compose" / "jgit.config"
+_GERRIT_CONFIG = _REPO / "infra" / "compose" / "gerrit.config"
 _COMPOSE = _REPO / "infra" / "compose" / "docker-compose.yml"
 _RUNBOOK = _REPO / "infra" / "runbooks" / "gerrit-object-store-repair.md"
 _REFSPEC_GUARD = _REPO / "infra" / "scripts" / "validate-gerrit-repair-refspecs.sh"
@@ -28,6 +29,36 @@ def test_jgit_config_disables_receive_autogc_in_versioned_infra() -> None:
         text=True,
     ).strip()
     assert value == "false"
+
+
+def test_gerrit_config_accepts_thin_pack_bases_outside_the_reachability_walk() -> None:
+    # Gerrit reads this receive.* key from gerrit.config, not jgit.config. With the default
+    # (true), JGit rejected readable thin-pack bases as "Missing tree" (bug 794d-b458).
+    value = subprocess.check_output(
+        [
+            "git",
+            "config",
+            "--file",
+            str(_GERRIT_CONFIG),
+            "--get",
+            "receive.checkReferencedObjectsAreReachable",
+        ],
+        text=True,
+    ).strip()
+    assert value == "false"
+    jgit = subprocess.run(
+        [
+            "git",
+            "config",
+            "--file",
+            str(_JGIT_CONFIG),
+            "--get",
+            "receive.checkReferencedObjectsAreReachable",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    assert jgit.returncode == 1, "the key belongs in gerrit.config only"
 
 
 def test_jgit_materializer_seeds_and_validates_the_receive_section(tmp_path: Path) -> None:
