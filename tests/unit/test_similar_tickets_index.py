@@ -318,6 +318,100 @@ def test_a_settled_index_finds_work_again_once_one_dirstate_row_is_falsified(
         conn.close()
 
 
+# --- a directory name that is not the reduced ticket id ----------------------------
+#
+# ``_document`` keys a row by the REDUCED ``ticket_id``, while the live set, the
+# persisted map and the removal path all speak directory names. The reducer does not
+# guarantee the two agree -- an ``EDIT`` may carry ``ticket_id``, which is not an
+# immutable field -- so every path that addresses a row has to cope with both.
+
+
+def _diverged(tracker: Path, dir_name: str, reduced_id: str, title: str) -> Path:
+    """A ticket dir whose reduced ``ticket_id`` is not its own name."""
+    ticket_dir = _write_ticket(tracker, dir_name, title)
+    _event(ticket_dir, "EDIT", {"fields": {"ticket_id": reduced_id}}, ts=_TS + 1000)
+    return ticket_dir
+
+
+def test_a_divergent_directory_is_indexed_under_its_reduced_id(tracker: Path) -> None:
+    """The row is keyed by what the reducer returned, not by the directory name."""
+    _diverged(tracker, "1111-1111-1111-1111", "9999-9999-9999-9999", "divergent kestrel")
+    conn = _indexed(tracker)
+    assert [r["id"] for r in search(conn, "divergent kestrel")] == ["9999-9999-9999-9999"]
+
+
+def test_dirstate_records_the_key_a_divergent_directory_was_indexed_under(
+    tracker: Path,
+) -> None:
+    """Without the recorded key, removal cannot find the row it has to delete."""
+    _diverged(tracker, "1111-1111-1111-1111", "9999-9999-9999-9999", "divergent kestrel")
+    conn = _indexed(tracker)
+    assert conn.execute("SELECT dir_name, ticket_id FROM dirstate").fetchall() == [
+        ("1111-1111-1111-1111", "9999-9999-9999-9999")
+    ]
+
+
+def test_removing_a_divergent_directory_leaves_no_document_behind(tracker: Path) -> None:
+    """Deleting by directory name alone would strand the row under the reduced id."""
+    ticket_dir = _diverged(
+        tracker, "1111-1111-1111-1111", "9999-9999-9999-9999", "divergent kestrel"
+    )
+    conn = _indexed(tracker)
+    assert search(conn, "divergent kestrel")
+    for child in ticket_dir.iterdir():
+        child.unlink()
+    ticket_dir.rmdir()
+
+    assert catch_up(tracker, conn)["dropped"] == 1
+    assert conn.execute("SELECT ticket_id FROM docs").fetchall() == []
+    assert conn.execute("SELECT dir_name FROM dirstate").fetchall() == []
+
+
+def test_find_similar_stops_returning_a_removed_divergent_ticket(tracker: Path) -> None:
+    """The advisory is the surface the stranded row would have shown up on."""
+    ticket_dir = _diverged(
+        tracker, "1111-1111-1111-1111", "9999-9999-9999-9999", "divergent kestrel"
+    )
+    _indexed(tracker).close()
+    assert find_similar(str(tracker), title="divergent kestrel", description="")
+    for child in ticket_dir.iterdir():
+        child.unlink()
+    ticket_dir.rmdir()
+
+    assert find_similar(str(tracker), title="divergent kestrel", description="") == []
+
+
+def test_an_exclusion_on_a_divergent_ticket_matches_its_reduced_id(tracker: Path) -> None:
+    """A create excludes the id it was given, which is the reduced one."""
+    _diverged(tracker, "1111-1111-1111-1111", "9999-9999-9999-9999", "divergent kestrel")
+    _write_ticket(tracker, "2222-2222-2222-2222", "divergent kestrel")
+    _indexed(tracker).close()
+
+    excluded = find_similar(
+        str(tracker),
+        title="divergent kestrel",
+        description="",
+        exclude_id="9999-9999-9999-9999",
+    )
+    assert [r["id"] for r in excluded] == ["2222-2222-2222-2222"]
+
+
+def test_a_touched_but_unchanged_divergent_directory_keeps_its_recorded_key(
+    tracker: Path,
+) -> None:
+    """A moved mtime does not reindex, so it must not overwrite the key with NULL."""
+    ticket_dir = _diverged(
+        tracker, "1111-1111-1111-1111", "9999-9999-9999-9999", "divergent kestrel"
+    )
+    conn = _indexed(tracker)
+    before = dir_hash_of(str(ticket_dir))
+    os.utime(ticket_dir, ns=(_TS + 5_000_000_000, _TS + 5_000_000_000))
+    assert dir_hash_of(str(ticket_dir)) == before
+
+    assert catch_up(tracker, conn)["indexed"] == 0
+    assert conn.execute("SELECT ticket_id FROM dirstate").fetchall() == [("9999-9999-9999-9999",)]
+
+
 # --- failure disposition -----------------------------------------------------------
 
 

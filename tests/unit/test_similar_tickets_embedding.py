@@ -48,7 +48,7 @@ from rebar.similar.embedding import (
     embedding_model_name,
     recover_digest,
 )
-from rebar.similar.index import open_index, store_vector, validity_key
+from rebar.similar.index import INDEX_VERSION, open_index, store_vector, validity_key
 
 pytestmark = pytest.mark.unit
 
@@ -851,16 +851,18 @@ def test_the_vectors_table_survives_an_index_reopen(tracker: Path) -> None:
 
 
 def test_an_index_from_the_previous_version_is_discarded(tracker: Path) -> None:
-    """The vectors table arrived with a schema bump; a v2 file must rebuild, not error."""
+    """The vectors table arrived with a schema bump; an older file must rebuild, not error."""
     conn = open_index(tracker)
     assert conn is not None
-    conn.execute("UPDATE meta SET value = '2' WHERE key = 'version'")
+    conn.execute("UPDATE meta SET value = ? WHERE key = 'version'", (str(INDEX_VERSION - 1),))
     conn.close()
 
     reopened = open_index(tracker)
     assert reopened is not None
     try:
         assert isinstance(reopened, sqlite3.Connection)
-        assert reopened.execute("SELECT value FROM meta WHERE key='version'").fetchone()[0] == "3"
+        assert reopened.execute("SELECT value FROM meta WHERE key='version'").fetchone()[0] == str(
+            INDEX_VERSION
+        )
     finally:
         reopened.close()

@@ -23,6 +23,13 @@ Two tables carry the whole design:
     :mod:`rebar.similar.catchup` for why one stat per DIRECTORY rather than one per
     event file is what makes the warm path affordable.
 
+    A row also records ``ticket_id``: the key the ``docs`` row for that directory was
+    actually inserted under. The two are normally equal, but the reduced state -- not
+    the directory name -- is the authority on a ticket's id, so they can diverge. The
+    removal path has only the directory name in scope once the directory is gone, so
+    without this column it could not address the ``docs`` row it needs to delete. It
+    is NULL when the directory produced no document.
+
 ``vectors``
     The opt-in embedding tier's storage, one row per ticket: the embedded digest's
     vector plus the VALIDITY KEY it was produced under. Embedding spaces are not
@@ -48,7 +55,7 @@ from rebar._snapshot.git_fetch import interprocess_lock
 logger = logging.getLogger(__name__)
 
 #: Bumped when the schema or the indexed text changes; a mismatch rebuilds.
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 
 #: Seconds a writer waits on sqlite's write lock before giving up. Concurrent
 #: reconcilers serialize here rather than corrupting each other.
@@ -88,7 +95,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         "CREATE TABLE IF NOT EXISTS dirstate ("
         "  dir_name TEXT PRIMARY KEY,"
         "  dir_mtime_ns INTEGER NOT NULL,"
-        "  dir_hash TEXT NOT NULL"
+        "  dir_hash TEXT NOT NULL,"
+        "  ticket_id TEXT"
         ")"
     )
     conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
