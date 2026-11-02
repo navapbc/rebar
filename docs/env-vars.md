@@ -80,6 +80,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_BASE_URL` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_BEDROCK_REGION` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_CONFIG_FILE` | `src/rebar/_config_sources.py` |  |
+| `REBAR_LLM_EMBEDDING_MODEL` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_EVALS_CORPUS_ROOT` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_FRONTIER_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_FRONTIER_MODEL` | `src/rebar/llm/model_classes.py` |  |
@@ -93,6 +94,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_REPO_PATH` | `src/rebar/llm/config.py` |  |
 | `REBAR_LLM_RETRY_MAX_ATTEMPTS` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_RETRY_MAX_WAIT_S` | `src/rebar/llm/config_readers.py` |  |
+| `REBAR_LLM_SIMILAR_DIGEST_MODEL` | `src/rebar/llm/config_readers.py` |  |
 | `REBAR_LLM_STANDARD_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_STANDARD_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_STANDARD_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
@@ -224,7 +226,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_211 variables._
+_213 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
