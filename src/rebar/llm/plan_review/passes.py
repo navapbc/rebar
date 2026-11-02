@@ -151,6 +151,7 @@ PASS_ISF = "plan-review-isf-finder"  # ISF finder
 PASS_CONTAINER = "plan-review-container"  # G3/G4 container finder
 PASS_CONTRADICTION = "plan-review-contradiction"  # validation: intra-verdict contradiction (5e40)
 PASS_COMMENT_TRAIL = "plan-review-comment-trail"  # validation: comment-trail consultation (5e40)
+PASS_FIX_UNIT_GROUPING = "plan-review-fix-unit-grouping"  # blocking fix-unit grouping (snowyowl)
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────

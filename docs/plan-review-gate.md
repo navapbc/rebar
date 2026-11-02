@@ -154,6 +154,22 @@ model emits **no** holistic severity/confidence anywhere in the decision path:
 | **3 — decide** | **Deterministic.** validity = graded fraction of the binary answers; impact = mean of the ordinal-mapped severity attributes; **priority = validity × impact**; decision = `block \| advisory \| dropped`. | `passes.pass3_decide` |
 | **4 — coach** | A single-turn call over the *coachable* findings (blocking first, then surviving advisory) maps each to a move from a locked registry; the coaching prose is rendered **deterministically** from the move's template (the LLM only picks the move + names a bounded noun-phrase subject — validated). | workflow `plan_review_coach_inputs` + `plan-review-coach` |
 
+**Blocking fix-unit grouping.** Each criterion's finder can only attribute to its own criteria,
+so one defect is often reported as several BLOCKING findings under different criteria. After
+every floor and cross-check has run and before the sidecar is written, a verdict with 2 or
+more blocking findings gets ONE grouping call (`plan-review-fix-unit-grouping`, output contract
+`plan_review_fix_unit_groups`, standard model class, temperature 0). The call sees all the
+blocking findings at once (their ids, criteria, locations and text, not the plan) and returns the groups that state the same defect, with no pairwise
+votes and no transitive chaining; a finding belongs to at most one group. Each member of a
+group is stamped `group_id` and `is_primary`, and the primary (highest priority, then the
+alphabetically-first criterion, then the lowest id) also gets `group_criteria`. Grouping is
+stamp-only: every member keeps `decision=block` and stays in `blocking`, so the verdict,
+counts and sidecar rows do not change; only the CLI renderer collapses a group to its primary
+with a `(+N co-criteria: …)` suffix. It fails open: a call error, malformed output, an unknown
+id or an id in two groups stamps nothing and logs a warning.
+`coverage.fix_unit_grouping` records `status` (`grouped`, `no_groups`, `failed`), the group
+count and the call's usage. Advisory findings are not grouped.
+
 **Verifier model.** Pass-2 verify (and the Pass-4 coach, which share the verify cfg) run on
 the decisive non-frontier `VERIFIER_DEFAULT_MODEL` (`claude-sonnet-4-6`) **unless the operator
 explicitly chose a model** (a `[tool.rebar.llm.model_classes]` slot, or the deprecated

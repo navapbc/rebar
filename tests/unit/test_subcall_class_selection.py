@@ -456,6 +456,8 @@ _EXPECTED_RUN_REQUEST_SITES = [
         "_max_output_cfg(cfg)",
         "bound",
     ),
+    # Blocking fix-unit grouping sub-call (bug longish-ripe-snowyowl).
+    ("llm/plan_review/floors.py::_request_fix_unit_groups", "vcfg", "bound"),
     # `_score_floor_novelty` moved from `plan_review/__init__.py` to the new sibling
     # `plan_review/floors.py` (ticket 02b7, module-size headroom extraction).
     ("llm/plan_review/floors.py::_score_floor_novelty", "vcfg", "bound"),
@@ -496,7 +498,7 @@ def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
 
     sites = _run_request_sites()
 
-    assert len(_EXPECTED_RUN_REQUEST_SITES) == 20
+    assert len(_EXPECTED_RUN_REQUEST_SITES) == 21
     assert all(expr for _, expr, _ in _EXPECTED_RUN_REQUEST_SITES)
     assert sites == _EXPECTED_RUN_REQUEST_SITES
     assert len(module_walks) >= 400, "the oracle did not exercise the real source corpus"
