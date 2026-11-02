@@ -41,8 +41,10 @@ the server simply is not there. Treat a one-off `export` as a *test*, never as s
 Pick one durable delivery mechanism and use it for both project variables:
 
 - **Shell rc file (simplest).** Append the `export` lines to the rc file that runs for the shells
-  you actually launch clients from — `~/.zshrc` on a default macOS zsh, `~/.bashrc`/`~/.bash_profile`
-  on bash. Open a **new** shell afterwards and confirm with `printenv MCP_CLIENT_PAT_CODEX` or
+  you actually launch clients from — `~/.zshenv` on a default macOS zsh, `~/.bashrc`/`~/.bash_profile`
+  on bash. Use `~/.zshenv`, not `~/.zshrc`: zsh reads `~/.zshrc` only in interactive shells, so a
+  client started from a non-interactive one (an agent's subshell, a script) sends an empty bearer,
+  gets `401`, and Copilot CLI reports that the server needs `/mcp auth rebar`. Open a **new** shell afterwards and confirm with `printenv MCP_CLIENT_PAT_CODEX` or
   `printenv MCP_CLIENT_PAT_CLI` (which prints the value — do this only on a screen you are willing
   to expose). The file now contains the PAT in cleartext, so `chmod 600` it and never place it in a
   repo or a dotfiles repository.
