@@ -301,6 +301,7 @@ _PLATFORM_COMPAT_PATH_FRAGMENTS = (
     "test_event_append_index_lock",
     "test_atomic_ticket_dir_create",
     "test_stale_lock_reclaim",
+    "test_git_grep_word_boundary",  # macOS git reads `\b` under -E as a literal b
 )
 
 

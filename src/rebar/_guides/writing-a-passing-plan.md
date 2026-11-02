@@ -140,8 +140,8 @@ These are the criteria that actually block a claim. Fix every one before you cla
   size, and are ordered by their real dependencies.
 - **Assert what the cited command actually reports (`F1`).** An acceptance criterion that names
   a command must assert something that command can produce on a correct implementation. Check
-  it by running the command on a clean tree *before* you write the criterion. Two measured
-  traps, each of which has shipped in real plans and failed at close:
+  it by running the command on a clean tree *before* you write the criterion. Three measured
+  traps, each of which has shipped in real plans and given a wrong verdict at close:
   - **The mechanism gate's `new=` counter is never 0.** `python
     scripts/check_mechanism_delta.py --check` counts marker-admitted mechanisms inside `new=N`,
     and the baseline has no write path for new keys, so a clean `origin/main` already reports
@@ -154,6 +154,19 @@ These are the criteria that actually block a claim. Fix every one before you cla
     33 of whose tests are deselected — is never executed. If your change touches one, name the
     explicit command (`pytest <path> -m ""`) alongside `make verify`, or the criterion passes
     without covering your work.
+  - **`\b` under `git grep -E` is not a word boundary on macOS.** macOS git reads it as a
+    literal `b`: against the lines `alpha beta` and `alphabeta`, `git grep -nE 'alpha\b'`
+    matches **`alphabeta`** and misses `alpha beta`, exit 0, nothing on stderr. Linux git
+    handles it correctly, so the criterion passes or fails depending on who runs it — and a
+    removal check such as "`git grep -E 'symbol\b' -- src` returns 0 hits" can report a clean
+    removal while the symbol is still there. `\<`/`\>` is no substitute (it matched nothing on
+    macOS). Write a form that means the same thing everywhere:
+    - `git grep -nE '(^|[^A-Za-z0-9_])symbol([^A-Za-z0-9_]|$)' -- src` (explicit boundary
+      classes; portable across git grep, GNU grep, and BSD grep);
+    - `git grep -nw 'symbol' -- src` (whole-word match);
+    - `git grep -nP 'symbol\b' -- src` (PCRE honours `\b`, where git is built with PCRE).
+    When the target is a literal with no regex metacharacters — most import-removal checks —
+    prefer `git grep -nF` (with `-w` for a whole word).
 
 A finding blocks only when it lands on a blocking-eligible criterion above; advisory criteria
 never block on their own (they're scored and coached, capped at the top ~20 per review).
