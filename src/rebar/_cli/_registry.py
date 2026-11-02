@@ -492,6 +492,14 @@ def _store_routes() -> tuple[Route, ...]:
             init="none",
         ),
         Route(
+            "build-vectors",
+            group="store",
+            parser_factory="rebar._cli._parsers.advanced.similar_build:build",
+            handler="rebar.similar._cli:build_vectors_cli",
+            adapter="argv",
+            init="full",
+        ),
+        Route(
             "export",
             group="store",
             parser_factory=_core_factory("export"),
