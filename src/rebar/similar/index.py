@@ -32,6 +32,9 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+from pathlib import Path
+
+from rebar._snapshot.git_fetch import interprocess_lock
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +113,47 @@ def _open_one(path: str) -> sqlite3.Connection:
     return conn
 
 
+def _recover(path: str) -> sqlite3.Connection | None:
+    """Discard and rebuild one unusable index, serialized across callers.
+
+    Every other write in this subsystem serializes on sqlite's own write lock, but
+    ``_discard`` unlinks files, and ``os.unlink`` is not covered by that lock. Two
+    callers that both found the index unusable would otherwise interleave: one can
+    unlink the WAL sidecar of the other's live connection, or commit rows into an
+    inode the other has already detached. Both leave a silently frozen index, which
+    is indistinguishable from a healthy index that matched nothing.
+
+    So the recovery is single-flight, on the same lock-then-RE-CHECK pattern
+    ``rebar._snapshot.cache`` runs for snapshot materialization: a peer may have
+    finished rebuilding while this caller waited, so retry the open inside the lock
+    BEFORE unlinking anything. The re-check is what removes the harm -- a lock alone
+    would still let the second caller discard a database the first just rebuilt.
+
+    This cannot help a caller that opened the index successfully *before* a peer
+    entered recovery; that caller never came here. Discarding a genuinely corrupt
+    file is destructive by nature. What this buys is that exactly one caller
+    discards, and that no caller discards an index that is already healthy.
+    """
+    try:
+        # os.unlink is not covered by sqlite's write lock, so single-flight recovery
+        # cannot reuse it. Adding this lock IS the ticket; there is no narrower fix.
+        # mechanism-ok: lock .recover.lock — 4932-ea62-cf4f-451b: unlink escapes sqlite
+        with interprocess_lock(Path(path + ".recover.lock")):
+            try:
+                return _open_one(path)
+            except (sqlite3.DatabaseError, StaleIndex):
+                pass  # still unusable: this caller is the one that rebuilds it
+            _discard(path)
+            try:
+                return _open_one(path)
+            except (sqlite3.DatabaseError, OSError, StaleIndex) as exc:
+                logger.warning("similar-ticket index could not be rebuilt: %s", exc)
+                return None
+    except OSError as exc:
+        logger.warning("similar-ticket index unavailable: %s", exc)
+        return None
+
+
 def open_index(tracker: str | os.PathLike[str]) -> sqlite3.Connection | None:
     """A usable connection, rebuilding from empty if the existing file is unusable.
 
@@ -134,12 +178,7 @@ def open_index(tracker: str | os.PathLike[str]) -> sqlite3.Connection | None:
         # Logged at warning: without it the index degrades to permanently empty results
         # with no observable symptom.
         logger.warning("similar-ticket index unusable (%s); rebuilding", exc)
-        _discard(path)
+        return _recover(path)
     except OSError as exc:
         logger.warning("similar-ticket index unavailable: %s", exc)
-        return None
-    try:
-        return _open_one(path)
-    except (sqlite3.DatabaseError, OSError, StaleIndex) as exc:
-        logger.warning("similar-ticket index could not be rebuilt: %s", exc)
         return None

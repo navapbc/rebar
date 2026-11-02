@@ -21,6 +21,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -415,6 +416,114 @@ def test_concurrent_catch_up_runs_leave_a_sound_index_holding_both_tickets(
     assert [r["id"] for r in search(conn, "ptarmigan")] == ["1111-1111-1111-1111"]
     assert [r["id"] for r in search(conn, "wolverine")] == ["2222-2222-2222-2222"]
     conn.close()
+
+
+def _make_stale(tracker: Path) -> None:
+    """Leave a readable index whose recorded version no longer matches the code's.
+
+    This is the version-bump case rather than a torn file, and it is the one that
+    matters: the moment ``INDEX_VERSION`` moves, every existing index on every box
+    takes the recovery branch at once. That is what turns the race from reachable
+    into expected.
+    """
+    conn = sqlite3.connect(index_path(tracker), isolation_level=None)
+    try:
+        conn.execute("UPDATE meta SET value = ? WHERE key = 'version'", (str(INDEX_VERSION - 1),))
+    finally:
+        conn.close()
+
+
+def _recover_concurrently(
+    tracker: Path, monkeypatch: pytest.MonkeyPatch, count: int = 2
+) -> tuple[list[BaseException], list[str]]:
+    """Drive ``count`` callers into recovery at once, holding the window open.
+
+    A plain barrier at the start of ``open_index`` is not enough. The first caller
+    discards and rebuilds in microseconds, so the second opens a healthy index and
+    never enters recovery at all -- the interleaving under test simply does not
+    happen, and an unsynchronized implementation passes. So the first caller to
+    reach ``_discard`` pauses there, before unlinking, which holds the second caller
+    inside recovery while the file is still being destroyed. That pause is the
+    experiment; without it there is nothing to observe.
+
+    Returns the threads' failures and every path passed to ``_discard``.
+    """
+    failures: list[BaseException] = []
+    discards: list[str] = []
+    counted = threading.Lock()
+    real_discard = similar.index._discard
+
+    def _instrumented_discard(path: str) -> None:
+        with counted:
+            first = not discards
+            discards.append(path)
+        if first:
+            time.sleep(0.5)
+        real_discard(path)
+
+    monkeypatch.setattr(similar.index, "_discard", _instrumented_discard)
+    barrier = threading.Barrier(count)
+
+    def _run() -> None:
+        try:
+            barrier.wait(timeout=30)
+            conn = open_index(tracker)
+            assert conn is not None, "recovery returned no connection"
+            conn.close()
+        except BaseException as exc:  # noqa: BLE001 - reported on the main thread
+            failures.append(exc)
+
+    threads = [threading.Thread(target=_run) for _ in range(count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+        assert not thread.is_alive()
+    return failures, discards
+
+
+def test_concurrent_recovery_leaves_a_sound_index_and_loses_no_ticket(
+    tracker: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two callers discarding and rebuilding at once must not detach each other's file."""
+    _write_ticket(tracker, "1111-1111-1111-1111", "ptarmigan")
+    _write_ticket(tracker, "2222-2222-2222-2222", "wolverine")
+    _indexed(tracker).close()
+    _make_stale(tracker)
+
+    failures, _ = _recover_concurrently(tracker, monkeypatch)
+    assert not failures
+
+    conn = open_index(tracker)
+    assert conn is not None
+    try:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    finally:
+        conn.close()
+    assert [r["id"] for r in find_similar(str(tracker), title="ptarmigan")] == [
+        "1111-1111-1111-1111"
+    ]
+    assert [r["id"] for r in find_similar(str(tracker), title="wolverine")] == [
+        "2222-2222-2222-2222"
+    ]
+
+
+def test_only_one_caller_discards_when_two_enter_recovery_on_one_stale_index(
+    tracker: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lock alone would not be enough; the re-check is what stops the second discard.
+
+    Unsynchronized, both callers unlink, and the second unlinks the database the first
+    had already rebuilt. Counting the discards is the cheapest observation of that: it
+    reports 2 against the unsynchronized implementation and 1 against this one.
+    """
+    _write_ticket(tracker, "1111-1111-1111-1111", "ptarmigan")
+    _indexed(tracker).close()
+    _make_stale(tracker)
+
+    failures, discards = _recover_concurrently(tracker, monkeypatch)
+    assert not failures
+    assert len(discards) == 1
 
 
 # --- advisory findings from the pre-push code review ---------------------------------
