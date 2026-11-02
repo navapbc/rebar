@@ -179,18 +179,25 @@ durable while the rates are not; multiply by the current Bedrock rates at adopti
 
 ### Deployment precondition
 
-The digest and the embedding run under **different Bedrock model families**. `infra/terraform/iam_s7.tf`
-scopes `bedrock:InvokeModel` on the Gerrit instance role to Anthropic Claude only — the statement
-`ConverseAnthropicClaudeOnly` (`:10`) lists exactly two resource ARNs (`:15-18`), both
-`anthropic.claude-*`, and the file header states the intent as "constraining the Anthropic model".
-`amazon.titan-embed-text-v2:0` is not admitted by either ARN, so **the embedding call would be
-denied** in a deployed environment today.
+The digest and the embedding run under **different Bedrock model families**, and the Gerrit
+instance role did not originally admit both. `infra/terraform/iam_s7.tf` scoped
+`bedrock:InvokeModel` to `anthropic.claude-*` ARNs only, so `amazon.titan-embed-text-v2:0`
+was denied and the embedding call would have failed in a deployed environment.
 
-Adopting this architecture therefore requires widening that resource list to include the Titan
-embedding model (or adding a separate statement for it) before the index can be built anywhere but
-a developer's own credentials. This is a deployment precondition, not a follow-up: the measurement
-above was produced under a local principal that already had Titan access, which is why the gap did
-not surface during the benchmark.
+That statement now also lists the `amazon.titan-embed-text-v2:0` foundation-model ARN, so the
+grant covers both families. The widening is **declared, not confirmed live**, and landing it does
+not apply it: applies are manual (`scripts/terraform_prod.py`), and the Terraform Drift workflow is
+advisory, does not contribute to the Gerrit `Verified` label, and triggers on pull requests, a daily
+sweep and manual dispatch — none of which a Gerrit change is. Bug `1c39-96d4-8f9e-4d38` records
+that gap in general. A policy simulator cannot close it either, because Converse authorizes against
+`bedrock:InvokeModel` while the distinct `bedrock:Converse` action simulates as denied. Only a real
+call from the instance role proves access; `infra/runbooks/bedrock-access.md` §4 is the probe that
+makes it.
+
+Adopting this architecture therefore depends on that grant being applied before the index can be
+built anywhere but a developer's own credentials. This is a deployment precondition, not a
+follow-up: the measurement above was produced under a local principal that already had Titan
+access, which is why the gap did not surface during the benchmark.
 
 ## Consequences
 

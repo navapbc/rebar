@@ -29,7 +29,7 @@ from a GitHub-hosted runner: there is no instance role on the runner and no IMDS
 Gerrit host. An earlier draft of this work assumed the precedent transferred; it does not.
 
 What transfers is the **permission policy shape**, not the delivery path. So: a dedicated role,
-assumed by **OIDC web-identity federation**, carrying the same Claude-only Bedrock grant.
+assumed by **OIDC web-identity federation**, carrying a Claude-only Bedrock grant of the same shape.
 
 The rejected alternative is a long-lived `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` pair in a
 repository secret — a durable AWS credential parked in CI to save a one-time role setup.
@@ -142,8 +142,10 @@ Inline policy name: `rebar-external-ci-bedrock-converse`
 }
 ```
 
-This is `iam_s7.tf`'s `aws_iam_policy_document.bedrock_converse`, verbatim in shape. Its
-non-obvious parts are load-bearing and were each got wrong once — do not "simplify" them:
+This has the same shape as `iam_s7.tf`'s `aws_iam_policy_document.bedrock_converse`, which
+additionally grants the `amazon.titan-embed-text-v2:0` embedding ARN that external CI does
+not need. Its non-obvious parts are load-bearing and were each got wrong once — do not
+"simplify" them:
 
 - **The action is `bedrock:InvokeModel`, not `bedrock:Converse`.** rebar calls the Bedrock
   **Converse** API (via pydantic-ai's `BedrockProvider`), and Converse **authorizes against

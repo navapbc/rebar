@@ -37,7 +37,7 @@ so its success carries zero information about the grant.
 not *"which action does the service actually check?"*. It is necessary (it catches policy-language and
 resource-ARN errors) but **not sufficient** for an authorization contract.
 
-**Do not check only the positive case.** Without a negative control you have not shown the Claude-only scope
+**Do not check only the positive case.** Without a negative control you have not shown the scoped model list
 binds; you have shown the role can call *something*.
 
 **Do not pass `--region` / `region_name=` and call the region question settled.** Every probe in this
@@ -47,7 +47,7 @@ proves the grant works; it proves nothing about whether the service can find a r
 
 ---
 
-## How to verify — three layers, all required
+## How to verify — four layers, all required
 
 ### 1. Policy layer — `simulate-principal-policy` against the ROLE
 
@@ -117,7 +117,48 @@ scoped role. It does NOT identify which IAM action `ConverseStream` authorizes a
 grants both actions at once; only removing one and re-testing would show that, which is the deny-side control
 S8's fault injection performs.
 
-### 4. Negative control — a non-Claude model must be DENIED
+### 4. Embedding layer — the Titan model must be INVOKABLE, not assumed from the Claude result
+
+The policy admits two model families, and step 2 exercises only one. The similar-ticket index (ADR 0122)
+calls `amazon.titan-embed-text-v2:0`, which the Claude probe says nothing about: a grant can carry the
+Claude ARNs and still deny Titan, and that is exactly the state this runbook's policy was in before the
+Titan ARN was added. Do not infer this path from the Claude result.
+
+Three things differ from steps 2 and 3, and each one is a way to get a misleading answer:
+
+- **It is `invoke_model`, not `converse`.** Titan Text Embeddings V2's only output modality is an embedding;
+  it is not a Converse model, so a `converse` probe fails on the model's capabilities and never reaches the
+  authorization question you are asking.
+- **It is a plain foundation-model id, not an inference profile.** The `us.`-prefix rule in "The model-id
+  trap set" below is a Claude on-demand-throughput constraint and does not apply here. `us.amazon.titan-…`
+  is not a model id, and using one produces a validation error that reads like a denial.
+- **The ARN it authorizes against is the foundation-model ARN**
+  (`arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0`), not the inference-profile ARN the
+  Claude grant also carries.
+
+Use boto3 in the review-bot container, for the same reason step 3 does — it is the runtime that will
+actually make this call:
+
+```sh
+cat > /tmp/ve.py <<'EOF'
+import boto3, json
+print("IDENTITY:", boto3.client("sts", region_name="us-east-1").get_caller_identity()["Arn"])
+c = boto3.client("bedrock-runtime", region_name="us-east-1")
+r = c.invoke_model(
+    modelId="amazon.titan-embed-text-v2:0",
+    body=json.dumps({"inputText": "ready", "dimensions": 1024, "normalize": True}),
+)
+print("EMBED_OK:", len(json.loads(r["body"].read())["embedding"]))
+EOF
+docker exec -i compose-review-bot-1 python - < /tmp/ve.py
+```
+
+Expect the identity to be `assumed-role/rebar-gerrit-instance-role/<instance-id>` — anything else means you
+are testing the wrong principal — and `EMBED_OK: 1024`. An `AccessDeniedException` naming
+`bedrock:InvokeModel` on the Titan foundation-model ARN means the grant in `iam_s7.tf` is not applied to the
+running role, whatever the Terraform source says.
+
+### 5. Negative control — an unlisted model must be DENIED
 
 Repeat step 2 with `--model-id amazon.nova-pro-v1:0`. Expect:
 
@@ -126,7 +167,9 @@ AccessDeniedException ... is not authorized to perform: bedrock:InvokeModel
 on resource: arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0
 ```
 
-If this *succeeds*, the scope is too broad — the policy is meant to permit `anthropic.claude-*` only.
+If this *succeeds*, the scope is too broad — the policy is meant to permit only the models it lists:
+`anthropic.claude-*` and `amazon.titan-embed-text-v2:0` (the embedding model the similar-ticket index
+uses). `amazon.nova-pro-v1:0` is in neither, so it stays denied.
 
 ---
 
