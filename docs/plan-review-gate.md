@@ -999,6 +999,33 @@ attestation instead of re-reviewing.
   defeats the skip on its own; `--force` is the manual override for an otherwise-unchanged
   ticket.
 
+### Run-to-run verdict variance (accepted behaviour)
+
+A BLOCK has no attestation to reuse, so its sibling short-circuit (`verdict_reuse`, bug 7e77)
+re-serves the stored BLOCK from the latest `REVIEW_RESULT` sidecar instead, but only while
+**both** its `material_fingerprint` and its `verified_at_sha` still match. Any other re-review,
+including one on an unchanged plan after `main` moved the reviewed SHA, is a fresh multi-pass
+LLM run, and **a fresh run can reach the opposite verdict on identical input**. The Pass-2
+verifier's `temperature: 0` pin (`plan-review.yaml`) narrows that variance but does not remove
+it.
+
+- **Measured rate** (2026-10-31, stored sidecars with identical plan material and reviewed SHA):
+  3 of 30 run pairs flipped their verdict (2 PASS→BLOCK, 1 BLOCK→PASS), and 13 of 125
+  per-finding decisions changed (10%).
+- **Where it comes from:** the verifier's severity attributes. In the traced flip, all 15
+  binary verification answers matched; the BLOCK run tagged `ac_unverifiable` and
+  `dod_uncertifiable` at their floor grades (impact 1.0) and the PASS run tagged neither
+  (impact 0.55, under the 0.8 threshold). A threshold change would not have altered it.
+- **Accepted, not voted away** (operator decision 2026-11-02, bug `5503-c37b-2a44-447c`):
+  the gate runs one verification per finding. This matches the 2026-08-11 ruling that
+  identical-material BLOCK→PASS flips are recoveries the gate must not freeze
+  (`aeromarine-notorious-gelding`). ADR 0109 uses the same identical-material flip rate as
+  the noise band when judging pipeline changes.
+
+Read a verdict that differs from an earlier run on an unchanged plan as within this rate, not
+as evidence that the plan, the criteria, or the gate changed. Answer each blocking finding on
+its merits.
+
 ## The convergent remediation re-review (rising floor)
 
 A re-review of an **edited** plan used to be at risk of not converging: each remediation
