@@ -588,3 +588,5 @@ Read the relevant ADRs for the rationale behind each decision before you adapt t
 [0014 inbound webhook auth](adr/0014-inbound-webhook-auth.md) —
 several are load-bearing (e.g. ADR-0010's
 `replicatePermissions = false` is what keeps ADR-0014's webhook token off GitHub).
+
+<!-- receive-check probe; abandon -->
