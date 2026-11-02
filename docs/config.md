@@ -429,6 +429,8 @@ model_provider = ""                  # env REBAR_LLM_MODEL_PROVIDER (inferred fr
 base_url       = ""                  # env REBAR_LLM_BASE_URL (OpenAI-compatible endpoint)
 bedrock_region_name = ""             # env REBAR_LLM_BEDROCK_REGION; AWS region for Bedrock (unset → boto3 resolution)
 parse_failure_artifact_dir = ""      # env REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR (opt-in raw-reply capture; unset = off)
+embedding_model = ""                 # env REBAR_LLM_EMBEDDING_MODEL; opt-in similar-ticket embedding tier (unset = lexical only)
+similar_digest_model = ""            # env REBAR_LLM_SIMILAR_DIGEST_MODEL; model that digests a ticket before embedding (unset → embedding_model)
 max_tokens     = 16000               # env REBAR_LLM_MAX_TOKENS
 max_steps      = 50                  # env REBAR_LLM_MAX_STEPS; ~2 steps per tool call
 timeout        = 600                 # env REBAR_LLM_TIMEOUT (wall-clock s)

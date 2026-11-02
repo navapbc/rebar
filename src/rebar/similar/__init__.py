@@ -20,6 +20,8 @@ import logging
 from typing import Any
 
 from .catchup import catch_up, live_entries
+from .embedding import build_vectors
+from .embedding import rank as embedding_rank
 from .index import index_dir, index_path, open_index
 from .lexical import RESULT_LIMIT, match_expression, query_text, search
 
@@ -27,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "RESULT_LIMIT",
+    "build_vectors",
     "catch_up",
+    "embedding_rank",
     "find_similar",
     "index_dir",
     "index_path",
@@ -66,12 +70,16 @@ def find_similar(
             # like a healthy one that matched nothing.
             logger.warning("similar-ticket catch-up failed; returning no results", exc_info=True)
             return []
-        return search(
-            conn,
-            text if text is not None else query_text(title, description),
-            exclude_id=exclude_id,
-            limit=limit,
-        )
+        resolved = text if text is not None else query_text(title, description)
+        # The embedding tier replaces the SCORING function and nothing else: same index,
+        # same rows, same result shape. `rank` returns None for every circumstance in
+        # which it cannot serve -- unconfigured, backend absent, provider failing,
+        # coverage incomplete -- and that one signal is what makes the lexical tier the
+        # floor rather than a parallel code path.
+        ranked = embedding_rank(conn, resolved, exclude_id=exclude_id, limit=limit)
+        if ranked is not None:
+            return ranked
+        return search(conn, resolved, exclude_id=exclude_id, limit=limit)
     except Exception:
         logger.warning("similar-ticket retrieval failed; returning no results", exc_info=True)
         return []

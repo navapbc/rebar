@@ -324,6 +324,16 @@ class LLMConfig:
     # names.
     model_provider: str | None = None
     base_url: str | None = None  # OpenAI-compatible endpoint (local models)
+    # Similar-ticket embedding tier (ADR 0122, ticket 2041). Both are provider-qualified
+    # model strings on the same convention as `model`, and BOTH DEFAULT TO UNSET: with
+    # `embedding_model` None the retrieval tier is the lexical one, which needs no provider,
+    # no credentials and no network. ADR 0122's measured values —
+    # `bedrock:amazon.titan-embed-text-v2:0` and
+    # `bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0` — are a recommendation recorded
+    # in the docs, never an applied default: shipping one would make an opt-in ranking
+    # upgrade reach for a vendor in an install that configured none.
+    embedding_model: str | None = None
+    similar_digest_model: str | None = None
     api_key: str | None = None  # explicit key (e.g. a dummy key for local servers)
     # Opt-in LOCAL capture of the raw model reply on FINAL structured-parse failure (story
     # 2fd6). None (the default) = off: nothing is written and the failure path is byte-for-byte

@@ -80,6 +80,8 @@ import os
 import sqlite3
 from typing import Any
 
+from .index import drop_vectors
+
 logger = logging.getLogger(__name__)
 
 UNKNOWN_MTIME = -1
@@ -175,6 +177,11 @@ def _reindex(conn: sqlite3.Connection, tracker: str, dir_name: str) -> int:
     # authority on that id.
     keys = {dir_name} | ({doc[0]} if doc else set())
     conn.executemany("DELETE FROM docs WHERE ticket_id = ?", [(k,) for k in keys])
+    # The stored vector describes the text being replaced, so it goes with it. Dropping
+    # it here rather than re-embedding is the whole reason catch-up stays affordable on
+    # the create path: this costs one DELETE, and the ticket is simply unvectored until
+    # an explicit build reaches it.
+    drop_vectors(conn, keys)
     if doc is None:
         return 0
     conn.execute(
@@ -198,6 +205,7 @@ def _apply(
         for dir_name in removed:
             conn.execute("DELETE FROM docs WHERE ticket_id = ?", (dir_name,))
             conn.execute("DELETE FROM dirstate WHERE dir_name = ?", (dir_name,))
+            drop_vectors(conn, [dir_name])
         for dir_name, (mtime_ns, dir_hash) in changed.items():
             previous = stored.get(dir_name)
             if previous is None or previous[1] != dir_hash:

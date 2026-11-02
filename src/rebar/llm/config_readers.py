@@ -145,6 +145,21 @@ def _read_llm_core_settings(
         "model": _llm_str(table, cli, None, "model", DEFAULT_MODEL),
         "model_provider": _llm_str(table, cli, "REBAR_LLM_MODEL_PROVIDER", "model_provider", None),
         "base_url": _llm_str(table, cli, "REBAR_LLM_BASE_URL", "base_url", None),
+        # Similar-ticket embedding tier (ADR 0122, ticket 2041-75d6-2a2f-4be9). Both resolve
+        # through `_llm_str`, so each inherits the CLI > env > file > default precedence every
+        # other `[llm]` string key has, and both default to None — unset means the lexical
+        # tier serves and no provider is contacted.
+        # mechanism-ok: env_var REBAR_LLM_EMBEDDING_MODEL — 2041-75d6-2a2f-4be9: ADR 0122's
+        # embedding tier is configured, not vendored; the key IS the vendor-neutral seam
+        "embedding_model": _llm_str(
+            table, cli, "REBAR_LLM_EMBEDDING_MODEL", "embedding_model", None
+        ),
+        # mechanism-ok: env_var REBAR_LLM_SIMILAR_DIGEST_MODEL — 2041-75d6-2a2f-4be9: the
+        # digest model is chosen independently of the embedding model (ADR 0122 ran two
+        # different Bedrock model families), so one key cannot serve both
+        "similar_digest_model": _llm_str(
+            table, cli, "REBAR_LLM_SIMILAR_DIGEST_MODEL", "similar_digest_model", None
+        ),
         "parse_failure_artifact_dir": _llm_str(
             table,
             cli,

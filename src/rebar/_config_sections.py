@@ -216,6 +216,7 @@ _RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot", "mapping"})
 _LLM_KNOWN_KEYS: tuple[str, ...] = (
     "base_url",
     "bedrock_region_name",
+    "embedding_model",
     "evals",
     "headers",
     "llm_retry_max_attempts",
@@ -228,6 +229,7 @@ _LLM_KNOWN_KEYS: tuple[str, ...] = (
     "model_classes",
     "model_provider",
     "parse_failure_artifact_dir",
+    "similar_digest_model",
     "temperature",
     "timeout",
 )
