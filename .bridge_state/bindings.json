@@ -13669,6 +13669,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:48Z"
     },
+    "2041-75d6-2a2f-4be9": {
+      "created_at": "2026-11-02T00:49:06Z",
+      "jira_id": "4597933",
+      "jira_key": "REB-6853",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T00:49:10Z"
+    },
     "2043-c450-d75f-459a": {
       "baseline": {
         "assignee": null,
@@ -30460,6 +30467,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T03:42:15Z"
     },
+    "47c8-97ac-eff3-4e88": {
+      "created_at": "2026-11-02T00:49:11Z",
+      "jira_id": "4597934",
+      "jira_key": "REB-6854",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T00:49:14Z"
+    },
     "47d0-8971-aa37-46fe": {
       "baseline": {
         "assignee": {
@@ -33369,6 +33383,13 @@
       "peer_parent": "REB-327",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:53Z"
+    },
+    "4e89-30b9-1666-4e53": {
+      "created_at": "2026-11-02T00:48:55Z",
+      "jira_id": "4597931",
+      "jira_key": "REB-6851",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T00:48:59Z"
     },
     "4e89-a06a-8152-464b": {
       "baseline": {
@@ -52987,6 +53008,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:50Z"
     },
+    "80a5-cbb1-ef06-4ba5": {
+      "created_at": "2026-11-02T00:49:15Z",
+      "jira_id": "4597935",
+      "jira_key": "REB-6855",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T00:49:18Z"
+    },
     "80af-c876-5856-4159": {
       "created_at": "2026-08-15T15:03:51Z",
       "jira_key": "REB-1492",
@@ -68238,6 +68266,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-19T02:52:37Z"
     },
+    "a350-2e7e-71eb-4f5b": {
+      "created_at": "2026-11-02T00:49:02Z",
+      "jira_id": "4597932",
+      "jira_key": "REB-6852",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T00:49:05Z"
+    },
     "a356-d8e4-d970-42a0": {
       "baseline": {
         "assignee": {
@@ -76492,6 +76527,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T07:44:56Z"
+    },
+    "b505-d66e-86b3-4446": {
+      "created_at": "2026-11-02T00:49:19Z",
+      "jira_id": "4597936",
+      "jira_key": "REB-6856",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T00:49:22Z"
     },
     "b51c-cd4c-1ec1-464c": {
       "baseline": {
@@ -101392,6 +101434,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:13Z"
     },
+    "f10f-c24a-3cfa-449e": {
+      "created_at": "2026-11-02T00:49:23Z",
+      "jira_id": "4597937",
+      "jira_key": "REB-6857",
+      "state": "confirmed",
+      "updated_at": "2026-11-02T00:49:26Z"
+    },
     "f112-6222-e236-4b09": {
       "baseline": {
         "assignee": {
@@ -112849,7 +112898,8 @@
     "1793544128033305163": "__rebar_unknown_comment_id__",
     "1793545816285669001": "__rebar_unknown_comment_id__",
     "1793546097358434846": "__rebar_unknown_comment_id__",
-    "1793549816970588837": "__rebar_unknown_comment_id__"
+    "1793549816970588837": "__rebar_unknown_comment_id__",
+    "1793580183378430001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -118201,6 +118251,13 @@
     "REB-6846": "ef13-6259-00f3-406d",
     "REB-6848": "0df8-9ee6-24a6-4c39",
     "REB-685": "b2e2-c631-3b0e-425c",
+    "REB-6851": "4e89-30b9-1666-4e53",
+    "REB-6852": "a350-2e7e-71eb-4f5b",
+    "REB-6853": "2041-75d6-2a2f-4be9",
+    "REB-6854": "47c8-97ac-eff3-4e88",
+    "REB-6855": "80a5-cbb1-ef06-4ba5",
+    "REB-6856": "b505-d66e-86b3-4446",
+    "REB-6857": "f10f-c24a-3cfa-449e",
     "REB-686": "jira-reb-686",
     "REB-687": "jira-reb-687",
     "REB-688": "1464-bd32-07a3-4225",
