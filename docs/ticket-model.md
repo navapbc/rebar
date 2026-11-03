@@ -201,6 +201,13 @@ Use `discovered_from` to record **provenance**: when working one ticket surfaces
 `create` the new ticket and `link <new> <parent> discovered_from` so the emergent-work
 trail lives in the store.
 
+**Closed endpoints.** A closed ticket records no new outgoing links (reopen it first), except
+`supersedes` (see the close classes above). A closed **target** is accepted by every relation:
+`rebar link <open> <merged> depends_on` records that the work rests on finished work, which
+`ready` counts as satisfied and plan-review `P6` accepts as a verified prerequisite for a
+`[rebar:<id>]` citation. The rule for each relation is the one table `_ENDPOINT_LIVENESS` in
+`src/rebar/graph/_links.py`.
+
 **`caused_by` targets must have a referencing commit.** `caused_by` is the only
 machine-readable causation edge in the store, and the escaped-defect lenses
 (`rebar metrics`) and the epic-close bug floor both reason over it — so an edge pointing at
