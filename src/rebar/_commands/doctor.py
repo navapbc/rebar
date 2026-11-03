@@ -46,7 +46,14 @@ _KIND_UNREADABLE = "unreadable"
 _KIND_DIRTY_DELETION = "tracker-dirty-deletion"
 _KIND_DIRTY_LEFTOVER = "tracker-dirty-leftover"
 _KIND_DIRTY_TMP_EVENT = "tracker-dirty-tmp-event"
-_DIRTY_KINDS = {_KIND_DIRTY_DELETION, _KIND_DIRTY_LEFTOVER, _KIND_DIRTY_TMP_EVENT}
+_KIND_DIRTY_UNTRACKED_EVENT = "tracker-dirty-untracked-event"
+_DIRTY_KINDS = {
+    _KIND_DIRTY_DELETION,
+    _KIND_DIRTY_LEFTOVER,
+    _KIND_DIRTY_TMP_EVENT,
+    _KIND_DIRTY_UNTRACKED_EVENT,
+}
+_MANUAL_DIRTY_KINDS = {_KIND_DIRTY_TMP_EVENT, _KIND_DIRTY_UNTRACKED_EVENT}
 _MUTATING_DIRTY_KINDS = {_KIND_DIRTY_DELETION, _KIND_DIRTY_LEFTOVER}
 
 # The rollback point for the dirty-tracker repairs: recorded at the tickets HEAD BEFORE
@@ -165,6 +172,11 @@ _DIRTY_FINDING_SPECS: tuple[tuple[str, str, str], ...] = (
         _KIND_DIRTY_TMP_EVENT,
         "orphaned .tmp-event-* staging file(s) — never auto-touched; triage manually",
     ),
+    (
+        "untracked_events",
+        _KIND_DIRTY_UNTRACKED_EVENT,
+        "untracked event file(s) in a ticket directory — never auto-touched; triage manually",
+    ),
 )
 
 
@@ -243,12 +255,13 @@ def _repair_dirty(findings: list[dict[str, Any]], tracker: str) -> None:
     reconverge self-lock. Before the first mutation the backup ref is recorded —
     no backup ref, no mutation.
 
-    Class 3 (``.tmp-event-*``) is marked ``manual`` and never touched: a live staging
-    file belongs to an in-flight append, and a dead one is named for human triage."""
+    Classes 3 and 4 (``.tmp-event-*``, untracked event files) are marked ``manual`` and never
+    touched: a live one belongs to an in-flight append, and a dead one is named for human
+    triage."""
     for finding in findings:
-        if finding["kind"] == _KIND_DIRTY_TMP_EVENT:
+        if finding["kind"] in _MANUAL_DIRTY_KINDS:
             finding["repair_status"] = "manual"
-            finding["repair_reason"] = "orphaned .tmp-event-* files are never auto-touched"
+            finding["repair_reason"] = "staging and untracked event files are never auto-touched"
     mutating = [f for f in findings if f["kind"] in _MUTATING_DIRTY_KINDS]
     if not mutating:
         return

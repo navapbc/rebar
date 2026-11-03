@@ -15,7 +15,12 @@ import subprocess
 
 from rebar import config
 from rebar._store import env_identity, git_outcome
-from rebar._store.gitutil import path_is_foreign_to_branch, run_git, run_git_bounded
+from rebar._store.gitutil import (
+    _dir_is_archived,
+    path_is_foreign_to_branch,
+    run_git,
+    run_git_bounded,
+)
 from rebar.reducer._cache import RETIRED_SUFFIX
 
 # Watchdog on fsck's read-only local git calls (bug 9305): NOT a latency budget — these
@@ -24,7 +29,9 @@ from rebar.reducer._cache import RETIRED_SUFFIX
 _FSCK_GIT_TIMEOUT = 120
 
 
-def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list[str], int]:
+def _tracker_health(
+    tracker: str, repo_root=None, authorship=None, *, include_archived: bool = False
+) -> tuple[list[str], int]:
     """Return tracker-level report lines and their counted issue total.
 
     A pending push and branch mismatch are informational. Configured-remote divergence,
@@ -44,7 +51,7 @@ def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list
         (_branch_mismatch(tracker, repo_root), False),
         (_foreign_store_paths(tracker), True),
         (env_identity.divergence_report(env_identity.read_env_id(tracker), spans), True),
-        *_dirty_tracker_lines(tracker),
+        *_dirty_tracker_lines(tracker, include_archived=include_archived),
     ):
         if not line:
             continue
@@ -276,6 +283,12 @@ _DIRTY_LINE_SPECS: tuple[tuple[str, str, str, bool], ...] = (
         "orphaned event staging file(s) — never auto-touched; triage manually",
         False,
     ),
+    (
+        "untracked_events",
+        "TRACKER_DIRTY_UNTRACKED_EVENT",
+        "untracked event file(s) in the tracker working tree — never auto-touched; triage manually",
+        False,
+    ),
 )
 
 
@@ -291,7 +304,12 @@ def dirty_tracker_classes(tracker: str) -> dict[str, list[str]]:
     porcelain preserves path bytes and permits skipping original rename records. A failed or
     hung status command returns empty classes.
     """
-    empty: dict[str, list[str]] = {"deletions": [], "leftovers": [], "tmp_events": []}
+    empty: dict[str, list[str]] = {
+        "deletions": [],
+        "leftovers": [],
+        "tmp_events": [],
+        "untracked_events": [],
+    }
     try:
         cp = run_git(
             tracker,
@@ -325,7 +343,35 @@ def dirty_tracker_classes(tracker: str) -> dict[str, list[str]]:
             state == "??" and name.endswith(RETIRED_SUFFIX) and _retired_source_folded(tracker, rel)
         ):
             classes["leftovers"].append(rel)
+        elif state == "??" and _is_ticket_event_path(rel):
+            classes["untracked_events"].append(rel)
     return {key: sorted(paths) for key, paths in classes.items()}
+
+
+def _is_ticket_event_path(rel: str) -> bool:
+    """Is *rel* an event file inside a ticket directory (``<ticket>/<name>.json``)?
+
+    Untracked ones are reported on their own row, not as snapshot faults: a fold's leftover
+    or a crashed append's file is working-tree debris, not a store inconsistency (bug
+    topnotch-brazen-slug). Report-only, because an append legitimately holds an untracked
+    event file between its write and its commit."""
+    ticket, sep, name = rel.partition("/")
+    return (
+        bool(sep)
+        and "/" not in name
+        and not ticket.startswith(".")
+        and (name.endswith(".json") and not name.startswith("."))
+    )
+
+
+def untracked_event_names(tracker: str) -> dict[str, set[str]]:
+    """Untracked ticket event filenames keyed by ticket directory, for fsck's snapshot
+    checks to skip (those files get their own report-only row instead)."""
+    by_ticket: dict[str, set[str]] = {}
+    for rel in dirty_tracker_classes(tracker)["untracked_events"]:
+        ticket, _, name = rel.partition("/")
+        by_ticket.setdefault(ticket, set()).add(name)
+    return by_ticket
 
 
 def _retired_source_folded(tracker: str, rel: str) -> bool:
@@ -366,17 +412,34 @@ def _configured_remote_ref() -> str | None:
         return None
 
 
-def _dirty_tracker_lines(tracker: str) -> list[tuple[str, bool]]:
+def _dirty_tracker_lines(tracker: str, *, include_archived: bool = False) -> list[tuple[str, bool]]:
     """The dirty-tracker findings as fsck ``(line, is_issue)`` pairs, one per non-empty
     class. The line shape ``KIND: <n> path(s): <paths> — <detail>`` is a contract:
     ``fsck._transform_json`` parses the count and paths back out of it so text and JSON
     can never drift. Paths are ``shlex.quote``d (identity for ordinary store paths) so
     a path containing spaces survives the round-trip."""
     classes = dirty_tracker_classes(tracker)
+    if not include_archived:
+        # Same scope as the per-ticket checks: an archived ticket's files are reported only
+        # under --include-archived.
+        classes["untracked_events"] = [
+            rel
+            for rel in classes["untracked_events"]
+            if not _dir_is_archived(os.path.join(tracker, rel.partition("/")[0]))
+        ]
     lines: list[tuple[str, bool]] = []
     for key, kind, blurb, is_issue in _DIRTY_LINE_SPECS:
         paths = classes[key]
         if paths:
             joined = " ".join(shlex.quote(p) for p in paths)
+            if key == "untracked_events":
+                blurb = f"{blurb} ({_retired_copy_note(tracker, paths)})"
             lines.append((f"{kind}: {len(paths)} path(s): {joined} — {blurb}", is_issue))
     return lines
+
+
+def _retired_copy_note(tracker: str, paths: list[str]) -> str:
+    """How many untracked event files already have a committed ``.retired`` copy at HEAD —
+    the evidence that a file is a pre-compaction leftover whose bytes are preserved."""
+    preserved = sum(1 for rel in paths if _exists_in_ref(tracker, "HEAD", rel + RETIRED_SUFFIX))
+    return f"{preserved} of {len(paths)} have a tracked .retired copy at HEAD"
