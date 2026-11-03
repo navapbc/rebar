@@ -42,6 +42,7 @@ evals/plan-review-gate/runs/criterion_firings.jsonl
 !.rebar/evals/
 .rebar/evals/*
 !.rebar/evals/plan-review-project-portability.eval.yaml
+!.rebar/evals/plan-review-project-net-mechanism.eval.yaml
 !.rebar/evals/code-review-project-review-phase-boundaries.eval.yaml
 !.rebar/evals/plan-review-project-engine-layer-enforcement.eval.yaml
 !.rebar/evals/plan-review-project-failure-disposition-contract.eval.yaml
