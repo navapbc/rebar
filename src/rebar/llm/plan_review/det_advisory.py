@@ -121,7 +121,7 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
     """Advisory. Lexical AC quality checks: compound-AND criteria (one item
     bundling multiple deliverables joined by ' and '), vague/subjective lexicon,
     and whether any verification command/section is present. Never blocks."""
-    from . import det_citation, det_measurement_provenance, det_operator_attested
+    from . import det_citation, det_closure, det_measurement_provenance, det_operator_attested
     from .det_floor import DetResult  # lazy: det_floor imports this module at load
 
     items = det_operator_attested.ac_item_lines(ctx.plan_text)
@@ -197,7 +197,13 @@ def p6_ac_quality(ctx: PlanContext) -> DetResult:
         _resolve_parent,
     )
     issues.extend(cit_issues)
+    # Enumeration-closure lint (bug c9c2-c569): sweep the tree for what the plan's own
+    # required-empty greps, removed symbols and deleted modules reach, and name each path
+    # the plan does not enumerate. ADVISORY coaching only; logic lives in det_closure.
+    closure_found, closure_cov = det_closure.closure_issues(ctx)
+    issues.extend(closure_found)
     cov = {
+        **closure_cov,
         "ran": True,
         "ac_items": len(items),
         "verify_commands_linted": len(linted),
