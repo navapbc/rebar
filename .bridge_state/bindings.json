@@ -11483,6 +11483,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-04T23:38:49Z"
     },
+    "1ae0-ff59-b62e-4267": {
+      "created_at": "2026-11-03T15:32:47Z",
+      "jira_id": "4598125",
+      "jira_key": "REB-6940",
+      "state": "confirmed",
+      "updated_at": "2026-11-03T15:32:52Z"
+    },
     "1af2-192d-3dde-4a28": {
       "baseline": {
         "assignee": null,
@@ -77032,6 +77039,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-04T01:10:50Z"
     },
+    "b48a-0ffe-4f9c-4b28": {
+      "created_at": "2026-11-03T15:32:53Z",
+      "jira_id": "4598126",
+      "jira_key": "REB-6941",
+      "state": "confirmed",
+      "updated_at": "2026-11-03T15:33:01Z"
+    },
     "b49a-6864-e035-4f65": {
       "baseline": {
         "assignee": null,
@@ -90691,6 +90705,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:29Z"
+    },
+    "d552-a55e-2877-47ef": {
+      "created_at": "2026-11-03T15:33:11Z",
+      "jira_id": "4598127",
+      "jira_key": "REB-6942",
+      "state": "confirmed",
+      "updated_at": "2026-11-03T15:33:25Z"
     },
     "d56d-8c54-b936-4d93": {
       "baseline": {
@@ -114250,7 +114271,11 @@
     "1793711923732559102": "__rebar_unknown_comment_id__",
     "1793712582148086373": "__rebar_unknown_comment_id__",
     "1793713872729303499": "__rebar_unknown_comment_id__",
-    "1793714905250851059": "__rebar_unknown_comment_id__"
+    "1793714905250851059": "__rebar_unknown_comment_id__",
+    "1793716587663314001": "__rebar_unknown_comment_id__",
+    "1793716989329794639": "__rebar_unknown_comment_id__",
+    "1793718336789578001": "__rebar_unknown_comment_id__",
+    "1793719351090800001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -119659,6 +119684,9 @@
     "REB-6933": "467d-e068-ee33-4bad",
     "REB-6934": "dc5a-5ca5-efca-4145",
     "REB-694": "3b37-abf4-61f4-4d2b",
+    "REB-6940": "1ae0-ff59-b62e-4267",
+    "REB-6941": "b48a-0ffe-4f9c-4b28",
+    "REB-6942": "d552-a55e-2877-47ef",
     "REB-696": "dec2-1232-de64-4e14",
     "REB-697": "9f78-ccbf-9248-4097",
     "REB-698": "1733-6b71-e83d-49c3",
