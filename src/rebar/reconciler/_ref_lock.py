@@ -43,6 +43,10 @@ _ZERO_OID = "0" * 40  # create-only CAS old-value: "ref must not exist"
 
 _LOCAL_TIMEOUT_SECS = 5.0
 _REMOTE_TIMEOUT_SECS = 30.0
+# Object reads (`cat-file`) take the REMOTE budget: in a partial clone (the bridge checks out
+# `filter: blob:none`) any object read can lazily fetch from the promisor remote, and a 5 s
+# local budget there failed three scheduled passes closed (bug tearful-enormous-solitaire).
+_OBJECT_READ_TIMEOUT_SECS = _REMOTE_TIMEOUT_SECS
 
 # Default lease (seconds) a holder claims; C3 wires ``[reconciler] lock_lease_secs``
 # into the acquire call. The value is carried IN the blob, so a contender waits the
@@ -352,7 +356,9 @@ def _payload_name(ref: str) -> str:
 
 
 def _object_type(repo_root: Path, oid: str) -> str:
-    return _git(repo_root, ["cat-file", "-t", oid], timeout=_LOCAL_TIMEOUT_SECS).stdout.strip()
+    return _git(
+        repo_root, ["cat-file", "-t", oid], timeout=_OBJECT_READ_TIMEOUT_SECS
+    ).stdout.strip()
 
 
 def _read_blob_bytes(repo_root: Path, ref: str, oid: str) -> bytes:
@@ -362,12 +368,12 @@ def _read_blob_bytes(repo_root: Path, ref: str, oid: str) -> bytes:
     """
     obj_type = _object_type(repo_root, oid)
     if obj_type == "blob":
-        return _git_bytes(repo_root, ["cat-file", "blob", oid], timeout=_LOCAL_TIMEOUT_SECS)
+        return _git_bytes(repo_root, ["cat-file", "blob", oid], timeout=_OBJECT_READ_TIMEOUT_SECS)
     if obj_type == "commit":
         return _git_bytes(
             repo_root,
             ["cat-file", "blob", f"{oid}:{_payload_name(ref)}"],
-            timeout=_LOCAL_TIMEOUT_SECS,
+            timeout=_OBJECT_READ_TIMEOUT_SECS,
         )
     raise RefLockCorruptError(f"ref {ref} points at unexpected object type {obj_type!r}")
 
