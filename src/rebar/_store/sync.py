@@ -227,32 +227,46 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
     Readers can pass a shorter timeout and keep their local snapshot on contention;
     writers use the default wait.
     """
-    if not os.path.isdir(str(tracker)):
-        return
-    tracker = _lock.canonical_tracker(tracker)
+    _reconverge(tracker, lock_timeout)
 
-    # Resolve store branch and remote from the tracker's parent, reading only those
-    # 2 keys so the rest of that checkout's config is not reported against a
-    # linked-worktree caller; malformed values skip this best-effort sync.
+
+def _store_destination(tracker: str) -> tuple[str, str] | None:
+    """``(branch, remote)`` of the STORE, or ``None`` on malformed config.
+
+    Read from the tracker's parent, only those 2 keys, so the rest of that checkout's
+    config is not reported against a linked-worktree caller."""
     from rebar.config import ConfigError, store_tickets_branch, store_tickets_remote
 
     try:
         # repo-root-ok: branch/remote of the STORE's own git repo (git -C tracker), not code config
-        branch = store_tickets_branch(os.path.dirname(str(tracker)))
+        branch = store_tickets_branch(os.path.dirname(tracker))
         # repo-root-ok: branch/remote of the STORE's own git repo (git -C tracker), not code config
-        remote_name = store_tickets_remote(os.path.dirname(str(tracker)))
+        remote_name = store_tickets_remote(os.path.dirname(tracker))
     except ConfigError:
-        return
+        return None
+    return branch, remote_name
+
+
+def _reconverge(tracker: str | os.PathLike, lock_timeout: int) -> str:
+    """:func:`reconverge`, returning how the round ended: ``done``, ``lock-busy``, or a
+    skip (``absent``, ``no-config``, ``fetch-failed``, ``no-remote-branch``)."""
+    if not os.path.isdir(str(tracker)):
+        return "absent"
+    tracker = _lock.canonical_tracker(tracker)
+    destination = _store_destination(str(tracker))
+    if destination is None:
+        return "no-config"
+    branch, remote_name = destination
 
     # Fetch outside the lock with an explicit destination refspec. A bare fetch
     # can exit 0 without updating origin/tickets in a single-branch clone.
     refspec = f"+refs/heads/{branch}:refs/remotes/{remote_name}/{branch}"
     if not _coordinated_fetch(tracker, remote_name, refspec):
-        return
+        return "fetch-failed"
     # Still guard on the ref existing: a remote that genuinely has no such branch
     # fetches fine (nothing matched) and must remain a quiet no-op.
     if not _ok(tracker, "rev-parse", "--verify", f"{remote_name}/{branch}"):
-        return
+        return "no-remote-branch"
 
     # Classify recovery state only after taking the lock: an in-flight merge may
     # temporarily leave MERGE_HEAD, while a marker that survives lock acquisition
@@ -261,4 +275,69 @@ def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIM
         with _lock.write_lock(tracker, timeout=lock_timeout, attempts=1, dual_window=True):
             _do_reconverge(tracker, branch, remote_name)
     except _lock.LockTimeout:
-        return
+        return "lock-busy"
+    return "done"
+
+
+# The idle sync's lock budget: one short pass, because the next tick retries.
+_IDLE_LOCK_TIMEOUT = 5
+
+
+def idle_sync(tracker: str | os.PathLike, *, lock_timeout: int = _IDLE_LOCK_TIMEOUT) -> str:
+    """One idle-timer round: reconverge, publish any backlog, and log the outcome.
+
+    Without it a fork is only pushed when a client writes (bug topnotch-brazen-slug). Every
+    outcome an operator must act on, or that ends an outage, is logged at WARNING, the
+    level a server's stderr handler shows by default: ``pending`` (commits still
+    undelivered), ``diverged`` (no common history with the shared branch), ``lock-busy``
+    (with the holder), ``delivered`` (a recorded backlog published). ``current`` and the
+    skips stay at DEBUG so a healthy server is quiet. Returns the outcome."""
+    from rebar._store import push, push_state
+
+    status = _reconverge(tracker, lock_timeout)
+    if status == "lock-busy":
+        logger.warning(
+            "tickets idle sync skipped: store write lock busy (holder: %s); retrying next tick",
+            _lock.describe_lock_holder(str(tracker)),
+        )
+        return status
+    if status in ("absent", "no-config", "no-remote-branch"):
+        logger.debug("tickets idle sync skipped: %s", status)
+        return status
+    tracker = _lock.canonical_tracker(tracker)
+    branch, remote_name = _store_destination(tracker) or ("tickets", "origin")
+    remote_ref = f"{remote_name}/{branch}"
+    if _ok(tracker, "rev-parse", "--verify", remote_ref) and not _ok(
+        tracker, "merge-base", "HEAD", remote_ref
+    ):
+        # reconverge refused to graft the unrelated history; pushing would only be rejected.
+        logger.warning(
+            "tickets idle sync: DIVERGED — the local store shares no history with %s; "
+            "nothing can be delivered (run: rebar store fsck)",
+            remote_ref,
+        )
+        return "diverged"
+    was_pending = push_state.read_status(tracker).get("state") == "pending"
+    if was_pending or push_state.unpushed_count(tracker, remote_ref) not in ("0", "unknown"):
+        push.push_after_commit(tracker)
+    return _report_idle_outcome(tracker, remote_ref, was_pending)
+
+
+def _report_idle_outcome(tracker: str, remote_ref: str, was_pending: bool) -> str:
+    from rebar._store import push_state
+
+    marker = push_state.read_status(tracker)
+    if marker.get("state") == "pending":
+        logger.warning(
+            "tickets idle sync: PUSH_PENDING (%s) — %s commit(s) not on %s; retrying next tick: %s",
+            marker.get("reason", "unknown"),
+            push_state.unpushed_count(tracker, remote_ref),
+            remote_ref,
+            (str(marker.get("detail") or "").strip().splitlines() or [""])[-1],
+        )
+        return "pending"
+    if was_pending:
+        logger.warning("tickets idle sync: delivered — the pending backlog reached %s", remote_ref)
+        return "delivered"
+    logger.debug("tickets idle sync: current with %s", remote_ref)
+    return "current"
