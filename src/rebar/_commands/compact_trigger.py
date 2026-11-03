@@ -156,6 +156,13 @@ def run_sweep(tracker: str) -> None:
     import contextlib
     import io
 
+    # The detached child is its own process entrypoint and its stderr IS the store's worker
+    # log, but no handler was installed, so every record (warnings included) was dropped and
+    # the production log stayed empty (bug breezelike-travelsick-moray). Idempotent, so an
+    # inline ``always`` run inside an entrypoint that already installed one adds nothing.
+    from rebar._logging import install_stderr_handler
+
+    install_stderr_handler()
     fd = _acquire_trigger_lock(tracker)
     if fd is None:
         logger.debug("compaction trigger: a worker already holds the lock; skipping")
