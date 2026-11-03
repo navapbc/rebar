@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 
 from rebar import config
 from rebar._commands import compact_plan
@@ -238,11 +239,10 @@ def _commit_backfill(tracker: str, compacted: int, folded_ids: set[str] | None =
     """Commit + push whatever the sweep's folds left staged-able, then push.
 
     Since bug compulsory-pernickety-mantis each fold commits its OWN unit inside its
-    locked section, so this normally finds nothing to stage and acts as (a) a safety net
-    for any residue and (b) the run's ONE batched push (the per-ticket calls pass
-    ``--skip-sync`` to defer the push here — bug prone-octet-cheek). The push must run
-    even when nothing is staged, precisely BECAUSE the per-ticket commits are the ones
-    waiting to be delivered.
+    locked section and the sweep pushes each fold as it lands (bug dc5a-5ca5-efca-4145),
+    so this normally finds nothing to stage and acts as a safety net for any residue and
+    for a per-fold push that failed. The push must run even when nothing is staged,
+    precisely BECAUSE a per-ticket commit may still be waiting to be delivered.
 
     ``folded_ids`` scopes the staging to the tickets this run actually folded; ``None`` keeps
     the historical whole-tree behaviour for callers that do not track them."""
@@ -308,6 +308,31 @@ def _sweep_should_yield(tracker: str, done: int) -> bool:
     return True
 
 
+# A waiter needs a moment past its polling gap to be scheduled and take the lock.
+_HANDOVER_MARGIN_S = 0.5
+# The shortest pass any acquire() caller can ask for, since its timeout is whole seconds. A
+# fold shorter than this cannot have outlasted a waiter's pass, so no waiter is in backoff.
+_SHORTEST_PASS_S = 1.0
+
+
+def _pause(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _give_waiters_a_turn(fold_s: float) -> float:
+    """Stay off the store lock long enough for a waiting writer to take it; return the pause.
+
+    The lock keeps no queue and a waiter only polls on an interval, so a sweep that released
+    and re-took the lock at once won every race and its yield probe never saw the waiter,
+    starving writes until they timed out (bug dc5a-5ca5-efca-4145). After a fold of
+    ``fold_s`` seconds, outwait the waiter's poll gap, or its retry backoff when the fold was
+    long enough to exhaust a pass; a waiter that takes the lock then makes the probe yield."""
+    gap = _lock.max_waiter_gap_s(between_passes=fold_s >= _SHORTEST_PASS_S)
+    seconds = gap + _HANDOVER_MARGIN_S
+    _pause(seconds)
+    return seconds
+
+
 def _sweep_one_ticket(
     tracker: str,
     tid: str,
@@ -319,7 +344,7 @@ def _sweep_one_ticket(
     """Fold one ticket and return '.', '-', or 'E'.
     Count work only when a new snapshot appears because a successful return
     may also mean no fold. Commit each fold under its lock, except when the
-    operator requested no-commit. Pushes remain batched."""
+    operator requested no-commit, and push it before the next fold."""
     import contextlib
     import io
 
@@ -337,7 +362,16 @@ def _sweep_one_ticket(
         rc = compact_cli(argv, repo_root=repo_root, position_commits=position_commits)
     if rc != 0:
         return "E"
-    return "." if _snapshot_names(os.path.join(tracker, tid)) - before else "-"
+    if not _snapshot_names(os.path.join(tracker, tid)) - before:
+        return "-"
+    if not no_commit:
+        # Publish now: holding every fold for one end-of-run push left the clone diverged from
+        # the shared store for the whole sweep (bug dc5a-5ca5-efca-4145). Best-effort, after the
+        # fold released the lock; a failed push stays pending for the end-of-run push.
+        from rebar._store import push
+
+        push.push_after_commit(tracker)
+    return "."
 
 
 def _sweep_position_map(repo_root) -> dict[str, str] | None:
@@ -366,17 +400,22 @@ def _run_sweep(
     skipped = 0
     folded_ids: set[str] = set()
     error_ids: list[str] = []
+    fold_s: float | None = None
     # Tag every store-lock acquisition this loop drives (via _sweep_one_ticket ->
     # _compact_locked) as `op=compact-sweep`, so a writer blocked by the sweep sees a named,
     # safe-to-interrupt holder rather than a bare pid (camerashy-erectable-frog). Ambient, so
     # it also covers a direct `rebar store compact --all` invocation, not only the detached trigger.
     with _lock_owner.operation_label("compact-sweep"):
         for tid in needs:
+            if fold_s is not None:
+                _give_waiters_a_turn(fold_s)
             if _sweep_should_yield(tracker, compacted + skipped + len(error_ids)):
                 break
+            started = time.monotonic()
             outcome = _sweep_one_ticket(
                 tracker, tid, repo_root, position_commits, no_commit=no_commit
             )
+            fold_s = time.monotonic() - started
             if outcome == "E":
                 error_ids.append(tid)
             elif outcome == ".":
