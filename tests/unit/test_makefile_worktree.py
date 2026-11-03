@@ -38,7 +38,21 @@ BRANCH = "sandbox-branch"
 
 _GIT_STUB = """#!/bin/sh
 printf '%s\\n' "$*" >> "{log}"
-if [ "$1" = "fetch" ]; then exit {fetch_exit}; fi
+if [ "$1" = "remote" ] && [ "$2" = "get-url" ]; then
+    case " {missing_remotes} " in
+        *" $3 "*) printf "error: No such remote '%s'\\n" "$3" >&2; exit 2 ;;
+    esac
+    printf 'https://example.invalid/%s\\n' "$3"
+    exit 0
+fi
+if [ "$1" = "fetch" ]; then
+    case " {missing_remotes} " in
+        *" $2 "*)
+            printf "fatal: '%s' does not appear to be a git repository\\n" "$2" >&2
+            exit 128 ;;
+    esac
+    exit {fetch_exit}
+fi
 if [ "$1" = "worktree" ] && [ "$2" = "add" ]; then
     mkdir -p "$3"
     exit {worktree_add_exit}
@@ -75,6 +89,7 @@ def _run_worktree(
     worktree_add_exit: int = 0,
     venv_exit: int = 0,
     install_exit: int = 0,
+    missing_remotes: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     """Run the real `worktree` recipe against stubbed `git` and stubbed provisioning."""
 
@@ -88,6 +103,7 @@ def _run_worktree(
             log=tmp_path / "git-args.txt",
             fetch_exit=fetch_exit,
             worktree_add_exit=worktree_add_exit,
+            missing_remotes=" ".join(missing_remotes),
         ),
     )
     stub_make = _write_stub(
@@ -218,3 +234,67 @@ def test_worktree_recipe_does_not_feed_make_comments_to_shell() -> None:
 
     assert hazardous_pairs == []
     assert '\ttarget_dir="$(if $(dir),$(dir),.rebar/worktrees/$(name))"; \\' in recipe_lines
+
+
+# --- Missing remotes (bug 1712-f158-9314-420a) ------------------------------------------
+#
+# A copied linked worktree shares the checkout's `.git/config`, and `git remote remove` run
+# in such a copy deleted both remotes from the shared config. `make worktree` then surfaced
+# only git's raw "'origin' does not appear to be a git repository", which reads like a
+# network or permissions fault. The recipe must name the missing remote itself.
+
+ORIGIN_URL = "https://github.com/navapbc/rebar.git"
+RUNBOOK = "docs/local-dev-env.md"
+RAW_GIT_MESSAGE = "does not appear to be a git repository"
+
+
+def test_missing_origin_is_named_before_git_fetch_runs(tmp_path: Path) -> None:
+    result = _run_worktree(tmp_path, missing_remotes=("origin", "gerrit"))
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert SUCCESS_MESSAGE not in combined
+    error_lines = [line for line in combined.splitlines() if "ERROR" in line]
+    assert any("origin" in line and "remote" in line for line in error_lines), combined
+    assert RAW_GIT_MESSAGE not in combined, combined
+    git_calls = (tmp_path / "git-args.txt").read_text(encoding="utf-8").splitlines()
+    assert not any(call.startswith(("fetch", "worktree add")) for call in git_calls), git_calls
+
+
+def test_missing_origin_prints_the_restore_command_and_runbook(tmp_path: Path) -> None:
+    result = _run_worktree(tmp_path, missing_remotes=("origin",))
+
+    combined = result.stdout + result.stderr
+    assert f"git remote add origin {ORIGIN_URL}" in combined, combined
+    assert RUNBOOK in combined, combined
+
+
+def test_missing_gerrit_warns_but_still_creates_the_worktree(tmp_path: Path) -> None:
+    # Creating a worktree never talks to gerrit; only the later push does. So a missing
+    # gerrit remote is announced, not fatal.
+    result = _run_worktree(tmp_path, missing_remotes=("gerrit",))
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert SUCCESS_MESSAGE in combined
+    warning_lines = [line for line in combined.splitlines() if "WARNING" in line]
+    assert any("gerrit" in line for line in warning_lines), combined
+    assert RUNBOOK in combined, combined
+
+
+def test_both_remotes_present_prints_no_remote_warning(tmp_path: Path) -> None:
+    result = _run_worktree(tmp_path)
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, combined
+    assert "WARNING" not in combined, combined
+
+
+def test_runbook_records_the_remote_urls_the_recipe_relies_on() -> None:
+    recipe = MAKEFILE.read_text(encoding="utf-8")
+    runbook = (REPO_ROOT / RUNBOOK).read_text(encoding="utf-8")
+
+    assert ORIGIN_URL in recipe
+    assert ORIGIN_URL in runbook
+    assert "https://rebar.solutions.navateam.com/a/rebar" in runbook
+    assert "ssh://<you>@rebar.solutions.navateam.com:29418/rebar" in runbook

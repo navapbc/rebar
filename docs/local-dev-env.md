@@ -159,6 +159,8 @@ export AWS_DEFAULT_REGION=us-east-1             # a region must resolve; Bedrock
 > inside it — the one-command form of the manual "fresh worktree + local venv" sequence
 > this repo mandates. Then `cd .rebar/worktrees/<branch> && source .venv/bin/activate`
 > and export your provider credentials (AWS by default — see the note above).
+> If it stops with `ERROR: this repository has no 'origin' remote`, see
+> [Restoring the origin and gerrit remotes](#restoring-the-origin-and-gerrit-remotes).
 
 > **Signing your ticket writes (per-clone identity).** Every clone that writes non-exempt
 > tickets should own its **own** identity + SSH signing key (never the shared bot). One-time
@@ -252,6 +254,40 @@ there; the canonical setup above (`source .venv/bin/activate`) satisfies this.
 
 This is a **developer-environment** note only — it concerns committing changes *to* rebar. It
 has no bearing on installing or running rebar as a tool; end users never run the commit gate.
+
+## Restoring the origin and gerrit remotes
+
+Every linked worktree shares the main checkout's `.git/config`, so the two remotes live in one
+place. If they disappear, `make worktree` stops with `ERROR: this repository has no 'origin'
+remote` (or warns that `gerrit` is missing), and a bare `git fetch origin` reports
+`'origin' does not appear to be a git repository`, which looks like a network fault but is not.
+
+One known cause: a file copy (`cp -R`) of a linked worktree is not an isolated copy. It keeps
+the original's `.git` file, so `git remote remove` run inside the copy edits the shared
+config. Check what a directory really points at with
+`git -C <dir> rev-parse --git-common-dir` before running git in it.
+
+**`origin`** (GitHub; the code mirror and the `tickets` branch remote) has one URL:
+
+```sh
+git remote add origin https://github.com/navapbc/rebar.git
+git fetch origin
+```
+
+**`gerrit`** (code review) has two documented forms. Restore the one you set up originally,
+because your credentials (an HTTP password or an SSH key) only work with that scheme:
+
+```sh
+# HTTPS, with a Gerrit HTTP password (CONTRIBUTING.md §1a-1b). Leave the username out to let
+# credential.https://rebar.solutions.navateam.com.username decide, or embed it as
+# https://<your-gerrit-username>@rebar.solutions.navateam.com/a/rebar
+git remote add gerrit https://rebar.solutions.navateam.com/a/rebar
+
+# SSH, with a key registered under Gerrit Settings -> SSH Keys
+git remote add gerrit ssh://<you>@rebar.solutions.navateam.com:29418/rebar
+
+git ls-remote gerrit HEAD
+```
 
 ## Verify you're on the repo build
 
