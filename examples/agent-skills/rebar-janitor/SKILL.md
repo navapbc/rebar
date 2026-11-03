@@ -2,18 +2,18 @@
 name: rebar-janitor
 description: >-
   Principal-engineer codebase health pipeline, a deliberate pause between features to buy
-  back optionality. Runs five phases. Discovery, a one-concern-per-subagent fan-out over
+  back optionality. Five phases. Discovery, a one-concern-per-subagent fan-out over
   code debt, smells, architectural decay, separation of concerns, spent optionality, doc
-  gaps, oversized units, oracle strength, AI-generated-code and security smells, and temporal
-  decay,
-  returning finding plus evidence with NO severity. Verification, an independent blue-team
-  pass that scores validity and impact and demands a reachable harm. Remediation, blind
+  gaps, oversized units, oracle strength, generated-code and security smells, and temporal
+  decay, returning finding plus evidence, NO severity. Verification, an independent pass
+  scoring validity and impact, demanding a reachable harm. Remediation, blind
   parallel proposers on asymmetric evidence (community practice vs project record) with
-  move-level convergence. Approval, a Remediation Plan reviewed one item at a time
-  (approve/refine/reject). Ticketization, approved work filed as child tickets under a
-  Janitor Cleanup epic. Never edits code; the plan and tickets are the deliverable. Use when
-  the user wants a maintainability or tech-debt review, asks to clean up or audit a
-  codebase, or invokes /rebar-janitor.
+  move-level convergence. Approval, a plan reviewed one item at a time
+  (approve/refine/reject). Ticketization, approved work filed under a Defect Audit epic.
+  Never edits code; the plan and tickets are the deliverable. A defect audit, not a tidying
+  pass: deletion-only complexity work belongs to rebar-tidy. Use when
+  the user wants a defect, maintainability or tech-debt review, asks to audit a codebase,
+  or invokes /rebar-janitor.
 ---
 
 # Codebase Health Pipeline — orchestrator
@@ -57,7 +57,7 @@ not load a later phase's file until you reach it — each phase file holds only 
 | 2 — Verification | `phases/verification.md`  | Scored survivors + a persisted audit record |
 | 3 — Remediation  | `phases/remediation.md`   | A Remediation Plan (converged / research-resolved / no-consensus items) |
 | 4 — Approval     | `phases/approval.md`      | The approved / refined item set |
-| 5 — Ticketization| `phases/ticketization.md` | A Janitor Cleanup epic + child tickets |
+| 5 — Ticketization| `phases/ticketization.md` | A Defect Audit epic + child tickets |
 
 Scale ceremony to the request: a quick check can merge concerns into fewer Discovery agents and keep
 Remediation light; "thorough"/"comprehensive" warrants the full fan-out, the temporal pass, and the

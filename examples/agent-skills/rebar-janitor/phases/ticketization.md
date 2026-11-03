@@ -7,7 +7,7 @@
 
 ## The epic
 
-Create an epic titled **`Janitor Cleanup <YYYY-MM-DD>`**. Its body summarizes the cleanup and holds
+Create an epic titled **`Defect Audit <YYYY-MM-DD>`**. Its body summarizes the audit and holds
 **one acceptance-criteria checklist item per finding** the plan remediates, so closing the epic
 validates every finding was addressed.
 
@@ -43,5 +43,5 @@ surfaced as survivors and became tickets need no action — they retire via patt
 - Enrich `.rebar-janitor/report-<YYYY-MM-DD>.md` with the outcome (which survivors became tickets,
   which were rejected, registry changes).
 - Do **not** edit code — the tickets are the deliverable. The edits happen later, when someone works
-  a ticket. (Janitor's principle: cleanup is completed *between* features; approved work should be
+  a ticket. (Janitor's principle: an audit is completed *between* features; approved work should be
   implemented before the next run, not left to accumulate as a backlog.)
