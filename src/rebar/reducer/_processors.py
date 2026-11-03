@@ -191,7 +191,8 @@ def process_comment(state: dict, event: dict, data: dict) -> None:
 def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None = None) -> None:
     """Append a LINK dependency after optional target resolution.
 
-    When no tracker exists or resolution fails, retain the original target. Readiness treats an
+    When no tracker exists or resolution fails (including an ambiguous prefix, which is not
+    reported), retain the original target. Readiness treats an
     unresolved ``depends_on`` target as a closed tombstone because archived and invalid targets
     cannot be distinguished. Treating both as open would leave archived blockers active. See
     ``_status._get_ticket_status`` and its unresolved-blocker regression test.
@@ -205,7 +206,10 @@ def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None =
             # pure replay layer never reaches UP into a higher read layer.
             from rebar._ids import resolve_ticket_id
 
-            canonical = resolve_ticket_id(raw_target, tracker_dir)
+            # quiet: replay resolves stored targets the current caller never supplied, so an
+            # ambiguous one (a raw 4-hex quad) must not print inside unrelated commands
+            # (bug 9a8a-fbe5-d4f5-4e2e); the raw target is kept below either way.
+            canonical = resolve_ticket_id(raw_target, tracker_dir, quiet=True)
             if canonical:
                 resolved_target = canonical
         except Exception:  # noqa: BLE001 — resolver is best-effort; never crash the reducer
