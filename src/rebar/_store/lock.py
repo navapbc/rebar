@@ -47,6 +47,23 @@ _WRITE_PATH_RETRIES = 2
 _MAX_RETRIES = 10
 _RETRY_BACKOFF_BASE_S = 0.5
 _RETRY_BACKOFF_CAP_S = 2.0
+# Within a pass a waiter re-polls the kernel leg every _jitter(_KERNEL_POLL_S) and the mkdir
+# leg every _jitter(_MKDIR_POLL_S). _jitter scales by at most _JITTER_MAX (git lockfile.c's
+# shape). The lock keeps no queue, so these are the gaps a holder must outwait to hand over.
+_KERNEL_POLL_S = 0.05
+_MKDIR_POLL_S = 0.1
+_JITTER_MAX = 1.25
+
+
+def max_waiter_gap_s(*, between_passes: bool) -> float:
+    """Return the longest time a waiting :func:`acquire` caller can go without polling.
+
+    Within a pass that is the jittered poll interval. ``between_passes`` covers a waiter whose
+    pass timed out and is asleep in retry backoff, at most the jittered backoff cap. A holder
+    that releases and re-takes the lock inside this gap never lets the waiter in, and a
+    :func:`write_lock_is_busy` probe in that gap cannot see it (bug dc5a-5ca5-efca-4145)."""
+    nominal = _RETRY_BACKOFF_CAP_S if between_passes else max(_KERNEL_POLL_S, _MKDIR_POLL_S)
+    return nominal * _JITTER_MAX
 
 
 # Exceptions carry a subprocess-compatible return code and message. They do not print, so
@@ -168,7 +185,7 @@ def _acquire_fcntl(lock_path: str, deadline: float) -> int:
                 os.close(fd)
                 return -1
             # Jittered so many competing acquirers de-synchronize (9305 research rec #4).
-            time.sleep(_jitter(0.05))
+            time.sleep(_jitter(_KERNEL_POLL_S))
 
 
 def write_lock_is_busy(tracker: str | os.PathLike) -> bool:
@@ -272,14 +289,14 @@ def _acquire_mkdir(lock_dir: str, deadline: float) -> bool:
             if time.monotonic() >= deadline:
                 return False
             # Jittered so many competing acquirers de-synchronize (9305 research rec #4).
-            time.sleep(_jitter(0.1))
+            time.sleep(_jitter(_MKDIR_POLL_S))
         except OSError as exc:  # pragma: no cover - unexpected fs error
             if exc.errno == errno.EEXIST:
                 if _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True):
                     _owner._reclaim_mkdir_lock(lock_dir)
                 if time.monotonic() >= deadline:
                     return False
-                time.sleep(_jitter(0.1))
+                time.sleep(_jitter(_MKDIR_POLL_S))
             else:
                 raise
 
