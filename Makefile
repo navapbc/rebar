@@ -244,8 +244,23 @@ worktree:  ## Create a fresh worktree from origin/main + provision its venv & ho
 	@# with no usable .venv (first symptom: the commit gate dying on a missing ruff/mypy,
 	@# which reads as a code problem, not an environment one). `set -e` makes the line
 	@# abort; the per-step handlers make the failure name itself.
+	@# Bug 1712: a copied linked worktree shares this checkout's .git/config, and a
+	@# `git remote remove` run inside such a copy deleted both remotes. git's own error for
+	@# the missing remote ("'origin' does not appear to be a git repository") reads like a
+	@# network fault, so name the missing remote here, before `git fetch` runs. `origin` is
+	@# fatal (the worktree branches from origin/main); `gerrit` is only needed to push.
 	@set -e; \
 	target_dir="$(if $(dir),$(dir),.rebar/worktrees/$(name))"; \
+	git remote get-url origin >/dev/null 2>&1 || { \
+		echo "ERROR: this repository has no 'origin' remote, so there is no origin/main to branch from."; \
+		echo "       Restore it:  git remote add origin https://github.com/navapbc/rebar.git"; \
+		echo "       Then check:  git fetch origin"; \
+		echo "       Runbook: docs/local-dev-env.md, section 'Restoring the origin and gerrit remotes'."; \
+		exit 1; }; \
+	git remote get-url gerrit >/dev/null 2>&1 || { \
+		echo "WARNING: this repository has no 'gerrit' remote; 'git push gerrit' will fail until it is restored."; \
+		echo "         Its HTTPS and SSH forms are in docs/local-dev-env.md, section 'Restoring the origin and gerrit remotes'."; \
+	}; \
 	echo "→ git fetch origin"; \
 	git fetch origin || { \
 		echo "ERROR: 'git fetch origin' failed — cannot branch from a current origin/main."; \
