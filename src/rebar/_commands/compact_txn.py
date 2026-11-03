@@ -5,11 +5,14 @@ orphan predicate so it cannot absorb an orphaned event."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import sys
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
+from typing import NamedTuple
 
 from rebar._commands import compact_plan, compact_recovery
 from rebar._commands._compact_policy import is_foldable
@@ -120,16 +123,69 @@ def preresolve_unmapped_positions(
     return resolved
 
 
+def _signer_key(ev: dict) -> tuple[str, str]:
+    """The inputs :func:`_identify_signer` depends on: the author id and the signature."""
+    sig = ev.get("author_sig")
+    return str(ev.get("author_id")), sig if isinstance(sig, str) else ""
+
+
+def _identify_signer(ev: dict, repo_root) -> str | None:
+    """The keyring public key that verifies ``ev``'s signature, or ``None`` (best-effort).
+
+    Reads the author's identity ticket through ``rebar.show_ticket``, whose freshness policy
+    may fetch, so :func:`preresolve_signers` runs this BEFORE the store write lock."""
+    from rebar.attest import authorship, dsse
+
+    author_id, sig = _signer_key(ev)
+    try:
+        envelope = dsse.decode(sig)
+        return authorship.identify_signer(envelope, author_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — a decode/lookup failure records a null signer
+        return None
+
+
+def preresolve_signers(ticket_dir: str, repo_root) -> dict[tuple[str, str], str | None]:
+    """Map each signed event of ``ticket_dir`` to its verifying key, keyed by
+    :func:`_signer_key`. Call this OUTSIDE the store write lock (bug
+    breezelike-travelsick-moray): each lookup reduces the author's identity ticket and its
+    freshness read can fetch and then ask for the store lock. A key absent from the map (an
+    event written after this ran) falls back to an in-lock lookup that the fold runs with
+    freshness suppressed."""
+    signers: dict[tuple[str, str], str | None] = {}
+    try:
+        names = sorted(os.listdir(ticket_dir))
+    except OSError:
+        return signers
+    for name in names:
+        if not name.endswith(".json") or name.startswith("."):
+            continue
+        try:
+            with open(os.path.join(ticket_dir, name), encoding="utf-8") as f:
+                ev = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if ev.get("author_sig") and _signer_key(ev) not in signers:
+            signers[_signer_key(ev)] = _identify_signer(ev, repo_root)
+    return signers
+
+
 def _build_authorship_ledger(
-    event_paths: list[str], repo_root, *, position_commits: dict[str, str] | None = None
+    event_paths: list[str],
+    repo_root,
+    *,
+    position_commits: dict[str, str] | None = None,
+    signers: dict[tuple[str, str], str | None] | None = None,
 ) -> list[dict]:
     """Record signed folded events for later identity verification.
     Store content hash, signature, verifying key, position, and introducing
     commit, using null for failed best-effort lookups. Omit unsigned events.
     Use a supplied position-keyed commit map without git log, or build one
-    per ticket. Misses fall back to per-event resolution."""
-    from rebar.attest import authorship, dsse
+    per ticket. Misses fall back to per-event resolution. ``signers`` from
+    :func:`preresolve_signers` replaces the per-event signer lookup; misses look up."""
+    from rebar.attest import authorship
 
+    if signers is None:
+        signers = {}
     if position_commits is None:
         position_commits = {}
         if event_paths:
@@ -147,18 +203,11 @@ def _build_authorship_ledger(
         sig = ev.get("author_sig")
         if not sig:
             continue
-        author_id = ev.get("author_id")
         position_str = f"{ev.get('timestamp')}-{ev.get('uuid')}"
         ticket_dir = os.path.dirname(path)
 
-        signer_pubkey = None
-        try:
-            envelope = dsse.decode(sig if isinstance(sig, str) else "")
-            signer_pubkey = authorship.identify_signer(
-                envelope, str(author_id), repo_root=repo_root
-            )
-        except Exception:  # noqa: BLE001 — a decode/lookup failure records a null signer
-            signer_pubkey = None
+        key = _signer_key(ev)
+        signer_pubkey = signers[key] if key in signers else _identify_signer(ev, repo_root)
 
         commit_sha = _introducing_commit(position_str, ticket_dir, repo_root, position_commits)
 
@@ -342,6 +391,60 @@ def _abort_fold(
     compact_recovery.discard(journal)
 
 
+#: The phases of one fold, in order, as named on its timing line. The first two run before
+#: the store write lock; ``lock_wait`` is the acquisition; ``held`` is the whole locked span.
+FOLD_PHASES: tuple[str, ...] = (
+    "attribution",
+    "signers",
+    "lock_wait",
+    "recover",
+    "parse",
+    "reduce",
+    "ledger",
+    "build_snapshot",
+    "write_retire",
+    "commit",
+    "held",
+)
+
+
+class _FoldTimer:
+    """Wall-clock seconds per named fold phase, reported as ONE log line per fold.
+
+    Bug breezelike-travelsick-moray: production folds held the store lock 160-250 s while
+    the same folds replay in under 3 s on a clone, and nothing recorded where the time went.
+    The line is logged at WARNING, the level every entrypoint's handler (and the detached
+    sweep worker's) shows by default, so the next production sweep's log carries it."""
+
+    def __init__(self, ticket_id: str) -> None:
+        self.ticket_id = ticket_id
+        self.seconds: dict[str, float] = dict.fromkeys(FOLD_PHASES, 0.0)
+        self.outcome = "error"
+        self._held_since: float | None = None
+
+    @contextlib.contextmanager
+    def phase(self, name: str) -> Iterator[None]:
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            self.seconds[name] += time.monotonic() - started
+
+    def locked(self) -> None:
+        self._held_since = time.monotonic()
+
+    def released(self) -> None:
+        if self._held_since is not None:
+            self.seconds["held"] += time.monotonic() - self._held_since
+            self._held_since = None
+
+    def report(self) -> None:
+        phases = " ".join(f"{name}={self.seconds[name]:.2f}s" for name in FOLD_PHASES)
+        logger.warning(
+            "compaction fold timing: ticket=%s outcome=%s %s", self.ticket_id, self.outcome, phases
+        )
+
+
 def _apply_fold(
     tracker: str,
     ticket_id: str,
@@ -350,6 +453,7 @@ def _apply_fold(
     final_path: str,
     fold_files: list[str],
     no_commit: bool,
+    timer: _FoldTimer | None = None,
 ) -> int:
     """Execute the fold's worktree mutation + commit as ONE crash-guarded unit.
 
@@ -373,9 +477,12 @@ def _apply_fold(
                 "store without its crash sentinel\n"
             )
             return 1
+    timer = timer or _FoldTimer(ticket_id)
     try:
-        fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
-        if _retire_folded_sources(fold_files, ticket_id, final_path) != 0:
+        with timer.phase("write_retire"):
+            fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
+            retired_rc = _retire_folded_sources(fold_files, ticket_id, final_path)
+        if retired_rc != 0:
             # Its per-step rollback already ran — a clean revert, or the intentionally
             # retained SNAPSHOT_INCONSISTENT state that fsck --repair-snapshots owns.
             # Either way the fold is OVER, so the sentinel must not outlive it (a live
@@ -386,9 +493,12 @@ def _apply_fold(
             os.remove(os.path.join(ticket_dir, ".cache.json"))
         except OSError:
             pass
-        if not no_commit and _commit_compaction(tracker, ticket_id) != 0:
-            _abort_fold(tracker, ticket_id, final_path, fold_files, journal)
-            return 1
+        if not no_commit:
+            with timer.phase("commit"):
+                committed_rc = _commit_compaction(tracker, ticket_id)
+            if committed_rc != 0:
+                _abort_fold(tracker, ticket_id, final_path, fold_files, journal)
+                return 1
     except BaseException:
         _abort_fold(tracker, ticket_id, final_path, fold_files, journal)
         raise
@@ -408,121 +518,198 @@ def _compact_locked(
 ) -> int:
     """The locked compaction critical section. Returns 0 on success (prints
     EVENT_COUNT + the compacted line), 0 on below-threshold-inside-lock (prints the
-    skip line), 1 on lock timeout / reducer / state / git failure."""
+    skip line), 1 on lock timeout / reducer / state / git failure.
+
+    Lookups that do not need the lock run BEFORE it, the pattern ordinary writes follow
+    (``finalize_event`` stamps attribution before ``write_and_push`` locks) and
+    :func:`preresolve_unmapped_positions` follows for history walks (bug
+    breezelike-travelsick-moray): the event attribution, whose cold resolution reduces every
+    ticket in the store, and each signed event's verifying key. Inside the lock, reads run
+    with freshness sync suppressed, so the fold never fetches nor asks for the store lock it
+    already holds (bug congruent-demurrable-insect). Every fold logs one timing line."""
+    from rebar._commands import _seam
+    from rebar._engine_support import reads as ticket_reads
+
+    timer = _FoldTimer(ticket_id)
     try:
-        handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
-    except lock.LockTimeout as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        return 1
-    except compat.StoreIncompatibleError as exc:
-        # Story 21dd: fail closed (non-zero) on an incompatible store before compaction.
-        sys.stderr.write(str(exc) + "\n")
-        return exc.returncode
-    try:
-        # Crash-recovery preamble (bug compulsory-pernickety-mantis): converge any
-        # abandoned partial fold BEFORE reading the event list, so this fold plans
-        # against the pre-crash truth rather than half-retired residue. Cheap when no
-        # journal is pending (one listdir); we already hold the store write lock.
+        repo_root = store_repo_root(tracker)
+        with timer.phase("attribution"):
+            attribution = _seam.attribution_fields(repo_root)
+        with timer.phase("signers"):
+            signers = preresolve_signers(ticket_dir, repo_root)
+        try:
+            with timer.phase("lock_wait"):
+                handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
+        except lock.LockTimeout as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+        except compat.StoreIncompatibleError as exc:
+            # Story 21dd: fail closed (non-zero) on an incompatible store before compaction.
+            sys.stderr.write(str(exc) + "\n")
+            return exc.returncode
+        timer.locked()
+        try:
+            with ticket_reads.local_read_context():
+                return _fold_under_lock(
+                    tracker,
+                    ticket_id,
+                    ticket_dir,
+                    threshold,
+                    no_commit,
+                    horizon,
+                    _FoldInputs(position_commits, signers, attribution),
+                    timer,
+                )
+        finally:
+            handle.release()
+            timer.released()
+    finally:
+        timer.report()
+
+
+class _FoldInputs(NamedTuple):
+    """What the fold resolved before taking the lock."""
+
+    position_commits: dict[str, str] | None
+    signers: dict[tuple[str, str], str | None]
+    attribution: dict
+
+
+def _fold_under_lock(
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    threshold: int,
+    no_commit: bool,
+    horizon: int,
+    inputs: _FoldInputs,
+    timer: _FoldTimer,
+) -> int:
+    """The body of :func:`_compact_locked`; the caller holds the store write lock."""
+    # Crash-recovery preamble (bug compulsory-pernickety-mantis): converge any
+    # abandoned partial fold BEFORE reading the event list, so this fold plans
+    # against the pre-crash truth rather than half-retired residue. Cheap when no
+    # journal is pending (one listdir); we already hold the store write lock.
+    with timer.phase("recover"):
         compact_recovery.recover_abandoned_folds(tracker)
+    with timer.phase("parse"):
         parsed = _parse_candidate_events(ticket_dir)
-        event_count = len(parsed)
+    event_count = len(parsed)
+    timer.outcome = "skipped"
 
-        if event_count <= threshold:
-            sys.stdout.write("below threshold (re-checked inside flock) — skipping compaction\n")
+    if event_count <= threshold:
+        sys.stdout.write("below threshold (re-checked inside flock) — skipping compaction\n")
+        return 0
+
+    # RC2b Option 3 (conservative horizon): only FOLD events older than the
+    # horizon. Younger "hot-edge" events stay live ``.json`` and — because the
+    # SNAPSHOT is timestamped just after the newest folded event and before the
+    # youngest live one — sort AFTER the snapshot and replay on top. So a
+    # concurrent sub-horizon append that merges in later is NOT silently dropped by
+    # the snapshot's positional skip. horizon<=0 folds everything (the pre-RC2b
+    # behavior; the offline test suite defaults to 0).
+    now = hlc.physical_now()
+
+    old = [c for c in parsed if is_foldable(c.timestamp, now, horizon)]
+    young = [c for c in parsed if not is_foldable(c.timestamp, now, horizon)]
+
+    if not old:
+        sys.stdout.write("all events within the compaction horizon — nothing to fold\n")
+        return 0
+
+    old = _defer_presnapshot_foldables(old, young)
+    if not old:
+        sys.stdout.write("pre-snapshot foldables deferred until their governing SNAPSHOT folds\n")
+        return 0
+    old = _exclude_snapshot_orphans(old)
+
+    fold_files = [c.path for c in old]
+
+    # Pick a SNAPSHOT timestamp strictly between the newest folded event and the
+    # youngest live one, so folded events sort before it (positionally skipped,
+    # their state in compiled_state) and live events sort after it (replayed).
+    if young:
+        old_ts = [c.timestamp for c in old if c.timestamp is not None]
+        young_ts = [c.timestamp for c in young if c.timestamp is not None]
+        max_old = max(old_ts) if old_ts else now
+        snapshot_ts = max_old + 1
+        if young_ts and snapshot_ts >= min(young_ts):
+            # No safe placement gap (adjacent straddling timestamps) — defer folding
+            # this pass rather than risk a mis-sorted snapshot.
+            sys.stdout.write("no safe horizon gap for a SNAPSHOT timestamp — deferring\n")
             return 0
-
-        # RC2b Option 3 (conservative horizon): only FOLD events older than the
-        # horizon. Younger "hot-edge" events stay live ``.json`` and — because the
-        # SNAPSHOT is timestamped just after the newest folded event and before the
-        # youngest live one — sort AFTER the snapshot and replay on top. So a
-        # concurrent sub-horizon append that merges in later is NOT silently dropped by
-        # the snapshot's positional skip. horizon<=0 folds everything (the pre-RC2b
-        # behavior; the offline test suite defaults to 0).
-        now = hlc.physical_now()
-
-        old = [c for c in parsed if is_foldable(c.timestamp, now, horizon)]
-        young = [c for c in parsed if not is_foldable(c.timestamp, now, horizon)]
-
-        if not old:
-            sys.stdout.write("all events within the compaction horizon — nothing to fold\n")
-            return 0
-
-        old = _defer_presnapshot_foldables(old, young)
-        if not old:
-            sys.stdout.write(
-                "pre-snapshot foldables deferred until their governing SNAPSHOT folds\n"
-            )
-            return 0
-        old = _exclude_snapshot_orphans(old)
-
-        fold_files = [c.path for c in old]
-
-        # Pick a SNAPSHOT timestamp strictly between the newest folded event and the
-        # youngest live one, so folded events sort before it (positionally skipped,
-        # their state in compiled_state) and live events sort after it (replayed).
-        if young:
-            old_ts = [c.timestamp for c in old if c.timestamp is not None]
-            young_ts = [c.timestamp for c in young if c.timestamp is not None]
-            max_old = max(old_ts) if old_ts else now
-            snapshot_ts = max_old + 1
-            if young_ts and snapshot_ts >= min(young_ts):
-                # No safe placement gap (adjacent straddling timestamps) — defer folding
-                # this pass rather than risk a mis-sorted snapshot.
-                sys.stdout.write("no safe horizon gap for a SNAPSHOT timestamp — deferring\n")
-                return 0
+        with timer.phase("reduce"):
             compiled_state = reduce_ticket(ticket_dir, event_files_override=fold_files)
-        else:
-            snapshot_ts = hlc.next_tick(tracker, ticket_id)
+    else:
+        snapshot_ts = hlc.next_tick(tracker, ticket_id)
+        with timer.phase("reduce"):
             compiled_state = reduce_ticket(ticket_dir)
 
-        if compiled_state is None:
-            sys.stderr.write(
-                f"Error: reducer failed for ticket {ticket_id} (corrupt or ghost ticket)\n"
-            )
-            return 1
-        # ``updated_at`` is a derived presentation field (P1.1), re-computed on
-        # every replay. It must NOT enter the SNAPSHOT's compiled_state, or it
-        # would (a) ride into event-log bytes and (b) be restored stale by
-        # process_snapshot. Copy-and-drop it so the cache object is untouched.
-        # The legacy ``signature`` mirror is dropped here too (task 7ed9 never-emit) —
-        # new snapshots carry only ``attestations``.
-        _strip = _snapshot_strip_keys()
-        compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
-        # Authorship ledger (epic gnu-whale-ichor / 3183): independently scan the folded
-        # events and preserve each SIGNED one so verify-identity can re-verify it after
-        # the raw files are retired. Derive repo_root from the tracker (no repo_root here).
+    if compiled_state is None:
+        timer.outcome = "error"
+        sys.stderr.write(
+            f"Error: reducer failed for ticket {ticket_id} (corrupt or ghost ticket)\n"
+        )
+        return 1
+    # ``updated_at`` is a derived presentation field (P1.1), re-computed on
+    # every replay. It must NOT enter the SNAPSHOT's compiled_state, or it
+    # would (a) ride into event-log bytes and (b) be restored stale by
+    # process_snapshot. Copy-and-drop it so the cache object is untouched.
+    # The legacy ``signature`` mirror is dropped here too (task 7ed9 never-emit) —
+    # new snapshots carry only ``attestations``.
+    _strip = _snapshot_strip_keys()
+    compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
+    # Authorship ledger (epic gnu-whale-ichor / 3183): independently scan the folded
+    # events and preserve each SIGNED one so verify-identity can re-verify it after
+    # the raw files are retired. Derive repo_root from the tracker (no repo_root here).
+    with timer.phase("ledger"):
         compiled_state["authorship_ledger"] = _build_authorship_ledger(
             fold_files,
             store_repo_root(tracker),
-            position_commits=position_commits,
+            position_commits=inputs.position_commits,
+            signers=inputs.signers,
         )
-        status = compiled_state.get("status", "")
-        if status in ("error", "fsck_needed"):
-            sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
-            return 1
+    status = compiled_state.get("status", "")
+    if status in ("error", "fsck_needed"):
+        timer.outcome = "error"
+        sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
+        return 1
 
-        # A folded prior SNAPSHOT is NOT a source event (bug aea0). Its entire content IS
-        # its compiled_state, which this snapshot absorbs, so nothing is lost when the file
-        # goes away — but citing it makes fsck's snapshot_missing_sources check report a
-        # perfectly healthy ticket as damaged (and, post b636, as un-rebuildable) the
-        # moment it does. `parsed` admits SNAPSHOT because it is a KNOWN_EVENT_TYPE, which
-        # is how it ended up in this list. The REBUILD path in compact_rebuild already
-        # skips snapshots when building its source list; this makes the two agree.
-        source_uuids = compact_plan.source_uuids_of(old)
+    # A folded prior SNAPSHOT is NOT a source event (bug aea0). Its entire content IS
+    # its compiled_state, which this snapshot absorbs, so nothing is lost when the file
+    # goes away — but citing it makes fsck's snapshot_missing_sources check report a
+    # perfectly healthy ticket as damaged (and, post b636, as un-rebuildable) the
+    # moment it does. `parsed` admits SNAPSHOT because it is a KNOWN_EVENT_TYPE, which
+    # is how it ended up in this list. The REBUILD path in compact_rebuild already
+    # skips snapshots when building its source list; this makes the two agree.
+    source_uuids = compact_plan.source_uuids_of(old)
 
+    with timer.phase("build_snapshot"):
         snapshot_event, final_path = compact_plan.build_snapshot_event(
-            tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts
+            tracker,
+            ticket_dir,
+            compiled_state,
+            source_uuids,
+            snapshot_ts,
+            attribution=inputs.attribution,
         )
-        if (
-            _apply_fold(
-                tracker, ticket_id, ticket_dir, snapshot_event, final_path, fold_files, no_commit
-            )
-            != 0
-        ):
-            return 1
+    timer.outcome = "error"
+    if (
+        _apply_fold(
+            tracker,
+            ticket_id,
+            ticket_dir,
+            snapshot_event,
+            final_path,
+            fold_files,
+            no_commit,
+            timer,
+        )
+        != 0
+    ):
+        return 1
+    timer.outcome = "folded"
 
-        sys.stdout.write(f"EVENT_COUNT={event_count}\n")
-        sys.stdout.write(f"compacted events into SNAPSHOT for {ticket_id}\n")
-        return 0
-    finally:
-        handle.release()
+    sys.stdout.write(f"EVENT_COUNT={event_count}\n")
+    sys.stdout.write(f"compacted events into SNAPSHOT for {ticket_id}\n")
+    return 0

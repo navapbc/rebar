@@ -243,12 +243,18 @@ def build_snapshot_event(
     compiled_state: dict,
     source_uuids: list[str],
     snapshot_ts: int,
+    *,
+    attribution: dict | None = None,
 ) -> tuple[dict, str]:
     """Assemble the SNAPSHOT event envelope and its destination path.
 
     The ONE builder for both engines. Denormalized author attribution (epic
     ``gnu-whale-ichor``) is stamped on here; neither caller has a ``repo_root`` parameter, so
     it is derived from the tracker — the derivation the two used to mirror by hand.
+
+    ``attribution`` is the caller's already-resolved :func:`_seam.attribution_fields`. The
+    fold resolves it BEFORE taking the store write lock, because a cold resolution reduces
+    every ticket in the store (bug breezelike-travelsick-moray); ``None`` resolves it here.
     """
     from pathlib import Path
 
@@ -267,7 +273,9 @@ def build_snapshot_event(
             "compacted_at": snapshot_ts,
         },
     }
-    snapshot_event.update(_seam.attribution_fields(store_repo_root(tracker)))
+    if attribution is None:
+        attribution = _seam.attribution_fields(store_repo_root(tracker))
+    snapshot_event.update(attribution)
     final_path = os.path.join(
         ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
     )
