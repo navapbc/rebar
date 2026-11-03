@@ -106,6 +106,11 @@ POLICY_DECLINE_MARKERS: tuple[str, ...] = (
 )
 NON_FF_RE = re.compile(r"non-fast-forward|rejected|fetch first", re.IGNORECASE)
 
+# gitutil.run_git_bounded's watchdog outcome: the return code it sets, and the text it
+# writes. Callers test the outcome with :func:`is_watchdog_timeout`, not by grepping.
+WATCHDOG_TIMEOUT_RC = 124
+WATCHDOG_TIMEOUT_MARKER = "git timed out after"
+
 # Transport failures can retry, but policy declines cannot. Subtractive matching
 # resolves ambiguous text to terminal instead of an ineffective retry (bug f61c).
 TRANSPORT_RETRIABLE_MARKERS: tuple[str, ...] = (
@@ -126,7 +131,7 @@ TRANSPORT_RETRIABLE_MARKERS: tuple[str, ...] = (
     "from promisor remote",  # blob:none partial clone: on-demand fetch hit the network
     # The synthetic rc-124 result gitutil.run_git_bounded builds for a watchdog timeout.
     # Recognised HERE; CONSTRUCTED there (two constructs, two owners).
-    "git timed out after",
+    WATCHDOG_TIMEOUT_MARKER,
 )
 
 MISSING_CREDENTIAL_MARKERS: tuple[str, ...] = (
@@ -256,6 +261,21 @@ def is_transport_retriable(text: str) -> bool:
     if is_policy_decline(text) or is_missing_credential(text):
         return False
     return _any(text, TRANSPORT_RETRIABLE_MARKERS) is not None
+
+
+def is_watchdog_timeout(result: Any) -> bool:
+    """Whether *result* is a git call killed by its wall-clock bound.
+
+    Keyed on the return code :func:`rebar._store.gitutil.run_git_bounded` sets, with its
+    message as a fallback for a result that lost that code on the way. Text that merely
+    mentions a network timeout is not this outcome. Unlike :func:`is_transport_retriable`,
+    this says nothing about the cause: for a local merge or commit it means the operation
+    outgrew its bound, not that a link blipped.
+    """
+    returncode = getattr(result, "returncode", None)
+    if returncode == WATCHDOG_TIMEOUT_RC:
+        return True
+    return bool(returncode) and WATCHDOG_TIMEOUT_MARKER in _failure_text(result).lower()
 
 
 def is_missing_credential(text: str) -> bool:
