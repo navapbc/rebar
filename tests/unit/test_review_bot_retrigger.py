@@ -504,7 +504,7 @@ def test_rerun_resets_attempts_budget(monkeypatch, tmp_path):
     from rebar.review_bot import gerrit_client as gcmod
 
     cfg = _cfg(tmp_path)
-    monkeypatch.setattr(appmod.app.state, "config", cfg, raising=False)
+    monkeypatch.setitem(appmod.app.state._state, "config", cfg)
 
     async def _idle_worker(queue, cfg):
         await asyncio.Event().wait()
@@ -574,7 +574,7 @@ def test_rerun_refuses_when_durable_vote_reset_cannot_be_established(
     from rebar.review_bot import gerrit_client as gcmod
 
     cfg = _cfg(tmp_path)
-    monkeypatch.setattr(appmod.app.state, "config", cfg, raising=False)
+    monkeypatch.setitem(appmod.app.state._state, "config", cfg)
 
     async def _idle_worker(queue, cfg):
         await asyncio.Event().wait()
@@ -638,7 +638,7 @@ def test_rerun_accepts_when_best_effort_attempt_reset_fails(monkeypatch, tmp_pat
     from rebar.review_bot import gerrit_client as gcmod
 
     cfg = _cfg(tmp_path)
-    monkeypatch.setattr(appmod.app.state, "config", cfg, raising=False)
+    monkeypatch.setitem(appmod.app.state._state, "config", cfg)
 
     async def _idle_worker(queue, cfg):
         await asyncio.Event().wait()
