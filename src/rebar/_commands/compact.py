@@ -293,9 +293,37 @@ def _snapshot_names(ticket_dir: str) -> set[str]:
         return set()
 
 
+# Set by the detached worker's SIGTERM handler (``compact_trigger.install_stop_on_sigterm``).
+# A plain bool: a signal handler runs between bytecodes in the main thread, so a lock-free
+# assignment is the only store it can make without risking a deadlock on a lock it interrupted.
+_stop_requested = False
+
+
+def request_stop() -> None:
+    """Ask the sweep to stop at its next ticket boundary (bug topnotch-brazen-slug).
+
+    The fold in flight is not interrupted: it commits, or rolls back through
+    ``compact_txn._abort_fold`` if it raises, and the end-of-run push still runs."""
+    global _stop_requested
+    _stop_requested = True
+
+
+def stop_requested() -> bool:
+    """Whether :func:`request_stop` has been called in this process."""
+    return _stop_requested
+
+
 def _sweep_should_yield(tracker: str, done: int) -> bool:
-    """Check between tickets whether a foreground writer needs the lock.
+    """Check between tickets whether the sweep must stop or a foreground writer needs the lock.
     Leave remaining optional folds for a later sweep."""
+    if _stop_requested:
+        sys.stdout.write("\n")
+        logger.warning(
+            "compaction sweep stopping after %d ticket(s): SIGTERM received (the process is "
+            "retiring); the remaining events stay live for the next sweep",
+            done,
+        )
+        return True
     if not _lock.write_lock_is_busy(tracker):
         return False
     sys.stdout.write("\n")

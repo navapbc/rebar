@@ -7,6 +7,8 @@ this call cluster and retains its gauge and handshake primitives.
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -63,29 +65,73 @@ def wait_for_idle(
         sleep(poll_interval)
 
 
+Retire = Callable[[], Callable[[float], None]]
+"""Start retiring background store work; return ``finish(deadline)`` for the exit path."""
+
+
 def make_sigterm_handler(
     server: Any,
     gauge: InFlightGauge,
     *,
     grace_seconds: float,
     poll_interval: float,
+    retire: Retire | None = None,
 ) -> Callable[[int, Any], None]:
     """Close certified intake, drain active ops, then request uvicorn shutdown.
 
     This order preserves active streaming responses while the short uvicorn
-    backstop handles only idle streams. The handler is testable without a signal.
+    backstop handles only idle streams. ``retire`` runs first, so a detached compaction
+    sweep is asked to stop while the drain runs, and its ``finish`` runs last, before
+    ``should_exit``, within the same grace (bug topnotch-brazen-slug). The handler is
+    testable without a signal.
     """
 
     def _on_sigterm(_signum: int, _frame: Any) -> None:
         gauge.begin_draining()
+        deadline = time.monotonic() + grace_seconds
+        finish = _start_retire(retire)
+
+        def _exit() -> None:
+            if finish is not None:
+                _run_finish(finish, deadline)
+            server.should_exit = True
+
         drain_then_exit(
             gauge,
             grace_seconds=grace_seconds,
             poll_interval=poll_interval,
-            exit_fn=lambda: setattr(server, "should_exit", True),
+            exit_fn=_exit,
         )
 
     return _on_sigterm
+
+
+def _start_retire(retire: Retire | None) -> Callable[[float], None] | None:
+    if retire is None:
+        return None
+    try:
+        return retire()
+    except Exception:
+        logging.getLogger("rebar").warning("retire: could not stop background work", exc_info=True)
+        return None
+
+
+def _run_finish(finish: Callable[[float], None], deadline: float) -> None:
+    try:
+        finish(deadline)
+    except Exception:
+        logging.getLogger("rebar").warning("retire: wait for background work failed", exc_info=True)
+
+
+def retire_store_work() -> Callable[[float], None]:
+    """Stop this container's compaction sweep; ``finish`` waits for it and the write lock."""
+    from rebar import config
+    from rebar._commands import compact_trigger
+
+    tracker = str(config.tracker_dir())
+    if not os.path.isdir(tracker):
+        return lambda _deadline: None
+    return compact_trigger.retire_local_sweep(tracker)
 
 
 def run_http_with_grace(
@@ -136,7 +182,11 @@ def run_http_with_grace(
     signal.signal(
         signal.SIGTERM,
         make_sigterm_handler(
-            server, gauge, grace_seconds=grace_seconds, poll_interval=poll_interval
+            server,
+            gauge,
+            grace_seconds=grace_seconds,
+            poll_interval=poll_interval,
+            retire=retire_store_work,
         ),
     )
 
@@ -172,8 +222,6 @@ def _run_transport(server: Any, mcp_cfg: Any, gauge: Any, opcert_binding: Any) -
             # server was assembled another way. Log it (an empty gauge would silently
             # read 0 and skip the drain) and fall back to a fresh gauge so the run
             # still starts rather than crashing.
-            import logging
-
             logging.getLogger("rebar").warning(
                 "MCP HTTP server has no wired in-flight gauge; SIGTERM drain will not "
                 "observe in-flight ops. Was build_server() used?"

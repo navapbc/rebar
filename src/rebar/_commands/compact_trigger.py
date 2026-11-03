@@ -136,7 +136,7 @@ def _spawn_detached_sweep(tracker: str) -> None:
     try:
         spawn_detached(
             "rebar._commands.compact_trigger",
-            "run_sweep",
+            "run_detached_sweep",
             # The canonical store tracker, for the same reason spawn_detached resolves the
             # child's cwd: the child outlives the worktree that spawned it, so handing over a
             # worktree's SYMLINK would leave the running child pointed at a path that dies
@@ -147,6 +147,115 @@ def _spawn_detached_sweep(tracker: str) -> None:
         )
     except Exception:
         logger.warning("compaction sweep detach failed; continuing", exc_info=True)
+
+
+def install_stop_on_sigterm() -> None:
+    """Make SIGTERM end this process's sweep at its next ticket boundary.
+
+    The detached worker runs in its own session, so ``docker stop`` never reaches it; the
+    retiring MCP server forwards SIGTERM through :func:`stop_local_sweep` instead (bug
+    topnotch-brazen-slug). The handler only sets the sweep's stop flag, so the fold in flight
+    finishes and the end-of-run push still runs. Main thread only, as :mod:`signal` requires."""
+    import signal
+
+    from rebar._commands import compact as _compact
+
+    def _on_sigterm(_signum: int, _frame: object) -> None:
+        _compact.request_stop()
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
+
+
+def run_detached_sweep(tracker: str) -> None:
+    """The detached worker's entrypoint: :func:`run_sweep` with SIGTERM as a stop request.
+
+    Kept apart from :func:`run_sweep` because the inline ``always`` trigger runs that inside
+    a host process whose own SIGTERM handling must not be replaced."""
+    install_stop_on_sigterm()
+    run_sweep(tracker)
+
+
+def _read_trigger_stamp(tracker: str) -> str | None:
+    try:
+        with open(_trigger_lock_path(tracker), encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return None
+
+
+def stop_local_sweep(tracker: str) -> int | None:
+    """Send SIGTERM to a sweep worker running in THIS PID namespace; return its pid.
+
+    The worker is found through its worker-lock stamp. The tickets clone is shared by every
+    MCP container on the host, so the stamp may name another container's worker; only a pid
+    the stamp proves live in our own namespace is signalled (``unverified-live`` is accepted
+    only where the platform cannot read start times, i.e. has no ``/proc``). Returns ``None``
+    when there is nothing of ours to stop. Never raises."""
+    import signal
+
+    from rebar._store import lock_owner as _owner
+
+    try:
+        stamp = _read_trigger_stamp(tracker)
+        fields = _owner._parse_v2_stamp(stamp) if stamp else None
+        if not fields:
+            return None
+        verdict = _owner._describe_stamped_pid(fields)
+        if not verdict.startswith(("live", "unverified-live")):
+            logger.info("retiring: compaction sweep lock holder not ours (%s); left alone", verdict)
+            return None
+        pid = int(fields["pid"])
+        if pid == os.getpid():
+            return None
+        os.kill(pid, signal.SIGTERM)
+    except (OSError, ValueError):
+        logger.warning("retiring: could not signal the compaction sweep", exc_info=True)
+        return None
+    logger.warning("retiring: asked compaction sweep pid %d to stop at its next ticket", pid)
+    return pid
+
+
+def _sweep_exited(tracker: str, pid: int) -> bool:
+    """Whether worker *pid* has finished: reaped (it may be our child, which would otherwise
+    linger as a zombie that signal 0 still finds), gone, or no longer the lock's holder."""
+    from rebar._store import lock_owner as _owner
+
+    try:
+        if os.waitpid(pid, os.WNOHANG)[0] == pid:
+            return True
+    except OSError:
+        pass  # not our child: init reaps it, and signal 0 below sees it go
+    if not _owner._pid_alive(pid):
+        return True
+    stamp = _read_trigger_stamp(tracker)
+    return stamp is None or f" pid={pid} " not in f"{stamp} "
+
+
+def retire_local_sweep(
+    tracker: str, *, poll_s: float = 0.2, sleep=time.sleep, monotonic=time.monotonic
+):
+    """Stop this namespace's sweep now; return ``finish(deadline)`` for the exit path.
+
+    ``finish`` waits, never past *deadline* (a ``time.monotonic`` value), for the signalled
+    worker to exit and then for the store write lock to be free, so an in-flight fold or
+    event write completes before the process exits. Past the deadline it logs and returns:
+    the fold's intent journal recovers a fold the container's final SIGKILL interrupts."""
+    from rebar._store import lock as _lock
+
+    pid = stop_local_sweep(tracker)
+
+    def finish(deadline: float) -> None:
+        while pid is not None and not _sweep_exited(tracker, pid) and monotonic() < deadline:
+            sleep(poll_s)
+        while _lock.write_lock_is_busy(tracker) and monotonic() < deadline:
+            sleep(poll_s)
+        if monotonic() >= deadline and _lock.write_lock_is_busy(tracker):
+            logger.warning(
+                "retiring: grace expired with the store write lock still held (%s); exiting",
+                _lock.describe_lock_holder(tracker),
+            )
+
+    return finish
 
 
 def run_sweep(tracker: str) -> None:
