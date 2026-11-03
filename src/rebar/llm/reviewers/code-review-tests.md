@@ -68,6 +68,22 @@ genuinely broken test — judge test quality on its own terms.
   cannot distinguish its verdict from its own failure.* The remediation is cheap and uniform:
   assert the producer RAN (exit status, non-empty capture, an asserted PRESENCE from the same
   capture) before trusting any absence derived from it.
+- **loc-ceiling-pinning**: a test asserting an UPPER line-count bound on a source file with a
+  hard-coded ceiling value — e.g. `assert len(path.read_text().splitlines()) <= 800`, or a
+  `line_counts["mod.py"] <= 500` lookup. ADR 0058 makes the project's LOC ceiling single-sourced
+  in `.github/module-size-limit.txt`, enforced by the CI module-size gate; a second, hand-written
+  copy of that number in a test is a change-detector against a value the test does not own. It
+  breaks on a behavior-preserving extraction that moves lines between files, and it silently
+  diverges when the authoritative limit changes. Litmus: *does this assertion bound a file's size
+  from above using a literal number written in the test?* TWO EXEMPTIONS, do NOT flag either:
+  (a) an anti-fragmentation FLOOR (`assert 100 <= count`, or the lower half of a
+  `100 <= count <= 500` range) — a floor guards shredding, which the cap structurally cannot
+  see, so it is the opposite check and not a duplicate; (b) a ceiling read from the
+  authoritative source at runtime (`read_limit()` or an equivalent single-sourced accessor)
+  rather than written as a literal — that is the sanctioned mirror form. Note the mixed case:
+  in `100 <= count <= 500` the floor is exempt and the literal ceiling is not; flag only the
+  upper half. Remediation is to delete the upper bound, or replace the literal with the
+  single-sourced accessor.
 
 **False-positive GUARDS — do NOT flag these (they are VALID by the standard):**
 - **Four-Criterion Test.** Raise a test-coupling finding above a `minor` suggestion ONLY when at
@@ -109,7 +125,10 @@ genuinely broken test — judge test quality on its own terms.
   alongside a deterministic primary mechanism (barrier, pipe, marker file, event); (x) an ABSENCE
   assertion PRECEDED by a producer-liveness assertion — a returncode check, a non-empty-output
   check, or an asserted presence from the same capture — is NOT a fail-open oracle; the liveness
-  anchor is exactly the remediation, so do not flag the fixed form.
+  anchor is exactly the remediation, so do not flag the fixed form; (xi) an anti-fragmentation
+  LOC FLOOR (`100 <= count`), and a LOC ceiling read from the authoritative limit file at
+  runtime (`read_limit()` or an equivalent single-sourced accessor) — neither is
+  loc-ceiling-pinning; only a hard-coded UPPER bound is.
 
 For each finding, conform to the evidence-record contract:
 - `finding`: the issue, as one specific, actionable claim.

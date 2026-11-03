@@ -99,21 +99,6 @@ def test_run_span_is_a_noop_without_a_tracer() -> None:
         pass
 
 
-def test_gate_dispatch_within_module_cap() -> None:
-    """AC6: gate_dispatch.py must stay under the 800-line cap."""
-    from pathlib import Path
-
-    p = (
-        Path(__file__).resolve().parents[2]
-        / "src"
-        / "rebar"
-        / "llm"
-        / "workflow"
-        / "gate_dispatch.py"
-    )
-    assert len(p.read_text().splitlines()) <= 800
-
-
 # ══════════════════════════ HELD-OUT ORACLE ══════════════════════════
 
 

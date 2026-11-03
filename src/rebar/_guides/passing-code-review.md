@@ -116,6 +116,33 @@ for a reason other than the condition (wrong input, a format the matcher can't s
 recovery work against a system that was never broken. If you are verifying an absence, verify
 your instrument can still see a presence.
 
+### LOC ceilings — the limit file owns the number, your test doesn't
+
+The `tests` dimension flags **loc-ceiling-pinning**: a test that bounds a source file's line
+count from above using a number written in the test, such as
+`assert len(path.read_text().splitlines()) <= 800`.
+
+The project single-sources its LOC ceiling in `.github/module-size-limit.txt`, enforced by the
+CI module-size gate (ADR 0058). A ceiling retyped into a test is a second copy of a number the
+test does not own, and it fails in both directions: it breaks on a behavior-preserving
+extraction that merely moves lines between files, and it goes quietly out of date when the
+authoritative limit changes — still green, no longer checking the real policy.
+
+Two forms are explicitly **not** flagged:
+
+- **An anti-fragmentation floor** (`assert 100 <= count`). A floor guards a failure the cap
+  structurally cannot see: the gate only rejects files that are too *large*, so it would
+  happily accept a module shredded into 40-line fragments. That is the opposite check, not a
+  duplicate one.
+- **A ceiling read from the limit file at runtime** (`read_limit()` or an equivalent
+  single-sourced accessor). There is no second copy to diverge — this is the sanctioned mirror
+  form, and `test_module_size_contract.py` is its reference implementation.
+
+Watch the mixed case. In `assert 100 <= counts["mod.py"] <= 500` the floor is fine and the
+literal ceiling is not; drop the upper half and keep the lower. And the antipattern is about
+*file line counts*, not every numeric bound — a payload-size budget on values your unit
+produced is an ordinary observable post-condition.
+
 ## A big bug fix needs a reviewed plan
 
 One blocking finding is not about your code at all. If your commit's `rebar-ticket:` names a
