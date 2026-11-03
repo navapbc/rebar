@@ -14,8 +14,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from rebar._store.git_outcome import is_ref_cas_mismatch
-from rebar._store.gitutil import fetch_coordination_lock, run_git
+from rebar._store.git_outcome import is_ref_cas_mismatch, is_watchdog_timeout
+from rebar._store.gitutil import fetch_coordination_lock, run_git_bounded
 
 try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
     import fcntl
@@ -133,25 +133,35 @@ def fetch_timeout() -> int:
 def git_run(
     repo_root: str, *args: str, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    try:
-        return run_git(repo_root, *args, check=False, env=env, timeout=_GIT_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            ["git", "-C", repo_root, *args],
-            124,
-            "",
-            f"git timed out after {_GIT_TIMEOUT}s",
+    """Run bounded local git; a watchdog kill is the shared outcome that
+    :func:`rebar._store.git_outcome.is_watchdog_timeout` recognises."""
+    return run_git_bounded(repo_root, *args, timeout=_GIT_TIMEOUT, env=env)
+
+
+def _raise_if_timed_out(proc: subprocess.CompletedProcess[str], repo_root: str, op: str) -> None:
+    """Raise when *proc* was killed by its watchdog: its empty output answers nothing."""
+    if is_watchdog_timeout(proc):
+        raise SnapshotError(
+            f"`git {op}` in {repo_root!r} timed out after {_GIT_TIMEOUT}s (attested mode "
+            "fails closed). This is not a verdict on the ref or remote: git did not answer "
+            "within its bound. Retry once git responds."
         )
 
 
 def has_remote(repo_root: str, remote: str = "origin") -> bool:
+    """Whether *remote* is configured; raises :class:`SnapshotError` if ``git remote``
+    times out rather than answering "absent"."""
     proc = git_run(repo_root, "remote")
+    _raise_if_timed_out(proc, repo_root, "remote")
     remotes = {ln.strip() for ln in proc.stdout.splitlines()}
     return remote in remotes
 
 
 def rev_parse(repo_root: str, ref: str) -> str | None:
-    """Resolve ``ref`` to a full commit SHA, or ``None`` if it does not resolve."""
+    """Resolve ``ref`` to a full commit SHA, or ``None`` if it does not resolve.
+
+    A timed-out ``git rev-parse`` raises :class:`SnapshotError` instead of returning
+    ``None``, so it is never reported as an unresolvable ref."""
     proc = git_run(
         repo_root,
         "rev-parse",
@@ -160,6 +170,7 @@ def rev_parse(repo_root: str, ref: str) -> str | None:
         "--end-of-options",
         f"{ref}^{{commit}}",
     )
+    _raise_if_timed_out(proc, repo_root, "rev-parse")
     sha = proc.stdout.strip()
     return sha or None
 
