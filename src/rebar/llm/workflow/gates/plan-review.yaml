@@ -28,6 +28,15 @@ inputs:
       supplied by the gate dispatcher (``[]`` = normal full review).
     type: array
     required: false
+  overlap:
+    description: >-
+      OVERLAP SURFACING (a350): when true, the activated `project.plan-overlap` criterion is
+      fanned in and the finder is told which existing tickets have the most similar recorded
+      plans. Always supplied by the gate dispatcher (`false` = off), and off leaves the
+      criterion out of every chunk, so checkpoint identity is unchanged.
+    type: boolean
+    required: false
+    default: false
   subject_plan:
     description: Subject plan from the same review generation as the relation preload.
     type: string
@@ -64,6 +73,9 @@ steps:
           # `include_<ID>` below), but the runner re-routes ACTIVATED project criteria itself,
           # so it needs the allowlist to filter those too. `[]` = normal full review.
           probe_criteria: ${{ inputs.probe_criteria }}
+          # OVERLAP (a350): the runner gates this criterion's fan-in on the flag, because for
+          # a project criterion the `include_<id>` key is only a coverage record.
+          overlap: ${{ inputs.overlap }}
         # Pass-1 uses frontier because it generates blocking findings; verify and coach use
         # standard. Consumers read only rung 0—context escalation uses sizing.MODEL_LADDER.
         model_ladder:

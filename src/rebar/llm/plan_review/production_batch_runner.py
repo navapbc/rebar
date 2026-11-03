@@ -122,6 +122,9 @@ class ProductionBatchRunner(BatchRunner):
             {c["id"] for c in (*single, *agent)},
             req.with_inputs.get("probe_criteria"),
         )
+        proj_single, proj_agent = _drop_unrequested_overlap(
+            proj_single, proj_agent, overlap=bool(req.with_inputs.get("overlap"))
+        )
         single.extend(proj_single)
         agent.extend(proj_agent)
 
@@ -256,6 +259,9 @@ def _resolve_criteria(
     return single, agent, skipped
 
 
+_OVERLAP_ID = "project.plan-overlap"
+
+
 def _project_criteria(
     ctx, exclude: set[str], probe: Iterable[Any] | None = None
 ) -> tuple[list[dict], list[dict]]:
@@ -274,6 +280,17 @@ def _project_criteria(
     fan-in is filtered to ids IN the allowlist, mirroring ``workflow_ops``' built-in probe
     filter; empty/absent leaves the normal full-review fan-in untouched.
 
+    ``overlap`` (a350) gates the OVERLAP criterion's fan-in rather than its inclusion key.
+    For a project criterion the ``include_<id>`` key is only a coverage record — this
+    function never reads it, filtering solely on ``probe`` — so an inclusion-key switch
+    would not be a switch at all. The drop happens in ``_drop_unrequested_overlap`` at the
+    call site rather than here, because this function's signature is a widely stubbed test
+    seam: 19 tests across five modules monkeypatch it with fixed-arity lambdas, so adding a
+    parameter breaks them all for a filter the caller can apply itself. Dropped either way,
+    the id reaches no chunk's rubric and is absent from the prompt id, which is what leaves
+    checkpoint identity byte-identical and makes it impossible for a finder to raise the
+    finding from plan text alone.
+
     No ``gate_log`` is passed (ticket 4ee2): this re-routes the same ticket the assemble
     step already routed, so recording its deterministic-gate skips here would duplicate
     the assemble step's ``coverage.routing.det_gated`` record — skips are captured once,
@@ -288,6 +305,24 @@ def _project_criteria(
         return cid in allowlist if allowlist else True
 
     return [c for c in single if _keep(c)], [c for c in agent if _keep(c)]
+
+
+def _drop_unrequested_overlap(
+    single: list[dict], agent: list[dict], *, overlap: bool
+) -> tuple[list[dict], list[dict]]:
+    """Remove the on-demand OVERLAP criterion unless this run asked for it.
+
+    Applied to ``_project_criteria``'s result rather than inside it, so that function's
+    signature — a test seam stubbed by fixed-arity lambdas across the workflow suites —
+    stays stable. The two orders are equivalent: ``_keep`` filters on id and allowlist
+    only, so dropping the id after the fan-in removes exactly the entry an in-function
+    arm would never have added."""
+    if overlap:
+        return single, agent
+    return (
+        [c for c in single if str(c["id"]) != _OVERLAP_ID],
+        [c for c in agent if str(c["id"]) != _OVERLAP_ID],
+    )
 
 
 __all__ = ["ProductionBatchRunner"]
