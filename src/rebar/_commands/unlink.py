@@ -39,22 +39,13 @@ _USAGE = (
 _EVENT_ORDER = {"LINK": 0, "UNLINK": 1}
 
 
-def _get_link_info(
-    ticket_dir: Path, target_id: str, relation: str | None = None
-) -> tuple[str, str]:
-    """Net-active ``(link_uuid, relation)`` from source→target, or ``("", "")``.
+def _replay_links(ticket_dir: Path) -> tuple[dict[str, tuple[str, str]], set[str]]:
+    """Replay LINK/UNLINK events chronologically: net-active ``{uuid: (target, relation)}``.
 
-    Replays LINK/UNLINK events chronologically (UNLINK.data.link_uuid cancels the
-    LINK with that uuid), returning the most recent net-active link for target;
-    falls back to a SNAPSHOT compiled_state.deps[] entry (compacted links), minus
-    any cancelled uuids.
-
-    ``relation`` narrows the search to exactly that relation (bug e39f): links are
-    written keyed on ``(target_id, relation)``, so a pair can hold several
-    relations; ``relation=None`` keeps the pair-scoped most-recent behavior.
+    ``UNLINK.data.link_uuid`` cancels the LINK with that uuid. The stored ``target_id`` is
+    returned raw, exactly as written; the dict's insertion order is chronological. Also
+    returns every cancelled uuid, for the SNAPSHOT fallback.
     """
-    if not ticket_dir.is_dir():
-        return "", ""
     events = [("LINK", f) for f in sorted(ticket_dir.glob("*-LINK.json"))]
     events += [("UNLINK", f) for f in sorted(ticket_dir.glob("*-UNLINK.json"))]
     events.sort(key=lambda x: (_prefix_ts(x[1].name), _EVENT_ORDER.get(x[0], 99), x[1].name))
@@ -80,14 +71,12 @@ def _get_link_info(
             if link_uuid:
                 cancelled.add(link_uuid)
                 active.pop(link_uuid, None)
+    return active, cancelled
 
-    found = ("", "")
-    for uuid, (tid, rel) in active.items():
-        if tid == target_id and (relation is None or rel == relation):
-            found = (uuid, rel)  # last match wins (insertion order = chronological)
-    if found[0]:
-        return found
 
+def _snapshot_links(ticket_dir: Path, cancelled: set[str]) -> list[tuple[str, str, str]]:
+    """``(uuid, target, relation)`` for SNAPSHOT compiled_state deps not later cancelled."""
+    out: list[tuple[str, str, str]] = []
     for snap in sorted(ticket_dir.glob("*-SNAPSHOT.json")):
         try:
             with open(snap, encoding="utf-8") as fh:
@@ -96,15 +85,58 @@ def _get_link_info(
             continue
         for dep in data.get("data", {}).get("compiled_state", {}).get("deps", []):
             duuid = dep.get("link_uuid", "")
-            drel = dep.get("relation", "")
-            if (
-                dep.get("target_id", "") == target_id
-                and duuid
-                and duuid not in cancelled
-                and (relation is None or drel == relation)
-            ):
-                return duuid, drel
+            if duuid and duuid not in cancelled:
+                out.append((duuid, dep.get("target_id", ""), dep.get("relation", "")))
+    return out
+
+
+def _get_link_info(
+    ticket_dir: Path, target_id: str, relation: str | None = None
+) -> tuple[str, str]:
+    """Net-active ``(link_uuid, relation)`` from source→target, or ``("", "")``.
+
+    Returns the most recent net-active LINK for target (``_replay_links``); falls back to a
+    SNAPSHOT compiled_state.deps[] entry (compacted links), minus any cancelled uuids.
+
+    ``relation`` narrows the search to exactly that relation (bug e39f): links are
+    written keyed on ``(target_id, relation)``, so a pair can hold several
+    relations; ``relation=None`` keeps the pair-scoped most-recent behavior.
+    """
+    if not ticket_dir.is_dir():
+        return "", ""
+    active, cancelled = _replay_links(ticket_dir)
+    found = ("", "")
+    for uuid, (tid, rel) in active.items():
+        if tid == target_id and (relation is None or rel == relation):
+            found = (uuid, rel)  # last match wins (insertion order = chronological)
+    if found[0]:
+        return found
+    for duuid, tid, drel in _snapshot_links(ticket_dir, cancelled):
+        if tid == target_id and (relation is None or drel == relation):
+            return duuid, drel
     return "", ""
+
+
+def _dangling_links(
+    ticket_dir: Path, raw_target: str, relation: str | None
+) -> list[tuple[str, str]]:
+    """Net-active ``(link_uuid, relation)`` whose STORED target equals ``raw_target`` exactly.
+
+    Chronological, live LINK events before compacted SNAPSHOT entries. Exact string equality
+    is the safety property (lionly-squarish-xantus): a link stored with a full ticket id never
+    equals a short or unknown input, so this cannot select a link to a real ticket.
+    """
+    if not ticket_dir.is_dir():
+        return []
+    active, cancelled = _replay_links(ticket_dir)
+    links = [(u, t, r) for u, (t, r) in active.items()]
+    seen = set(active)
+    links += [link for link in _snapshot_links(ticket_dir, cancelled) if link[0] not in seen]
+    return [
+        (uuid, rel)
+        for uuid, tid, rel in links
+        if tid == raw_target and (relation is None or rel == relation)
+    ]
 
 
 def _write_unlink(
@@ -149,8 +181,9 @@ def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo
     unlink the most-recent id1→id2 link, and for a relates_to link also unlink the
     reciprocal id2→id1 (warning if it is an orphaned one-sided link). With an
     explicit ``relation`` (bug e39f), removes exactly that relation's net-active
-    link — a pair holding several relations keeps the others. Raises
-    :class:`CommandError`.
+    link — a pair holding several relations keeps the others. When ``id2_raw`` does
+    not resolve to a ticket, a link whose stored target equals it exactly is removed
+    instead (``_unlink_dangling``). Raises :class:`CommandError`.
 
     Returns ``{"source", "target", "relation"}`` — the resolved edge actually
     removed (ticket 6bda-9d58-8546-4638); the former ``None`` return was unconsumed
@@ -168,9 +201,9 @@ def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo
     id1 = resolve_ticket_id(id1_raw, str(tracker))
     if id1 is None:
         raise CommandError(f"Error: ticket '{id1_raw}' does not exist")
-    id2 = resolve_ticket_id(id2_raw, str(tracker))
+    id2 = resolve_ticket_id(id2_raw, str(tracker), quiet=True)
     if id2 is None:
-        raise CommandError(f"Error: ticket '{id2_raw}' does not exist")
+        return _unlink_dangling(id1, id2_raw, relation, tracker, repo_root=repo_root)
 
     _, link_relation = _get_link_info(tracker / id1, id2, relation)
     _write_unlink(id1, id2, tracker, repo_root=repo_root, relation=relation)
@@ -186,6 +219,44 @@ def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo
                 file=sys.stderr,
             )
     return {"source": id1, "target": id2, "relation": link_relation}
+
+
+def _unlink_dangling(
+    source_id: str, raw_target: str, relation: str | None, tracker: Path, *, repo_root
+) -> dict:
+    """Remove a net-active link whose stored target is ``raw_target`` and resolves to nothing.
+
+    Reached only when ``raw_target`` does not resolve to a ticket (lionly-squarish-xantus).
+    The reducer keeps such a LINK's raw ``target_id`` (``process_link``) and an UNLINK cancels
+    by ``link_uuid``, so the stored string is the only handle. With no match the resolver's
+    diagnostic is replayed and the historical "does not exist" error stands. Matches spanning
+    more than one relation without a relation selector are refused, never guessed. There is
+    no reciprocal UNLINK: the target is not a ticket directory.
+    """
+    matches = _dangling_links(tracker / source_id, raw_target, relation)
+    if not matches:
+        resolve_ticket_id(raw_target, str(tracker))  # re-run loudly for its diagnostic
+        raise CommandError(f"Error: ticket '{raw_target}' does not exist")
+    relations = sorted({rel for _, rel in matches})
+    if len(relations) > 1:
+        raise CommandError(
+            f"Error: '{source_id}' holds links to unresolvable target '{raw_target}' with "
+            f"relations {', '.join(relations)}; name the relation to remove"
+        )
+    link_uuid, link_relation = matches[-1]
+    append_event(
+        source_id,
+        "UNLINK",
+        {"link_uuid": link_uuid, "target_id": raw_target},
+        tracker,
+        repo_root=repo_root,
+    )
+    print(
+        f"Note: target '{raw_target}' does not resolve to a ticket; removed the stored "
+        f"{link_relation} link {link_uuid} by its exact target string",
+        file=sys.stderr,
+    )
+    return {"source": source_id, "target": raw_target, "relation": link_relation}
 
 
 def unlink_cli(argv: list[str], *, repo_root=None) -> int:
