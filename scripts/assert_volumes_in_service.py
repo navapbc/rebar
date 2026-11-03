@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# mechanism-ok: ci_gate scripts/assert_volumes_in_service.py — bug dcc3-75ee-26ce-4840: a volume
+# mechanism-ok: ci_gate scripts/assert_volumes_in_service.py — dcc3-75ee-26ce-4840 a volume
 # attached by `terraform apply` AFTER first boot is never mounted, because user_data.sh runs only
 # at launch. Terraform knows it attached the volume; nothing compared that against whether the
 # volume actually entered service, so a closed story sat provably not-in-effect for days.

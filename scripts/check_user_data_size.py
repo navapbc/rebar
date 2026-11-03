@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# mechanism-ok: ci_gate scripts/check_user_data_size.py — bug a68c-9633-248c-4b06: the EC2
+# mechanism-ok: ci_gate scripts/check_user_data_size.py — a68c-9633-248c-4b06 the EC2
 # 16 KiB UserData cap is enforced by AWS at PLAN time, so exceeding it makes terraform unable
 # to generate a plan for the WHOLE configuration and blocks every apply. Nothing in the repo
 # measured that payload, so the only feedback was a broken plan a day later, read as "drift".

@@ -20,7 +20,7 @@ pytest.importorskip("hcl2")
 
 
 SECRET = "fixture-secret-credential-value"
-# mechanism-ok: env_var REBAR_TERRAFORM_CONFIG_INSPECT_CANARY — REB-640 c6ce optional pinned-upstream canary  # noqa: E501
+# mechanism-ok: env_var REBAR_TERRAFORM_CONFIG_INSPECT_CANARY — c6ce-4d8d-1c12-47cc REB-640 optional pinned-upstream canary  # noqa: E501
 CANARY_ENV = "REBAR_TERRAFORM_CONFIG_INSPECT_CANARY"
 
 

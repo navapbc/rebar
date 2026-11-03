@@ -22,6 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "check_mechanism_delta.py"
 BASELINE = REPO_ROOT / ".github" / "mechanism-baseline.json"
 MAKEFILE = REPO_ROOT / "Makefile"
+
+# A well-SHAPED id that resolves to no ticket. The seeded markers below are string literals
+# in a tracked file, so the close-time sunset scan (`rebar._commands.sunset_markers`) sees
+# them exactly as it sees a real marker. Seeding a LIVE ticket id here would refuse that
+# ticket's own close forever; the sentinel satisfies the ratchet's shape check and names
+# nothing closeable (d68f-4771).
+SENTINEL = "0000-0000-0000-0000"
 LIMIT_FILE = REPO_ROOT / ".github" / "module-size-limit.txt"
 
 # Reach the private detector subpackage the way `scripts/check_mechanism_delta.py` reaches it
@@ -161,8 +168,8 @@ def test_the_failure_names_the_marker_as_the_remedy():
 
 
 def test_a_marker_with_a_reason_admits_a_new_mechanism():
-    """AC6."""
-    markers = {"lock::new.lock": "bounded by the drain lock it replaces, ticket 9ca8"}
+    """AC6. The reason must OPEN with the sunset ticket (d68f) — prose alone no longer admits."""
+    markers = {"lock::new.lock": "9ca8-1f20-4c3b-4ddd bounded by the drain lock it replaces"}
     code, _ = ratchet.evaluate({"lock::new.lock": 1}, {}, markers)
     assert code == 0
 
@@ -178,7 +185,7 @@ def test_a_marker_without_a_real_reason_does_not_admit(reason: str):
 
 def test_a_marker_admits_only_the_mechanism_it_names():
     """A marker is not a blanket opt-out for its kind."""
-    markers = {"lock::declared.lock": "declared for a reason"}
+    markers = {"lock::declared.lock": "9ca8-1f20-4c3b-4ddd declared for a reason"}
     current = {"lock::declared.lock": 1, "lock::undeclared.lock": 1}
     code, messages = ratchet.evaluate(current, {}, markers)
     assert code != 0
@@ -213,12 +220,15 @@ def test_a_marker_in_a_new_gate_scripts_head_admits_it(tmp_path):
     code, messages = ratchet.evaluate(current, {}, ratchet.markers_for(tmp_path))
     assert code != 0, "an unjustified new gate script should fail"
 
-    write(f"# mechanism-ok: ci_gate {name} — seeded by this test")
+    write(f"# mechanism-ok: ci_gate {name} — {SENTINEL} seeded by this test")
     code, messages = ratchet.evaluate(ratchet.census(tmp_path), {}, ratchet.markers_for(tmp_path))
     assert code == 0, messages
 
     # ...and the head window is a real bound, not decoration.
-    write(f"# mechanism-ok: ci_gate {name} — seeded by this test", pad=ratchet_head_lines())
+    write(
+        f"# mechanism-ok: ci_gate {name} — {SENTINEL} seeded by this test",
+        pad=ratchet_head_lines(),
+    )
     code, messages = ratchet.evaluate(ratchet.census(tmp_path), {}, ratchet.markers_for(tmp_path))
     assert code != 0, "a marker past the head window should not admit"
 
@@ -245,7 +255,7 @@ def test_a_marker_above_a_workflow_run_step_admits_it(tmp_path):
     code, _ = ratchet.evaluate(current, {}, ratchet.markers_for(tmp_path))
     assert code != 0, "an unjustified new workflow step should fail"
 
-    write(f"# mechanism-ok: ci_gate {name} — seeded by this test")
+    write(f"# mechanism-ok: ci_gate {name} — {SENTINEL} seeded by this test")
     markers = ratchet.markers_for(tmp_path)
     assert f"ci_gate::{name}" in markers, (
         "the marker must be harvested under the step's FULL name; a name with a space that "
@@ -265,7 +275,7 @@ def test_a_marker_admits_a_step_whose_name_carries_a_flag(tmp_path):
     name = ".github/workflows/flagged.yml::pytest -q tests"
     (workflows / "flagged.yml").write_text(
         "jobs:\n  build:\n    steps:\n"
-        f"      # mechanism-ok: ci_gate {name} — seeded by this test\n"
+        f"      # mechanism-ok: ci_gate {name} — {SENTINEL} seeded by this test\n"
         "      - run: pytest -q tests\n",
         encoding="utf-8",
     )
@@ -337,7 +347,7 @@ def test_update_stale_drains_while_an_admitted_mechanism_stands(tmp_path, monkey
     monkeypatch.setattr(
         ratchet,
         "markers_for",
-        lambda root: {"lock::marked.lock": "bug 1768 - probe"},
+        lambda root: {"lock::marked.lock": f"{SENTINEL} probe"},
         raising=False,
     )
 
@@ -544,3 +554,64 @@ def test_the_committed_tree_assertions_consult_marker_admission():
             "path (--update-stale refuses while anything is new; hand-editing the baseline is "
             "forbidden). Re-apply the intent of 6125c5345f01 rather than editing the baseline."
         )
+
+
+# ---------------------------------------------------------------------------
+# the admission names a SUNSET TICKET (d68f)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "remove after the migration finishes",
+        "REB-640 pinned optional corroborator lane",
+        "ticket adab closed-race guard",
+    ],
+)
+def test_a_reason_naming_no_sunset_ticket_does_not_admit(reason: str):
+    """A free-prose admission is permanent — nothing could ever establish it expired.
+
+    The Jira id and the ``ticket <quad>`` form are included because both were REAL in-tree
+    reasons before this change, and both name something the rebar resolver cannot reach.
+    """
+    code, messages = ratchet.evaluate({"lock::new.lock": 1}, {}, {"lock::new.lock": reason})
+    assert code != 0, f"{reason!r} admitted a mechanism with no retiring ticket"
+    assert any("new.lock" in m for m in messages), messages
+
+
+@pytest.mark.parametrize("quad", ["c6ce", "aa9e", "1cef"])
+def test_a_bare_single_quad_does_not_admit(quad: str):
+    """AGENTS.md deprecates the 4-digit quad BECAUSE it collides and so resolves to nothing.
+
+    Each of these three was a real in-tree citation, and each resolved to no ticket at all.
+    """
+    markers = {"lock::new.lock": f"{quad} fixture-heal interval"}
+    code, messages = ratchet.evaluate({"lock::new.lock": 1}, {}, markers)
+    assert code != 0, f"the deprecated quad {quad!r} admitted a mechanism"
+    assert any("new.lock" in m for m in messages), messages
+
+
+@pytest.mark.parametrize(
+    "ticket_id",
+    [
+        "metaphoric-late-creature",
+        "1e24-bfc0",
+        "933f-e7d8-696a-4fbd",
+    ],
+)
+def test_every_resolvable_id_form_admits(ticket_id: str):
+    """Alias, two-quad, and four-quad all admit — AGENTS.md prefers the alias, and the one
+    alias-citing marker in the tree would break wrongly if the grammar rejected it."""
+    markers = {"lock::new.lock": f"{ticket_id} bounded by the drain lock it replaces"}
+    code, messages = ratchet.evaluate({"lock::new.lock": 1}, {}, markers)
+    assert code == 0, messages
+
+
+def test_removing_a_mechanism_still_passes():
+    """The ratchet stays SHRINK-ONLY: ``counters.stale`` is never consulted in the verdict,
+    so a narrowed admission grammar cannot turn a removal into a failure."""
+    baseline = {"lock::retired.lock": 1, "lock::kept.lock": 1}
+    current = {"lock::kept.lock": 1}
+    code, messages = ratchet.evaluate(current, baseline, {})
+    assert code == 0, messages

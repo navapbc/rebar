@@ -83,12 +83,12 @@ jobs:
       - uses: ./.github/actions/setup-uv
         with:
           enable-cache: true
-      # mechanism-ok: ci_gate .github/workflows/_scanner-integration.yml::Install rebar from the committed lock (dev extra) — aa9e scanner lane needs repo dev dependencies before running pytest contracts.
+      # mechanism-ok: ci_gate .github/workflows/_scanner-integration.yml::Install rebar from the committed lock (dev extra) — aa9e-3d35-fd3e-41ee scanner lane needs repo dev dependencies before running pytest contracts.
       - name: Install rebar from the committed lock (dev extra)
         run: |
           uv sync --locked --extra dev
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-      # mechanism-ok: ci_gate .github/workflows/_scanner-integration.yml::Run hash-locked scanner integration contracts — aa9e advisory lane executes the pinned native scanner contract target.
+      # mechanism-ok: ci_gate .github/workflows/_scanner-integration.yml::Run hash-locked scanner integration contracts — aa9e-3d35-fd3e-41ee advisory lane executes the pinned native scanner contract target.
       - name: Run hash-locked scanner integration contracts
         env:
           REBAR_SCANNER_PLATFORM: linux/amd64

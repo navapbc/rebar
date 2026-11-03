@@ -273,7 +273,7 @@ class ReclaimConfig:
 
 @dataclass
 class FixtureHealConfig:
-    # mechanism-ok: config_key fixture_heal.interval_days — 1cef fixture-heal interval
+    # mechanism-ok: config_key fixture_heal.interval_days — 1cef-7fbc fixture-heal interval
     # read-via: config.py fixture_heal_interval_days()
     interval_days: int = _documented(
         30,

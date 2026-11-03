@@ -274,7 +274,7 @@ jobs:
       # This step names the Windows evidence that the write lock excludes concurrent processes and
       # releases after the holder exits. The default suite covers the same module without named
       # output under `-q`. Running it first preserves the platform-specific verdicts in the log.
-      # mechanism-ok: ci_gate .github/workflows/test.yml::Prove the Windows exclusive leg (named verdicts) — story 4cfc-2de2-747d-4388 AC4: windows-latest is the only place the real msvcrt.locking's cross-process exclusivity and release-on-process-death can be established, and under the default suite's `-q` a passing proof prints NOTHING, so the evidence was readable only as absence. This step gates nothing (the job is continue-on-error) and adds no new coverage — it re-runs one already-running module so its verdicts are named in the log.
+      # mechanism-ok: ci_gate .github/workflows/test.yml::Prove the Windows exclusive leg (named verdicts) — 4cfc-2de2-747d-4388 AC4: windows-latest is the only place the real msvcrt.locking's cross-process exclusivity and release-on-process-death can be established, and under the default suite's `-q` a passing proof prints NOTHING, so the evidence was readable only as absence. This step gates nothing (the job is continue-on-error) and adds no new coverage — it re-runs one already-running module so its verdicts are named in the log.
       - name: Prove the Windows exclusive leg (named verdicts)
         # Skip trees predating the module. Use bash because Windows defaults to pwsh and the
         # parity test executes this guard in bash. Non-blocking failure names the proof without

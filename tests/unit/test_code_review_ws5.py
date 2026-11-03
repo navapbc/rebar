@@ -637,7 +637,7 @@ def test_terraform_grounding_provider_is_byte_neutral_for_ws5_python_security_pa
 
 
 # ── deployed scanner lock + provisioner contract (story aa9e) ───────────────────────────────
-# mechanism-ok: test_helper _load_review_scanners — aa9e scanner installer import seam.
+# mechanism-ok: test_helper _load_review_scanners — aa9e-3d35-fd3e-41ee scanner installer seam
 def _load_review_scanners():
     import importlib.util
     import sys

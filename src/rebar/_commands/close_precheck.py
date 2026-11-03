@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from rebar import config
-from rebar._commands import close_disposition, close_scope, txn
+from rebar._commands import close_disposition, close_scope, sunset_markers, txn
 from rebar._commands._seam import CommandError
 from rebar._store import freshness
 
@@ -551,6 +551,17 @@ def _bot_alert_disposition(ticket_id: str, close_class: str, close_reason: str, 
     }
 
 
+def _refuse_open_sunset_marker(ticket_id: str, code_root: str, tracker: str) -> None:
+    """Refuse the close while a `# mechanism-ok:` marker names this ticket as its sunset.
+
+    Resolves the alias/short form the caller typed to the canonical id a marker would
+    carry, so `rebar transition <alias> ... closed` and the full-quad form refuse alike."""
+    from rebar._ids import resolve_ticket_id
+
+    resolved = resolve_ticket_id(ticket_id, tracker, quiet=True) or ticket_id
+    sunset_markers.check_no_open_sunset_marker(ticket_id, resolved, code_root, tracker)
+
+
 def _gate_skip_expectation(ticket_id: str, code_root: str, force_close: str) -> str | None:
     """Record gate_off when disabled or force_bypassed when an enabled gate is
     forced. Resolve gate state first. Unreadable config raises instead of
@@ -646,6 +657,15 @@ def _completion_precheck(
             returncode=1,
         )
 
+    # A mechanism admitted by a marker naming THIS ticket as its sunset outlives the close
+    # unless the close refuses, which would restore the permanent admission the narrowed
+    # marker grammar retired. This is a property of the marker grammar, not of completion
+    # verification, so it runs ahead of every disposition and gate-skip path below: a
+    # project with the completion gate off still has markers, and an admission discharged
+    # only when an unrelated gate happens to be enabled is not discharged at all. Only an
+    # explicit --force (handled above) passes it.
+    _refuse_open_sunset_marker(ticket_id, code_root, tracker)
+
     # Disposition closes attest why completion is not being claimed; skip the verifier.
     disposition = _administrative_disposition(ticket_id, ticket_type, close_class, reason, tracker)
     if disposition is not _NO_DISPOSITION:
@@ -691,6 +711,8 @@ def _completion_precheck(
             **view_kwargs,
             **metrics_kwargs,
         )
+        # A mechanism admitted by a marker naming THIS ticket as its sunset is refused
+        # unconditionally by _refuse_open_sunset_marker above, before any gate-skip path.
         tree_sha, tree_source = _verification_tree(ref, ref_source, code_root)
         close_scope.ensure_tree_contains_landed(
             ticket_id, landed or [], code_root, tree_sha, tree_source
