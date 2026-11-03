@@ -616,6 +616,14 @@ local branch into the shared store. Do that only through `rebar store maintenanc
 an isolated operator clone) while other sessions are quiesced, because this host runs many
 worktrees against one shared `tickets` branch.
 
+A served MCP server (the HTTP transport) does not wait for that later write. Every 120 s it
+runs `sync.idle_sync`, which reconverges the clone and pushes any backlog. The run holds the
+drain gauge and stops once SIGTERM drain begins. Each outcome an operator needs is logged at
+WARNING, the server's default stderr level: `PUSH_PENDING` with its reason, `DIVERGED`, a
+skip because the write lock is busy (with the holder), and `delivered` when a recorded
+backlog lands. A store that is already current logs nothing at that level (bug
+topnotch-brazen-slug).
+
 #### Where the signal STOPS being advisory — the gate freshness assertion
 
 The marker above is advisory to a WRITE, and deliberately so. It is not advisory to a

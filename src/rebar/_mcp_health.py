@@ -332,6 +332,78 @@ def _sweep_store(tracker: str) -> None:
         logging.getLogger("rebar").debug("startup ensure-sweep skipped", exc_info=True)
 
 
+#: How often an idle MCP server syncs its tickets clone. Short enough that a fork left by a
+#: failed push or a deploy overlap heals within minutes with no client write; long enough
+#: that the fetch is noise next to the server's own traffic. A constant, not config: no
+#: deployment has needed another value (bug topnotch-brazen-slug).
+IDLE_SYNC_INTERVAL_S = 120.0
+
+
+def run_idle_sync_loop(
+    tracker: str,
+    gauge: InFlightGauge | None,
+    *,
+    interval: float = IDLE_SYNC_INTERVAL_S,
+    stop: threading.Event | None = None,
+    sync_fn: Callable[[str], object] | None = None,
+) -> None:
+    """Run ``sync.idle_sync`` every *interval* seconds until *stop* is set or the server
+    starts draining.
+
+    Each run holds the drain gauge, so a SIGTERM drain waits for a push in progress rather
+    than exiting under it. ``draining`` is checked before the hold, which leaves only a
+    single bounded run able to start in the instant SIGTERM lands. A failing run is logged
+    with its traceback and the next tick runs anyway."""
+    from rebar._deprecations import RemovedInputError
+
+    if sync_fn is None:
+        from rebar._store import sync as _sync
+
+        sync_fn = _sync.idle_sync
+    stop = stop if stop is not None else threading.Event()
+    while not stop.wait(interval):
+        if gauge is not None and gauge.draining:
+            return
+        release = gauge.hold() if gauge is not None else None
+        try:
+            sync_fn(tracker)
+        except RemovedInputError:
+            # A removed load-bearing input must fail loudly, not be retried every tick.
+            raise
+        except Exception:
+            logging.getLogger("rebar").warning(
+                "idle tickets sync failed; retrying next tick", exc_info=True
+            )
+        finally:
+            if release is not None:
+                release()
+
+
+def start_idle_sync(gauge: InFlightGauge | None) -> threading.Thread | None:
+    """Start :func:`run_idle_sync_loop` on a daemon thread; ``None`` when there is no store."""
+    from rebar._deprecations import RemovedInputError
+
+    try:
+        from rebar import config as _config
+
+        tracker = str(_config.tracker_dir())
+    except RemovedInputError:
+        # Removed load-bearing inputs must fail MCP startup hard.
+        raise
+    except Exception:
+        logging.getLogger("rebar").warning("idle tickets sync not started", exc_info=True)
+        return None
+    if not os.path.isdir(tracker):
+        return None
+    from rebar._opcert_binding import spawn_context_daemon
+
+    # Not inside tracked_work: the loop is permanent, so it must not hold the drain gauge;
+    # each run takes its own hold instead.
+    return spawn_context_daemon(
+        lambda: run_idle_sync_loop(tracker, gauge), name="rebar-mcp-idle-sync"
+    )
+
+
 def _resolve_startup_tracker() -> str | None:
     """The tracker path to sweep, or ``None`` after warning that no store exists.
 

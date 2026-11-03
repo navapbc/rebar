@@ -562,11 +562,20 @@ def main() -> None:
     # (fail-closed). The transport selection drives both build_server and run().
     cfg = rebar.config.compose_config()
     server = build_server(cfg)
-    from rebar._mcp_health import _GAUGE_ATTR, run_mcp, start_startup_store_sweep
+    from rebar._mcp_health import (
+        _GAUGE_ATTR,
+        run_mcp,
+        start_idle_sync,
+        start_startup_store_sweep,
+    )
 
     # Boot store sweep + the no-store warning, off the pre-listen path and held on the
     # drain gauge (bug short-elderly-cock); see _mcp_health.start_startup_store_sweep.
     start_startup_store_sweep(getattr(server, _GAUGE_ATTR, None))
+    # A served (HTTP) store syncs on an idle timer, so a fork heals without waiting for a
+    # client write (bug topnotch-brazen-slug). A stdio server is a per-session process.
+    if cfg.mcp.transport == "http":
+        start_idle_sync(getattr(server, _GAUGE_ATTR, None))
 
     # Bind a valid box signer inside the serving thread; unprovisioned runs
     # retain env/genesis signing.
