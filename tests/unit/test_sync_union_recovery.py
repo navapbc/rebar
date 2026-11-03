@@ -142,3 +142,172 @@ def test_sync_preserves_detached_head_local_ahead_commit(tmp_path: Path) -> None
     assert _git(tracker, "cat-file", "-e", local_sha).returncode == 0, (
         "local commit was collectible — it was orphaned, not merged"
     )
+
+
+# ── A timed-out merge is a timeout, not a conflict (bug painted-epidermal-shelduck) ──
+#
+# ``run_git_bounded`` folds a watchdog kill into a synthetic rc-124 result. Sync used to
+# feed that result to the conflict-recovery path, find no conflict marker, and report
+# "could not auto-merge … run: rebar store fsck-recover" — a tool that cannot help with a
+# merge that is merely slower than its bound. These pin the distinct report, the single
+# attempt, the unchanged conflict path, and the bounds sync applies.
+
+
+def _diverged_clone(tmp_path: Path, *, conflict: bool = False) -> tuple[Path, str, str]:
+    """A clone of ``origin`` where both sides committed after a shared base. With
+    *conflict*, both sides write different content to the same tracked file."""
+    origin = tmp_path / "origin"
+    tracker = tmp_path / "tracker"
+    _new_tickets_repo(origin)
+    _commit_event(origin, "0000-base-0000-0000", '{"e":"base"}')
+    subprocess.run(["git", "clone", "-q", "-b", "tickets", str(origin), str(tracker)], check=True)
+    _git(tracker, "config", "user.email", "t@t")
+    _git(tracker, "config", "user.name", "t")
+    if conflict:
+        origin_sha = _commit_event(origin, "3333-same-3333-3333", '{"side":"origin"}')
+        local_sha = _commit_event(tracker, "3333-same-3333-3333", '{"side":"local"}')
+    else:
+        origin_sha = _commit_event(origin, "2222-orig-2222-2222", '{"e":"origin"}')
+        local_sha = _commit_event(tracker, "1111-local-1111-1111", '{"e":"local"}')
+    return tracker, local_sha, origin_sha
+
+
+def _stall_merges(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
+    """Make every non-abort ``git merge`` hit the watchdog, through the real
+    ``run_git_bounded`` fold, so the result is exactly what production builds."""
+    attempts: list[tuple[str, ...]] = []
+    real_run_git = sync.run_git
+
+    def stalling_run_git(cwd, *args, **kwargs):
+        if args and args[0] == "merge" and "--abort" not in args:
+            attempts.append(args)
+            raise subprocess.TimeoutExpired(["git", *args], kwargs.get("timeout"))
+        return real_run_git(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(sync, "run_git", stalling_run_git)
+    return attempts
+
+
+def test_timed_out_merge_is_reported_as_a_timeout_not_a_conflict(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    tracker, local_sha, origin_sha = _diverged_clone(tmp_path)
+    _stall_merges(monkeypatch)
+
+    with caplog.at_level("WARNING", logger="rebar._store.sync"):
+        sync.reconverge(tracker)
+
+    text = caplog.text
+    assert "could not auto-merge" not in text, text
+    assert "fsck-recover" not in text, text
+    assert "timed out" in text and "git merge" in text, text
+    assert f"{sync._LOCAL_GIT_TIMEOUT}s" in text, f"the bound is not named: {text}"
+    # Local state is still never discarded, and nothing is left mid-merge.
+    assert _git(tracker, "merge-base", "--is-ancestor", local_sha, "HEAD").returncode == 0
+    assert _git(tracker, "merge-base", "--is-ancestor", origin_sha, "HEAD").returncode != 0
+    assert (tracker / "1111-local-1111-1111").is_dir()
+    assert not (tracker / ".git" / "MERGE_HEAD").exists()
+
+
+def test_timed_out_merge_is_attempted_exactly_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-running an operation that already outran its bound only burns more bounds."""
+    tracker, _local_sha, _origin_sha = _diverged_clone(tmp_path)
+    attempts = _stall_merges(monkeypatch)
+
+    sync.reconverge(tracker)
+
+    assert len(attempts) == 1, f"a timed-out merge was retried: {attempts}"
+
+
+def test_genuine_conflict_keeps_the_could_not_auto_merge_report(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    tracker, local_sha, origin_sha = _diverged_clone(tmp_path, conflict=True)
+
+    with caplog.at_level("WARNING", logger="rebar._store.sync"):
+        sync.reconverge(tracker)
+
+    assert "could not auto-merge origin/tickets" in caplog.text
+    assert "fsck-recover" in caplog.text
+    assert "timed out" not in caplog.text
+    assert _git(tracker, "merge-base", "--is-ancestor", local_sha, "HEAD").returncode == 0
+    assert _git(tracker, "merge-base", "--is-ancestor", origin_sha, "HEAD").returncode != 0
+    assert not (tracker / ".git" / "MERGE_HEAD").exists()
+
+
+def test_fetch_keeps_the_network_bound_and_local_ops_get_the_local_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stuck remote still fails fast; merge/reset are O(index) local work and are not
+    judged by the network bound."""
+    tracker, _local_sha, _origin_sha = _diverged_clone(tmp_path)
+    bounds: dict[str, set[float | None]] = {}
+    real_run_git = sync.run_git
+
+    def recording_run_git(cwd, *args, **kwargs):
+        bounds.setdefault(args[0], set()).add(kwargs.get("timeout"))
+        return real_run_git(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(sync, "run_git", recording_run_git)
+    sync.reconverge(tracker)
+
+    assert sync._LOCAL_GIT_TIMEOUT > sync._GIT_TIMEOUT
+    assert bounds["fetch"] == {sync._GIT_TIMEOUT}
+    assert bounds["merge"] == {sync._LOCAL_GIT_TIMEOUT}
+
+
+def test_ff_adopt_reset_gets_the_local_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    origin = tmp_path / "origin"
+    tracker = tmp_path / "tracker"
+    _new_tickets_repo(origin)
+    _commit_event(origin, "0000-base-0000-0000", '{"e":"base"}')
+    subprocess.run(["git", "clone", "-q", "-b", "tickets", str(origin), str(tracker)], check=True)
+    _commit_event(origin, "2222-orig-2222-2222", '{"e":"origin"}')
+    seen: list[tuple[tuple[str, ...], float | None]] = []
+    real_run_git = sync.run_git
+
+    def recording_run_git(cwd, *args, **kwargs):
+        seen.append((args, kwargs.get("timeout")))
+        return real_run_git(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(sync, "run_git", recording_run_git)
+    sync.reconverge(tracker)
+
+    resets = [timeout for args, timeout in seen if args[0] == "reset"]
+    assert resets == [sync._LOCAL_GIT_TIMEOUT]
+    assert (tracker / "2222-orig-2222-2222").is_dir()
+
+
+# ── The structural predicate (git_outcome.is_watchdog_timeout) ──
+
+
+def test_watchdog_predicate_is_true_for_the_constructed_timeout() -> None:
+    from rebar._store import git_outcome
+    from rebar._store.gitutil import run_git_bounded
+
+    def hung(*_a, **_kw):
+        raise subprocess.TimeoutExpired(["git", "merge"], 30)
+
+    result = run_git_bounded("/nonexistent", "merge", "x", timeout=30, runner=hung)
+    assert git_outcome.is_watchdog_timeout(result)
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stderr"),
+    [
+        (1, "fatal: unable to access 'https://x/': Connection timed out after 30001 ms"),
+        (128, "ssh: connect to host x port 22: Operation timed out"),
+        (1, "error: Your local changes to the following files would be overwritten by merge"),
+        (0, ""),
+    ],
+)
+def test_watchdog_predicate_is_false_for_ordinary_results(returncode: int, stderr: str) -> None:
+    """Text that merely mentions a timeout is not the watchdog's outcome."""
+    from rebar._store import git_outcome
+
+    result = subprocess.CompletedProcess(["git", "merge"], returncode, "", stderr)
+    assert not git_outcome.is_watchdog_timeout(result)

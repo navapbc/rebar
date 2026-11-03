@@ -18,6 +18,7 @@ import time
 from rebar._store import compat, git_outcome, merge_recovery
 from rebar._store import lock as _lock
 from rebar._store.gitutil import (
+    _LOCAL_GIT_TIMEOUT,
     _with_transient_fault_retry,
     fetch_coordination_lock,
     run_git,
@@ -31,6 +32,10 @@ _SYNC_LOCK_TIMEOUT = 15  # bash TICKET_SYNC_LOCK_TIMEOUT default
 # sync indefinitely. These calls are best-effort already (`_ok` returns False on
 # failure), so a timeout surfaces as a failed CompletedProcess, never a hang.
 _GIT_TIMEOUT = 30
+# These subcommands refresh or rewrite the whole index, so their cost grows with the
+# store, not with the link. They take gitutil's local bound instead of the network one
+# (bug painted-epidermal-shelduck: a 213k-entry store's merge outran 30 s).
+_INDEX_SUBCOMMANDS = frozenset({"merge", "reset", "checkout", "status"})
 
 # The fetch lock serializes rebar peers; bounded retries cover CAS races with
 # other Git peers. Exhaustion skips this best-effort freshness round.
@@ -42,8 +47,11 @@ _FETCH_CAS_BACKOFF_S = 0.1
 def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
     """This module's bounded git seam; the timeout fold is the shared
     :func:`gitutil.run_git_bounded`, handed THIS module's ``run_git`` so the tests that
-    patch ``sync.run_git`` by name keep intercepting every sync git call."""
-    return run_git_bounded(tracker, *args, timeout=_GIT_TIMEOUT, runner=run_git)
+    patch ``sync.run_git`` by name keep intercepting every sync git call. Index-wide
+    subcommands take the local bound; everything else keeps the network bound."""
+    index_wide = bool(args) and args[0] in _INDEX_SUBCOMMANDS
+    bound = _LOCAL_GIT_TIMEOUT if index_wide else _GIT_TIMEOUT
+    return run_git_bounded(tracker, *args, timeout=bound, runner=run_git)
 
 
 # raw-git-ok: locked store seam internal
@@ -164,6 +172,20 @@ def _union_merge(tracker: str, remote: str, *extra: str) -> None:
             return
 
     _git(tracker, "merge", "--abort")
+    _warn_merge_failed(remote, merge)
+
+
+def _warn_merge_failed(remote: str, merge: subprocess.CompletedProcess) -> None:
+    """Report an aborted merge as what it was. A watchdog kill is not a conflict, and
+    ``fsck-recover`` cannot fix a merge that only needs more time."""
+    if git_outcome.is_watchdog_timeout(merge):
+        logger.warning(
+            "tickets sync: git merge of %s timed out after %ss and was aborted — local "
+            "state kept. This is not a merge conflict; the next sync tries again.",
+            remote,
+            _LOCAL_GIT_TIMEOUT,
+        )
+        return
     logger.warning(
         "tickets sync could not auto-merge %s — local state kept; run: rebar store fsck-recover",
         remote,
