@@ -35,6 +35,7 @@ from rebar._snapshot.git_fetch import (
     SnapshotError,
     SnapshotFetchError,
     SnapshotRefError,
+    _raise_if_timed_out,
     fetch_origin,
     fetch_timeout,
     git_run,
@@ -244,8 +245,16 @@ def is_lfs_pointer(path: Path) -> bool:
 
 def _list_submodules(repo_root: str, sha: str) -> tuple[str, ...]:
     """Gitlink (mode 160000) paths in the tree at ``sha`` — submodules, omitted from the
-    materialized tree by construction."""
+    materialized tree by construction.
+
+    A timed-out or failed ``ls-tree`` raises :class:`SnapshotError`: its empty output is no
+    answer, and callers persist the result as the SHA's immutable caveats."""
     proc = git_run(repo_root, "ls-tree", "-r", "--full-tree", sha)
+    _raise_if_timed_out(proc, repo_root, "ls-tree")
+    if proc.returncode != 0:
+        raise SnapshotError(
+            f"git ls-tree {sha[:12]} failed: {(proc.stderr or '').strip() or '<no detail>'}"
+        )
     paths: list[str] = []
     for line in proc.stdout.splitlines():
         # "<mode> <type> <oid>\t<path>"
