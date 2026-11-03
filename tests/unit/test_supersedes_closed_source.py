@@ -111,12 +111,17 @@ def test_every_other_relation_still_refuses_a_closed_source_at_the_writer(store,
         add_dependency(slice_, story, _tracker(store), relation)
 
 
-def test_depends_on_still_refuses_a_closed_target(store):
-    """The relocated closed-TARGET guard keeps refusing depends_on onto closed work."""
+def test_depends_on_accepts_a_closed_target(store):
+    """A closed target is a satisfied dependency, not a refused one (closed-target rules live in
+    ``_links._ENDPOINT_LIVENESS``; see ``test_link_endpoint_liveness.py``)."""
     story, slice_ = _decomposed(store)
 
-    with pytest.raises(ValueError, match=f"target ticket '{slice_}' is closed"):
-        add_dependency(story, slice_, _tracker(store), "depends_on")
+    add_dependency(story, slice_, _tracker(store), "depends_on")
+
+    assert any(
+        dep.get("relation") == "depends_on" and dep.get("target_id") == slice_
+        for dep in _state(store, story).get("deps") or []
+    )
 
 
 # --- AC3: the superseded story closes through both armed gates, without force ----------------

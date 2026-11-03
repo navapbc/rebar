@@ -35,11 +35,25 @@ CANONICAL_RELATIONS: frozenset[str] = frozenset(
 )
 
 
-# Relations a closed SOURCE may still record. The subject of `supersedes` is its TARGET,
-# and the disposition close reads the source as finished replacement work
-# (close_disposition.replacement_of accepts any non-archived, non-deleted source), so a
-# closed source is its normal shape: slices that absorbed a story close before the story.
-_CLOSED_SOURCE_RELATIONS_ALLOWED: frozenset[str] = frozenset({"supersedes"})
+# Which endpoints of each relation must be open: relation -> (source, target). This is the
+# one statement of the rule; every relation must have a row (a missing one is a KeyError,
+# never an inherited default).
+# - Source: a closed ticket records no new outgoing edges (reopen it first), except
+#   `supersedes`, whose subject is its TARGET. The disposition close reads its source as
+#   finished replacement work (close_disposition.replacement_of accepts any non-archived,
+#   non-deleted source), and slices that absorbed a story close before the story.
+# - Target: never required to be open. An edge onto finished work is accurate history, and
+#   for `depends_on` a closed target is a satisfied dependency: `ready` already treats it
+#   so, and plan-review P6 grounds a citation to merged work through exactly this edge.
+_ENDPOINT_LIVENESS: dict[str, tuple[bool, bool]] = {
+    "blocks": (True, False),
+    "depends_on": (True, False),
+    "relates_to": (True, False),
+    "duplicates": (True, False),
+    "supersedes": (False, False),
+    "discovered_from": (True, False),
+    "caused_by": (True, False),
+}
 
 
 def _refuse_closed_endpoints(
@@ -47,19 +61,18 @@ def _refuse_closed_endpoints(
 ) -> None:
     """Raise ``ValueError`` when an endpoint's closed status forbids this relation.
 
-    The message text is matched by the reconciler's closed-source classifier
-    (``impossible_links``), so keep its ``cannot create`` / ``is closed`` wording.
+    The rule comes from :data:`_ENDPOINT_LIVENESS`. The message text is matched by the
+    reconciler's closed-source classifier (``impossible_links``), so keep its
+    ``cannot create`` / ``is closed`` wording.
     """
-    if (
-        relation not in _CLOSED_SOURCE_RELATIONS_ALLOWED
-        and _get_ticket_status(source_id, tracker_dir) == "closed"
-    ):
+    source_must_be_open, target_must_be_open = _ENDPOINT_LIVENESS[relation]
+    if source_must_be_open and _get_ticket_status(source_id, tracker_dir) == "closed":
         raise ValueError(
             f"cannot create {relation} link — source ticket '{source_id}' is closed. "
             f"Reopen it first with: ticket transition {source_id} closed open"
         )
-    if relation == "depends_on" and _get_ticket_status(target_id, tracker_dir) == "closed":
-        raise ValueError(f"cannot create depends_on link — target ticket '{target_id}' is closed")
+    if target_must_be_open and _get_ticket_status(target_id, tracker_dir) == "closed":
+        raise ValueError(f"cannot create {relation} link — target ticket '{target_id}' is closed")
 
 
 class CyclicDependencyError(Exception):
