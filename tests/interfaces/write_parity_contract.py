@@ -44,7 +44,8 @@ class Case:
     ``op`` names the final write. ``setup_type`` and ``pre_in_progress`` define
     its subject. ``gate`` makes bypass cases non-vacuous. ``inputs`` reach the
     operation, ``expected`` and ``expected_status`` describe accepted effects,
-    and ``unmutated_status`` proves rejection is atomic. ``xfail`` maps a surface
+    and ``unmutated_status`` proves rejection is atomic. ``culprit_committed`` gives a
+    ``needs_culprit`` target its referencing commit. ``xfail`` maps a surface
     to its divergence ticket.
     """
 
@@ -57,6 +58,7 @@ class Case:
     target: str = "closed"
     inputs: dict = field(default_factory=dict)
     needs_culprit: bool = False
+    culprit_committed: bool = True
     expected_status: str | None = None
     unmutated_status: str | None = None
     xfail: dict = field(default_factory=dict)
@@ -78,10 +80,10 @@ _GATE_KEY = {
 }
 
 
-def _commit(repo: Path) -> None:
+def _commit(repo: Path, message: str = "oracle") -> None:
     """Seed CODE so a ``ref=HEAD`` gate snapshot resolves."""
     subprocess.run(
-        ["git", "commit", "--allow-empty", "-q", "-m", "oracle"],
+        ["git", "commit", "--allow-empty", "-q", "-m", message],
         cwd=str(repo),
         check=True,
         capture_output=True,
@@ -177,6 +179,18 @@ CASES: list[Case] = [
         expected=Result(ACCEPTED),
         expected_status="closed",
     ),
+    # A close refuses a commitless explicit culprit before writing, as link does.
+    Case(
+        id="caused-by-commitless-bug-close",
+        op="transition",
+        setup_type="bug",
+        pre_in_progress=True,
+        inputs={"close_class": "regression"},
+        needs_culprit=True,
+        culprit_committed=False,
+        expected=Result(REJECTED, code=1),
+        unmutated_status="in_progress",
+    ),
     # ── caused_by link-time validation ───────────────────────────────────────
     # A commitless caused_by target is rejected everywhere. Its reasoned bypass
     # must also agree across surfaces.
@@ -243,6 +257,8 @@ def execute(adapter, case: Case, repo: Path) -> tuple[Result, str | None]:
         inputs["caused_by"] = rebar.create_ticket(
             "task", "oracle culprit", description=_DESC, repo_root=str(repo)
         )
+        if case.culprit_committed:
+            _commit(repo, f"oracle culprit\n\nrebar-ticket: {inputs['caused_by']}")
 
     if case.op == "link":
         target = rebar.create_ticket(
