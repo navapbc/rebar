@@ -193,7 +193,8 @@ def resolve_ref(
 
     A present full SHA skips fetching; other refs fetch only their scoped target. Absent SHAs
     require reachable-want support. Resolution and transport/auth/stall failures close as
-    :class:`SnapshotRefError` and :class:`SnapshotFetchError`; materializers pass
+    :class:`SnapshotRefError` and :class:`SnapshotFetchError`, and a timed-out local
+    ``git remote``/``rev-parse`` as a plain :class:`SnapshotError`; materializers pass
     ``blobless=False`` through to ``fetch_origin``."""
     root = str(repo_root) if repo_root else "."
     remote_present = fetch and has_remote(root, remote)
@@ -308,7 +309,12 @@ def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
     One ``--no-filter --refetch`` RPC overrides partial-clone filtering and transfers objects
     even for an existing commit. Unsupported git, absent remotes, or fetch failure stay silent
     and fall back to lazy fetching; never loop or add a materialization failure mode."""
-    if not _has_missing_blobs(repo_root, sha) or not has_remote(repo_root, remote):
+    if not _has_missing_blobs(repo_root, sha):
+        return
+    try:
+        if not has_remote(repo_root, remote):
+            return
+    except SnapshotError:  # a timed-out `git remote`: skip, as for any best-effort failure
         return
     # SECURITY: terminate options before the SHA so an option-shaped value cannot execute
     # through git; this mirrors git_fetch.fetch_origin's targeted fetch.
