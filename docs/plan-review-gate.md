@@ -130,6 +130,31 @@ The gate has **two layers**:
   (gate ≥70%), flag rate 2.07% (gate ≤5%), recall 61.3% (reported), both known
   cases fire — NO LLM runs in the lint or the eval.
 
+  **Enumeration-closure lint (P6 family; bug `c9c2-c569-f5cb-426f`, `det_closure.py`).**
+  A plan can enumerate fewer files than its own work compels: a required-empty grep AC
+  that still hits a path the plan never names, a removed symbol still cited elsewhere,
+  or a deleted module whose test file loses every test, not just the one the plan names.
+  `p6_ac_quality` sweeps the tree for what the plan implies and reports each path outside
+  the plan's *enumerated set* (backticked paths plus `file_impact`; a directory covers
+  its descendants). Sweeps come from two sources: a backticked `git grep`, `grep -r`, or
+  `rg` command in an AC item that also says the result is empty ("no hits", "is empty",
+  "returns nothing"), and backticked identifiers containing `_` or an interior capital
+  that a removal verb (remove, delete, rename, retire, drop) takes as its object,
+  stopping at to/with/into so a rename's new name is not swept. The grep command
+  is parsed with `shlex` and translated to a Python regex (BRE `\|`, `\(`, `\)` and
+  `-E`/`-F`/`-P`/`-w`/`-i`, path arguments and `:!`/`:(exclude)` pathspecs); it is never
+  executed. Each evidence line names the path, its first matching line, and the whole
+  identifier that matched, so a pattern that over-matches (`_ALIASES\b` hitting
+  `_ARCH_ALIASES`) is visible. A path a removal verb names directly (for example
+  "Delete `src/x.py`") is a deleted module: each test file whose module-level imports bind it is
+  parsed and its tests that the plan does not name are listed, unless the plan deletes
+  that test file too. The tree is `git ls-files` in a checkout, or a walk of the attested
+  snapshot (a plain tree); binary files and files over 1 MiB are skipped. It fails
+  open: an uncompilable pattern is counted in `closure_abstained`, and the P6 coverage
+  also records `closure_sources` and `closure_gaps`. Path granularity is the limit: an
+  un-enumerated *line* in an enumerated file is not reported. It never blocks, adds no
+  `DET_CHECKS` entry, and is not a routed criterion, so `rebar explain` has no entry for it.
+
 * **Layer 2 — the advisory coaching review (the four passes)** — never blocks by
   default. Each criterion (e.g. the F/E/G/A judgment criteria, the T1–T15
   triggered overlays, COH, ISF, and the advisory `ac-text-quality` / scope
