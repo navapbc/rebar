@@ -841,7 +841,8 @@ false positive.
 
 ADR 0043, as amended by ADR 0101, selects outside-the-codebase evidence only with an exact
 case-insensitive tag at the start of the checkbox text: the canonical `[non-codebase]`, or the
-still-accepted legacy `[operator-attested]`. Untagged criteria, `[codebase]`, and near-misses
+still-accepted legacy `[operator-attested]`, written bare or wrapped in one pair of backticks
+(both count the same). Untagged criteria, `[codebase]`, and near-misses
 such as `[non_codebase]` or `[operator_attested]` remain codebase-verifiable.
 
 Emit a finding in these cases:

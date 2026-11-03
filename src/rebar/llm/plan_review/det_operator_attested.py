@@ -38,15 +38,25 @@ def ac_item_lines(text: str) -> list[str]:
     return out
 
 
+# The accepted tag FORM at the start of the checkbox text: the bare bracketed token, or the
+# same token wrapped in one balanced pair of backticks (bug 3d6f-1f34). Backticking the tag is
+# the ordinary markdown instinct, and a bare tag beside the checkbox reads as a second empty
+# bracket pair, so both forms count the same everywhere the tag is parsed. An unbalanced or
+# doubled backtick is NOT the accepted form. Non-capturing, so patterns built from it keep their
+# own capture groups.
+_TAG_TOKEN = r"\[(?:non-codebase|operator-attested)\]"
+_TAG_FORM = rf"(?:`{_TAG_TOKEN}`|{_TAG_TOKEN})"
+
 # The canonical tag matcher (ADR-0043, ADR-0101). Accepts two spellings: the canonical
-# [non-codebase] and the compatibility alias [operator-attested]. OWNED here and re-exported by
+# [non-codebase] and the compatibility alias [operator-attested], each bare or backticked
+# (:data:`_TAG_FORM`). OWNED here and re-exported by
 # workflow_ops (:data:`workflow_ops._OPERATOR_ATTESTED_AC_RE`) so the plan-time lint and the
 # completion-verifier enrichment agree on "tagged" by construction. Matching is exact on the
-# hyphenated tokens: a near-miss like [operator_attested] is NOT a match. The alternation is
+# hyphenated tokens: a near-miss like [operator_attested] is NOT a match. The alternations are
 # non-capturing so the single capturing group stays the criterion text — workflow_ops calls
 # .findall() on this pattern and requires plain strings.
 _OPERATOR_ATTESTED_TAG_RE = re.compile(
-    r"^\s*-\s*\[[ xX]?\]\s*\[(?:non-codebase|operator-attested)\]\s*(.+?)\s*$",
+    rf"^\s*-\s*\[[ xX]?\]\s*{_TAG_FORM}\s*(.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -184,12 +194,11 @@ def operator_evidence_issues(ac_lines: list[str]) -> list[str]:
 # text; anywhere else it fails safe to the codebase bar, and that rule is unchanged. This adds
 # visibility: a line carrying the exact token elsewhere is reported so the author can move it
 # while the move is still cheap (before certification). A mention inside a backtick code span
-# is prose, not a tag. The start-position guard keeps `- [ ] [non-codebase]` with no criterion
+# later in the line is prose, not a tag; a backticked tag AT THE START is the tag itself
+# (:data:`_TAG_FORM`). The start-position guard keeps `- [ ] [non-codebase]` with no criterion
 # text yet (which the tag regex rejects for its empty capture) from being called misplaced.
-_TAG_TOKEN_RE = re.compile(r"\[(?:non-codebase|operator-attested)\]", re.IGNORECASE)
-_TAG_AT_START_RE = re.compile(
-    r"^\s*-\s*\[[ xX]?\]\s*\[(?:non-codebase|operator-attested)\]", re.IGNORECASE
-)
+_TAG_TOKEN_RE = re.compile(_TAG_TOKEN, re.IGNORECASE)
+_TAG_AT_START_RE = re.compile(rf"^\s*-\s*\[[ xX]?\]\s*{_TAG_FORM}", re.IGNORECASE)
 _CODE_SPAN_RE = re.compile(r"`[^`\n]*`")
 
 

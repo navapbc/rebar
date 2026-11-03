@@ -1203,7 +1203,8 @@ an unaudited `--force` bypass.
 Before the completion verifier runs, the close gate performs a deterministic check: if the
 ticket's `## Acceptance Criteria` section contains any unchecked `- [ ]` item, the close
 fails immediately (exit 1) **without making any LLM call**. Items whose text begins with the
-`[non-codebase]` tag (ADR-0043, renamed by ADR 0101) are exempt — the shared matcher `_OPERATOR_ATTESTED_TAG_RE`
+`[non-codebase]` tag (ADR-0043, renamed by ADR 0101), written bare or wrapped in one pair of
+backticks, are exempt — the shared matcher `_OPERATOR_ATTESTED_TAG_RE`
 from `det_operator_attested.py` is reused so the two surfaces cannot drift. To override when
 a gate-level bypass is warranted, pass `--force="<reason>"`. Checking boxes to satisfy
 this precheck is attestation-safe: checkbox state is normalized out of the material

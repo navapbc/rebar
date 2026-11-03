@@ -91,7 +91,9 @@ accept for it:
 
 **How you classify a criterion:** SOLELY from an author tag at the start of the checkbox text,
 `- [ ] [non-codebase] …`. Matching is exact and case-insensitive on the token `non-codebase`;
-the legacy token `operator-attested` is still accepted and means exactly the same thing.
+the legacy token `operator-attested` is still accepted and means exactly the same thing. The tag
+counts the same whether it is written bare or wrapped in one pair of backticks at the start of
+the checkbox text (``- [ ] `[non-codebase]` …``).
 Anything else — untagged, an explicit `[codebase]`, or a malformed near-miss such as
 `[non_codebase]` or `[operator_attested]` — is **codebase-verifiable**. Do NOT infer the kind
 from a criterion's wording; an untagged criterion that *sounds* operational is still judged by
