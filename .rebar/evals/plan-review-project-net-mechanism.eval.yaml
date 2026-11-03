@@ -1,0 +1,313 @@
+# Project eval corpus for the plan-review criterion `project.net-mechanism`
+# (epic 77e3-28e2-31ec-47ec, task 39bc-072e-9ebf-461d). Resolves as the user override
+# for logical criterion `project.net-mechanism` (prompt id plan-review-project-net-mechanism).
+#
+# Balanced semantic fixture set: four must-fire cases (a plan that adds an element of a
+# counted mechanism kind while naming neither a retirement nor a reason none is possible)
+# and four must-not-fire cases (a named retirement, a stated justification, no counted
+# addition at all, and a net removal). Offline shape checks live in
+# tests/unit/test_project_net_mechanism_eval.py; the live semantic run is the ticket's
+# [operator-attested] criterion (`rebar criteria eval project.net-mechanism --runs 3`).
+# See eval_specs/README.plan-review.md.
+#
+# `model` names the model this corpus was CALIBRATED against. It does not constrain which
+# provider or model runs the criterion in production — routing selects that independently.
+prompt: plan-review-project-net-mechanism
+model: anthropic:claude-sonnet-4-6
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 1.0
+scorers:
+  # Deterministic GATE: the criterion emits a schema-valid finding set — >=1 finding on a
+  # fire case, none on a pass case — scored independently of any judge.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a fire case surfaces at least one
+      project.net-mechanism finding, a pass case surfaces none.
+
+dataset:
+  # ── must-fire: a counted addition with no retirement and no stated justification ──
+  - id: NETMECH-F1
+    corpus: rebar
+    criterion: project.net-mechanism
+    expect: finding
+    note: >-
+      Red proof, reconstructed from a landed outcome rather than quoted from a plan.
+      Provenance: ticket 2041-75d6-2a2f-4be9 added the `env_var`
+      REBAR_LLM_EMBEDDING_MODEL, admitted by the marker at
+      src/rebar/llm/config_readers.py:152; the name is consequently absent from
+      .github/mechanism-baseline.json, because a marker-admitted key never enters the
+      baseline. No mechanism was retired alongside it.
+      2041's plan TEXT was not read. What was measured is the landed outcome — a counted
+      mechanism added, admitted by marker, no retirement recorded. The `input` below is a
+      faithful reconstruction of that outcome as plan prose, not an excerpt of 2041.
+      Why it must fire: a counted addition (env_var), nameable by kind and name, with the
+      plan naming no retirement and offering no reason none is possible — all four
+      threshold conditions hold.
+    input: >
+      ## The change
+
+
+      Add an embedding tier to similar-ticket surfacing. The tier is configured through a
+      new environment variable `REBAR_LLM_EMBEDDING_MODEL`, read in the `[llm]` config
+      reader so it inherits the CLI > env > file > default precedence every other `[llm]`
+      string key already has. It defaults to unset, in which case the existing lexical
+      tier serves and no provider is contacted.
+
+
+      ## Acceptance criteria
+
+
+      - [ ] `REBAR_LLM_EMBEDDING_MODEL` resolves through the `[llm]` reader with the
+        documented precedence.
+
+      - [ ] With the variable unset, similar-ticket surfacing returns the lexical tier's
+        results unchanged.
+
+      - [ ] `make verify` exits 0.
+
+  - id: NETMECH-F2
+    corpus: rebar
+    criterion: project.net-mechanism
+    expect: finding
+    note: >-
+      Adds a `feature_flag` and gives a reason for the FLAG's existence — which is not the
+      same thing as a reason no retirement is possible. Threshold condition 3 asks for a
+      statement about retirement; a rationale for the addition does not satisfy it.
+      This case exists to keep the criterion from accepting any nearby justification as
+      the one it requires.
+    input: >
+      ## The change
+
+
+      Introduce a boolean settings key `reconciler.strict_field_parity` (default `false`)
+      so an operator can opt in to failing the reconcile when a Jira field has no local
+      counterpart. It ships default-off because turning strict parity on for every
+      existing project would break reconciles that are working today, so adoption has to
+      be opt-in per project.
+
+
+      ## Acceptance criteria
+
+
+      - [ ] `reconciler.strict_field_parity` defaults to `false` and the reconcile
+        behaves exactly as it does today when unset.
+
+      - [ ] With the key set to `true`, a field with no local counterpart fails the
+        reconcile with a message naming the field.
+
+      - [ ] `make verify` exits 0.
+
+  - id: NETMECH-F3
+    corpus: rebar
+    criterion: project.net-mechanism
+    expect: finding
+    note: >-
+      Adds an `autouse_fixture` and pre-empts the objection by asserting the addition is
+      "small enough not to count". Self-exemption is not one of the threshold's escape
+      conditions: the criterion checks for a named retirement or a stated reason none is
+      possible, and a claim about the addition's size is neither.
+    input: >
+      ## The change
+
+
+      Add an autouse fixture `_isolate_tracker_env` to `tests/conftest.py` that clears
+      REBAR_* variables from the environment before every test and restores them after.
+      Tests currently do this by hand in 40-odd modules and some forget, which is how the
+      cross-test leakage in the reconciler suite happened.
+
+
+      The fixture is a dozen lines of setup and teardown — small enough not to count as
+      real surface growth, and it lets us delete the hand-rolled copies over time.
+
+
+      ## Acceptance criteria
+
+
+      - [ ] `_isolate_tracker_env` is autouse and applies without being requested.
+
+      - [ ] A test that sets a REBAR_* variable cannot leak it into the next test.
+
+      - [ ] `make verify` exits 0.
+
+  - id: NETMECH-F4
+    corpus: rebar
+    criterion: project.net-mechanism
+    expect: finding
+    note: >-
+      Adds two counted kinds at once — a `ci_gate` and a non-boolean `config_key` — and
+      retires neither. Present so the corpus exercises the required `scenarios` field,
+      which takes one entry per added kind/name pair; a single-addition corpus would never
+      show whether the criterion enumerates multiple additions or collapses them.
+    input: >
+      ## The change
+
+
+      Add a `docs-freshness` check to the required set, so a change that edits a module
+      without touching its documented reference fails before it can land. The staleness
+      window is configurable through a new settings key `docs.freshness_max_age_days`,
+      which takes an integer number of days and defaults to 90.
+
+
+      ## Acceptance criteria
+
+
+      - [ ] The `docs-freshness` check is in the required set and blocks a change that
+        edits a documented module without updating its reference.
+
+      - [ ] `docs.freshness_max_age_days` accepts an integer and defaults to 90.
+
+      - [ ] `make verify` exits 0.
+
+  # ── must-not-fire: the two escape conditions, no counted addition, and a net removal ──
+  - id: NETMECH-N1
+    corpus: rebar
+    criterion: project.net-mechanism
+    expect: pass
+    note: >-
+      Adds an `env_var` and NAMES the `config_key` it retires. Threshold condition 2
+      fails, so the criterion must stay silent. The trade is deliberately NOT like-for-
+      like — the rubric states a retirement in a different kind still counts — so this
+      case also proves the criterion does not demand kind-for-kind symmetry.
+    input: >
+      ## The change
+
+
+      Replace the `bridge.sync_batch_size` settings key with an environment variable
+      `REBAR_BRIDGE_SYNC_BATCH`, so the batch size can be varied per invocation without
+      editing committed configuration. `bridge.sync_batch_size` is removed in the same
+      change; it has one reader and no other caller.
+
+
+      ## Acceptance criteria
+
+
+      - [ ] `REBAR_BRIDGE_SYNC_BATCH` sets the batch size for one invocation.
+
+      - [ ] `bridge.sync_batch_size` no longer appears in the settings schema and a
+        config file that still sets it is reported as unknown.
+
+      - [ ] `make verify` exits 0.
+
+  - id: NETMECH-N2
+    corpus: rebar
+    criterion: project.net-mechanism
+    expect: pass
+    note: >-
+      Adds a `lock` and states explicitly why no retirement is possible. Threshold
+      condition 3 fails, so the criterion must stay silent. The rubric is emphatic that
+      presence of the justification is what is checked, not its persuasiveness — judging
+      persuasiveness would make the criterion irreproducible across runs — so this case
+      must pass even for a reader who finds the reasoning weak.
+    input: >
+      ## The change
+
+
+      Add a file lock around the ticket-index rebuild so two concurrent sessions cannot
+      write a half-built index. The rebuild is currently unguarded; the corruption in the
+      2026-10 incident happened exactly this way.
+
+
+      No existing mechanism can be retired in exchange. There is no other lock, flag, key,
+      variable, gate, fixture, or shared test helper covering index writes — this is the
+      first serialisation point on that path, so there is nothing of a counted kind to
+      collapse it into or remove alongside it.
+
+
+      ## Acceptance criteria
+
+
+      - [ ] Two concurrent rebuilds serialise rather than interleave.
+
+      - [ ] A stale lock left by a killed process does not block the next rebuild
+        indefinitely.
+
+      - [ ] `make verify` exits 0.
+
+  - id: NETMECH-N3
+    corpus: rebar
+    criterion: project.net-mechanism
+    expect: pass
+    note: >-
+      Adds substantial surface — a new module, a new CLI subcommand, and a new document —
+      none of which is one of the seven counted kinds. Threshold condition 1 fails, so the
+      criterion must stay silent. This is the case that keeps the criterion from drifting
+      into a general complexity-growth criterion, which the rubric explicitly assigns
+      elsewhere.
+    input: >
+      ## The change
+
+
+      Add a `rebar ticket-graph` subcommand that renders a ticket's dependency closure as
+      a text tree. It lives in a new module `src/rebar/_commands/ticket_graph.py`, reuses
+      the existing link resolver, and reads nothing new from configuration or the
+      environment. A reference page documents the output shape.
+
+
+      ## Acceptance criteria
+
+
+      - [ ] `rebar ticket-graph <id>` prints the dependency closure as a text tree.
+
+      - [ ] A cycle in the link graph is rendered once and annotated, not recursed into.
+
+      - [ ] `make verify` exits 0.
+
+  - id: NETMECH-N4
+    corpus: rebar
+    criterion: project.net-mechanism
+    expect: pass
+    note: >-
+      Retires three counted mechanisms and adds none. A net reduction is the outcome this
+      criterion exists to encourage and the rubric states it is never a finding. Present
+      so a criterion that fired on any mention of mechanism vocabulary would be caught —
+      this case is dense with counted-kind names while adding nothing.
+    input: >
+      ## The change
+
+
+      Retire the migration scaffolding left over from the reconciler write-facade cutover,
+      now that every caller goes through the facade:
+
+
+      - delete the environment variable `REBAR_RECONCILER_WRITE_FACADE` and its two
+        readers;
+
+      - delete the boolean settings key `reconciler.legacy_write_path`;
+
+      - delete the shared test helper `tests/_legacy_write_harness.py`, whose four
+        importers are being migrated to the ordinary fixtures in the same change.
+
+
+      Nothing is added in exchange.
+
+
+      ## Acceptance criteria
+
+
+      - [ ] `REBAR_RECONCILER_WRITE_FACADE` has no readers left in the tree.
+
+      - [ ] `reconciler.legacy_write_path` no longer appears in the settings schema.
+
+      - [ ] `tests/_legacy_write_harness.py` is deleted and no module imports it.
+
+      - [ ] `make verify` exits 0.
+
+gold_set:
+  - input: "Plan adds the env_var REBAR_LLM_EMBEDDING_MODEL for an embedding tier and names no mechanism it retires."
+    label: finding
+  - input: "Plan adds the boolean key reconciler.strict_field_parity, explains why it ships default-off, and names no retirement."
+    label: finding
+  - input: "Plan adds the autouse fixture _isolate_tracker_env and calls it small enough not to count, naming no retirement."
+    label: finding
+  - input: "Plan adds a docs-freshness required check and the config key docs.freshness_max_age_days, retiring neither."
+    label: finding
+  - input: "Plan adds the env_var REBAR_BRIDGE_SYNC_BATCH and removes the config key bridge.sync_batch_size it replaces."
+    label: pass
+  - input: "Plan adds a file lock on index rebuilds and states that no mechanism of a counted kind exists on that path to retire."
+    label: pass
+  - input: "Plan adds a ticket-graph subcommand, a module, and a reference page, introducing no lock, variable, key, flag, gate, fixture, or test helper."
+    label: pass
+  - input: "Plan deletes an env_var, a boolean settings key, and a shared test helper, and adds nothing in exchange."
+    label: pass
