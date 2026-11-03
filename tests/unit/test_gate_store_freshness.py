@@ -131,13 +131,12 @@ def test_a_diverged_store_is_stale(store: Path) -> None:
     assert "DIVERGED" in result["reason"], f"the refusal does not name divergence: {result}"
 
 
-def test_an_outstanding_delivery_failure_is_stale(store: Path) -> None:
-    """The durable push-pending marker: this clone holds events nobody else has.
+def test_an_outstanding_delivery_failure_is_not_stale(store: Path) -> None:
+    """Unpublished local writes leave the store fresh (529c-ffa4-5227-4324).
 
-    The clone is advanced FIRST so the marker's claim is true. A marker on a store that is
-    level with the remote-tracking ref asserts undelivered commits that demonstrably do not
-    exist, and is reconciled instead — see
-    ``test_a_level_store_reconciles_a_stale_push_pending_marker``.
+    The operator decision of 2026-11-03 lets an offline client review, claim and close
+    after writing locally, so the push-pending marker no longer makes the store stale for
+    any gate. The marker itself is still recorded for ``fsck``.
     """
     (store / "unpublished.json").write_text('{"body": "never delivered"}\n')
     _git(store, "add", "unpublished.json")
@@ -146,9 +145,9 @@ def test_an_outstanding_delivery_failure_is_stale(store: Path) -> None:
         str(store), "final-push-rejected", "! [rejected] (fetch first)", "origin/tickets"
     )
     result = freshness.store_freshness(str(store))
-    assert result["fresh"] is False, f"an outstanding delivery failure read as fresh: {result}"
-    assert result["verdict"] == "push-pending"
-    assert "final-push-rejected" in result["reason"]
+    assert result["fresh"] is True, f"unpublished local writes read as stale: {result}"
+    assert result["verdict"] == "fresh"
+    assert push_state.read_status(str(store))["state"] == "pending", "the marker was cleared"
 
 
 def test_a_store_merely_AHEAD_is_not_reported_behind(store: Path) -> None:
@@ -157,82 +156,6 @@ def test_a_store_merely_AHEAD_is_not_reported_behind(store: Path) -> None:
     _git(store, "add", "local.json")
     _git(store, "commit", "-q", "-m", "ticket: local")
     assert freshness.store_freshness(str(store))["verdict"] == "fresh"
-
-
-# ── the stale marker: a durable diagnostic that observable git state can falsify ───────
-
-
-def test_a_level_store_reconciles_a_stale_push_pending_marker(store: Path) -> None:
-    """THE bug (16c9-a42d-fd01-48b9): a marker outlived the delivery it describes.
-
-    Only a rebar-performed push clears the marker, so recovering by hand
-    (``git push origin HEAD:tickets``) delivers the events and leaves it set forever. Every
-    gate in the clone then refuses on a claim of undelivered events that HEAD level with the
-    remote-tracking ref disproves. On baseline ``main`` this returns
-    ``{"fresh": False, "verdict": "stale-store"}`` at the gate.
-    """
-    push_state.record_failure(
-        str(store), "push-transport-failed", "ssh: connect: timed out", "origin/tickets"
-    )
-    result = freshness.store_freshness(str(store))
-    assert result["fresh"] is True, f"a level store was reported stale by a marker: {result}"
-    assert result["verdict"] == "fresh"
-
-
-def test_the_reconciled_marker_is_cleared_not_merely_ignored(store: Path) -> None:
-    """Ignoring the marker would leave every later reader re-deriving the same falsehood."""
-    push_state.record_failure(
-        str(store), "push-transport-failed", "ssh: connect: timed out", "origin/tickets"
-    )
-    freshness.store_freshness(str(store))
-    assert push_state.read_status(str(store))["state"] == "ok", "the stale marker survived"
-
-
-def test_a_commit_leg_marker_on_a_level_store_is_reconciled(store: Path) -> None:
-    """``record_failure`` records the commit leg too, where HEAD never advanced.
-
-    Such a marker coexists with a level store, and its claim is false a fortiori: a write
-    that never became a commit left nothing to deliver.
-    """
-    push_state.record_failure(str(store), "commit-failed", "index.lock exists", "origin/tickets")
-    result = freshness.store_freshness(str(store))
-    assert result["fresh"] is True, f"a commit-leg marker on a level store blocked: {result}"
-    assert result["verdict"] == "fresh"
-
-
-def test_an_AHEAD_store_with_a_marker_is_never_whitewashed(store: Path) -> None:
-    """The inverse guard: genuinely undelivered events must still stop a gate.
-
-    Without this the fix could 'repair' staleness by discarding the signal it exists for.
-    """
-    (store / "unpublished.json").write_text('{"body": "never delivered"}\n')
-    _git(store, "add", "unpublished.json")
-    _git(store, "commit", "-q", "-m", "ticket: unpublished")
-    push_state.record_failure(
-        str(store), "push-transport-failed", "ssh: connect: timed out", "origin/tickets"
-    )
-    result = freshness.store_freshness(str(store))
-    assert result["fresh"] is False, f"an ahead store with a marker read as fresh: {result}"
-    assert result["verdict"] == "push-pending"
-    assert push_state.read_status(str(store))["state"] == "pending", "the live marker was cleared"
-
-
-def test_a_clear_that_cannot_remove_the_marker_still_reports_fresh(
-    store: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Fail OPEN: a broken reconciliation must not resurrect the false stale verdict."""
-    push_state.record_failure(
-        str(store), "push-transport-failed", "ssh: connect: timed out", "origin/tickets"
-    )
-
-    def _refuse(_path: str) -> None:
-        raise PermissionError("read-only filesystem")
-
-    # Patched AFTER the marker is written, so only the clear is broken.
-    monkeypatch.setattr(push_state.os, "remove", _refuse)
-    result = freshness.store_freshness(str(store))
-    assert result["fresh"] is True, f"a failed clear blocked a healthy store: {result}"
-    assert result["verdict"] == "fresh"
 
 
 def test_write_divergence_probe_ignores_repointing_tracker_remote(
@@ -290,7 +213,7 @@ def test_the_probe_fails_OPEN_on_its_own_error(
     def _boom(*_a, **_k):
         raise RuntimeError("probe exploded")
 
-    monkeypatch.setattr(push_state, "read_status", _boom)
+    monkeypatch.setattr(freshness, "_ref_divergence", _boom)
     result = freshness.store_freshness(str(store))
     assert result["fresh"] is True, f"a failed probe blocked a gate: {result}"
 
@@ -307,7 +230,6 @@ def _stale(monkeypatch: pytest.MonkeyPatch) -> None:
             "fresh": False,
             "verdict": "behind",
             "reason": "the local ticket store is 7 commit(s) BEHIND the shared store",
-            "unpushed": None,
             "behind": 7,
         },
     )

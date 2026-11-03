@@ -168,6 +168,9 @@ def _gate_sidecar_fields(gate_type: str, result: Any) -> dict[str, Any]:
     reviewed_at = result.get("sidecar_reviewed_at")
     if isinstance(reviewed_at, int) and not isinstance(reviewed_at, bool):
         out["sidecar_reviewed_at"] = reviewed_at
+    # Both reuse paths set ``runner: "reused"`` and copy the PRIOR review's timestamp, so
+    # without this flag gate_status cannot tell a replayed verdict from one this run decided.
+    out["verdict_replayed"] = result.get("runner") == "reused"
     return out
 
 

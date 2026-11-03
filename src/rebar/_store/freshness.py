@@ -8,17 +8,23 @@ would turn degraded delivery into an outage.
 Gate reads require a stricter posture. A stale clone once reported an existing
 completion attestation as unsigned, which could produce an incorrect operation
 certificate. Gate-critical reads therefore check local freshness before deciding.
-No network request is required.
+No network request is required, and a clone needs no knowledge of the remote store
+beyond the remote-tracking ref it has already fetched (operator decision
+2026-11-03, ``overweak-deviant-shelduck``): a clone that was never fetched, or has
+no remote, is fresh. Only two states are stale:
 
-- ``push-pending`` means this clone has committed events absent from the shared
-  store. The marker recording that is durable and is cleared only by a
-  rebar-performed push, so it is checked against observable git state before it
-  is reported: HEAD level with the remote-tracking ref falsifies the claim, and
-  the stale marker is discharged rather than reported.
 - ``behind`` means HEAD is an ancestor of the fetched remote-tracking ref. A gate
   does not perform the writer adoption that would repair this state.
 - ``diverged`` means neither history contains the other, including histories
   without a common ancestor.
+
+Unpublished local writes are NOT stale. The durable push-pending marker still
+records them, and ``fsck`` still reports ``PUSH_PENDING``, but no gate refuses on
+it, so an offline client can review, claim and close after writing locally. The
+accepted trade-off is that a certificate can cover events the shared store has not
+received yet. This supersedes the push-pending refusal added for
+``cibophobic-moist-guineafowl`` and ``yummy-yogic-clam``, and with it the marker
+reconciliation ``abnormal-dear-shoveler`` needed.
 
 The diagnostic fails open when it cannot read its inputs so a broken probe cannot
 block a healthy store. A proven stale verdict makes the gate fail closed because
@@ -40,9 +46,8 @@ logger = logging.getLogger(__name__)
 #: operator who cannot tell them apart re-runs the wrong recovery.
 STALE_VERDICT = "stale-store"
 
-#: Verdicts that mean the store is not a sound basis for certification, worst first. The
-#: order is the reporting precedence when more than one holds.
-_STALE_VERDICTS = ("diverged", "behind", "push-pending")
+#: Verdicts that mean the store is not a sound basis for certification, worst first.
+_STALE_VERDICTS = ("diverged", "behind")
 
 _GIT_TIMEOUT = 60
 
@@ -70,9 +75,10 @@ def _ref_divergence(tracker: str, remote_ref: str) -> tuple[str, int] | None:
     """``(verdict, behind_count)`` when HEAD is behind/diverged from ``remote_ref``.
 
     ``None`` means level or strictly ahead — neither is a stale READ: a clone that is
-    ahead has every event the remote has, plus its own. (Its own being unpublished is the
-    separate ``push-pending`` signal.) Purely local: no ``fetch``, so this reports what the
-    clone's git dir ALREADY knows and never makes a gate depend on network reachability.
+    ahead has every event the remote has, plus its own, and its own being unpublished is
+    not staleness (the push-pending marker records it for ``fsck``). Purely local: no
+    ``fetch``, so this reports what the clone's git dir ALREADY knows and never makes a
+    gate depend on network reachability.
     """
     from rebar._store.gitutil import run_git
 
@@ -96,68 +102,6 @@ def _ref_divergence(tracker: str, remote_ref: str) -> tuple[str, int] | None:
     return ("behind", behind)
 
 
-def _head_is_level_with(tracker: str, remote_ref: str) -> bool:
-    """Whether HEAD and ``remote_ref`` name the SAME commit. Never raises.
-
-    Proof that this clone has nothing undelivered: every local commit is contained in a
-    revision the remote acknowledged. Purely local, like :func:`_ref_divergence` — no
-    ``fetch``. A remote-tracking ref that lags the true remote can only UNDERSTATE how far
-    ahead the clone is, so equality here cannot hold while genuinely undelivered commits
-    exist; the worst a stale ref can do is withhold this proof and keep a marker set.
-
-    Returns ``False`` for an unresolvable or never-fetched ref: absence of evidence of
-    delivery, never evidence of delivery.
-    """
-    from rebar._store.gitutil import run_git
-
-    # raw-git-ok: read-only oid probe on the tracker, mirroring _ref_divergence above
-    def _oid(rev: str) -> str | None:
-        cp = run_git(
-            tracker, "rev-parse", "--verify", f"{rev}^{{commit}}", check=False, timeout=_GIT_TIMEOUT
-        )
-        out = (cp.stdout or "").strip()
-        return out if cp.returncode == 0 and out else None
-
-    try:
-        head = _oid("HEAD")
-        return head is not None and head == _oid(remote_ref)
-    except Exception:  # an unreadable probe proves nothing, so it proves nothing
-        logger.debug("could not compare HEAD with %s", remote_ref, exc_info=True)
-        return False
-
-
-def _pending_reconciled(tracker: str, remote_ref: str | None) -> bool:
-    """Whether a push-pending marker has been FALSIFIED by observable git state, clearing
-    it when so. Never raises.
-
-    The marker claims this clone holds committed ticket events the shared store never
-    received. HEAD level with the remote-tracking ref contradicts that claim, and the
-    marker is then a stale diagnostic that would otherwise block every gate in this clone
-    forever, because only a rebar-performed push clears it (``push.py``) — a hand-run
-    ``git push`` delivers the events and leaves the marker set.
-
-    This holds for EVERY recorded reason, not only push-leg ones.
-    :func:`push_state.record_failure` deliberately also records the commit leg's
-    ``stage-failed`` / ``commit-lock-timeout`` / ``commit-failed``, where HEAD never
-    advanced; there the claim is false a fortiori, since a write that never became a commit
-    left nothing to deliver. Discharging a commit-leg marker on unrelated delivery evidence
-    is the marker's own documented rule ("a later successful push clears the marker either
-    way"), not a new liberty taken here.
-
-    Clearing on exact equality is the shape taken from the one clear outside the push path,
-    ``_commands/completion_delivery.py:297-301``, which clears only when
-    ``local_oid == remote_oid`` because "a different local HEAD can belong to a concurrent
-    writer whose delivery outcome we do not own". The comparand there is the revision the
-    remote just accepted; here it is the remote-tracking ref, since this probe never fetches.
-    """
-    if remote_ref is None or not _head_is_level_with(tracker, remote_ref):
-        return False
-    from rebar._store import push_state
-
-    push_state.clear(tracker)  # never raises; a failed clear leaves the marker, not an error
-    return True
-
-
 def resolve_tracker(repo_root: Any = None) -> str | None:
     """This repo's tracker path for a gate's freshness probe, or ``None`` to let the probe
     discover it. Best-effort: an unresolvable root must degrade to the default discovery
@@ -174,9 +118,10 @@ def resolve_tracker(repo_root: Any = None) -> str | None:
 def store_freshness(tracker: str | os.PathLike[str] | None = None) -> dict[str, Any]:
     """Whether this clone's ticket store is a sound basis for certification. Never raises.
 
-    Returns ``{"fresh": bool, "verdict": str, "reason": str, "unpushed": str|None,
-    "behind": int|None}`` where ``verdict`` is ``fresh`` or one of :data:`_STALE_VERDICTS`.
-    ``tracker`` defaults to the configured store for the current repo.
+    Returns ``{"fresh": bool, "verdict": str, "reason": str, "behind": int|None}`` where
+    ``verdict`` is ``fresh`` or one of :data:`_STALE_VERDICTS`. ``tracker`` defaults to the
+    configured store for the current repo. The push-pending marker plays no part: unpublished
+    local writes leave the store fresh (see the module docstring).
 
     Any failure of the probe itself resolves to ``fresh`` (see the module docstring): a
     broken diagnostic must never be able to block a healthy gate.
@@ -184,8 +129,7 @@ def store_freshness(tracker: str | os.PathLike[str] | None = None) -> dict[str, 
     result: dict[str, Any] = {
         "fresh": True,
         "verdict": "fresh",
-        "reason": "the local ticket store is level with the shared store",
-        "unpushed": None,
+        "reason": "the local ticket store is not behind the shared store",
         "behind": None,
     }
     try:
@@ -194,10 +138,6 @@ def store_freshness(tracker: str | os.PathLike[str] | None = None) -> dict[str, 
 
             tracker = tracker_dir()
         tracker = str(tracker)
-        from rebar._store import push_state
-
-        status = push_state.read_status(tracker)
-        pending = status.get("state") == "pending"
         remote_ref = _remote_ref()
         divergence = _ref_divergence(tracker, remote_ref) if remote_ref else None
     # A broken probe reports a healthy store, never a stale one.
@@ -205,32 +145,21 @@ def store_freshness(tracker: str | os.PathLike[str] | None = None) -> dict[str, 
         logger.debug("store freshness probe failed; reporting fresh", exc_info=True)
         return result
 
-    if divergence is not None:
-        verdict, behind = divergence
-        result["behind"] = behind
-        if verdict == "diverged":
-            result["reason"] = (
-                "the local ticket store has DIVERGED from the shared store — neither "
-                "history contains the other, so this clone can neither see the shared "
-                "state nor publish its own"
-            )
-        else:
-            result["reason"] = (
-                f"the local ticket store is {behind} commit(s) BEHIND the shared store — "
-                "ticket events written elsewhere are not in this clone's view"
-            )
-    elif pending:
-        if _pending_reconciled(tracker, remote_ref):
-            return result
-        verdict = "push-pending"
-        result["unpushed"] = str(status.get("unpushed", "unknown"))
+    if divergence is None:
+        return result
+    verdict, behind = divergence
+    result["behind"] = behind
+    if verdict == "diverged":
         result["reason"] = (
-            f"the local ticket store holds {result['unpushed']} committed ticket "
-            f"event(s) the shared store has never received "
-            f"(last delivery failure: {status.get('reason', 'unknown')})"
+            "the local ticket store has DIVERGED from the shared store — neither "
+            "history contains the other, so this clone can neither see the shared "
+            "state nor publish its own"
         )
     else:
-        return result
+        result["reason"] = (
+            f"the local ticket store is {behind} commit(s) BEHIND the shared store — "
+            "ticket events written elsewhere are not in this clone's view"
+        )
 
     result["fresh"] = False
     result["verdict"] = verdict

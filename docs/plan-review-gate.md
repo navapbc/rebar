@@ -699,8 +699,19 @@ re-running `rebar review-plan` will make future messages specific.
 
 The same principle applies to the other verdicts: `stale-code` names the drifted dependency
 files, `stale-head` names both SHAs, `stale-reopened` names the sign and reopen timestamps,
-and `unsigned` names both remedies (`review-plan` to earn an attestation, `sign-review` when a
-review PASSed but its attestation failed to persist).
+and `unsigned` names `review-plan` to earn an attestation. It also names `sign-review`, but
+only when the latest `REVIEW_RESULT` records a PASS to sign from (a review PASSed but its
+attestation failed to persist); without one, `sign-review` would refuse, so it is not
+suggested (bug `overweak-deviant-shelduck`).
+
+`review-plan` itself refuses, before context assembly or any LLM pass and even under
+`--force`, when the local ticket store is provably BEHIND or DIVERGED from its
+already-fetched remote-tracking ref: it returns an unsigned INDETERMINATE verdict whose
+finding id and `signature.reason` are `stale-store` (exit 2). A review of such a clone would
+read superseded plan material and could replay a superseded verdict. The check is purely
+local, so an offline clone is never refused: a clone that was never fetched, has no remote,
+or holds unpublished local writes (the push-pending marker) is fresh, and so is every gate
+that reads it — see `docs/concurrency.md` §"Where the signal STOPS being advisory".
 
 The attestation means **"a review process was followed, no blocking red flags, with
 coverage recorded"** — *not* "perfect". The rich per-criterion verdicts live in the
@@ -794,7 +805,12 @@ signed, or dead, and a blind re-run launches a **second, double-billed** LLM pas
   plan-review jobs, `gate_status(job_id).findings.readable` is the per-run
   `REVIEW_RESULT` receipt: do not read the latest findings sidecar for remediation until it
   is `true`, because a terminal BLOCK verdict has no signed attestation and an older
-  sidecar may otherwise still be the newest readable record. The
+  sidecar may otherwise still be the newest readable record. `findings.reason` is
+  `current-review-result-sidecar` when this run's review wrote the result, and
+  `replayed-review-result-sidecar` when the run replayed an earlier review's stored result
+  instead of reviewing (`runner: "reused"`); `findings.decided_by_run` says the same as a
+  boolean (`null` for a run recorded before the field existed). A replayed result is
+  readable, but its `reviewed_at` is the earlier review's timestamp. The
   `.rebar/gate_runs/<job_id>` index is a **local** handle only — like `run_workflow`, the
   daemon does not survive the process exiting and there is no reaper; the verdict a fresh
   process trusts is always the attestation, not the index.

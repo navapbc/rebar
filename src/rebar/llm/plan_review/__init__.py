@@ -345,6 +345,39 @@ def _finalize_signature(
         verdict["signature"] = signature_error
 
 
+def _stale_store_verdict(ticket_id: str, *, cfg, repo_root=None) -> dict[str, Any] | None:
+    """Return an INDETERMINATE ``stale-store`` verdict when this clone is provably BEHIND or
+    DIVERGED from its already-fetched remote-tracking ref, else ``None``.
+
+    A review of a stale clone reads superseded material and can replay a superseded verdict
+    (bug ``overweak-deviant-shelduck``), so it refuses before context assembly or any LLM
+    pass. The check is purely local (:func:`rebar._store.freshness.store_freshness`): a clone
+    that was never fetched, has no remote, or only holds unpublished local writes is fresh,
+    so an offline client can still review. It fails open like the probe itself."""
+    from rebar._store import freshness
+
+    store = freshness.store_freshness(freshness.resolve_tracker(repo_root))
+    if store["fresh"]:
+        return None
+    reason = f"{store['reason']} — refusing to review against a ticket store that is not current"
+    logger.info("plan review skipped (stale store): %s", reason)
+    from . import claimability
+
+    return claimability.indeterminate_verdict(
+        ticket_id,
+        ticket_type="",
+        finding={"id": freshness.STALE_VERDICT, "reason": reason, "store": store["verdict"]},
+        coverage_extra={"stale_store": {"reason": reason, "store": store["verdict"]}},
+        signature_reason=freshness.STALE_VERDICT,
+        remediation=(
+            "Bring the ticket store up to date (any ticket write fast-forwards a clone that "
+            "is behind; `rebar store fsck` diagnoses a diverged one), then rerun "
+            "`rebar review-plan`; no plan-review attestation was signed and no LLM ran."
+        ),
+        cfg=cfg,
+    )
+
+
 def _run_plan_review(
     ticket_id: str,
     *,
@@ -407,6 +440,12 @@ def _run_plan_review(
             ),
             cfg=cfg,
         )
+
+    # Refuse a provably behind/diverged clone (even under --force) before any context
+    # assembly or LLM pass; checked after the snapshot's own best-effort sync (529c).
+    stale = _stale_store_verdict(ticket_id, cfg=cfg, repo_root=repo_root)
+    if stale is not None:
+        return stale
 
     initial_generation = generation.from_snapshot(review_snapshot)
 

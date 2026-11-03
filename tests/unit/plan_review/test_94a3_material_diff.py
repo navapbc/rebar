@@ -387,9 +387,12 @@ def test_stale_reopened_names_both_timestamps(monkeypatch) -> None:
 
 
 def test_unsigned_claim_gate_message_names_both_remedies(monkeypatch) -> None:
+    """With a recorded PASS to sign from, ``unsigned`` names both remedies (529c: without
+    one, ``sign-review`` is not named — see test_offline_gate_freshness_529c)."""
     from rebar import signing
     from rebar.llm.plan_review import attest_gate
 
+    monkeypatch.setattr(attest_gate, "_latest_result_passed", lambda *_a, **_k: True)
     monkeypatch.setattr(
         signing,
         "verify_signature",
@@ -404,6 +407,7 @@ def test_mismatch_claim_gate_message_names_sign_review_only(monkeypatch) -> None
     from rebar import signing
     from rebar.llm.plan_review import attest_gate
 
+    monkeypatch.setattr(attest_gate, "_latest_result_passed", lambda *_a, **_k: True)
     monkeypatch.setattr(
         signing,
         "verify_signature",

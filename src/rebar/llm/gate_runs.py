@@ -261,11 +261,17 @@ def _review_result_status(
         ticket_id, repo_root, spec.latest_timestamp
     )
     if reviewed_at is not None:
+        replayed = rec.get("verdict_replayed")
+        # True: this run's review wrote the sidecar. False: the run replayed an earlier
+        # review's stored result. None: a record from before the flag existed.
+        out["decided_by_run"] = None if replayed is None else not replayed
         if _has_review_result_timestamp(
             ticket_id, reviewed_at, repo_root, spec.sidecar_type, spec.schemas
         ):
             out["readable"] = True
-            out["reason"] = "current-review-result-sidecar"
+            out["reason"] = (
+                "replayed-review-result-sidecar" if replayed else "current-review-result-sidecar"
+            )
         else:
             out["reason"] = "review-result-sidecar-missing"
         return out

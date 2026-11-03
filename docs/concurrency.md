@@ -626,7 +626,9 @@ then mints or withholds an operation certificate on the strength of it. A late c
 an inconvenience; a wrong certification corrupts the audit trail.
 
 So the gate-critical READ paths call `rebar._store.freshness.store_freshness` and REFUSE
-before consulting an attestation: the plan-review **claim** gate
+before consulting an attestation: `review-plan` itself (which refuses with an unsigned
+INDETERMINATE `stale-store` verdict before context assembly or any LLM pass, even under
+`--force`), the plan-review **claim** gate
 (`llm.plan_review.attest_gate.claim_gate_check`, and therefore `review-plan --status` and
 `transition open in_progress` too), the plan-review **close** gate
 (`_commands.gates.close_plan_review_gate_check`), and the **completion-verification** close
@@ -636,9 +638,19 @@ verdict, because "I could not trust the input" and "the attestation is stale" ha
 different remedies.
 
 Staleness is defined **locally, with no network call**, so a gate never acquires a
-dependency on the remote being reachable: the durable `rebar-push-pending` marker is set
-(`push-pending`), or HEAD is behind / has diverged from the ALREADY-FETCHED
-remote-tracking ref (`behind` / `diverged`). Note that `fsck` stays silent on *merely
+dependency on the remote being reachable: HEAD is behind / has diverged from the
+ALREADY-FETCHED remote-tracking ref (`behind` / `diverged`). A clone that was never
+fetched, or has no remote, has nothing to compare against and is fresh.
+
+**Unpublished local writes are not stale.** The client must be able to run offline without
+knowing anything about the remote store (operator decision 2026-11-03, bug
+`overweak-deviant-shelduck`), so the `rebar-push-pending` marker no longer makes the store
+stale for any gate: an offline clone can review, claim and close after writing locally.
+The accepted trade-off is that a certificate can cover events the shared store has not
+received yet; they reach it on the next successful push. The marker is still recorded and
+`fsck` still reports `PUSH_PENDING`. This supersedes the push-pending refusal added for
+`cibophobic-moist-guineafowl` / `yummy-yogic-clam`, and with it the marker reconciliation
+that `abnormal-dear-shoveler` needed to keep a stale marker from wedging every gate. Note that `fsck` stays silent on *merely
 behind* because a writer ff-adopts on its next push — a gate is a pure reader and never
 triggers that adoption, which is why this is the sharpest signal available to it.
 
