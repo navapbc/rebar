@@ -70,6 +70,7 @@ def produce_plan_review_verdict(
     repo_root=None,
     probe_criteria=None,
     prerequisite_blocks=None,
+    overlap: bool = False,
 ) -> dict[str, Any]:
     """Produce a ``plan_review_verdict`` by running ``gates/plan-review.yaml`` in-memory.
 
@@ -80,7 +81,11 @@ def produce_plan_review_verdict(
     ``probe_criteria`` (PROBE MODE, drift-refresh tripwire): when a non-empty id list, the
     finder runs ONLY those criteria (the cheap E4+G1G2 probe) instead of the full routed set.
     Always threaded as a workflow input (``[]`` = normal full review) so the gate's
-    ``${{ inputs.probe_criteria }}`` reference always resolves."""
+    ``${{ inputs.probe_criteria }}`` reference always resolves.
+
+    ``overlap`` (a350) is threaded the same way (``False`` = off) and gates the overlap
+    criterion's FAN-IN inside the batch runner, so with it off the criterion reaches no
+    chunk and checkpoint identity is byte-identical to a review before the switch existed."""
     import time
 
     from rebar.llm import review_kernel
@@ -181,6 +186,7 @@ def produce_plan_review_verdict(
                 {
                     "ticket_id": ctx.ticket_id,
                     "probe_criteria": list(probe_criteria or []),
+                    "overlap": bool(overlap),
                     "subject_plan": ctx.plan_text,
                     "prerequisites": list(prerequisite_blocks or []),
                 },

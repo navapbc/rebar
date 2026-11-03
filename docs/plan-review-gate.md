@@ -506,6 +506,34 @@ breaker. That protocol is recorded in
 (`docs/adr/0113-fixture-mining-and-admission-protocol.md`), which extends the ADR 0109 replay
 harness.
 
+### A third project criterion: `project.plan-overlap` (on demand)
+
+Two tickets planning the same change both pass review today, because each plan is read in
+isolation and the reviewer has no view of the rest of the store. `project.plan-overlap`
+(ticket `a350-2e7e-71eb-4f5b`, epic `62dc-535b`) closes that gap, and it is the first
+project criterion that is **activated per run** rather than always on.
+
+The gate dispatcher passes an `overlap` input (the `plan-review` workflow declares it
+`default: false`). When it is off, `_drop_unrequested_overlap` removes the id from the
+project fan-in in `production_batch_runner`, so the criterion reaches no chunk's rubric and
+is absent from the prompt id. That is what keeps **checkpoint identity byte-identical** to a
+run from before the criterion existed, so an existing cached review stays reusable — the
+property an always-on criterion could not have offered.
+
+When it is on, `rebar.llm.plan_review.overlap` ranks the existing tickets whose recorded
+plans are most similar to the subject (reusing `rebar.similar` rather than introducing a
+second notion of similarity) and injects them as finder context, so a finding can cite a
+specific ticket instead of a suspicion. Retrieval **cannot fail the review**: every failure
+path returns no candidates and records the reason under `coverage["overlap"]["status"]`, so
+a degraded index is distinguishable from an honest empty match. The posture is **advisory**
+with `block_threshold` `0.9` — an overlap judgment rests on how two plans are read, which is
+not a basis for refusing a claim.
+
+Its rubric is `.rebar/prompts/plan-review-project-plan-overlap.md`. Like every sibling
+project prompt it needs an explicit un-ignore line in `.gitignore`, because `.rebar/prompts/*`
+is ignored by default; without one the criterion routes in a fresh checkout but has no rubric
+to load.
+
 ### The advisory cap
 
 The surfaced advisory findings are capped at the top-N by priority (default **20**,

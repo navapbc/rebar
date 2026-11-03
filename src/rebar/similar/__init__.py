@@ -51,16 +51,28 @@ def find_similar(
     text: str | None = None,
     exclude_id: str | None = None,
     limit: int = RESULT_LIMIT,
+    diagnostics: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Ranked similar tickets, or ``[]``. Never raises.
 
     Pass *title* and *description* to have the measured query text built, or *text*
     to supply it directly. *exclude_id* keeps a ticket out of its own results.
+
+    Every failure here returns ``[]``, so a caller cannot tell an absent index from a
+    failed catch-up from an honest empty match. Pass a dict as *diagnostics* to have the
+    branch recorded under ``"status"``; the signal travels through the dict so the return
+    type, the "Never raises" contract, and every existing call are unchanged.
     """
+
+    def _status(value: str) -> None:
+        if diagnostics is not None:
+            diagnostics["status"] = value
+
     conn = None
     try:
         conn = open_index(tracker)
         if conn is None:
+            _status("index-absent")
             return []
         try:
             catch_up(tracker, conn)
@@ -69,6 +81,7 @@ def find_similar(
             # cannot tell the difference, and a silently frozen index looks exactly
             # like a healthy one that matched nothing.
             logger.warning("similar-ticket catch-up failed; returning no results", exc_info=True)
+            _status("catch-up-failed")
             return []
         resolved = text if text is not None else query_text(title, description)
         # The embedding tier replaces the SCORING function and nothing else: same index,
@@ -78,10 +91,15 @@ def find_similar(
         # floor rather than a parallel code path.
         ranked = embedding_rank(conn, resolved, exclude_id=exclude_id, limit=limit)
         if ranked is not None:
+            _status("ok")
             return ranked
+        # An embedding-provider failure is NOT a status: `rank` returns None for every
+        # cause it cannot serve, and the lexical tier below then serves the request.
+        _status("ok")
         return search(conn, resolved, exclude_id=exclude_id, limit=limit)
     except Exception:
         logger.warning("similar-ticket retrieval failed; returning no results", exc_info=True)
+        _status("retrieval-error")
         return []
     finally:
         if conn is not None:

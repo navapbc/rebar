@@ -38,6 +38,7 @@ evals/plan-review-gate/runs/criterion_firings.jsonl
 !.rebar/prompts/plan-review-project-symbol-reference-completeness.md
 !.rebar/prompts/plan-review-project-engine-layer-enforcement.md
 !.rebar/prompts/plan-review-project-measurement-provenance.md
+!.rebar/prompts/plan-review-project-plan-overlap.md
 !.rebar/prompts/plan-review-project-failure-disposition-contract.md
 !.rebar/evals/
 .rebar/evals/*
