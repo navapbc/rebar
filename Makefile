@@ -73,8 +73,9 @@ PYTEST_WORKERS ?= 4
 
 # Test-bearing extras (bug 9b28-415d-0780-4b2a). CI's gating pytest cell installs these and
 # sets REBAR_REQUIRE_EXTRAS=1, so a venv without them skips tests CI runs and fails. Held equal
-# to that cell's `uv sync` line by tests/unit/test_install_extras_parity.py.
-TEST_EXTRAS := reviewbot ui grounding-terraform
+# to that cell's `uv sync` line by tests/unit/test_install_extras_parity.py. `s3` carries the
+# git-remote-s3 API-surface contract test (bug a54e-4b02-ab42-481f).
+TEST_EXTRAS := reviewbot ui grounding-terraform s3
 
 .PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin ensure-pandoc verify-mcp-pin
 

@@ -38,7 +38,11 @@ _INTENTIONAL_SWEEP_EXTRA_DIVERGENCES = {
     "grounding-terraform": (
         "The interpreter sweep is intentionally lean; the grounding-terraform "
         "extra is covered by the Verified gate and optionality lane."
-    )
+    ),
+    "s3": (
+        "Only the integration-tier git-remote-s3 API-surface contract test needs the s3 "
+        "extra, and the interpreter sweep runs no integration tests (bug a54e-4b02-ab42-481f)."
+    ),
 }
 
 # Pre-commit hooks whose PASS/FAIL depends on the current git branch / HEAD state rather
