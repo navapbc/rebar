@@ -90,31 +90,62 @@ def _snapshot_links(ticket_dir: Path, cancelled: set[str]) -> list[tuple[str, st
     return out
 
 
+def _stored_target_matches(stored: str, target_id: str, tracker: Path) -> bool:
+    """True when a LINK's stored ``target_id`` names the ticket ``target_id``.
+
+    ``process_link`` resolves a stored target at replay, so a link written with a short form
+    (for example a unique 4-hex quad) is shown under the full id (jovial-subcranial-conch).
+    The stored string matches when it equals ``target_id`` or resolves to it now. A stored
+    target that is ambiguous, unknown, or resolves to a different ticket never matches.
+    """
+    if stored == target_id:
+        return True
+    if not stored:
+        return False
+    return resolve_ticket_id(stored, str(tracker), quiet=True) == target_id
+
+
+def _find_link(
+    ticket_dir: Path, target_id: str, relation: str | None = None
+) -> tuple[str, str, str]:
+    """Net-active ``(link_uuid, relation, stored_target)`` from source→target, or empties.
+
+    Returns the most recent net-active LINK for target (``_replay_links``); falls back to a
+    SNAPSHOT compiled_state.deps[] entry (compacted links), minus any cancelled uuids. A
+    stored target matches by ``_stored_target_matches``; ``stored_target`` is the raw string.
+    """
+    if not ticket_dir.is_dir():
+        return "", "", ""
+    tracker = ticket_dir.parent
+    active, cancelled = _replay_links(ticket_dir)
+    found = ("", "", "")
+    for uuid, (tid, rel) in active.items():
+        if (relation is None or rel == relation) and _stored_target_matches(
+            tid, target_id, tracker
+        ):
+            found = (uuid, rel, tid)  # last match wins (insertion order = chronological)
+    if found[0]:
+        return found
+    for duuid, tid, drel in _snapshot_links(ticket_dir, cancelled):
+        if (relation is None or drel == relation) and _stored_target_matches(
+            tid, target_id, tracker
+        ):
+            return duuid, drel, tid
+    return "", "", ""
+
+
 def _get_link_info(
     ticket_dir: Path, target_id: str, relation: str | None = None
 ) -> tuple[str, str]:
     """Net-active ``(link_uuid, relation)`` from source→target, or ``("", "")``.
 
-    Returns the most recent net-active LINK for target (``_replay_links``); falls back to a
-    SNAPSHOT compiled_state.deps[] entry (compacted links), minus any cancelled uuids.
-
     ``relation`` narrows the search to exactly that relation (bug e39f): links are
     written keyed on ``(target_id, relation)``, so a pair can hold several
-    relations; ``relation=None`` keeps the pair-scoped most-recent behavior.
+    relations; ``relation=None`` keeps the pair-scoped most-recent behavior. The match
+    rules are ``_find_link``'s.
     """
-    if not ticket_dir.is_dir():
-        return "", ""
-    active, cancelled = _replay_links(ticket_dir)
-    found = ("", "")
-    for uuid, (tid, rel) in active.items():
-        if tid == target_id and (relation is None or rel == relation):
-            found = (uuid, rel)  # last match wins (insertion order = chronological)
-    if found[0]:
-        return found
-    for duuid, tid, drel in _snapshot_links(ticket_dir, cancelled):
-        if tid == target_id and (relation is None or drel == relation):
-            return duuid, drel
-    return "", ""
+    uuid, rel, _stored = _find_link(ticket_dir, target_id, relation)
+    return uuid, rel
 
 
 def _dangling_links(
@@ -156,13 +187,13 @@ def _write_unlink(
         if not (tracker / tid).is_dir():
             raise CommandError(f"Error: ticket '{tid}' does not exist")
 
-    link_uuid, link_relation = _get_link_info(tracker / source_id, target_id, relation)
+    link_uuid, link_relation, stored_target = _find_link(tracker / source_id, target_id, relation)
     if not link_uuid:
         scope = f" with relation '{relation}'" if relation else ""
         raise CommandError(
             f"Error: no LINK event found in '{source_id}' targeting '{target_id}'{scope}"
         )
-    if not _is_active_link(source_id, target_id, link_relation, str(tracker)):
+    if not _is_active_link(source_id, stored_target, link_relation, str(tracker)):
         raise CommandError(f"Error: no active link found between '{source_id}' and '{target_id}'")
 
     append_event(
