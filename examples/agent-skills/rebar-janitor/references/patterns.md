@@ -186,7 +186,7 @@ quoting in any deliverable — some are very recent.
   https://socket.dev/blog/slopsquatting-how-ai-hallucinations-are-fueling-a-new-class-of-supply-chain-attacks
 - "AI-Generated Smells" (volume-quality bloat, cross-session inconsistency) — arXiv 2605.02741.
 - Prior art for this skill's shape: CodeScene (hotspots, CodeHealth) and the `tech-debt-skill`
-  Claude Code skill (github.com/ksimback/tech-debt-skill — living-doc memory, "looks bad but is fine").
+  agent skill (github.com/ksimback/tech-debt-skill — living-doc memory, "looks bad but is fine").
 
 ## Notes on tuning
 
