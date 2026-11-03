@@ -383,14 +383,7 @@ def test_rotation_paths_and_regenerable_documentation_are_pinned() -> None:
 def test_rotation_extraction_respects_module_size_policy() -> None:
     rotation = RECONCILER_DIR / "get_rotation.py"
     assert rotation.is_file(), "A2-1 must add the cohesive GET-rotation module"
-    line_counts = {
-        path.name: len(path.read_text().splitlines())
-        for path in (
-            RECONCILER_DIR / "binding_store.py",
-            RECONCILER_DIR / "outbound_differ.py",
-            rotation,
-        )
-    }
-    assert 100 <= line_counts["get_rotation.py"] <= 500
-    assert line_counts["binding_store.py"] <= 800
-    assert line_counts["outbound_differ.py"] <= 800
+    # Anti-fragmentation floor only. The upper LOC bound is owned by
+    # .github/module-size-limit.txt and the CI module-size gate (ADR 0058);
+    # a second copy of that number here would be a change-detector.
+    assert 100 <= len(rotation.read_text().splitlines())
