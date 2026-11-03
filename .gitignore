@@ -33,6 +33,7 @@ evals/plan-review-gate/runs/criterion_firings.jsonl
 !.rebar/prompts/
 .rebar/prompts/*
 !.rebar/prompts/plan-review-project-portability.md
+!.rebar/prompts/plan-review-project-net-mechanism.md
 !.rebar/prompts/code-review-project-review-phase-boundaries.md
 !.rebar/prompts/plan-review-project-symbol-reference-completeness.md
 !.rebar/prompts/plan-review-project-engine-layer-enforcement.md

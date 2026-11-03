@@ -13,6 +13,19 @@
       "block_threshold": 0.9,
       "checklist": []
     },
+    "project.net-mechanism": {
+      "exec": "1-TURN",
+      "facet": "project-invariants",
+      "applies_at": {
+        "scope": [
+          "container",
+          "leaf"
+        ]
+      },
+      "default_posture": "blocking",
+      "block_threshold": 0.9,
+      "checklist": []
+    },
     "project.symbol-reference-completeness": {
       "exec": "AGENT",
       "facet": "project-invariants",
@@ -128,6 +141,9 @@
   },
   "activate": {
     "project.portability": [
+      "plan_review"
+    ],
+    "project.net-mechanism": [
       "plan_review"
     ],
     "project.symbol-reference-completeness": [
