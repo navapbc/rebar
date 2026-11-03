@@ -33,7 +33,17 @@ from rebar.llm.review_kernel import (
 )
 from rebar.llm.runner import Runner
 
-from . import budget, checkpoints, det_floor, generation, passes, registry, sidecar, sizing
+from . import (
+    budget,
+    checkpoints,
+    det_floor,
+    generation,
+    overlap,
+    passes,
+    registry,
+    sidecar,
+    sizing,
+)
 from .container_stage import (  # noqa: F401 — re-exported for the pass1.<symbol> call sites
     _CONTAINER_MAX_WORKERS,
     CONTAINER_CRITERIA,
@@ -212,14 +222,18 @@ def _chunk_usage(calls: list[dict[str, Any]]) -> Usage:
     )
 
 
-def _chunk_extra_context(chunk: list[dict], ctx: PlanContext, decomp_context: str) -> str:
-    """The criterion-scoped store-derived context injected into a chunk's finder call,
-    in a stable order (child-state first, no-file-impact declaration second)."""
+def _chunk_extra_context(
+    chunk: list[dict], ctx: PlanContext, decomp_context: str, overlap_context: str = ""
+) -> str:
+    """The criterion-scoped store-derived context injected into a chunk's finder call, in a
+    stable order (child-state first, no-file-impact declaration second, overlap third)."""
     context_parts: list[str] = []
     if any(c.get("id") == "G5" for c in chunk) and decomp_context:
         context_parts.append(decomp_context)
     if any(c.get("id") == "no-file-impact" for c in chunk):
         context_parts.append(_no_file_impact_context(ctx))
+    if any(c.get("id") == overlap.CRITERION_ID for c in chunk) and overlap_context:
+        context_parts.append(overlap_context)
     return "\n\n".join(context_parts)
 
 
@@ -254,6 +268,15 @@ def run_pass1(
     # store-derived child summary, injected into ONLY the chunk that carries G5 (below) so
     # co-chunked criteria are unaffected. Empty when the ticket has no children.
     decomp_context = det_floor.decomposition_state_block(ctx)
+    # Overlap candidates (a350): retrieved ONCE per review, not per chunk, and only when the
+    # criterion was fanned in. With `overlap=False` the id reaches no chunk, so this is an
+    # empty string, injected nowhere, and `coverage["overlap"]` is never written — which is
+    # what keeps checkpoint identity byte-identical to a review before this change.
+    overlap_context = (
+        overlap.overlap_block(ctx, coverage)
+        if any(c.get("id") == overlap.CRITERION_ID for c in single)
+        else ""
+    )
     size = _ticket_size(ctx)
     # Container criteria (G3/G4) run via the dedicated per-child loop, not the normal
     # agent path — pull them out of `agent`.
@@ -323,7 +346,7 @@ def run_pass1(
             return [], []
         # The injected extra-context is part of the checkpoint identity, so it is built
         # BEFORE the cache lookup.
-        extra = _chunk_extra_context(chunk, ctx, decomp_context)
+        extra = _chunk_extra_context(chunk, ctx, decomp_context, overlap_context)
         unit_plan = checkpoints._discovery_unit_plan(
             chunk=chunk,
             model=cfg.model,

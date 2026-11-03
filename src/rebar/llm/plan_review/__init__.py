@@ -209,8 +209,16 @@ def review_plan(
     advisory_cap: int | None = None,
     force: bool = False,
     retry: bool = False,
+    overlap: bool = False,
 ) -> dict[str, Any]:
     """Run the plan-review gate on ``ticket_id`` and return a ``plan_review_verdict``.
+
+    ``overlap`` (a350) turns on store-derived overlap surfacing: the finder is additionally
+    told which existing tickets have the most similar recorded plans, so a plan that redoes
+    work another ticket already describes is advised on. Off by default and threaded exactly
+    as ``probe_criteria`` — always supplied, ``False`` = off — so the gate's
+    ``${{ inputs.overlap }}`` reference always resolves. It adds no LLM call: the candidates
+    ride a Pass-1 chunk already being sent.
 
     Assembles the whole-ticket context, runs the DET floor + the find → verify →
     decide LLM passes, mints finding ids, applies the advisory cap, runs the Pass-4
@@ -272,6 +280,7 @@ def review_plan(
                 repo_root=repo_root,
                 force=force,
                 retry=retry,
+                overlap=overlap,
                 # Resolved source: stamped on the verdict only AFTER this returns (bug 5128).
                 source_mode=handle.source,
             )
@@ -348,6 +357,7 @@ def _run_plan_review(
     force: bool = False,
     retry: bool = False,
     source_mode: str | None = None,
+    overlap: bool = False,
 ) -> dict[str, Any]:
     from . import claimability
 
@@ -477,6 +487,7 @@ def _run_plan_review(
         advisory_cap=cap,
         repo_root=repo_root,
         prerequisite_blocks=prerequisite_blocks,
+        overlap=overlap,
     )
 
     # Mid-run cancellation (story 2c89): the ticket's OWN material changed while the review ran —
