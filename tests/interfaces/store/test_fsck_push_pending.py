@@ -9,6 +9,7 @@ real local bare origin.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from collections.abc import Iterator
@@ -244,3 +245,60 @@ def test_push_pending_names_the_configured_sync_remote(
 
     assert "PUSH_PENDING" in out, out
     assert "check connectivity to s3tickets" in out, out
+
+
+# ── a watchdog timeout is not a history verdict (bug unarmed-raw-siskin) ───────────────
+# ``_tracker_sync_status`` reads git's return codes as ancestry answers. A ``merge-base``
+# killed by fsck's watchdog must be reported as a timeout naming the operation and its
+# bound — never as DIVERGED, whose fsck-recover / re-clone advice cannot fix a slow or
+# wedged git call and, for re-clone, risks discarding local-only commits.
+
+
+def _time_out_git(monkeypatch: pytest.MonkeyPatch, *, when) -> None:
+    """Make every real ``git`` call whose argv satisfies *when* raise ``TimeoutExpired``,
+    as the 120 s watchdog would; every other call runs for real."""
+    real_run = subprocess.run
+
+    def fake_run(argv, *args, **kwargs):
+        if isinstance(argv, list) and argv[:1] == ["git"] and when(argv):
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout") or 0)
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+
+def _assert_timeout_report(line: str | None, is_issue: bool) -> None:
+    from rebar._commands import fsck, fsck_tracker_health
+
+    assert line is not None, "a timed-out git call must be reported, not silently dropped"
+    assert "DIVERGED" not in line and "re-clone" not in line, line
+    assert "timed out" in line and "git merge-base" in line, line
+    assert f"{fsck_tracker_health._FSCK_GIT_TIMEOUT}s" in line, line
+    assert is_issue is False, "a watchdog timeout is not a counted divergence issue"
+    (item,) = json.loads(fsck._transform_json(line))["issues"]
+    assert item["counted"] is False, item
+
+
+def test_merge_base_timeout_is_reported_as_timeout_not_diverged(
+    repo_with_origin: tuple[Path, Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rebar._commands import fsck
+
+    _repo, tracker, _seed = repo_with_origin
+    assert fsck._tracker_sync_status(str(tracker)) == (None, False), "precondition: healthy"
+    _time_out_git(monkeypatch, when=lambda a: "merge-base" in a and "--is-ancestor" not in a)
+
+    _assert_timeout_report(*fsck._tracker_sync_status(str(tracker)))
+
+
+def test_is_ancestor_timeout_is_reported_as_timeout_not_diverged(
+    repo_with_origin: tuple[Path, Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rebar._commands import fsck
+
+    _repo, tracker, _seed = repo_with_origin
+    _time_out_git(monkeypatch, when=lambda a: "--is-ancestor" in a)
+
+    _assert_timeout_report(*fsck._tracker_sync_status(str(tracker)))

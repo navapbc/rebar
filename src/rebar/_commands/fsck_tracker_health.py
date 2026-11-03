@@ -14,8 +14,8 @@ import shlex
 import subprocess
 
 from rebar import config
-from rebar._store import env_identity
-from rebar._store.gitutil import path_is_foreign_to_branch, run_git
+from rebar._store import env_identity, git_outcome
+from rebar._store.gitutil import path_is_foreign_to_branch, run_git, run_git_bounded
 from rebar.reducer._cache import RETIRED_SUFFIX
 
 # Watchdog on fsck's read-only local git calls (bug 9305): NOT a latency budget — these
@@ -152,22 +152,10 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
     * HEAD is an ancestor of remote (local merely behind) → nothing (sync ff-adopts).
 
     Best-effort: a malformed config or an absent remote/remote-ref yields no report
-    rather than a crash.
+    rather than a crash. A git call killed by the watchdog is reported as an uncounted
+    ``WARN`` naming the operation and its bound: its return code answers no ancestry
+    question, so it must not become a ``DIVERGED`` verdict (bug unarmed-raw-siskin).
     """
-
-    # raw-git-ok: store-maintenance command, seam-internal
-    def _git(*args: str) -> subprocess.CompletedProcess:
-        try:
-            return run_git(tracker, *args, check=False, timeout=_FSCK_GIT_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            # Watchdog, not a latency budget (9305): a hung fs must not hang fsck.
-            return subprocess.CompletedProcess(
-                ["git", "-C", tracker, *args],
-                124,
-                "",
-                f"git timed out after {_FSCK_GIT_TIMEOUT}s",
-            )
-
     # tickets.branch / tickets.remote are CODE-repo config (rebar.toml lives in the checkout,
     # not beside a relocated store) — resolve the code root the config way, NOT from the
     # tracker's parent, which holds no rebar.toml on a relocated store.
@@ -177,6 +165,38 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
         remote = config.tickets_remote(base)
     except config.ConfigError:
         return None, False
+    try:
+        return _classify_sync(tracker, branch, remote)
+    except _SyncGitTimedOut as timed_out:
+        return (
+            f"WARN: could not check '{branch}' against {remote}/{branch}: "
+            f"`git {timed_out.operation}` timed out after {_FSCK_GIT_TIMEOUT}s. This is not "
+            "a divergence verdict — git did not answer within its bound, so the store "
+            "history is unchecked; re-run fsck once git responds",
+            False,
+        )
+
+
+class _SyncGitTimedOut(Exception):
+    """A sync-status git call was killed by its watchdog; ``operation`` names it."""
+
+    def __init__(self, operation: str) -> None:
+        super().__init__(operation)
+        self.operation = operation
+
+
+def _classify_sync(tracker: str, branch: str, remote: str) -> tuple[str | None, bool]:
+    """The ancestry classification behind :func:`_tracker_sync_status`. Raises
+    :class:`_SyncGitTimedOut` as soon as a git call times out, so no later branch reads
+    the watchdog's return code as an ancestry answer."""
+
+    def _git(*args: str) -> subprocess.CompletedProcess:
+        # Watchdog, not a latency budget (9305): a hung fs must not hang fsck.
+        cp = run_git_bounded(tracker, *args, timeout=_FSCK_GIT_TIMEOUT)
+        if git_outcome.is_watchdog_timeout(cp):
+            raise _SyncGitTimedOut(" ".join(args[:2]))
+        return cp
+
     remote_ref = f"{remote}/{branch}"
     if _git("remote", "get-url", remote).returncode != 0:
         return None, False
