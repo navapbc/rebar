@@ -467,6 +467,15 @@ Today:
   compacts", it was that an operation agents *wait on* held the store lock for minutes. Here
   the waited-on operation holds nothing and waits for nothing; the worker's lock profile is
   that of a manual `rebar store compact`.
+
+  The detached worker runs in its own session, so a container stop signal sent to the MCP
+  server (PID 1) never reaches it. On SIGTERM the server therefore reads the worker lock's
+  stamp and forwards SIGTERM to that worker, but only when the stamp names a live process in
+  the server's own PID namespace: the clone may be shared by another container. The worker
+  treats SIGTERM as a stop request. The fold in flight commits, the sweep stops before the
+  next ticket and runs its end-of-run push, and the stop is logged at WARNING. Within the
+  shutdown grace, the server waits for the worker to exit and for the store write lock to be
+  free before it exits (bug topnotch-brazen-slug).
 - **The standing trigger is `rebar store compact --all`, run out of band on a schedule.** The
   `Compaction Sweep` workflow (`.github/workflows/compact-sweep.yml`) runs it **every 6
   hours** (`cron: '0 */6 * * *'`, also `workflow_dispatch`-able with `dry_run` / `limit`), on
