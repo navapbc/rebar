@@ -30,7 +30,7 @@ from rebar._commands.fsck_repair import (
 from rebar._commands.fsck_repair import (
     repair_or_plan as _repair_or_plan,
 )
-from rebar._commands.fsck_tracker_health import _tracker_health
+from rebar._commands.fsck_tracker_health import _tracker_health, untracked_event_names
 from rebar._store.gitutil import (
     _dir_is_archived,
     _reclaim_if_stale_index_lock,
@@ -201,17 +201,21 @@ def _check_ticket_snapshots(
     """
     lines: list[str] = []
     issues = 0
+    untracked = untracked_event_names(tracker)
     for ticket_id in _ticket_dirs(tracker, include_archived=include_archived):
         ticket_dir = os.path.join(tracker, ticket_id)
+        skip = untracked.get(ticket_id, set())
 
-        def _snap_findings(_dir: str = ticket_dir, _tid: str = ticket_id) -> list[str]:
+        def _snap_findings(
+            _dir: str = ticket_dir, _tid: str = ticket_id, _skip: set[str] = skip
+        ) -> list[str]:
             out: list[str] = []
             for snap_name in sorted(
                 n
                 for n in os.listdir(_dir)
                 if n.endswith("-SNAPSHOT.json") and not n.startswith(".")
             ):
-                out.extend(_check_snapshot(_dir, _tid, snap_name))
+                out.extend(_check_snapshot(_dir, _tid, snap_name, _skip))
             return out
 
         findings = _snap_findings()
@@ -320,7 +324,9 @@ def _scan(
         include_archived=include_archived,
     )
     # Checks 4.5–4.7 + 4.9 are tracker-level, not per-ticket: they live in fsck_tracker_health.
-    tracker_lines, tracker_issues = _tracker_health(tracker, repo_root, env_authorship)
+    tracker_lines, tracker_issues = _tracker_health(
+        tracker, repo_root, env_authorship, include_archived=include_archived
+    )
 
     lines += json_lines
     lines += create_lines
@@ -340,7 +346,9 @@ def _scan(
     return lines, issue_count
 
 
-def _active_event_map(ticket_dir: str, snapshot_filename: str) -> dict[str, tuple[str, str]]:
+def _active_event_map(
+    ticket_dir: str, snapshot_filename: str, skip: frozenset[str] | set[str] = frozenset()
+) -> dict[str, tuple[str, str]]:
     """Map each active event UUID to its filename and type without reading event bodies.
 
     Types come from canonical filename suffixes. ``is_active_event`` excludes folded retired
@@ -350,7 +358,7 @@ def _active_event_map(ticket_dir: str, snapshot_filename: str) -> dict[str, tupl
     for name in sorted(os.listdir(ticket_dir)):
         if not name.endswith(".json") or name.startswith("."):
             continue
-        if not is_active_event(name) or name == snapshot_filename:
+        if not is_active_event(name) or name == snapshot_filename or name in skip:
             continue
         parts = name.split("-", 1)
         if len(parts) < 2:
@@ -363,7 +371,15 @@ def _active_event_map(ticket_dir: str, snapshot_filename: str) -> dict[str, tupl
     return event_files
 
 
-def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> list[str]:
+def _check_snapshot(
+    ticket_dir: str,
+    ticket_id: str,
+    snapshot_filename: str,
+    skip: frozenset[str] | set[str] = frozenset(),
+) -> list[str]:
+    """SNAPSHOT consistency findings. ``skip`` names untracked event files, which fsck
+    reports on their own ``TRACKER_DIRTY_UNTRACKED_EVENT`` row instead (bug
+    topnotch-brazen-slug)."""
     out: list[str] = []
     try:
         with open(os.path.join(ticket_dir, snapshot_filename), encoding="utf-8") as f:
@@ -383,7 +399,7 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     if not source_uuids:
         return out
 
-    event_files = _active_event_map(ticket_dir, snapshot_filename)
+    event_files = _active_event_map(ticket_dir, snapshot_filename, skip)
 
     source_uuid_set = set(source_uuids)
     for u in source_uuids:

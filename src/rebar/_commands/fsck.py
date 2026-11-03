@@ -64,6 +64,7 @@ _TRACKER_DIRTY_KINDS = {
     "tracker_dirty_deletion",
     "tracker_dirty_leftover",
     "tracker_dirty_tmp_event",
+    "tracker_dirty_untracked_event",
 }
 
 _DIRTY_HEAD_RE = re.compile(r"^(\d+) path\(s\): (.*)$")

@@ -546,6 +546,11 @@ finding classes (each carried in `--output json` with a per-class count and path
 - `TRACKER_DIRTY_TMP_EVENT` — an orphaned `.tmp-event-*` temp file. Report-only and never
   counted or auto-touched: a live one belongs to an in-flight append. In `--output json` it
   appears in `issues[]` with `counted: false`, so it is excluded from `issue_count`.
+- `TRACKER_DIRTY_UNTRACKED_EVENT` — an untracked event file inside a ticket directory. Its
+  detail says how many have a committed `.retired` copy at HEAD, which marks a
+  pre-compaction leftover whose bytes are preserved. Report-only and never auto-touched,
+  for the same in-flight-append reason. These files are excluded from the SNAPSHOT checks,
+  so they are not also reported as `SNAPSHOT_INCONSISTENT` or `ORPHAN_EVENT`.
 
 `STATUS_FORK_RESOLVED` belongs to that same report-only class: `fsck` still emits it (in
 the text report and in `--output json`'s `issues[]`, carrying the ticket id and
@@ -567,7 +572,8 @@ historical findings cannot pin a store's `fsck` at exit 1.
 `--output json`'s `issue_count` is the COUNTED subset of `issues[]` (the items with
 `counted: true`) and therefore AGREES with the exit code: 0 when the run exits 0, ≥ 1 when
 it exits 1. Every report-only kind — `PUSH_PENDING`, `STATUS_FORK_RESOLVED`,
-`UNCERTIFIED_CLOSE`, `TRACKER_DIRTY_TMP_EVENT`, and any `WARN:` line — is carried in `issues[]` with
+`UNCERTIFIED_CLOSE`, `TRACKER_DIRTY_TMP_EVENT`, `TRACKER_DIRTY_UNTRACKED_EVENT`, and any
+`WARN:` line — is carried in `issues[]` with
 `counted: false` and never contributes to `issue_count`. A consumer that wants the old
 "every emitted line" total can still compute `len(issues)`. An uninitialized or absent
 tracker is reported as a single counted `not_initialized` issue, so its JSON payload is

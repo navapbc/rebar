@@ -141,17 +141,24 @@ def test_classifier_names_each_seeded_class(wedged_store: dict) -> None:
 
 @pytest.mark.unit
 def test_classifier_fences(tmp_path: Path) -> None:
-    """Never classified: a plain untracked .json (a live event pending append), and a
-    .retired whose source bytes are preserved NOWHERE committed (quarantining it could
-    orphan the only copy of an event)."""
+    """Never classified as repairable: a plain untracked .json (a live event pending append),
+    and a .retired whose source bytes are preserved NOWHERE committed (quarantining it could
+    orphan the only copy of an event). The untracked event is reported on the report-only
+    ``untracked_events`` row, which doctor never touches (bug topnotch-brazen-slug)."""
     from rebar._commands.fsck_tracker_health import dirty_tracker_classes
 
     tracker = _clean_clone(tmp_path)
-    _write(tracker, "eeee-live-5555-5555/1700000000000000006-eeee-live-5555-5555-CREATE.json", "{}")
+    live = "eeee-live-5555-5555/1700000000000000006-eeee-live-5555-5555-CREATE.json"
+    _write(tracker, live, "{}")
     _write(tracker, "ffff-nowh-6666-6666/1700000000000000007-nowhere.json.retired", "{}")
 
     classes = dirty_tracker_classes(str(tracker))
-    assert classes == {"deletions": [], "leftovers": [], "tmp_events": []}
+    assert classes == {
+        "deletions": [],
+        "leftovers": [],
+        "tmp_events": [],
+        "untracked_events": [live],
+    }
 
 
 @pytest.mark.unit
@@ -162,6 +169,7 @@ def test_classifier_is_empty_on_a_clean_tracker(tmp_path: Path) -> None:
         "deletions": [],
         "leftovers": [],
         "tmp_events": [],
+        "untracked_events": [],
     }
 
 
