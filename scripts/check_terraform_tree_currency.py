@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# mechanism-ok: ci_gate scripts/check_terraform_tree_currency.py — bug eebc-6aa1-e45b-4325:
+# mechanism-ok: ci_gate scripts/check_terraform_tree_currency.py — eebc-6aa1-e45b-4325
 # a terraform plan from a stale tree reports "No changes" indistinguishably from converged
 # infrastructure; nothing in the existing surface can tell those two apart.
 """Assert a checkout is CURRENT with its tracked branch before terraform reasons about it.

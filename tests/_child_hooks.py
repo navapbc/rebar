@@ -1,4 +1,4 @@
-# mechanism-ok: test_helper tests/_child_hooks.py — replaces the production env reads
+# mechanism-ok: test_helper tests/_child_hooks.py — b939-bc68-1cb2-4ee9 replaces prod env reads
 # REBAR_HLC_NOW / REBAR_TEST_COMPACT_RENAME_BARRIER with test-owned child injection
 # (story b939-bc68-1cb2-4ee9)
 """Inject rebar's clock and compaction failpoint into a CHILD process.

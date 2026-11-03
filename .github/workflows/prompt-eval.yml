@@ -61,7 +61,7 @@ jobs:
         run: |
           uv sync --locked --extra agents
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-      # mechanism-ok: ci_gate .github/workflows/prompt-eval.yml::Run changed-rubric criterion evals — story 5169 requires rubric-change live evals outside the weekly sweep
+      # mechanism-ok: ci_gate .github/workflows/prompt-eval.yml::Run changed-rubric criterion evals — 5169-ab69-9c23-4f8b requires rubric-change live evals outside the weekly sweep
       - name: Run changed-rubric criterion evals
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

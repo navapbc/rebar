@@ -75,7 +75,7 @@ class RefLockCorruptError(ValueError):
         self.raw = raw
 
 
-# mechanism-ok: lock RefLockPushError — an error type, not a lock (metaphoric-late-creature)
+# mechanism-ok: lock RefLockPushError — metaphoric-late-creature an error type, not a lock
 class RefLockPushError(RefLockError):
     """A push to the lock remote failed while the remote tip stayed unchanged.
 

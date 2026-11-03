@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from rebar import config
-from rebar._commands import close_disposition, close_scope, txn
+from rebar._commands import close_disposition, close_scope, sunset_markers, txn
 from rebar._commands._seam import CommandError
 from rebar._store import freshness
 
@@ -691,6 +691,10 @@ def _completion_precheck(
             **view_kwargs,
             **metrics_kwargs,
         )
+        # A mechanism admitted by a marker naming THIS ticket as its sunset outlives the
+        # close unless the close refuses, which would restore the permanent admission the
+        # narrowed marker grammar retired.
+        sunset_markers.check_no_open_sunset_marker(ticket_id, resolved_id, code_root, tracker)
         tree_sha, tree_source = _verification_tree(ref, ref_source, code_root)
         close_scope.ensure_tree_contains_landed(
             ticket_id, landed or [], code_root, tree_sha, tree_source

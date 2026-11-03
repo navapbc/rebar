@@ -254,7 +254,7 @@ def evals_corpus_root(repo_root=None) -> Path:
     raw = _llm_str(
         flat,
         _root_config.cli_overrides_for("llm"),
-        # mechanism-ok: env_var REBAR_LLM_EVALS_CORPUS_ROOT — client corpus override
+        # mechanism-ok: env_var REBAR_LLM_EVALS_CORPUS_ROOT — d279-4cf9 client corpus override
         "REBAR_LLM_EVALS_CORPUS_ROOT",
         "evals.corpus_root",
         DEFAULT_EVALS_CORPUS_ROOT,

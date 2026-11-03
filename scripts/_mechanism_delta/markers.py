@@ -15,6 +15,11 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+# The admission grammar is single-sourced in the package so the lint-time ratchet and the
+# close precheck cannot drift apart: a grammar disagreeing with the precheck would admit
+# markers that no close could ever discharge.
+from rebar._commands.sunset_markers import sunset_ticket as sunset_ticket
+
 MARKER = "mechanism-ok:"
 
 _MARKER_RE = re.compile(r"#\s*mechanism-ok:(.*)")

@@ -308,7 +308,7 @@ jobs:
           exit $rc
 
   terraform-config-inspect-canary:
-    # mechanism-ok: ci_gate terraform-config-inspect-canary — REB-640 c6ce pinned optional corroborator lane
+    # mechanism-ok: ci_gate terraform-config-inspect-canary — c6ce-4d8d-1c12-47cc REB-640 pinned optional corroborator lane
     name: terraform-config-inspect pinned canary
     runs-on: ubuntu-latest
     steps:
@@ -365,13 +365,13 @@ jobs:
       - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00  # v6.0.0
         with:
           go-version: "1.25.x"
-      # mechanism-ok: ci_gate .github/workflows/_optionality.yml::Install the audited terraform-config-inspect commit — REB-640 c6ce pinned binary install
+      # mechanism-ok: ci_gate .github/workflows/_optionality.yml::Install the audited terraform-config-inspect commit — c6ce-4d8d-1c12-47cc REB-640 pinned binary install
       - name: Install the audited terraform-config-inspect commit
         run: |
           mkdir -p "$RUNNER_TEMP/tfci-bin"
           GOBIN="$RUNNER_TEMP/tfci-bin" go install \
             github.com/hashicorp/terraform-config-inspect@2fb54c236733ee65ee877105d595c124c993c64d
-      # mechanism-ok: ci_gate .github/workflows/_optionality.yml::Run the opt-in pinned canary — REB-640 c6ce exercises optional corroborator
+      # mechanism-ok: ci_gate .github/workflows/_optionality.yml::Run the opt-in pinned canary — c6ce-4d8d-1c12-47cc REB-640 exercises optional corroborator
       - name: Run the opt-in pinned canary
         env:
           REBAR_TERRAFORM_CONFIG_INSPECT_CANARY: "1"
