@@ -181,6 +181,33 @@ def _validate_status(label: str, value: str) -> None:
     )
 
 
+def refuse_unproven_caused_by(ticket_id: str, caused_by: str, tracker: str, code_root: str) -> None:
+    """Refuse a close whose explicit ``--caused-by`` target no commit references.
+
+    Applies ``rebar link``'s referencing-commit rule (:func:`caused_by_refusal`) to the edge a
+    bug close would write, before anything is written (bug primitive-flowered-panther). It runs
+    only when the close would record an explicit edge: a blank flag (blame derives its culprit
+    from a commit's own trailer), a non-bug, a self-target, or an already-active target writes
+    nothing new. History that cannot prove absence allows the edge, exactly as on ``link``.
+    """
+    if not caused_by or caused_by == ticket_id:
+        return
+    from rebar._commands.link_revert import caused_by_refusal
+    from rebar._commands.transition_close import _active_caused_by_targets
+
+    state = reduce_ticket(os.path.join(tracker, ticket_id)) or {}
+    if state.get("ticket_type") != "bug" or caused_by in _active_caused_by_targets(state):
+        return
+    if reason := caused_by_refusal("caused_by", caused_by, tracker, code_root):
+        raise CommandError(
+            f"Error: --caused-by cannot be recorded: {reason}. Nothing was written; the ticket "
+            "keeps its status and its caused_by links. Point --caused-by at the ticket whose "
+            "commit carries its 'rebar-ticket:' trailer, or close without --caused-by and record "
+            "the attribution with 'rebar link'.",
+            returncode=1,
+        )
+
+
 def transition_compute(
     ticket_id: str,
     current_status: str,
@@ -261,6 +288,9 @@ def transition_compute(
     # Refuse an explicit ``--caused-by`` that names no single ticket before any write, and
     # pass the canonical id on (bug surprising-fruticose-herring).
     caused_by = resolve_explicit_caused_by(caused_by, target_status, tracker)
+    # Apply ``rebar link``'s referencing-commit rule to that target, also before any write
+    # (bug primitive-flowered-panther).
+    refuse_unproven_caused_by(ticket_id, caused_by, tracker, repo_root_str)
 
     # Every transition into ``in_progress`` passes the claim start-work gate. This
     # target-based check covers open, blocked, and closed sources after same-status no-ops

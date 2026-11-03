@@ -35,9 +35,17 @@ def _caused_by_targets(tid: str, repo: str) -> list[str]:
     return [d["target_id"] for d in deps if d["relation"] == "caused_by"]
 
 
+def _culprit_commit(repo: str, culprit: str) -> None:
+    """Give ``culprit`` a referencing commit: a close refuses an explicit ``--caused-by``
+    target no commit references, as ``rebar link`` does (bug primitive-flowered-panther)."""
+    message = f"the culprit change\n\nrebar-ticket: {culprit}"
+    _git(repo, "commit", "--allow-empty", "-q", "-m", message)
+
+
 def test_explicit_caused_by_on_bug_close(rebar_repo) -> None:
     repo = str(rebar_repo)
     culprit = rebar.create_ticket("task", "the culprit change", repo_root=repo)
+    _culprit_commit(repo, culprit)
     bug = rebar.create_ticket("bug", "the bug", repo_root=repo)
     rebar.transition(bug, "open", "in_progress", repo_root=repo)
 
@@ -123,6 +131,7 @@ def test_ambiguous_blame_draws_no_autolink(rebar_repo) -> None:
 def test_library_facade_threads_caused_by(rebar_repo) -> None:
     repo = str(rebar_repo)
     culprit = rebar.create_ticket("task", "culprit", repo_root=repo)
+    _culprit_commit(repo, culprit)
     bug = rebar.create_ticket("bug", "bug", repo_root=repo)
     rebar.transition(bug, "open", "in_progress", repo_root=repo)
 

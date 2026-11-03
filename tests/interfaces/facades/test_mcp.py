@@ -15,6 +15,7 @@ pytest.importorskip("mcp")
 
 import asyncio
 import importlib.util
+import subprocess
 
 from mcp.server.fastmcp.exceptions import ToolError
 
@@ -448,6 +449,14 @@ def test_mcp_transition_persists_close_reason_on_reason_required_class(rebar_rep
 
 def test_mcp_transition_records_explicit_caused_by_edge(rebar_repo) -> None:
     culprit = rebar.create_ticket("task", "culprit", repo_root=str(rebar_repo))
+    # A close refuses an explicit culprit no commit references, as link does (bug
+    # primitive-flowered-panther), so give it one.
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", f"culprit\n\nrebar-ticket: {culprit}"],
+        cwd=rebar_repo,
+        check=True,
+        capture_output=True,
+    )
     bug = rebar.create_ticket("bug", "attributed bug", repo_root=str(rebar_repo))
     asyncio.run(
         build_server().call_tool(
