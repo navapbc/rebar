@@ -664,7 +664,7 @@ jobs:
           echo "WORKFLOW_CONCLUSION='${CONCLUSION}' failure_observed='${FAILURE_OBSERVED}' -> vote-type='${vote}'"
           echo "vote-type=${vote}" >> "$GITHUB_OUTPUT"
 
-      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Cast Verified from the CI conclusion — ticket adab closed-race guard.
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Cast Verified from the CI conclusion — adab-9d5a-7043-42d2 closed-race guard.
       - name: Cast Verified from the CI conclusion
         shell: bash
         env:

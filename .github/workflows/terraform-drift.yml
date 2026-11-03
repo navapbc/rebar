@@ -72,7 +72,7 @@ jobs:
           # freshly fetched tracked tip, which a shallow clone cannot reach (bug eebc-6aa1).
           fetch-depth: 0
 
-      # mechanism-ok: ci_gate .github/workflows/terraform-drift.yml::Assert this tree is current with the tracked branch — bug eebc-6aa1-e45b-4325: a plan from a stale ref reports "No changes" indistinguishably from converged infrastructure, so the sweep must prove WHICH tree it planned
+      # mechanism-ok: ci_gate .github/workflows/terraform-drift.yml::Assert this tree is current with the tracked branch — eebc-6aa1-e45b-4325 a plan from a stale ref reports "No changes" indistinguishably from converged infrastructure, so the sweep must prove WHICH tree it planned
       - name: Assert this tree is current with the tracked branch
         working-directory: ${{ github.workspace }}
         env:

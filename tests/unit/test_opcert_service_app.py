@@ -39,7 +39,7 @@ GUARD = "shared-secret-value"
 # then expires the test with `os._exit(1)`, killing the whole xdist worker
 # ("node down: Not properly terminated") and DESTROYING the assertion message that named
 # the real cause. Bounding the join lets that assertion surface instead.
-# mechanism-ok: test_helper _join_worker — bounded teardown join, bug 68a9-2a6c-d9aa-49ad
+# mechanism-ok: test_helper _join_worker — 68a9-2a6c-d9aa-49ad bounded teardown join
 async def _join_worker(worker: asyncio.Task, bound: float = 5.0) -> None:
     """Await a cancelled worker under a bound, so a wedged task fails the test rather than
     hanging it.

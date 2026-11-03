@@ -42,7 +42,7 @@ from rebar._store.git_locking import (  # noqa: F401  (compat re-export — see 
 logger = logging.getLogger(__name__)
 
 
-# mechanism-ok: env_var GIT_CONFIG_COUNT — bug 48bd: inspect inherited Git command config
+# mechanism-ok: env_var GIT_CONFIG_COUNT — 48bd-1c15-c3b0-4a99 inspect inherited Git config
 # to remove only empty credential-helper resets from authenticated housekeeping Git children.
 _GIT_CONFIG_ENTRY_RE = re.compile(r"^GIT_CONFIG_(KEY|VALUE)_(\d+)$")
 
