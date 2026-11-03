@@ -507,8 +507,8 @@ def ensure_ac_boxes_checked(
     """Fail the close (CommandError, exit 1) when unchecked ``- [ ]`` AC items remain.
 
     Deterministic, pre-LLM. Items whose text begins with ``[non-codebase]`` (the
-    shared ADR-0043 tag) are exempt. Silently returns on any read / reduce failure so an
-    unreadable ticket is never blocked here (other guards own that)."""
+    shared ADR-0043 tag, bare or backticked) are exempt. Silently returns on any read / reduce
+    failure so an unreadable ticket is never blocked here (other guards own that)."""
     try:
         state = (
             ticket_state
@@ -534,8 +534,9 @@ def ensure_ac_boxes_checked(
         f"Error: ticket {ticket_id} has unchecked Acceptance Criteria items:\n"
         f"{items_fmt}\n"
         "Resolve each item before closing, then check the box (edit the description).\n"
-        "Items with done-evidence outside the snapshot may be tagged [non-codebase] "
-        "to exempt them from this check.\n"
+        "Items with done-evidence outside the snapshot are exempt from this check when the "
+        "checkbox text starts with the tag: - [ ] [non-codebase] <criterion> (the tag may "
+        "also be written in backticks).\n"
         f"{_misplaced_tag_note(offenders)}"
         'To override: --force="<reason>"',
         returncode=1,

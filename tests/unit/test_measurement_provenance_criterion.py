@@ -27,7 +27,7 @@ CONTRACT_DIGESTS: dict[str, tuple[str, int]] = {
     "src/rebar/llm/reviewers/plan_review_E2.md": ("5ff7cfbe9435dc36", 1),
     "src/rebar/llm/reviewers/plan_review_E6.md": ("fc186146df6042b4", 1),
     "src/rebar/llm/plan_review/coach_moves.py": ("8a0e69dc6c95e808", 2),
-    "docs/plan-review-criteria-guide.md": ("fbc6da30ded5d2ae", 12),
+    "docs/plan-review-criteria-guide.md": ("7c6667901992ba7e", 12),
 }
 
 
