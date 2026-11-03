@@ -676,12 +676,16 @@ def test_push_invokes_heal_once_then_converges(tmp_path: Path, monkeypatch) -> N
     assert state["heals"] == 1, "heal must fire exactly once (healed_once guard)"
 
 
-@pytest.mark.skipif(
-    shutil.which("git-remote-s3") is None,
-    reason="git-remote-s3 helper binary absent (optional [s3] extra not installed in this lane)",
-)
 def test_git_remote_s3_api_surface_contract() -> None:
-    import git_remote_s3
+    """Pin the git_remote_s3 library surface the heal imports, so a helper upgrade that moves
+    any of it fails here rather than at heal time.
+
+    Gate on the package, not the ``git-remote-s3`` binary: the body never runs the binary, and
+    a binary installed outside this interpreter (``~/.local/bin``) satisfied the old PATH check
+    while the import failed (bug a54e-4b02-ab42-481f). ``importorskip`` also puts the test under
+    REBAR_REQUIRE_EXTRAS, so CI, which installs ``[s3]``, fails rather than skips if it is lost.
+    """
+    git_remote_s3 = pytest.importorskip("git_remote_s3")
     from git_remote_s3 import S3Remote, parse_git_url  # noqa: F401
 
     for attr in ("acquire_lock", "release_lock", "get_bundles_for_ref", "init_remote_head"):
