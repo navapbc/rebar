@@ -266,12 +266,55 @@ def _active_caused_by_targets(state: dict) -> list[str]:
     ]
 
 
+def _caused_by_candidates(value: str, tracker: str) -> list[str]:
+    """Ticket ids an unresolved ``--caused-by`` value could mean: alias and prefix matches."""
+    from rebar._ids import build_resolver_scan_index
+
+    index = build_resolver_scan_index(tracker)
+    if index is None:
+        return []
+    by_prefix = [n for n in index.sorted_dir_names if n.startswith(value)]
+    return sorted({*index.alias_to_dirs.get(value, []), *by_prefix})
+
+
+def resolve_explicit_caused_by(caused_by: str, target_status: str, tracker: str) -> str:
+    """Resolve a close's explicit ``--caused-by`` before anything is written.
+
+    Return ``""`` when the target is not ``closed`` or the value is blank (blame derivation
+    then runs as before), else the canonical id. A value that does not name exactly one ticket
+    raises :class:`CommandError` naming the candidates, as ``rebar link`` refuses an unresolved
+    target, so no edge to a non-ticket is ever recorded (bug surprising-fruticose-herring).
+    """
+    value = caused_by.strip()
+    if target_status != "closed" or not value:
+        return ""
+    from rebar._ids import resolve_ticket_id
+
+    resolved = resolve_ticket_id(value, tracker, quiet=True)
+    if resolved is not None:
+        return resolved
+    candidates = _caused_by_candidates(value, tracker)
+    if len(candidates) > 1:
+        detail = f"is ambiguous: it matches {len(candidates)} tickets: {' '.join(candidates)}"
+    else:
+        detail = "does not resolve: no ticket matches it"
+    raise CommandError(
+        f"Error: --caused-by '{value}' {detail}. Nothing was written; the ticket keeps its "
+        "status and its caused_by links. Pass the alias or full id of the one ticket that "
+        "caused this bug.",
+        returncode=1,
+    )
+
+
 def _resolve_caused_by_culprit(
     caused_by: str, existing: list[str], ticket_id: str, tracker: str, repo_root_str: str
 ) -> str | None:
     """The culprit this close should attribute the bug to, or ``None`` for "leave it alone".
 
-    An explicit ``--caused-by`` is the operator's stated attribution and always resolves.
+    An explicit ``--caused-by`` is the operator's stated attribution. It yields its canonical
+    id, or ``None`` when it does not name exactly one ticket: the raw string is never an edge
+    target (bug surprising-fruticose-herring). :func:`resolve_explicit_caused_by` refuses such
+    a value before the close writes; this ``None`` covers direct ``close_ticket`` callers.
     An EMPTY flag falls through to :func:`rebar.metrics.blame.derive_caused_by` ONLY when the
     bug carries no ``caused_by`` edge yet (bug 10d0): blame is a guess, and a guess must never
     be added beside a proven edge — that is the wrong-target failure the ``/rebar-debug``
@@ -281,7 +324,7 @@ def _resolve_caused_by_culprit(
     if caused_by.strip():
         from rebar._ids import resolve_ticket_id
 
-        return resolve_ticket_id(caused_by.strip(), tracker) or caused_by.strip()
+        return resolve_ticket_id(caused_by.strip(), tracker, quiet=True)
     if existing:
         return None
     from rebar.metrics import blame

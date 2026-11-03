@@ -15,7 +15,7 @@ import sys
 from rebar import config
 from rebar._commands._seam import CommandError
 from rebar._commands.lifecycle_cascade import cascade_parent_first
-from rebar._commands.transition_close import close_ticket
+from rebar._commands.transition_close import close_ticket, resolve_explicit_caused_by
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._ids import resolve_ticket_id
@@ -257,6 +257,10 @@ def transition_compute(
         raise CommandError(
             "Error: ticket system not initialized. Run 'ticket init' first.", returncode=1
         )
+
+    # Refuse an explicit ``--caused-by`` that names no single ticket before any write, and
+    # pass the canonical id on (bug surprising-fruticose-herring).
+    caused_by = resolve_explicit_caused_by(caused_by, target_status, tracker)
 
     # Every transition into ``in_progress`` passes the claim start-work gate. This
     # target-based check covers open, blocked, and closed sources after same-status no-ops
