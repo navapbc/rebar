@@ -511,6 +511,68 @@ dataset:
        def parse_release_tag(tag):
            # unchanged, shipped and exercised in production for two years
            return tuple(int(p) for p in tag.split("."))
+  - id: R-loc-ceiling-pinned-literal
+    corpus: rebar
+    expect: finding
+    mode: loc-ceiling-pinning
+    note: >-
+      Story f86e: ADR 0058 makes `.github/module-size-limit.txt` the single authoritative LOC
+      ceiling. A test that hard-codes `<= 800` keeps a second copy of a number it does not own:
+      it breaks on a behavior-preserving extraction and diverges silently when the real limit
+      moves. Seeded from the live violations in test_run_span.py and test_header_delivery.py.
+    diff: |
+      --- a/tests/unit/test_run_span.py
+      +++ b/tests/unit/test_run_span.py
+      @@ -110,3 +110,6 @@
+       def test_module_stays_small():
+           p = SRC / "run_span.py"
+      +    assert len(p.read_text().splitlines()) <= 800
+  - id: FP-loc-anti-fragmentation-floor
+    corpus: rebar
+    expect: pass
+    mode: loc-floor-exempt
+    note: >-
+      Story f86e: ADR 0058 explicitly RETAINS the anti-fragmentation floor. A floor guards
+      shredding, which the module-size cap structurally cannot see — the gate only rejects files
+      that are too large. It is the opposite check, not a duplicate ceiling. Must NOT fire.
+    diff: |
+      --- a/tests/unit/reconciler/state/test_get_rotation.py
+      +++ b/tests/unit/reconciler/state/test_get_rotation.py
+      @@ -390,3 +390,5 @@
+       def test_not_shredded():
+      +    # a mechanically split module would fall below this; the cap cannot see that
+      +    assert 100 <= line_counts["get_rotation.py"]
+  - id: FP-loc-ceiling-single-sourced-mirror
+    corpus: rebar
+    expect: pass
+    mode: loc-ceiling-exempt
+    note: >-
+      Story f86e: the sanctioned mirror form. The ceiling is READ from the authoritative limit
+      file at runtime rather than written as a literal, so there is no second copy to diverge
+      and no hard-coded value the test does not own. Must NOT fire.
+    diff: |
+      --- a/tests/unit/test_module_size_contract.py
+      +++ b/tests/unit/test_module_size_contract.py
+      @@ -24,3 +24,5 @@
+       def test_every_module_is_within_the_authoritative_limit():
+      +    limit = read_limit()
+      +    assert all(count <= limit for count in line_counts.values())
+  - id: FP-loc-numeric-budget-not-a-file-size
+    corpus: rebar
+    expect: pass
+    mode: loc-ceiling-exempt
+    note: >-
+      Story f86e: a numeric upper bound that is NOT a file line-count ceiling. This asserts a
+      payload-size budget on values the unit produced — an observable post-condition under guard
+      (i), unrelated to ADR 0058. The antipattern must not generalize to every `<= N`. Must NOT
+      fire.
+    diff: |
+      --- a/tests/unit/workflow/test_completion_prefetch.py
+      +++ b/tests/unit/workflow/test_completion_prefetch.py
+      @@ -133,3 +133,5 @@
+       def test_prefetch_payload_stays_within_budget():
+           base, out = prefetch(ticket)
+      +    assert len(base) + len(out) <= 500
 
 gold_set:
   - input: "A test that asserts a mock's own configured return value (tautological)."

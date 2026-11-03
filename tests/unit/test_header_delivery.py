@@ -292,11 +292,3 @@ def test_header_values_never_reach_provenance_or_logs(caplog) -> None:
     blob = _json.dumps(rec)
     assert "SENTINEL-VALUE-8f2a" not in blob
     assert "x-corp-secret" in blob
-
-
-def test_runner_stays_within_the_module_size_cap() -> None:
-    """AC11: runner.py sits AT the 800-line cap; the provenance_for argument must be paid for."""
-    from pathlib import Path
-
-    runner = Path(__file__).resolve().parents[2] / "src" / "rebar" / "llm" / "runner.py"
-    assert len(runner.read_text().splitlines()) <= 800
