@@ -87,7 +87,7 @@ def _app_and_client(monkeypatch):
     from rebar.review_bot.config import ReceiverConfig
 
     cfg = ReceiverConfig(gerrit_bot_token=SENTINEL, webhook_token=SENTINEL)
-    app_module.app.state.config = cfg
+    monkeypatch.setitem(app_module.app.state._state, "config", cfg)
     return app_module, TestClient(app_module.app)
 
 

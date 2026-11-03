@@ -892,7 +892,7 @@ def test_accepted_rerun_survives_restart_via_gerrit_reconcile(monkeypatch, tmp_p
 
     monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
     monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
-    monkeypatch.setattr(appmod.app.state, "config", cfg, raising=False)
+    monkeypatch.setitem(appmod.app.state._state, "config", cfg)
     monkeypatch.setattr(gcmod, "GerritClient", lambda _cfg: g)
     monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
 
@@ -1768,7 +1768,7 @@ def test_lifespan_is_safe_by_default_without_per_test_stubs(monkeypatch, tmp_pat
     from rebar.review_bot import app as appmod
     from rebar.review_bot.config import shutdown_drain_seconds
 
-    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path))
+    monkeypatch.setitem(appmod.app.state._state, "config", _cfg(tmp_path))
     monkeypatch.setattr(appmod, "_gerrit_auth_health", lambda _cfg: (True, "ok"), raising=True)
 
     start = time.monotonic()
@@ -1805,7 +1805,7 @@ def test_webhook_auth_rejection_is_visible_on_health(monkeypatch, tmp_path):
 
     monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
     monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
-    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path), raising=False)
+    monkeypatch.setitem(appmod.app.state._state, "config", _cfg(tmp_path))
     monkeypatch.setattr(appmod, "_gerrit_auth_health", lambda _cfg: (True, "ok"), raising=True)
 
     with TestClient(appmod.app) as client:
@@ -1834,7 +1834,7 @@ def test_gerrit_internal_webhook_does_not_need_unsupported_plugin_header(monkeyp
 
     monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
     monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
-    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path), raising=False)
+    monkeypatch.setitem(appmod.app.state._state, "config", _cfg(tmp_path))
     monkeypatch.setattr(appmod, "_resolve_host_addresses", lambda _host: {"testclient"})
 
     with TestClient(appmod.app) as client:
@@ -1881,7 +1881,7 @@ def test_gerrit_internal_webhook_requires_the_gerrit_service_peer(monkeypatch, t
 
     monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
     monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
-    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path), raising=False)
+    monkeypatch.setitem(appmod.app.state._state, "config", _cfg(tmp_path))
     monkeypatch.setattr(appmod, "_resolve_host_addresses", lambda _host: {"172.21.0.4"})
 
     with TestClient(appmod.app) as client:
@@ -1934,7 +1934,7 @@ def test_lifespan_can_opt_into_the_real_reconcile_loop(monkeypatch, tmp_path):
     monkeypatch.setattr(appmod._reconcile, "GerritClient", lambda config: fake_gerrit)
     monkeypatch.setattr(appmod._reconcile, "DedupStore", lambda path: fake_dedup)
     monkeypatch.setattr(appmod._reconcile, "reconcile_once", _record_reconcile_once)
-    monkeypatch.setattr(appmod.app.state, "config", _cfg(tmp_path))
+    monkeypatch.setitem(appmod.app.state._state, "config", _cfg(tmp_path))
 
     with TestClient(appmod.app):
         assert started.wait(timeout=1), "the real reconcile loop never started"

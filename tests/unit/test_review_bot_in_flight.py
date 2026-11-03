@@ -151,7 +151,7 @@ def test_health_endpoint_reports_the_queue_depth(monkeypatch: pytest.MonkeyPatch
     backlog: asyncio.Queue = asyncio.Queue()
     for n in range(3):
         backlog.put_nowait({"type": "patchset-created", "_n": n})
-    monkeypatch.setattr(appmod.app.state, "queue", backlog, raising=False)
+    monkeypatch.setitem(appmod.app.state._state, "queue", backlog)
     body = asyncio.run(appmod.health())
 
     assert body["queue_depth"] == 3, (

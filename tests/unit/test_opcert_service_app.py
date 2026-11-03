@@ -77,7 +77,11 @@ def client(monkeypatch):
     from rebar.opcert_service import app as app_module
 
     monkeypatch.setattr(app_module, "compose_signer", _fake_signer)
-    app_module.app.state.config = OpcertServiceConfig(guard=GUARD, job_timeout_seconds=30.0)
+    monkeypatch.setitem(
+        app_module.app.state._state,
+        "config",
+        OpcertServiceConfig(guard=GUARD, job_timeout_seconds=30.0),
+    )
     with TestClient(app_module.app) as c:
         yield c
 
@@ -355,8 +359,10 @@ def test_shutdown_does_not_wait_for_an_in_flight_job(monkeypatch):
 
     monkeypatch.setattr(jobs, "run_job", blocking_job)
     monkeypatch.setattr(app_module, "compose_signer", _fake_signer)
-    app_module.app.state.config = OpcertServiceConfig(
-        guard=GUARD, job_timeout_seconds=30.0, shutdown_cancel_seconds=1.0
+    monkeypatch.setitem(
+        app_module.app.state._state,
+        "config",
+        OpcertServiceConfig(guard=GUARD, job_timeout_seconds=30.0, shutdown_cancel_seconds=1.0),
     )
     try:
         with TestClient(app_module.app) as c:

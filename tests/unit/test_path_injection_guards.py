@@ -131,11 +131,10 @@ def test_rerun_502_body_has_no_exception_detail(monkeypatch: pytest.MonkeyPatch)
         raise GerritError("SEKRIT internal detail: /etc/passwd stacktrace", status=500)
 
     monkeypatch.setattr(gerrit_client.GerritClient, "get_change_event", _boom)
-    monkeypatch.setattr(
-        app_module.app.state,
+    monkeypatch.setitem(
+        app_module.app.state._state,
         "config",
         ReceiverConfig(gerrit_bot_token="tok", webhook_token="tok"),
-        raising=False,
     )
 
     client = TestClient(app_module.app)
