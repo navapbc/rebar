@@ -11,6 +11,8 @@ cryptographic verification.
 
 from __future__ import annotations
 
+from rebar._store.env_identity import Span
+
 # Snapshots are derived projections, not appended events: a SNAPSHOT carries no independent
 # authorship of its own, so folding it into a writer's tally would double-count the events it
 # compacted. ``_scan``'s Check 1 walks every ``*.json`` in the ticket dir, so the filter lives
@@ -20,6 +22,15 @@ _SNAPSHOT_SUFFIX = "-SNAPSHOT.json"
 # An event whose ``author`` is absent, empty, or the literal placeholder is "unattributed" for
 # this check. ``Unknown`` is what the reducer projects when no author was ever stamped.
 _UNKNOWN_AUTHORS = frozenset({"", "unknown"})
+
+
+def _widen(span: Span, ts: int | None) -> Span:
+    """``span`` extended to cover ``ts``; an unstamped event leaves it unchanged."""
+    if ts is None:
+        return span
+    if span is None:
+        return (ts, ts)
+    return (min(span[0], ts), max(span[1], ts))
 
 
 class _EnvRow:
@@ -32,7 +43,7 @@ class _EnvRow:
         self.signed = 0
         self.unattributed = 0
         self.last_ts = 0
-        self.authors: set[str] = set()
+        self.authors: dict[str, Span] = {}
 
 
 class EnvAuthorshipTally:
@@ -64,8 +75,9 @@ class EnvAuthorshipTally:
             row = self._envs[env_id] = _EnvRow()
         row.events += 1
 
-        ts = payload.get("timestamp")
-        ts = ts if isinstance(ts, int) else 0
+        raw_ts = payload.get("timestamp")
+        ts = raw_ts if isinstance(raw_ts, int) else 0
+        stamped = raw_ts if isinstance(raw_ts, int) and not isinstance(raw_ts, bool) else None
         row.last_ts = max(row.last_ts, ts)
 
         if payload.get("author_sig"):
@@ -77,11 +89,17 @@ class EnvAuthorshipTally:
         if not isinstance(author, str) or author.strip().lower() in _UNKNOWN_AUTHORS:
             row.unattributed += 1
         elif author.strip():
-            row.authors.add(author.strip())
+            name = author.strip()
+            row.authors[name] = _widen(row.authors.get(name), stamped)
 
-    def identity_pairs(self) -> set[tuple[str, str]]:
-        """Return collected ``(env_id, author)`` pairs for identity-divergence checks."""
-        return {(env_id, author) for env_id, row in self._envs.items() for author in row.authors}
+    def identity_spans(self) -> dict[tuple[str, str], Span]:
+        """Return each ``(env_id, author)`` pair's event time span for identity-divergence
+        checks (:func:`rebar._store.env_identity.divergence_report`)."""
+        return {
+            (env_id, author): span
+            for env_id, row in self._envs.items()
+            for author, span in row.authors.items()
+        }
 
     def findings(self) -> list[str]:
         """``UNSIGNED_ENV:`` lines for every env that is silently writing unsigned.

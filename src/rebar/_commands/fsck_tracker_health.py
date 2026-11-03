@@ -34,7 +34,7 @@ def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list
     """
     lines: list[str] = []
     issues = 0
-    pairs = authorship.identity_pairs() if authorship is not None else set()
+    spans = authorship.identity_spans() if authorship is not None else {}
     sync_line, sync_is_issue = _tracker_sync_status(tracker)
     # NOTE: any pair added here with ``is_issue=False`` (e.g. a new WARN/informational
     # check) MUST also be reflected in fsck._NEVER_COUNTED_KINDS so the JSON ``issue_count``
@@ -43,7 +43,7 @@ def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list
         (sync_line, sync_is_issue),
         (_branch_mismatch(tracker, repo_root), False),
         (_foreign_store_paths(tracker), True),
-        (env_identity.divergence_report(env_identity.read_env_id(tracker), pairs), True),
+        (env_identity.divergence_report(env_identity.read_env_id(tracker), spans), True),
         *_dirty_tracker_lines(tracker),
     ):
         if not line:

@@ -1043,13 +1043,20 @@ Set `REBAR_ALLOW_ENV_REIDENTIFY=1` to acknowledge the situation and quieten the 
 
 `fsck` reports the condition independently and store-wide: an `ENV_ID_MISMATCH` finding
 means **this environment's own author(s) have also written events under a different env
-id** — a re-clone, or the same person moving machines. It is deliberately scoped by
-author rather than simply "the store holds more than one env id", because a healthy store
-shared by several clones always holds several; a check that fired there would fire on
-every well-formed team store until nobody read it. It is a counted integrity issue,
-because the alternative is discovering the loss one ticket at a time at a gate, hours
-later. Prior events are **not** rewritten — they are correctly stamped with whichever
-environment actually wrote them.
+id during an overlapping period** — a second clone writing while the first was still
+active. It is deliberately scoped by author rather than simply "the store holds more than
+one env id", because a healthy store shared by several clones always holds several; a
+check that fired there would fire on every well-formed team store until nobody read it.
+It is also scoped by time: for each shared author, fsck compares the first and last event
+timestamps under each env id, and env ids whose ranges do not overlap are treated as
+successive re-clones of one store and not reported. Ranges are closed, so a shared
+boundary timestamp counts as overlap, and a range with no timestamp counts as
+overlapping. The accepted trade-off (bug `bbd4-cec2-ecdb-46d9`) is that a clone retired
+and then replaced, the ordinary re-clone, is **not** flagged by fsck; the mint warning
+above is the signal for that case. It is a counted integrity issue, because the
+alternative is discovering the loss one ticket at a time at a gate, hours later. Prior
+events are **not** rewritten — they are correctly stamped with whichever environment
+actually wrote them.
 
 A re-clone no longer invalidates op-cert attestations: the signing environment is not a gate
 (bug `c21f-6f29-5d2d-4a5a`), and an SSHSIG blob carries the public half it was made with, so a

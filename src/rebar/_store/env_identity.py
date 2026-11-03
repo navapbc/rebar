@@ -18,8 +18,9 @@ Minting proceeds because the store cannot distinguish a re-clone from an
 additional collaborator, which requires its own identity. The environment
 variable reaches CLI, MCP boot, and library ensure paths. A CLI flag would not.
 
-:func:`divergence_report` detects completed re-identification and scopes its
-signal by author so normal multi-clone stores do not warn. Existing events keep
+:func:`divergence_report` detects one author writing under two identities at once. It
+scopes its signal by author so normal multi-clone stores do not warn, and by time so
+successive re-clones of one store do not warn either. Existing events keep
 their original identity and attestations are not re-homed. Cross-environment key
 publication would change the trust model and remains outside this module.
 """
@@ -30,6 +31,7 @@ import json
 import os
 import sys
 import uuid
+from collections.abc import Mapping
 
 from rebar._store.ensures import EnsureOutcome
 
@@ -218,28 +220,58 @@ def _realpath(p: str) -> str:
     return os.path.realpath(p)
 
 
-def divergence_report(current: str, seen: set[tuple[str, str]]) -> str | None:
-    """Return the ``fsck`` line for one author using multiple identities.
+#: One author's ``(first, last)`` event timestamps under one env id, or ``None`` when unknown.
+Span = tuple[int, int] | None
 
-    ``seen`` contains ``(env_id, author)`` pairs. Author scoping distinguishes
-    re-identification from a healthy store shared by multiple clones. The authors
-    associated with ``current`` come from store events, so this check needs no
-    configured identity. It also catches older or acknowledged identity changes
-    whose attestations no longer verify in this environment.
+
+def _overlaps(a: Span, b: Span) -> bool:
+    """Whether two event time spans share any instant, as CLOSED intervals.
+
+    A successor clone's first write comes after its predecessor's last write, so a shared
+    endpoint is not evidence of succession and counts as overlap. Measured against the
+    live store's 2026-08-09 handover (the retiring clone last wrote at 19:51:58 PDT and its
+    successor first wrote at 20:44:59 PDT), succession leaves a gap of minutes, not a
+    shared nanosecond, so the closed rule loses nothing there. Event timestamps are HLC values
+    (:func:`rebar._store.hlc.next_tick`): never earlier than the writer's wall clock, but
+    possibly later, so clock skew between hosts larger than the gap between two clones can
+    misclassify them in either direction. An unknown span (``None``) cannot be ordered, so
+    it counts as overlapping rather than being assumed successive.
+    """
+    if a is None or b is None:
+        return True
+    return a[0] <= b[1] and b[0] <= a[1]
+
+
+def divergence_report(current: str, spans: Mapping[tuple[str, str], Span]) -> str | None:
+    """Return the ``fsck`` line for one author writing under two identities at once.
+
+    ``spans`` maps ``(env_id, author)`` to that author's event time span under that env.
+    Author scoping distinguishes re-identification from a healthy store shared by
+    multiple clones. Time scoping (bug disruptive-breezy-esok, operator decision
+    2026-11-03) treats an author's env ids whose spans do NOT overlap as successive
+    re-clones of one store and does not report them. The accepted trade-off is that a
+    clone retired and then replaced is not flagged. The authors associated with
+    ``current`` come from store events, so this check needs no configured identity.
     """
     if not current:
         return None  # not yet identified — the mint warning's business, not the detector's
-    local_authors = {author for env_id, author in seen if env_id == current}
+    local = {author: span for (env_id, author), span in spans.items() if env_id == current}
     foreign = sorted(
-        {env_id for env_id, author in seen if env_id != current and author in local_authors}
+        {
+            env_id
+            for (env_id, author), span in spans.items()
+            if env_id != current and author in local and _overlaps(local[author], span)
+        }
     )
     if not foreign:
         return None
     return (
         f"ENV_ID_MISMATCH: this environment ('{current}') has also written events under "
         f"{len(foreign)} other environment id(s) ({', '.join(foreign)}) — the same "
-        "author(s) appear under both. Op-cert attestations signed by those identities "
+        "author(s) wrote under both during overlapping periods, so these are not "
+        "successive re-clones. Op-cert attestations signed by those identities "
         "cannot be verified here (`foreign_key` at the claim/close gates) and must be "
-        "re-earned. This is the signature of a tracker re-clone that did not carry over "
-        f"its git-ignored local state ({', '.join(name for name, _ in CARRY_OVER)})."
+        "re-earned. This is the signature of a second clone writing while the first was "
+        "still active, or of a re-clone that did not carry over its git-ignored local "
+        f"state ({', '.join(name for name, _ in CARRY_OVER)}) while the old clone kept writing."
     )
