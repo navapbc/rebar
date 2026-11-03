@@ -380,7 +380,11 @@ take a ref name so every existing tickets-branch call site is preserved.
 **Fail-closed reads and bounded timeouts.** A read raises on empty, non-UTF-8,
 invalid-JSON, missing-field, or out-of-range content, and callers treat that — indeed
 **any** read failure — as HELD, never free. Every git subprocess is time-bounded (5s
-local, 30s remote); a timeout is likewise HELD.
+local, 30s remote); a timeout is likewise HELD. Object reads (`git cat-file`) take the
+30s remote budget: in a partial clone, such as the bridge's `filter: blob:none` checkout,
+any object read can lazily fetch the payload from the promisor remote. Budgeting it as a
+local op failed three scheduled passes closed on 2026-11-03 (bug
+`tearful-enormous-solitaire`).
 
 **Lease self-healing, with no cross-clone clock comparison.** A contender records the OID
 and fence, waits one lease measured on its **own** clock, and re-reads; the holder is
