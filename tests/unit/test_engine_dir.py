@@ -150,11 +150,15 @@ _RECONCILER_PROBE_MODULES = ("rebar.reconciler.classify", "rebar.reconciler.adap
 
 def test_reconciler_submodules_resolve_to_the_package_source() -> None:
     """``rebar.reconciler`` submodules, imported from a ``tests/unit`` module, are the
-    package's own files under ``src/rebar/reconciler/`` — never a test-tree module of the
-    same name (``tests/unit/reconciler/classify/`` is a test package)."""
+    package's own files — never a test-tree module of the same name
+    (``tests/unit/reconciler/classify/`` is a test package). The package directory is
+    taken from the imported ``rebar``, because a non-editable install puts it in
+    ``site-packages`` rather than ``src/``."""
     import importlib
 
-    reconciler_src = (REPO_ROOT / "src" / "rebar" / "reconciler").resolve()
+    import rebar
+
+    reconciler_src = (Path(rebar.__file__).resolve().parent / "reconciler").resolve()
     for name in _RECONCILER_PROBE_MODULES:
         module = importlib.import_module(name)
         origin = Path(module.__file__ or "").resolve()
@@ -199,3 +203,50 @@ def test_engine_submodules_resolve_from_a_tests_unit_module(tmp_path: Path):
     )
     assert "2 passed" in combined, "the nested selection did not run both probes:\n" + combined
     assert child_basetemp.is_dir(), "nested pytest did not use its parent-owned basetemp"
+
+
+def test_reconciler_probe_passes_when_rebar_is_installed_outside_the_checkout(
+    tmp_path: Path,
+) -> None:
+    """Run the probe against a copy of ``rebar`` outside ``src/``, as a non-editable
+    install places it in ``site-packages``. The probe must judge the package's own
+    directory, not the checkout's source tree."""
+    import shutil
+    import subprocess
+    import sys
+
+    site = tmp_path / "site"
+    shutil.copytree(
+        REPO_ROOT / "src" / "rebar",
+        site / "rebar",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(site)
+
+    located = subprocess.run(
+        [sys.executable, "-c", "import rebar; print(rebar.__file__)"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
+    )
+    assert located.returncode == 0, located.stderr
+    origin = Path(located.stdout.strip()).resolve()
+    assert origin.is_relative_to(site.resolve()), f"rebar did not import from the copy: {origin}"
+
+    cp = run_nested_pytest(
+        tmp_path / "nested",
+        str(Path(__file__).resolve()),
+        "-k",
+        "test_reconciler_submodules_resolve_to_the_package_source",
+        "-q",
+        "-p",
+        "no:randomly",
+        env=env,
+        cwd=REPO_ROOT,
+    )
+    combined = cp.stdout + cp.stderr
+    assert cp.returncode == 0, "the probe failed against a relocated rebar:\n" + combined
+    assert "1 passed" in combined, "the nested selection did not run the probe:\n" + combined
