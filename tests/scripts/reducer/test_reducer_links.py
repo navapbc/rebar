@@ -520,3 +520,44 @@ def test_reducer_link_event_alias_target_normalizes_to_canonical_uuid(
         f"got {dep.get('target_id')!r}. "
         f"Fix: process_link must resolve short-hex alias to canonical UUID via tracker_dir."
     )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_reducer_link_to_ambiguous_quad_keeps_raw_target_without_stderr(
+    tmp_path: Path, reducer: ModuleType, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Replaying a LINK whose raw target is an ambiguous 4-hex quad prints nothing.
+
+    Bug 9a8a-fbe5-d4f5-4e2e: a stored ``caused_by`` target of ``6ed2`` matched two
+    tickets, and every replay of the source ticket printed ``Error: Ambiguous prefix``
+    on stderr, inside unrelated commands such as a gated close. The reducer resolves
+    best-effort over ids the current caller never supplied, so the ambiguity is noise:
+    the raw target is kept and stderr stays empty.
+    """
+    tracker_dir = tmp_path / "tracker-ambiguous-quad"
+    tracker_dir.mkdir()
+    for colliding in ("6ed2-1e12-0780-4efd", "6ed2-24e5-6985-4faa"):
+        (tracker_dir / colliding).mkdir()
+    source_ticket_dir = tracker_dir / "d52f-823f-894e-499a"
+    source_ticket_dir.mkdir()
+    _write_event(
+        source_ticket_dir,
+        timestamp=1742601000,
+        uuid="aaaa-bbbb-cccc-dddd",
+        event_type="CREATE",
+        data={"ticket_type": "bug", "title": "Source ticket", "parent_id": None},
+    )
+    _write_event(
+        source_ticket_dir,
+        timestamp=1742601100,
+        uuid="1234-5678-9abc-def0",
+        event_type="LINK",
+        data={"relation": "caused_by", "target_id": "6ed2", "provenance": "explicit"},
+    )
+
+    state = reducer.reduce_ticket(source_ticket_dir)
+
+    assert state is not None
+    assert [d["target_id"] for d in state["deps"]] == ["6ed2"]
+    assert capsys.readouterr().err == ""
