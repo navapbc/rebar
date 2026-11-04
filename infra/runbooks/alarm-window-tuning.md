@@ -325,6 +325,7 @@ the dead-man from nine alarms with no other symptom.
 | `rebar-gate-scratch-disk-high` | A reading | 300/3/2/breaching | 300/6/6/breaching | 30 min |
 | `rebar-docker-storage-cap-high` | A reading | 300/3/2/breaching | 300/6/6/breaching | 30 min |
 | `rebar-docker-buildkit-cache-high` | A reading | 300/3/2/breaching | 300/6/6/breaching | 30 min |
+| `rebar-docker-buildkit-gc-not-enforced` | A heartbeat | — (added 2026-11-03) | 300/6/6/breaching | 30 min |
 | `rebar-docker-unaccounted-bytes` | A reading | 300/3/2/breaching | 300/6/6/breaching | 30 min |
 | `rebar-journal-usage-high` | A reading | 300/3/2/breaching | 300/6/6/breaching | 30 min |
 | `rebar-var-tmp-usage-high` | A reading | 300/3/2/breaching | 300/6/6/breaching | 30 min |
@@ -361,6 +362,14 @@ active file at the default `SystemMaxFileSize` of 1/8), so it pages only when jo
 vacuuming (bug `9716-01cb-db59-4f71`). The window shape in the table above is unchanged. The
 general lesson for the other `*_used_percent` alarms: a ceiling that its writer fills to by
 design needs a threshold above the writer's documented overshoot, not below the ceiling.
+
+**Same correction for `rebar-docker-buildkit-cache-high`, 2026-11-03.** BuildKit also fills its
+cache to its keep-bytes and trims after builds: against the limit it actually enforced, every
+5-minute sample 2026-10-29..11-03 read 86–98%, with a 35-day peak daily maximum of 103.6%. At 85
+the alarm fired with the cap working. Its threshold is now `> 110` (bug `007c-dabe-21a5-4e92`).
+A threshold alone would then read OK while BuildKit ignores the configured share and fills to
+its own default, so the new `rebar-docker-buildkit-gc-not-enforced` heartbeat
+(`docker_buildkit_gc_enforced < 1`, Profile A) carries that failure separately.
 
 ## Detection preserved, alarm by alarm
 

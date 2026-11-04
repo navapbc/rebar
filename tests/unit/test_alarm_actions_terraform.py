@@ -28,7 +28,7 @@ _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 
 # This floor makes an empty or incomplete alarm parse fail. Raise it when alarms are
 # added, and lower it only when alarms are deleted.
-_MIN_EXPECTED_ALARMS = 31
+_MIN_EXPECTED_ALARMS = 32
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',
@@ -44,7 +44,7 @@ _MISSING_DATA_OPT_OUT_RE = re.compile(r"#\s*rebar:allow-missing-data-notbreachin
 # Host-published alarms had 13 rebar/host blocks when this guard was written. Same
 # anti-vacuity role as _MIN_EXPECTED_ALARMS: a scope filter that silently matches nothing
 # makes the guard below pass for free.
-_MIN_EXPECTED_HOST_ALARMS = 26
+_MIN_EXPECTED_HOST_ALARMS = 27
 
 
 def _quoted_attr(raw: str, masked: str, attr: str) -> str | None:
@@ -243,6 +243,8 @@ def test_host_published_disk_alarms_treat_missing_data_as_breaching() -> None:
         # Docker `du` heartbeat still own their dead/missing cases.
         ("monitoring_autodeploy.tf", "docker_buildkit_cache_high"),
         ("monitoring_autodeploy.tf", "docker_du_not_ok"),
+        # Bug 007c-dabe-21a5-4e92: a 1/0 heartbeat on EVERY tick, so silence is a dead probe.
+        ("monitoring_autodeploy.tf", "docker_buildkit_gc_not_enforced"),
         # The journald pair (story e956-b1c3-45b9-4016). Same ADR 0112 obligation, pinned for
         # the same reason — and with the same reachable runtime edge as the Docker trio:
         # observability.sh 2g publishes ``journal_used_percent`` only on a successful
@@ -624,6 +626,8 @@ _LIVENESS_HEARTBEATS_REQUIRING_ALARMS = {
     "mem_probe_ok": "rebar-memory-probe-not-ok",
     "container_stats_ok": "rebar-container-stats-probe-not-ok",
     "docker_du_ok": "rebar-docker-du-not-ok",
+    # Bug 007c-dabe-21a5-4e92: whether BuildKit enforces the configured cap, every tick.
+    "docker_buildkit_gc_enforced": "rebar-docker-buildkit-gc-not-enforced",
 }
 _OBSERVABILITY_SH = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _PUBLISHED_METRIC_RE = re.compile(r"--metric-name[ \\\n]+(?P<metric>[A-Za-z0-9_]+)")
@@ -714,3 +718,34 @@ def test_journal_usage_alarm_fires_only_past_journald_worst_case() -> None:
         f"threshold {threshold} would not page until a vacuum failure is a whole extra file past "
         "the worst case"
     )
+
+
+# An ENFORCED BuildKit cap is filled to, not stayed under: BuildKit trims only after builds,
+# so the cache sits just below its keep-bytes and briefly above it. Measured on rebar-gerrit
+# against the limit BuildKit actually enforced: every 5-minute sample 2026-10-29..11-03 at
+# 86-98%, and a 35-day peak daily maximum of 103.6% (bug 007c-dabe-21a5-4e92).
+_BUILDKIT_ENFORCED_PEAK_PERCENT = 103.6
+
+
+def test_buildkit_cache_alarm_clears_an_enforced_cap_at_its_measured_peak() -> None:
+    """At 85 the alarm fired in steady state even with the cap enforced, so it carried no signal."""
+    raw, masked = _alarm_block("monitoring_autodeploy.tf", "docker_buildkit_cache_high")
+    threshold = _numeric_attr(raw, masked, "threshold")
+    assert _quoted_attr(raw, masked, "comparison_operator") == "GreaterThanThreshold"
+    assert threshold == 110, (
+        f"threshold {threshold}: expected 110, the enforced-cap peak "
+        f"({_BUILDKIT_ENFORCED_PEAK_PERCENT}%) plus margin"
+    )
+
+
+def test_buildkit_gc_not_enforced_alarm_has_the_heartbeat_shape() -> None:
+    """The threshold above reads OK while the cap is ignored; this alarm is what catches that."""
+    raw, masked = _alarm_block("monitoring_autodeploy.tf", "docker_buildkit_gc_not_enforced")
+    assert _quoted_attr(raw, masked, "alarm_name") == "rebar-docker-buildkit-gc-not-enforced"
+    assert _quoted_attr(raw, masked, "namespace") == "rebar/host"
+    assert _quoted_attr(raw, masked, "metric_name") == "docker_buildkit_gc_enforced"
+    assert _quoted_attr(raw, masked, "statistic") == "Minimum"
+    assert _quoted_attr(raw, masked, "comparison_operator") == "LessThanThreshold"
+    assert _numeric_attr(raw, masked, "threshold") == 1
+    assert _quoted_attr(raw, masked, "treat_missing_data") == "breaching"
+    assert masked.count("aws_sns_topic.alerts.arn") >= 2

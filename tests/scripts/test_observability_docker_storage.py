@@ -433,3 +433,58 @@ def test_a_missing_cap_script_still_publishes_the_raw_byte_readings(tmp_path: Pa
     assert _one(aws_log, "docker_unaccounted_bytes") > 0
     assert _values(aws_log, "docker_storage_used_percent") == []
     assert _values(aws_log, "docker_buildkit_cache_used_percent") == []
+
+
+# Enforced-limit heartbeat (bug 007c-dabe-21a5-4e92)
+#
+# `docker_buildkit_cache_used_percent` cannot tell "BuildKit enforces our cap and fills to it"
+# from "BuildKit ignores our cap and fills to its own default": on rebar-gerrit both read about
+# 100%. The heartbeat asks docker-storage-cap.sh --check-gc-enforced every tick instead.
+
+
+def _cap_stub(tmp_path: Path, check_body: str) -> str:
+    path = tmp_path / "docker-storage-cap-stub.sh"
+    path.write_text(
+        "#!/usr/bin/env bash\n"
+        'case "$1" in\n'
+        "  --print-env)\n"
+        f"    printf 'DOCKER_BUDGET_BYTES=%s\\n' {20 * GIB}\n"
+        f"    printf 'DOCKER_BUILDKIT_CACHE_BYTES=%s\\n' {5 * GIB}\n"
+        "    printf 'DOCKER_ROOT=%s\\n' /var/lib/docker ;;\n"
+        f"  --check-gc-enforced) {check_body} ;;\n"
+        "esac\n"
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return str(path)
+
+
+@pytest.mark.parametrize(
+    ("check_body", "expected"),
+    [
+        ("echo 1; exit 0", 1),
+        ("echo 0; exit 0", 0),
+        ("exit 1", -1),  # unreadable policy: HEARTBEAT_UNKNOWN, never a fabricated 1
+        ("echo maybe; exit 0", -1),  # garbage is unknown too
+    ],
+)
+def test_the_gc_enforced_heartbeat_reports_the_cap_check(
+    tmp_path: Path, check_body: str, expected: int
+) -> None:
+    env, aws_log = _environment(
+        tmp_path, env_extra={"DOCKER_CAP_SH": _cap_stub(tmp_path, check_body)}
+    )
+    assert _run(env).returncode == 0
+    assert _one(aws_log, "docker_buildkit_gc_enforced") == expected
+
+
+def test_the_gc_enforced_heartbeat_is_published_when_the_ledger_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    """A heartbeat publishes on EVERY tick; a dead `docker system df` must not silence it."""
+    env, aws_log = _environment(
+        tmp_path,
+        df_rows=None,
+        env_extra={"DOCKER_CAP_SH": _cap_stub(tmp_path, "echo 0; exit 0")},
+    )
+    assert _run(env).returncode == 0
+    assert _one(aws_log, "docker_buildkit_gc_enforced") == 0

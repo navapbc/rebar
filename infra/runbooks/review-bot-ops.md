@@ -933,7 +933,8 @@ enforceable, and knowing which one is saturated is what decides the response:
 | Alarm | Metric | What it means | First move |
 |---|---|---|---|
 | `rebar-docker-storage-cap-high` | `docker_storage_used_percent` | the whole budget is >85% full, measured from the FILESYSTEM | read the other two before touching anything — this one cannot say which generator grew |
-| `rebar-docker-buildkit-cache-high` | `docker_buildkit_cache_used_percent` | the BuildKit generator is at, or PAST, its own cap | the `builder.gc` policy is not taking effect (below) |
+| `rebar-docker-buildkit-cache-high` | `docker_buildkit_cache_used_percent` | the BuildKit cache is >110% of its own cap — well past the 86–104% an enforced cap fills to | check `rebar-docker-buildkit-gc-not-enforced` first; if it is OK, prune with `--keep-storage` (below) |
+| `rebar-docker-buildkit-gc-not-enforced` | `docker_buildkit_gc_enforced` | BuildKit's effective keep-bytes is NOT the configured share (1/0 every tick, -1 unreadable) | the `builder.gc` policy is not taking effect (below) |
 | `rebar-docker-unaccounted-bytes` | `docker_unaccounted_bytes` | >2 GiB of apparent-size content under `/var/lib/docker` that `docker system df` does not account for in any row | **do not prune** — daemon-level reclaim (below) |
 
 `observability.sh` §2f publishes the Docker storage gauges only on successful measurement. The
@@ -943,7 +944,8 @@ datapoint does not pretend unseen residue crossed the threshold.
 **Read the percentages above 100 — they are real.** Every `*_used_percent` on this box
 (`docker_storage`, `docker_buildkit_cache`, `journal`, `var_tmp`, `container_writable`) is a
 ratio against a BUDGET, not a fill level, and every one of those budgets is a best-effort
-target its writer can exceed: `builder.gc.maxUsedSpace` reclaims lazily, `SystemMaxUse` is
+target its writer can exceed: BuildKit fills its cache to its keep-bytes and trims only after
+builds (an ENFORCED 5.588 GiB limit measured 86–104% of itself on 2026-10-01..11-03), `SystemMaxUse` is
 journald's own target, and the `/var/tmp` and container-layer shares are held by 5-minute
 reapers a fast writer outruns. These metrics used to CLAMP at 100 (bug
 `b380-3dfc-99fc-4a0e`), which made "exactly at the cap" and "9% past it" the same datapoint —
@@ -983,12 +985,18 @@ daemon-invisible content.
 
 ### The BuildKit cap is not taking effect
 
-The rendered `builder.gc` key depends on the engine version, and **a key the daemon does not
-recognise is silently ignored** — the config looks installed and the cap simply does not exist.
-Engine >= 25.0 honours `maxUsedSpace`; older engines honour `defaultKeepStorage`.
+The rendered `builder.gc` key depends on the **BuildKit** version embedded in dockerd, not the
+Engine version, and **a key BuildKit does not recognise is silently ignored** — the config looks
+installed and the cap simply does not exist. `docker-storage-cap.sh` renders `maxUsedSpace` at
+BuildKit >= 0.13 and `defaultKeepStorage` below it. Engine 25.0 does not imply BuildKit 0.13:
+rebar-gerrit runs Engine 25.0.16 with BuildKit 0.12.6 (bug `3057-4d76-9ee4-4817`). The
+`rebar-docker-buildkit-gc-not-enforced` alarm checks this every tick via
+`docker-storage-cap.sh --check-gc-enforced`; on 2026-11-03 it would have been firing because
+`--install` had never been run after the 3057 fix landed (bug `007c-dabe-21a5-4e92`).
 
 ```bash
-docker version --format '{{.Server.Version}}'
+docker buildx inspect | grep -E 'Buildkit|Keep Bytes'   # BuildKit version + enforced keep-bytes
+bash infra/scripts/docker-storage-cap.sh --check-gc-enforced   # 1 = share enforced, 0 = not
 python3 -m json.tool /etc/docker/daemon.json     # what is actually installed
 bash infra/scripts/docker-storage-cap.sh --print-json   # what SHOULD be installed (writes nothing)
 bash infra/scripts/docker-storage-cap.sh --install      # backup + validate + install
