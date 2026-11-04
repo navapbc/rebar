@@ -191,8 +191,15 @@ report_activation_state() {
 effective_gc_verdict() {
   local reported
   GC_VERDICT=""
+  # Two output shapes, one ceiling (bug eb89-806b-8f46-4dbd). buildx <= 0.17 prints one
+  # `Keep Bytes:` per rule; buildx >= 0.18 prints `Reserved Space:` / `Max Used Space:` /
+  # `Min Free Space:` instead (docker/buildx commands/inspect.go), and the buildx plugin
+  # upgrades independently of dockerd. A rule's ceiling is max(reserved, max-used) (BuildKit
+  # cache/manager.go calculateKeepBytes), so all three ceiling labels feed the same
+  # largest-value comparison. `Min Free Space` is a disk-free FLOOR, not a cache size, and is
+  # deliberately not read: counting it could pass a cap that does not exist.
   reported="$(docker buildx inspect 2>/dev/null \
-              | sed -n 's/^[[:space:]]*[Kk]eep [Bb]ytes:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p')"
+              | sed -En 's/^[[:space:]]*([Kk]eep [Bb]ytes|[Rr]eserved [Ss]pace|[Mm]ax [Uu]sed [Ss]pace):[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\2/p')"
   [ -n "$reported" ] || return 2
   local verdict status
   verdict="$(DSC_REPORTED="$reported" DSC_CAP="$DOCKER_BUILDKIT_CACHE_BYTES" \
