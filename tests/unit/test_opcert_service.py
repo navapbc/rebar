@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar.attest import dsse
@@ -237,6 +238,89 @@ def test_completion_fail_completes_with_null_envelope(authority, signer):
     assert fields["status"] == "completed"
     assert fields["verdict"] == "FAIL"
     assert fields["envelope"] is None
+
+
+# ─────────────────────────── process budget (upset-prissy-olm) ────────────────
+# Each child-process start costs 0.1-1.3 s on a loaded host, so the job's spawn
+# count is its wall-time floor. Main at 90d57e392ba measured PASS 49 git / 53 total
+# and FAIL 32; these ceilings pin the reduced counts.
+_PASS_GIT_CEILING = 30
+_PASS_TOTAL_CEILING = 34
+_FAIL_TOTAL_CEILING = 18
+
+
+_COUNTING = {"paused": False}
+
+
+def _counted_run_job(monkeypatch, gate, authority, signer) -> tuple[dict, list[list[str]]]:
+    """Run one job and return its fields plus the argv of every process it started
+    (except those the test's own probes start while ``_COUNTING["paused"]``)."""
+    src, tid, _main = authority
+    started: list[list[str]] = []
+    real_init = subprocess.Popen.__init__
+
+    def counting_init(self, args, *a, **kw):
+        if not _COUNTING["paused"]:
+            started.append([str(x) for x in args] if not isinstance(args, str) else [args])
+        real_init(self, args, *a, **kw)
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", counting_init)
+    fields = jobs.run_job(
+        ticket_id=tid,
+        kind="completion-verifier",
+        cfg=_cfg(src),
+        signer=signer,
+        verify_completion_fn=gate,
+    )
+    monkeypatch.undo()
+    return fields, started
+
+
+def _git_out(cwd: str, *args: str) -> str:
+    """A test probe, excluded from the job's spawn count."""
+    _COUNTING["paused"] = True
+    try:
+        proc = subprocess.run(
+            ["git", "-C", cwd, *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=subprocess_env(),
+        )
+    finally:
+        _COUNTING["paused"] = False
+    return proc.stdout.strip()
+
+
+def test_completion_pass_spawn_ceiling(authority, signer, monkeypatch):
+    seen: dict = {}
+
+    def gate(tid_, rr):
+        from rebar.config import tracker_dir
+
+        seen["remote_refs"] = _git_out(rr, "for-each-ref", "refs/remotes")
+        seen["tracker_email"] = _git_out(str(tracker_dir(rr)), "config", "user.email")
+        return _pass_completion(tid_, rr)
+
+    fields, started = _counted_run_job(monkeypatch, gate, authority, signer)
+    assert fields["status"] == "completed", fields
+    assert fields["envelope"]
+    git = [argv for argv in started if argv and argv[0] == "git"]
+    assert len(git) <= _PASS_GIT_CEILING, (len(git), git)
+    assert len(started) <= _PASS_TOTAL_CEILING, (len(started), started)
+    # Workspace end state is unchanged: no remote-tracking refs, identity visible in the tracker.
+    assert seen["remote_refs"] == ""
+    assert seen["tracker_email"] == "opcert@rebar.invalid"
+
+
+def test_completion_fail_spawn_ceiling(authority, signer, monkeypatch):
+    def gate(tid_, rr):
+        return {"verdict": "FAIL", "findings": [{"criterion": "x"}]}
+
+    fields, started = _counted_run_job(monkeypatch, gate, authority, signer)
+    assert fields["status"] == "completed", fields
+    assert fields["verdict"] == "FAIL"
+    assert len(started) <= _FAIL_TOTAL_CEILING, (len(started), started)
 
 
 @pytest.mark.parametrize(
