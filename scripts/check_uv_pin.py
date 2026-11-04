@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""Keep the uv version pin exact, single-sourced, and manifest-free.
+"""Keep uv at a minimum version locally and at one checksummed release in CI.
 
-The repository-local setup action reads ``[tool.uv] required-version`` from
-``pyproject.toml`` and downloads checksummed, versioned release artifacts. This gate rejects:
+``[tool.uv] required-version`` in ``pyproject.toml`` is a ``>=X.Y.Z`` floor: uv enforces it
+itself, so any newer uv (a contributor's, a self-updated host's, Dependabot's bundled one)
+works, and an older one refuses to run. CI installs exactly one release through the
+repository-local setup action, whose ``UV_VERSION`` sits next to that release's committed
+checksums. This gate rejects:
 
-1. a missing or ranged ``required-version``;
+1. a missing ``required-version``, or one that is not a bare ``>=X.Y.Z`` floor (an exact pin
+   or an upper bound makes uv refuse every newer release, which broke every Dependabot uv
+   run, bug ad14-c714-4619-4cd2);
 2. per-call ``version`` or ``version-file`` overrides;
 3. a root ``uv.toml`` that shadows ``[tool.uv]``;
 4. use of the manifest-backed upstream ``astral-sh/setup-uv`` action;
-5. a missing/weakened local action or incomplete supported-runner checksums; and
-6. Docker/Compose images whose uv reference is floating, absent-tagged, templated, or a bare
-   opaque digest.
+5. a missing/weakened local action, incomplete supported-runner checksums, or a
+   ``UV_VERSION`` that is missing, below the floor, or not the release those checksums
+   belong to; and
+6. Docker/Compose images whose uv reference is floating, absent-tagged, templated, a bare
+   opaque digest, or below the floor.
 
-Every uv container reference must carry the exact required version as its tag. A digest is
-accepted only alongside that matching tag, and no Dockerfile or Compose image may use
-``:latest``.
+Every uv container reference must carry an exact ``X.Y.Z`` tag at or above the floor. A digest
+is accepted only alongside that tag, and no Dockerfile or Compose image may use ``:latest``.
 
 The standard-library/PyYAML check has no CI-provider dependency and runs identically through
 ``make lint`` or a local shell.
@@ -84,6 +90,9 @@ POWERSHELL_SCOPES = frozenset(
         "variable",
     }
 )
+#: The one uv release CI installs. ``REQUIRED_CHECKSUMS`` are that release's published
+#: ``.sha256`` values, so the two move together; the local action's ``UV_VERSION`` must equal it.
+REQUIRED_UV_VERSION = "0.13.6"
 REQUIRED_CHECKSUMS = {
     "UV_SHA256_X86_64_UNKNOWN_LINUX_GNU": (
         "f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645"
@@ -117,45 +126,53 @@ class Finding:
         return f"{self.location}: {self.detail}"
 
 
-def _is_exact_specifier(specifier: str) -> bool:
-    """Accept only the explicit ``==X.Y.Z`` form shared by every uv reader."""
+def _parse_version(text: str) -> tuple[int, ...] | None:
+    """Parse a bare ``X.Y.Z`` release into a comparable tuple, or None if it is not one."""
+    parts = text.strip().split(".")
+    if len(parts) < 2 or not all(part.isdigit() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def _floor_of(specifier: str) -> str | None:
+    """Return ``X.Y.Z`` for a bare ``>=X.Y.Z`` floor, or None for any other specifier."""
     stripped = specifier.strip()
-    if not stripped.startswith("=="):
-        return False
-    remainder = stripped[2:].strip()
-    if not remainder or "," in remainder or "*" in remainder:
-        return False
-    if not remainder[0].isdigit():
-        return False
-    return all(part.isdigit() for part in remainder.split(".") if part != "")
+    if not stripped.startswith(">="):
+        return None
+    floor = stripped[2:].strip()
+    return floor if _parse_version(floor) is not None else None
 
 
-def check_pyproject(root: Path) -> list[Finding]:
-    """Assert ``pyproject.toml`` carries an EXACT ``[tool.uv] required-version``."""
+def _load_required_version(root: Path) -> tuple[object, Finding | None]:
     pyproject = root / "pyproject.toml"
     if not pyproject.is_file():
-        return [Finding("pyproject.toml", "missing — the uv pin has nowhere to live")]
-
+        return None, Finding("pyproject.toml", "missing — the uv floor has nowhere to live")
     try:
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:  # pragma: no cover - malformed tree
-        return [Finding("pyproject.toml", f"could not be parsed as TOML: {exc}")]
+        return None, Finding("pyproject.toml", f"could not be parsed as TOML: {exc}")
+    return data.get("tool", {}).get("uv", {}).get("required-version"), None
 
-    required = data.get("tool", {}).get("uv", {}).get("required-version")
+
+def check_pyproject(root: Path) -> list[Finding]:
+    """Assert ``pyproject.toml`` carries a bare ``>=X.Y.Z`` ``[tool.uv] required-version``."""
+    required, error = _load_required_version(root)
+    if error is not None:
+        return [error]
     if required is None:
         return [
             Finding(
                 "pyproject.toml",
-                "no [tool.uv] required-version — the local setup-uv action has no "
-                "single-sourced uv release to install",
+                'no [tool.uv] required-version — declare the minimum uv as ">=X.Y.Z"',
             )
         ]
-    if not isinstance(required, str) or not _is_exact_specifier(required):
+    if not isinstance(required, str) or _floor_of(required) is None:
         return [
             Finding(
                 "pyproject.toml",
-                f'[tool.uv] required-version is {required!r}, which is not an exact "==X.Y.Z" '
-                "pin. Keep uv pinned exactly once in pyproject.toml",
+                f'[tool.uv] required-version is {required!r}, which is not a bare ">=X.Y.Z" '
+                "floor. uv refuses to run outside required-version, so an exact pin or an "
+                "upper bound breaks every newer uv, including Dependabot's bundled one",
             )
         ]
     return []
@@ -340,6 +357,7 @@ def check_local_action(root: Path) -> list[Finding]:
         findings.append(Finding(location, "must wire enable-cache through actions/cache"))
 
     env = _action_env(document)
+    findings.extend(_check_action_version(root, env))
     for name, expected in REQUIRED_CHECKSUMS.items():
         actual = env.get(name)
         if actual is None:
@@ -355,23 +373,49 @@ def check_local_action(root: Path) -> list[Finding]:
     return findings
 
 
-def _required_version(root: Path) -> str | None:
-    """Return the bare ``X.Y.Z`` from ``[tool.uv] required-version``, or None if unusable.
+def _uv_floor(root: Path) -> str | None:
+    """Return the ``X.Y.Z`` floor from ``[tool.uv] required-version``, or None if unusable.
 
-    ``check_pyproject`` already reports a missing or inexact pin, so this returns None
+    ``check_pyproject`` already reports a missing or malformed floor, so this returns None
     silently rather than double-reporting the same defect from a second checker.
     """
-    pyproject = root / "pyproject.toml"
-    if not pyproject.is_file():
+    required, error = _load_required_version(root)
+    if error is not None or not isinstance(required, str):
         return None
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:  # pragma: no cover - check_pyproject reports this
-        return None
-    required = data.get("tool", {}).get("uv", {}).get("required-version")
-    if not isinstance(required, str) or not _is_exact_specifier(required):
-        return None
-    return required.strip()[2:].strip()
+    return _floor_of(required)
+
+
+def _below_floor(version: str, floor: str | None) -> bool:
+    parsed, minimum = _parse_version(version), _parse_version(floor or "")
+    return parsed is not None and minimum is not None and parsed < minimum
+
+
+def _check_action_version(root: Path, env: dict[str, str]) -> list[Finding]:
+    """Assert the action installs the release its checksums belong to, at or above the floor."""
+    location = str(LOCAL_SETUP_UV_ACTION_FILE)
+    version = env.get("UV_VERSION")
+    if version is None:
+        return [Finding(location, "missing UV_VERSION env entry — CI has no uv release to install")]
+    findings: list[Finding] = []
+    if version != REQUIRED_UV_VERSION:
+        findings.append(
+            Finding(
+                location,
+                f"UV_VERSION is {version}, but the committed checksums belong to uv "
+                f"{REQUIRED_UV_VERSION}. Move UV_VERSION, the checksums, and "
+                "REQUIRED_UV_VERSION/REQUIRED_CHECKSUMS in scripts/check_uv_pin.py together",
+            )
+        )
+    floor = _uv_floor(root)
+    if _below_floor(version, floor):
+        findings.append(
+            Finding(
+                location,
+                f"UV_VERSION {version} is below the [tool.uv] required-version floor {floor}, "
+                "so every uv command in CI would refuse to run",
+            )
+        )
+    return findings
 
 
 def _split_reference(reference: str) -> tuple[str, str | None, str | None]:
@@ -418,39 +462,43 @@ def _compose_files(root: Path) -> list[Path]:
 
 
 def _check_uv_reference(
-    location: str, reference: str, tag: str | None, digest: str | None, version: str | None
+    location: str, reference: str, tag: str | None, digest: str | None, floor: str | None
 ) -> Finding | None:
-    """Assert the uv image names the EXACT ``[tool.uv] required-version`` as its tag.
+    """Assert the uv image names an EXACT ``X.Y.Z`` tag at or above the floor.
 
-    uv is held to a stricter rule than every other image because this gate exists to prove
-    the two halves of ONE pin agree. A digest is immutable but OPAQUE: it does not say which
-    uv version it holds, so ``ghcr.io/astral-sh/uv@sha256:...`` cannot be read against
-    ``required-version`` at all. Immutability is not the property under test here, agreement
-    is, so for uv a digest is accepted only ALONGSIDE a matching tag
-    (``uv:0.12.7@sha256:...``); every other image may still pin by bare digest.
+    uv is held to a stricter rule than every other image because the tag is the only way to
+    read its version against ``[tool.uv] required-version``. A digest is immutable but OPAQUE:
+    ``ghcr.io/astral-sh/uv@sha256:...`` does not say which uv it holds, so for uv a digest is
+    accepted only ALONGSIDE an exact tag (``uv:0.13.6@sha256:...``); every other image may
+    still pin by bare digest.
     """
-    pin = version or "X.Y.Z"
     if tag is None:
         suffix = f"@{digest}" if digest else ""
         return Finding(
             location,
             f"'{reference}' pins uv by digest alone. A digest is immutable but OPAQUE — it "
-            "does not say which uv version it holds, so it cannot be checked against "
-            "[tool.uv] required-version, which is the agreement this gate exists to prove. "
-            f"Keep the digest and name the version too: {UV_IMAGE_REPOSITORY}:{pin}{suffix}",
+            "does not say which uv version it holds, so it cannot be checked against the "
+            "[tool.uv] required-version floor. Keep the digest and name the version too: "
+            f"{UV_IMAGE_REPOSITORY}:{REQUIRED_UV_VERSION}{suffix}",
         )
-    if version is not None and tag != version:
+    if _parse_version(tag) is None:
         return Finding(
             location,
-            f"installs uv {tag}, but [tool.uv] required-version pins {version}. uv reads "
-            "that key itself and refuses to run on a mismatch, so every build here fails. "
-            f"Use {UV_IMAGE_REPOSITORY}:{version}",
+            f"'{reference}' tags uv as {tag!r}, which is not an exact X.Y.Z release. "
+            f"Use {UV_IMAGE_REPOSITORY}:{REQUIRED_UV_VERSION}",
+        )
+    if _below_floor(tag, floor):
+        return Finding(
+            location,
+            f"installs uv {tag}, below the [tool.uv] required-version floor {floor}. uv reads "
+            "that key itself and refuses to run below it, so every build here fails. "
+            f"Use {UV_IMAGE_REPOSITORY}:{REQUIRED_UV_VERSION}",
         )
     return None
 
 
-def _check_image_reference(location: str, reference: str, version: str | None) -> Finding | None:
-    """Assert one image reference is exactly pinned, and uv-pinned to ``version``.
+def _check_image_reference(location: str, reference: str, floor: str | None) -> Finding | None:
+    """Assert one image reference is exactly pinned, and its uv tag meets ``floor``.
 
     A tag templated from a build ARG (``uv:${UV_VERSION}``) resolves only at build time, so
     this gate cannot read it. For the uv image that is a FAILURE — an unprovable pin is not a
@@ -466,9 +514,9 @@ def _check_image_reference(location: str, reference: str, version: str | None) -
         return Finding(
             location,
             f"'{reference}' templates the uv reference from a build ARG, so this gate cannot "
-            "prove it matches [tool.uv] required-version — and an ARG that defaults to a "
+            "prove it meets the [tool.uv] required-version floor — and an ARG that defaults to a "
             "floating tag is the same outage with an extra hop. Name the exact version: "
-            f"{UV_IMAGE_REPOSITORY}:{version or 'X.Y.Z'}",
+            f"{UV_IMAGE_REPOSITORY}:{REQUIRED_UV_VERSION}",
         )
     if tag is None and digest is None:
         return Finding(
@@ -483,7 +531,7 @@ def _check_image_reference(location: str, reference: str, version: str | None) -
         )
     if not is_uv:
         return None
-    return _check_uv_reference(location, reference, tag, digest, version)
+    return _check_uv_reference(location, reference, tag, digest, floor)
 
 
 def _strip_optional_quotes(value: str) -> str:
@@ -514,7 +562,7 @@ def _resolve_compose_reference(location: str, reference: str) -> tuple[str | Non
 
 def check_dockerfiles(root: Path) -> list[Finding]:
     """Assert every Dockerfile image is exactly pinned, and uv matches ``required-version``."""
-    version = _required_version(root)
+    floor = _uv_floor(root)
     findings: list[Finding] = []
     for path in _dockerfiles(root):
         relative = path.relative_to(root)
@@ -525,7 +573,7 @@ def check_dockerfiles(root: Path) -> list[Finding]:
             reference = match.group("from") or match.group("copy")
             if not _is_registry_reference(reference):
                 continue
-            finding = _check_image_reference(f"{relative}:{number}", reference, version)
+            finding = _check_image_reference(f"{relative}:{number}", reference, floor)
             if finding is not None:
                 findings.append(finding)
     return findings
@@ -533,7 +581,7 @@ def check_dockerfiles(root: Path) -> list[Finding]:
 
 def check_compose_images(root: Path) -> list[Finding]:
     """Assert every Compose ``image:`` reference is exactly pinned."""
-    version = _required_version(root)
+    floor = _uv_floor(root)
     findings: list[Finding] = []
     for path in _compose_files(root):
         relative = path.relative_to(root)
@@ -549,7 +597,7 @@ def check_compose_images(root: Path) -> list[Finding]:
                 findings.append(interpolation_finding)
                 continue
             assert reference is not None
-            finding = _check_image_reference(location, reference, version)
+            finding = _check_image_reference(location, reference, floor)
             if finding is not None:
                 findings.append(finding)
     return findings
@@ -568,7 +616,7 @@ def check_repo(root: Path) -> list[Finding]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Gate the single-sourced uv version pin.")
+    parser = argparse.ArgumentParser(description="Gate the uv floor and CI's uv release.")
     parser.add_argument("--root", default=str(REPO_ROOT), help="repo root to scan")
     args = parser.parse_args(argv)
 
@@ -578,11 +626,12 @@ def main(argv: list[str] | None = None) -> int:
     for finding in findings:
         print(f"check_uv_pin: {finding.render()}", file=sys.stderr)
     print(
-        f"\ncheck_uv_pin: {len(findings)} finding(s). uv must be pinned exactly ONCE, as "
-        '[tool.uv] required-version = "==X.Y.Z" in pyproject.toml, and every workflow must '
-        f"install it through {LOCAL_SETUP_UV_ACTION} without version overrides or manifest "
-        f"fetches. Every Dockerfile and Compose image: key must name {UV_IMAGE_REPOSITORY} "
-        "with that same exact version as its TAG (a digest may accompany the tag but never "
+        f"\ncheck_uv_pin: {len(findings)} finding(s). [tool.uv] required-version in "
+        'pyproject.toml must be a bare ">=X.Y.Z" floor. Every workflow must install uv '
+        f"through {LOCAL_SETUP_UV_ACTION} without version overrides or manifest fetches, and "
+        "that action's UV_VERSION must be the checksummed release at or above the floor. "
+        f"Every Dockerfile and Compose image: key must name {UV_IMAGE_REPOSITORY} with an "
+        "exact X.Y.Z tag at or above the floor (a digest may accompany the tag but never "
         "replace it, and a build-ARG/defaultless Compose template is not a provable pin), "
         "and no Dockerfile or Compose image may resolve any image from a floating :latest tag.",
         file=sys.stderr,

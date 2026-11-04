@@ -205,13 +205,14 @@ venv:  ## Create .venv on the CI-pinned interpreter ($(PYTHON_VERSION_FILE)). Fa
 		echo "       Install it: https://docs.astral.sh/uv/getting-started/installation/"; \
 		exit 1; }
 	@python_version="$$(tr -d '[:space:]' < $(PYTHON_VERSION_FILE))"; \
-	required_uv="$$(sed -n 's/^[[:space:]]*required-version[[:space:]]*=[[:space:]]*"==\([^"]*\)".*/\1/p' pyproject.toml | head -n 1)"; \
+	min_uv="$$(sed -n 's/^[[:space:]]*required-version[[:space:]]*=[[:space:]]*">=\([^"]*\)".*/\1/p' pyproject.toml | head -n 1)"; \
 	actual_uv="$$(uv --version | sed -n 's/^uv \([^ ]*\).*/\1/p')"; \
 	uv_path="$$(command -v uv)"; \
-	if [ -n "$$required_uv" ] && [ "$$actual_uv" != "$$required_uv" ]; then \
-		echo "ERROR: selected uv is version $$actual_uv, but this repository requires $$required_uv."; \
+	if [ -n "$$min_uv" ] && [ "$$(printf '%s\n%s\n' "$$min_uv" "$$actual_uv" | sort -V | head -n 1)" != "$$min_uv" ]; then \
+		echo "ERROR: selected uv is version $$actual_uv, older than this repository's minimum $$min_uv."; \
 		echo "       selected uv: $$uv_path"; \
 		echo "       required by: pyproject.toml [tool.uv].required-version"; \
+		echo "       Any newer uv works: uv self update"; \
 		exit 1; \
 	fi; \
 	echo "→ uv venv --python $$python_version .venv   (pinned by $(PYTHON_VERSION_FILE))"; \
@@ -437,16 +438,15 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# write-only `value_wo` + `value_wo_version` (never stored to state). Pure-Python + hermetic
 	@# (no live AWS), so it is portable across CI providers.
 	python scripts/check_ssm_secret_state.py
-	@# Single-source uv pin (bug 56b7-b21a-c8ab-4afc). setup-uv is SHA-pinned at all 25 call
-	@# sites, but uv ITSELF was not, so the action fell back to fetching a remote manifest on
-	@# every job -- and when that fetch failed the job failed with `##[error]fetch failed`, a
-	@# verdict unrelated to the change under test (run 33214025855, dead in 21s). The pin is one
-	@# line, `[tool.uv] required-version` in pyproject.toml; this gate keeps it the SINGLE source
-	@# by rejecting the four ways it can be defeated -- removed, loosened to a range (which still
-	@# fetches, so it reads as pinned while restoring the outage), overridden by a per-call-site
-	@# `version:`/`version-file:` input (resolved AHEAD of the pyproject scan), or shadowed by a
-	@# root uv.toml. Stdlib + PyYAML, no CI provider required -- same portability contract as the
-	@# ShellCheck and templatefile gates above.
+	@# uv floor + CI release gate (bugs 56b7-b21a-c8ab-4afc, ad14-c714-4619-4cd2). pyproject's
+	@# `[tool.uv] required-version` must be a bare ">=X.Y.Z" floor: uv refuses to run outside it,
+	@# so an exact pin broke every newer uv, Dependabot's bundled one included. CI must not float:
+	@# workflows install uv only through the local setup-uv action (no upstream action, which
+	@# fetches a remote manifest and failed jobs with `##[error]fetch failed`; no per-call-site
+	@# `version:`/`version-file:` input; no root uv.toml), whose UV_VERSION is the checksummed
+	@# release at or above the floor. Dockerfile/Compose uv tags must be exact and meet the floor.
+	@# Stdlib + PyYAML, no CI provider required -- same portability contract as the ShellCheck
+	@# and templatefile gates above.
 	python scripts/check_uv_pin.py
 	@# Verified-gate parity (story dispiteous-balsamic-isopod): vote.needs must cover every
 	@# gating job. One owner from make lint; the CI step stays (workflows are out of scope).

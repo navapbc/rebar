@@ -38,13 +38,15 @@ def _gate_module() -> ModuleType:
     return module
 
 
-PYPROJECT_PINNED = """\
+#: The fixture floor sits below the action's exact CI version (0.13.6) so tests can tell a
+#: version that merely differs from CI's apart from one that falls below the floor.
+PYPROJECT_FLOOR = """\
 [project]
 name = "fixture"
 version = "0.1.0"
 
 [tool.uv]
-required-version = "==0.13.6"
+required-version = ">=0.13.0"
 """
 
 WORKFLOW_CLEAN = """\
@@ -97,6 +99,7 @@ runs:
     - name: Install uv
       shell: pwsh
       env:
+        UV_VERSION: 0.13.6
 {CHECKSUM_LINES}
       run: |
         echo "placeholder"
@@ -130,7 +133,7 @@ def _run(root: Path) -> subprocess.CompletedProcess[str]:
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     """A minimal, correctly pinned repository: the baseline every skew mutates."""
-    (tmp_path / "pyproject.toml").write_text(PYPROJECT_PINNED, encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(PYPROJECT_FLOOR, encoding="utf-8")
     workflows = tmp_path / ".github" / "workflows"
     workflows.mkdir(parents=True)
     (workflows / "build.yml").write_text(WORKFLOW_CLEAN, encoding="utf-8")
@@ -149,20 +152,29 @@ def test_fixture_baseline_passes(tree: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("specifier", ['">=0.13.6"', '"~=0.12.0"', '"0.13.6"', '"==0.12.*"'])
-def test_range_specifier_is_rejected(tree: Path, specifier: str) -> None:
-    """A range still triggers the manifest fetch, so it must not read as pinned.
+@pytest.mark.parametrize(
+    "specifier", ['"==0.13.6"', '">=0.13.0,<0.14"', '"~=0.13.0"', '"0.13.6"', '"<0.14"']
+)
+def test_non_floor_specifier_is_rejected(tree: Path, specifier: str) -> None:
+    """Only a bare ``>=X.Y.Z`` floor is accepted.
 
-    `"0.13.6"` (no operator) is included deliberately: uv accepts it, so it looks correct, but
-    the action's `normalizeVersionSpecifier` only strips a leading `==` — this gate insists on
-    the form that is unambiguously exact to BOTH readers.
+    An exact pin or an upper bound makes uv refuse every newer release, which is what broke
+    every Dependabot uv run (its bundled uv is whatever dependabot-core ships). `"0.13.6"` (no
+    operator) is uv's spelling of an exact pin, so it is refused for the same reason.
     """
     (tree / "pyproject.toml").write_text(
-        PYPROJECT_PINNED.replace('"==0.13.6"', specifier), encoding="utf-8"
+        PYPROJECT_FLOOR.replace('">=0.13.0"', specifier), encoding="utf-8"
     )
     result = _run(tree)
     assert result.returncode == 1
-    assert "exact" in result.stderr
+    assert "floor" in result.stderr
+
+
+def test_floor_specifier_is_accepted(tree: Path) -> None:
+    """The baseline's ``>=X.Y.Z`` floor is the accepted form; this names it explicitly."""
+    pyproject = (tree / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'required-version = ">=0.13.0"' in pyproject
+    assert _run(tree).returncode == 0
 
 
 def test_missing_pin_is_rejected(tree: Path) -> None:
@@ -294,6 +306,40 @@ def test_checksum_mismatch_in_local_action_is_rejected(tree: Path) -> None:
     assert "UV_SHA256_X86_64_UNKNOWN_LINUX_GNU" in result.stderr
 
 
+def _set_action_version(tree: Path, line: str) -> None:
+    action = tree / ".github" / "actions" / "setup-uv" / "action.yml"
+    action.write_text(
+        action.read_text(encoding="utf-8").replace("        UV_VERSION: 0.13.6\n", line),
+        encoding="utf-8",
+    )
+
+
+def test_local_action_missing_uv_version_is_rejected(tree: Path) -> None:
+    """CI installs exactly one release; without ``UV_VERSION`` it has nothing to download."""
+    _set_action_version(tree, "")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "UV_VERSION" in result.stderr
+
+
+def test_local_action_uv_version_below_floor_is_rejected(tree: Path) -> None:
+    """CI must run a uv the floor admits, or every CI uv command refuses to start."""
+    _set_action_version(tree, "        UV_VERSION: 0.12.9\n")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "0.12.9" in result.stderr
+    assert "0.13.0" in result.stderr
+
+
+def test_local_action_uv_version_without_matching_checksums_is_rejected(tree: Path) -> None:
+    """The committed checksums belong to one release; another version could not verify."""
+    _set_action_version(tree, "        UV_VERSION: 0.13.9\n")
+    result = _run(tree)
+    assert result.returncode == 1
+    assert "UV_VERSION" in result.stderr
+    assert "0.13.6" in result.stderr
+
+
 def test_local_action_emits_acceptance_anchor() -> None:
     """CI greps this exact install liveness line before checking manifest absence."""
     body = (REPO_ROOT / ".github" / "actions" / "setup-uv" / "action.yml").read_text(
@@ -315,13 +361,21 @@ def test_dockerfile_floating_uv_tag_is_rejected(tree: Path) -> None:
 
 
 def test_dockerfile_uv_tag_skewed_from_pyproject_is_rejected(tree: Path) -> None:
-    """A pinned-but-WRONG tag is the same outage with a slower fuse."""
+    """A uv tag below the floor would refuse to run in the image it ships in."""
     dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
     dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.13.6", "uv:0.12.9"), encoding="utf-8")
     result = _run(tree)
     assert result.returncode == 1
     assert "0.12.9" in result.stderr
-    assert "0.13.6" in result.stderr
+    assert "0.13.0" in result.stderr
+
+
+def test_dockerfile_uv_tag_above_floor_is_allowed(tree: Path) -> None:
+    """An image may run a newer exact uv than CI; only the floor binds it."""
+    dockerfile = tree / "infra" / "compose" / "Dockerfile.svc"
+    dockerfile.write_text(DOCKERFILE_CLEAN.replace("uv:0.13.6", "uv:0.13.9"), encoding="utf-8")
+    result = _run(tree)
+    assert result.returncode == 0, result.stderr
 
 
 def test_dockerfile_untagged_uv_reference_is_rejected(tree: Path) -> None:

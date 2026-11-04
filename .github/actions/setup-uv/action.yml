@@ -1,5 +1,5 @@
 name: Setup uv
-description: Install the repository-pinned uv release without fetching the setup-uv manifest.
+description: Install the checksummed uv release CI uses, without fetching the setup-uv manifest.
 inputs:
   enable-cache:
     description: Restore and save uv's cache directory.
@@ -8,9 +8,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install repository-pinned uv
+    - name: Install CI's uv release
       shell: pwsh
       env:
+        UV_VERSION: 0.13.6
         UV_SHA256_AARCH64_APPLE_DARWIN: 60fbd5c8a1ed681845eea28d9d622fcde03c51e91a43465b64a1e17db1ed3472
         UV_SHA256_AARCH64_PC_WINDOWS_MSVC: c2426c0c8e28b53d8c440e47a18d96ad4db51e159866c0e81435b196d7f0081c
         UV_SHA256_AARCH64_UNKNOWN_LINUX_GNU: 229e194255c7958d86d56e8790d969a6f74736592133f0dfd0076f754c642c1d
@@ -20,22 +21,12 @@ runs:
       run: |
         $ErrorActionPreference = 'Stop'
 
-        $pyproject = Join-Path $env:GITHUB_WORKSPACE 'pyproject.toml'
-        $version = $null
-        $inToolUv = $false
-        foreach ($line in Get-Content -LiteralPath $pyproject) {
-          $trimmed = $line.Trim()
-          if ($trimmed -match '^\[(.+)\]\s*$') {
-            $inToolUv = $Matches[1] -eq 'tool.uv'
-            continue
-          }
-          if ($inToolUv -and $trimmed -match '^required-version\s*=\s*"==([0-9]+(?:\.[0-9]+)+)"\s*(?:#.*)?$') {
-            $version = $Matches[1]
-            break
-          }
-        }
-        if (-not $version) {
-          throw 'pyproject.toml must define [tool.uv] required-version as "==X.Y.Z"'
+        # The one uv release CI installs; the six checksums above belong to it. pyproject.toml's
+        # [tool.uv] required-version is only a floor, and scripts/check_uv_pin.py keeps this
+        # version at or above it and equal to REQUIRED_UV_VERSION there.
+        $version = $env:UV_VERSION
+        if ($version -notmatch '^[0-9]+(?:\.[0-9]+)+$') {
+          throw "UV_VERSION must be an exact X.Y.Z release, got '$version'"
         }
 
         switch ($env:RUNNER_OS) {
