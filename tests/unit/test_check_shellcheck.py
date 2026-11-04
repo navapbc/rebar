@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import importlib.util
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -107,6 +109,37 @@ def test_discover_skips_vendored_and_scratch_directories(tmp_path):
     )
     assert chk.discover(repo) == [Path("real.sh")]
     # The vulnerable copies are all excluded, so the gate stays green.
+    assert chk.main(["--root", str(repo)]) == 0
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=subprocess_env())
+
+
+def test_discover_skips_git_ignored_scratch_but_keeps_owned_scripts(tmp_path):
+    # Bug frouzy-downfallen-salamander: a venv in the git-ignored .rebar/scratch failed
+    # `make lint`. Git's ignore rules, not a directory-name list, decide what we own.
+    repo = _repo(
+        tmp_path,
+        {
+            ".gitignore": ".rebar/*\n",
+            "tracked.sh": VULNERABLE,
+            "untracked.sh": VULNERABLE,
+            ".rebar/scratch/x/bad.sh": VULNERABLE,
+        },
+    )
+    _git(repo, "init", "--quiet")
+    _git(repo, "add", ".gitignore", "tracked.sh")
+    assert chk.discover(repo) == [Path("tracked.sh"), Path("untracked.sh")]
+
+
+def test_discover_ignored_scratch_alone_keeps_the_gate_green(tmp_path):
+    repo = _repo(
+        tmp_path,
+        {".gitignore": ".rebar/*\n", ".rebar/scratch/x/venv/activate.sh": VULNERABLE},
+    )
+    _git(repo, "init", "--quiet")
+    assert chk.discover(repo) == []
     assert chk.main(["--root", str(repo)]) == 0
 
 

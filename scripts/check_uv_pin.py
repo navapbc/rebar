@@ -32,6 +32,10 @@ from typing import Any
 import tomllib
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _repo_files import files_named
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: The upstream action this repository-local action replaces. Matched against the ``uses:``
@@ -402,27 +406,15 @@ def _is_registry_reference(reference: str) -> bool:
 
 
 def _dockerfiles(root: Path) -> list[Path]:
-    return sorted(
-        path
-        for path in root.glob("**/Dockerfile*")
-        if path.is_file() and not SKIPPED_SCAN_DIRS.intersection(path.relative_to(root).parts)
-    )
+    return files_named(root, ("Dockerfile*",), SKIPPED_SCAN_DIRS)
 
 
 def _compose_files(root: Path) -> list[Path]:
-    paths: set[Path] = set()
-    for pattern in (
-        "**/docker-compose*.yml",
-        "**/docker-compose*.yaml",
-        "**/compose*.yml",
-        "**/compose*.yaml",
-    ):
-        paths.update(
-            path
-            for path in root.glob(pattern)
-            if path.is_file() and not SKIPPED_SCAN_DIRS.intersection(path.relative_to(root).parts)
-        )
-    return sorted(paths)
+    return files_named(
+        root,
+        ("docker-compose*.yml", "docker-compose*.yaml", "compose*.yml", "compose*.yaml"),
+        SKIPPED_SCAN_DIRS,
+    )
 
 
 def _check_uv_reference(

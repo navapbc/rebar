@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "check_user_data_size.py"
@@ -269,3 +270,52 @@ def test_the_drift_sweep_still_fails_on_both_non_zero_outcomes() -> None:
     )[1]
     assert 'exit "$rc"' in plan_step, "the step no longer propagates terraform's exit code"
     assert "set -o pipefail" in plan_step, "tee would mask terraform's exit code without it"
+
+
+# ── git's ignore rules decide what the repository owns (bug frouzy-downfallen-salamander) ──
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=subprocess_env())
+
+
+_OVERSIZED = "#!/bin/bash\n" + "# pad\n" * 4000
+
+
+def _scratch_call_site(root: Path) -> None:
+    scratch = root / ".rebar" / "scratch" / "x"
+    scratch.mkdir(parents=True)
+    (scratch / "big.sh").write_text(_OVERSIZED, encoding="utf-8")
+    (scratch / "main.tf").write_text(
+        'resource "aws_instance" "x" {\n'
+        '  user_data = templatefile("${path.module}/big.sh", {})\n}\n',
+        encoding="utf-8",
+    )
+
+
+def test_git_ignored_scratch_user_data_is_not_measured(tmp_path: Path) -> None:
+    """An oversized call site under the git-ignored ``.rebar/scratch`` is not ours to judge."""
+    (tmp_path / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
+    _scratch_call_site(tmp_path)
+    _git(tmp_path, "init", "--quiet")
+    assert check_repo(tmp_path) == []
+
+
+def test_tracked_user_data_is_still_measured_beside_ignored_scratch(tmp_path: Path) -> None:
+    """Positive control: the tracked call site is measured, the ignored one is not."""
+    _tree(tmp_path, script_body=_OVERSIZED, gzipped=False)
+    (tmp_path / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
+    _scratch_call_site(tmp_path)
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", ".gitignore", MAIN_TF, USER_DATA_SH)
+    found = check_repo(tmp_path)
+    assert [type(p).__name__ for p in found] == ["Payload"]
+    assert found[0].tf_file == MAIN_TF
+    assert found[0].rendered_bytes > USER_DATA_LIMIT_BYTES
+
+
+def test_untracked_nonignored_user_data_is_still_measured(tmp_path: Path) -> None:
+    _tree(tmp_path, script_body=_OVERSIZED, gzipped=False)
+    (tmp_path / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
+    _git(tmp_path, "init", "--quiet")
+    assert [p.tf_file for p in check_repo(tmp_path)] == [MAIN_TF]

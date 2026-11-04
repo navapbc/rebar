@@ -7,11 +7,13 @@ valid escapes, and the configured deployment template.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
+from _subprocess_env import subprocess_env
 from check_templatefile_escapes import (
     Unresolved,
     check_repo,
@@ -227,3 +229,51 @@ def test_dot_terraform_is_excluded_from_the_repo_scan(tmp_path: Path) -> None:
     (vendored / "main.tf").write_text('x = templatefile("${path.module}/t.sh", {\n  a = "b"\n})\n')
     (vendored / "t.sh").write_text("# reduces to ${!THEIRS[@]}\n")
     assert check_repo(tmp_path) == [], "vendored .terraform templates must not be scanned"
+
+
+# --- git's ignore rules decide what the repository owns (bug frouzy-downfallen-salamander) - #
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=subprocess_env())
+
+
+_UNDECLARED_CALL = 'x = templatefile("${path.module}/t.sh", {\n  a = "b"\n})\n'
+_UNDECLARED_TEMPLATE = "echo ${UNDECLARED}\n"
+
+
+def test_git_ignored_scratch_terraform_is_not_scanned(tmp_path: Path) -> None:
+    """A `.tf` call site under the git-ignored `.rebar/scratch` is not the repo's to judge."""
+    (tmp_path / ".gitignore").write_text(".rebar/*\n")
+    scratch = tmp_path / ".rebar" / "scratch" / "x"
+    scratch.mkdir(parents=True)
+    (scratch / "main.tf").write_text(_UNDECLARED_CALL)
+    (scratch / "t.sh").write_text(_UNDECLARED_TEMPLATE)
+    _git(tmp_path, "init", "--quiet")
+    assert check_repo(tmp_path) == []
+
+
+def test_tracked_terraform_is_still_scanned_beside_ignored_scratch(tmp_path: Path) -> None:
+    """Positive control: the tracked copy is reported, and the ignored duplicate of its
+    template does not make template resolution ambiguous."""
+    (tmp_path / ".gitignore").write_text(".rebar/*\n")
+    # `${var.root}` is resolved by a unique suffix match over the tree, which is the search
+    # an ignored duplicate used to make ambiguous.
+    (tmp_path / "main.tf").write_text(_UNDECLARED_CALL.replace("${path.module}", "${var.root}"))
+    (tmp_path / "t.sh").write_text(_UNDECLARED_TEMPLATE)
+    scratch = tmp_path / ".rebar" / "scratch" / "x"
+    scratch.mkdir(parents=True)
+    (scratch / "t.sh").write_text(_UNDECLARED_TEMPLATE)
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", ".gitignore", "main.tf", "t.sh")
+    assert [(type(f).__name__, getattr(f, "root", None)) for f in check_repo(tmp_path)] == [
+        ("Finding", "UNDECLARED")
+    ]
+
+
+def test_untracked_nonignored_terraform_is_still_scanned(tmp_path: Path) -> None:
+    (tmp_path / ".gitignore").write_text(".rebar/*\n")
+    (tmp_path / "main.tf").write_text(_UNDECLARED_CALL)
+    (tmp_path / "t.sh").write_text(_UNDECLARED_TEMPLATE)
+    _git(tmp_path, "init", "--quiet")
+    assert [getattr(f, "root", None) for f in check_repo(tmp_path)] == ["UNDECLARED"]
