@@ -70,6 +70,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # (bug 291e-7b48-3f24-41c6). Derived from __file__ so it holds under every invocation style.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _repo_files import files_named  # noqa: E402
 from check_templatefile_escapes import (  # noqa: E402
     EXCLUDED_DIRS,
     declared_vars,
@@ -206,9 +207,7 @@ def measure(tf_file: Path, root: Path) -> list[Payload | Unresolved]:
 def check_repo(root: Path) -> list[Payload | Unresolved]:
     """Every ``user_data`` call site under ``root``."""
     found: list[Payload | Unresolved] = []
-    for tf_file in sorted(root.rglob("*.tf")):
-        if EXCLUDED_DIRS.intersection(tf_file.relative_to(root).parts):
-            continue
+    for tf_file in files_named(root, ("*.tf",), EXCLUDED_DIRS):
         found.extend(measure(tf_file, root))
     return found
 

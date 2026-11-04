@@ -13,6 +13,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE = REPO_ROOT / "scripts" / "check_uv_pin.py"
@@ -556,3 +557,83 @@ def test_check_repo_includes_compose_images(tree: Path) -> None:
     assert result.returncode == 1
     assert f"{COMPOSE_FILE}:{COMPOSE_IMAGE_LINE}" in result.stderr
     assert "redis:latest" in result.stderr
+
+
+# --- git's ignore rules decide what the repository owns (bug frouzy-downfallen-salamander) - #
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=subprocess_env())
+
+
+_FLOATING_UV = "FROM ghcr.io/astral-sh/uv:latest\n"
+_FLOATING_COMPOSE = "services:\n  a:\n    image: ghcr.io/astral-sh/uv:latest\n"
+
+
+def _plant(root: Path, directory: Path) -> None:
+    target = root / directory
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "Dockerfile").write_text(_FLOATING_UV, encoding="utf-8")
+    (target / "compose.yml").write_text(_FLOATING_COMPOSE, encoding="utf-8")
+
+
+def test_git_ignored_scratch_images_are_not_scanned(tree: Path) -> None:
+    """A floating uv image under the git-ignored ``.rebar/scratch`` is not ours to judge."""
+    (tree / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
+    _plant(tree, Path(".rebar") / "scratch" / "x")
+    _git(tree, "init", "--quiet")
+    gate = _gate_module()
+    assert gate.check_dockerfiles(tree) == []
+    assert gate.check_compose_images(tree) == []
+
+
+def test_tracked_images_are_still_scanned_beside_ignored_scratch(tree: Path) -> None:
+    """Positive control: the tracked copies are reported, the ignored copies are not."""
+    (tree / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
+    _plant(tree, Path("svc"))
+    _plant(tree, Path(".rebar") / "scratch" / "x")
+    _git(tree, "init", "--quiet")
+    _git(tree, "add", "--all")
+    gate = _gate_module()
+    assert [f.location for f in gate.check_dockerfiles(tree)] == ["svc/Dockerfile:1"]
+    assert [f.location for f in gate.check_compose_images(tree)] == ["svc/compose.yml:3"]
+
+
+def test_untracked_nonignored_images_are_still_scanned(tree: Path) -> None:
+    (tree / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
+    _plant(tree, Path("svc"))
+    _git(tree, "init", "--quiet")
+    gate = _gate_module()
+    assert [f.location for f in gate.check_dockerfiles(tree)] == ["svc/Dockerfile:1"]
+    assert [f.location for f in gate.check_compose_images(tree)] == ["svc/compose.yml:3"]
+
+
+def _repo_files_module() -> ModuleType:
+    path = REPO_ROOT / "scripts" / "_repo_files.py"
+    spec = importlib.util.spec_from_file_location("_repo_files", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_files_named_lists_owned_files_inside_git(tmp_path: Path) -> None:
+    """Inside git: tracked and non-ignored untracked matches only, sorted and absolute."""
+    owned = ["a/tracked.sh", "b/untracked.sh", "n.txt"]
+    for rel in [*owned, ".rebar/scratch/x/ignored.sh", "skip/c.sh"]:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "add", ".gitignore", "a/tracked.sh")
+    found = _repo_files_module().files_named(tmp_path, ("*.sh",), frozenset({"skip"}))
+    assert found == [tmp_path / "a" / "tracked.sh", tmp_path / "b" / "untracked.sh"]
+
+
+def test_files_named_falls_back_to_the_walk_outside_git(tmp_path: Path) -> None:
+    """Outside git there are no ignore rules to consult: walk, minus the exclusion set."""
+    for rel in ["a/one.sh", ".rebar/scratch/x/two.sh", "skip/three.sh"]:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x\n", encoding="utf-8")
+    found = _repo_files_module().files_named(tmp_path, ("*.sh",), frozenset({"skip"}))
+    assert found == [tmp_path / ".rebar" / "scratch" / "x" / "two.sh", tmp_path / "a" / "one.sh"]

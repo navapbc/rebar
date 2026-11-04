@@ -22,15 +22,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _repo_files import files_named
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Severity floor. See the module docstring — SC2115 is a `warning`, so raising
 #: this to `error` would silence the very finding this gate exists to catch.
 SEVERITY = "warning"
 
-#: Directories never linted: virtualenvs, git internals, agent scratch, the
-#: ticket store, and nested worktrees. These hold vendored or generated shell we
-#: neither own nor can fix.
+#: Directories never linted, even when git does not ignore them: virtualenvs, git
+#: internals, Claude worktrees, the ticket store, and node_modules. Inside a git work
+#: tree, discover() also skips everything git ignores (e.g. the per-session
+#: `.rebar/scratch`), so vendored or generated shell we neither own nor can fix is
+#: never judged (bug frouzy-downfallen-salamander).
 EXCLUDED_DIRS = frozenset(
     {
         ".venv",
@@ -52,13 +58,10 @@ INSTALL_HINT = (
 def discover(root: Path) -> list[Path]:
     """Return repo-relative paths of every lintable ``*.sh`` file, sorted."""
     found: list[Path] = []
-    for path in root.rglob("*.sh"):
-        rel = path.relative_to(root)
-        if EXCLUDED_DIRS.intersection(rel.parts):
+    for path in files_named(root, ("*.sh",), EXCLUDED_DIRS):
+        if path.is_symlink():
             continue
-        if not path.is_file() or path.is_symlink():
-            continue
-        found.append(rel)
+        found.append(path.relative_to(root))
     return sorted(found)
 
 

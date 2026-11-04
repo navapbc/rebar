@@ -19,6 +19,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _repo_files import files_named
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 #: Directories never scanned (vendored / generated / scratch), mirroring check_shellcheck.py.
@@ -167,10 +171,8 @@ def resolve_template_path(raw: str, tf_file: Path, root: Path) -> Path | None:
         return None
     matches = [
         p
-        for p in root.rglob("*" + Path(suffix).name)
-        if not EXCLUDED_DIRS.intersection(p.relative_to(root).parts)
-        and p.is_file()
-        and str(p).endswith(suffix)
+        for p in files_named(root, ("*" + Path(suffix).name,), EXCLUDED_DIRS)
+        if str(p).endswith(suffix)
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -198,9 +200,7 @@ Report = Finding | Unresolved
 def check_repo(root: Path) -> list[Report]:
     """Every ``templatefile()`` call site in ``root``, checked against its own variable map."""
     findings: list[Report] = []
-    for tf_file in sorted(root.rglob("*.tf")):
-        if EXCLUDED_DIRS.intersection(tf_file.relative_to(root).parts):
-            continue
+    for tf_file in files_named(root, ("*.tf",), EXCLUDED_DIRS):
         tf_text = tf_file.read_text(encoding="utf-8")
         for call in _TEMPLATEFILE.finditer(tf_text):
             template = resolve_template_path(call.group(1), tf_file, root)
