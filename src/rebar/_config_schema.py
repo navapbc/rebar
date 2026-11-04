@@ -122,18 +122,22 @@ class VerifyConfig:
         1.5,
         "Scales the completion-verifier recovery step pool by the number of reviewed criteria.",
     )
+    # read-via: llm/config.py verify_step_floor
     completion_verify_steps_per_criterion: int = _documented(
         24,
         "Adds this many completion-verifier steps for each reviewed criterion.",
     )
+    # read-via: llm/config.py verify_step_floor
     completion_verify_step_floor_min: int = _documented(
         160,
         "Sets the minimum step budget for a completion-verification run.",
     )
+    # read-via: llm/config.py verify_step_floor
     completion_verify_child_traversal_steps: int = _documented(
         16,
         "Adds this many verifier steps for each child ticket traversed during completion review.",
     )
+    # read-via: llm/config.py verify_step_floor
     completion_verify_fixed_overhead_steps: int = _documented(
         16,
         "Adds a fixed step allowance to every completion-verification run.",

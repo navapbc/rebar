@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from rebar._store.fsutil import atomic_write
-from rebar.llm.completion import verify_step_floor
+from rebar.llm.config import verify_step_floor
 from rebar.llm.errors import CompletionRecoveryError
 
 # Verdict assembly lives in its own module (extracted along the rendering-seam call-graph
