@@ -38,7 +38,8 @@ Shutdown is **bounded and two-phase** (`app.lifespan`'s `finally`):
 Total shutdown therefore has an upper bound of `drain + cancel`. Both budgets are single-sourced in
 `review_bot/config.py` (not `app.py`) so the test that asserts the container's `stop_grace_period`
 is sized above them can read the values **without** importing the fastapi-laden `app` module (the
-`reviewbot` extra is absent in the default test tier). The compose `stop_grace_period` (`1320s`)
+`reviewbot` extra is absent in the default test tier). The compose `stop_grace_period` (`1320s`;
+raised to `1440s` when bug `evolutive-descendent-manta` moved the lock-held git bound to 120 s)
 is kept strictly above `drain + cancel` so the drain completes before Docker escalates SIGTERM →
 SIGKILL — an invariant pinned by
 `tests/unit/test_review_bot.py::test_reviewbot_stop_grace_period_covers_an_in_flight_store_write`.
