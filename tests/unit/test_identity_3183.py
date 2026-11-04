@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import uuid as _uuid
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def _verify_authorship(store: Path, *, required: bool) -> subprocess.CompletedPr
     env = subprocess_env({"REBAR_ROOT": str(store)})
     env["REBAR_IDENTITY_REQUIRE_AUTHENTICATED"] = "1" if required else "0"
     return subprocess.run(
-        ["rebar", "verify-identity", "--all"],
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
         cwd=store,
         env=env,
         capture_output=True,
@@ -193,7 +194,7 @@ def test_snapshot_roundtrip_signed_events_still_verify(
 
     env = subprocess_env({"REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"})
     res = subprocess.run(
-        ["rebar", "verify-identity", "--all"],
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
         cwd=repo,
         env=env,
         capture_output=True,
@@ -228,7 +229,7 @@ def test_verify_authorship_flags_unknown_author(store_heldout: Path) -> None:
         {"REBAR_ROOT": str(store_heldout), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"}
     )
     res = subprocess.run(
-        ["rebar", "verify-identity", "--all"],
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
         cwd=store_heldout,
         env=env,
         capture_output=True,
@@ -244,7 +245,7 @@ def test_fsck_surfaces_unsigned_count(store_heldout: Path) -> None:
     rebar.create_ticket("task", "unsigned t", repo_root=str(store_heldout))
     env = subprocess_env({"REBAR_ROOT": str(store_heldout)})
     res = subprocess.run(
-        ["rebar", "store", "fsck"],
+        [sys.executable, "-m", "rebar", "store", "fsck"],
         cwd=store_heldout,
         env=env,
         capture_output=True,

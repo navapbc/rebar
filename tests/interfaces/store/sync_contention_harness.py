@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -30,10 +29,14 @@ def _rebar_cli(*args: str, repo: Path, push: str, timeout: int = 60) -> subproce
     env = subprocess_env()
     env["REBAR_ROOT"] = str(repo)
     env["REBAR_SYNC_PUSH"] = push
-    rebar_bin = shutil.which("rebar")
-    cmd = [rebar_bin, *args] if rebar_bin else [sys.executable, "-m", "rebar", *args]
     return subprocess.run(
-        cmd, cwd=str(repo), env=env, capture_output=True, text=True, timeout=timeout, check=False
+        [sys.executable, "-m", "rebar", *args],
+        cwd=str(repo),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
     )
 
 

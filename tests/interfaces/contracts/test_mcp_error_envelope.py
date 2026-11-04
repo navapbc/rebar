@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -59,13 +60,15 @@ def _structured_payload(res: object) -> dict:
 def _fresh_tracker(tmp: Path) -> Path:
     env = _clean_env(tmp)
     subprocess.run(["git", "init", "-q"], cwd=tmp, check=True, env=env)
-    subprocess.run(["rebar", "init"], cwd=tmp, check=True, capture_output=True, env=env)
+    subprocess.run(
+        [sys.executable, "-m", "rebar", "init"], cwd=tmp, check=True, capture_output=True, env=env
+    )
     return tmp
 
 
 def _cli_json(root: Path, *args: str) -> tuple[dict, int]:
     p = subprocess.run(
-        ["rebar", *args],
+        [sys.executable, "-m", "rebar", *args],
         cwd=root,
         env=_clean_env(root),
         capture_output=True,
@@ -94,7 +97,7 @@ def _mcp_envelope_for(tool: str, args: dict, root: Path) -> dict:
 
 def _new_ticket(root: Path) -> str:
     p = subprocess.run(
-        ["rebar", "create", "task", "t"],
+        [sys.executable, "-m", "rebar", "create", "task", "t"],
         cwd=root,
         env=_clean_env(root),
         capture_output=True,

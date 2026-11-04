@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,7 @@ def test_live_signed_event_verifies(store: Path, tmp_path: Path, monkeypatch) ->
         }
     )
     res = subprocess.run(
-        ["rebar", "verify-identity", "--all"],
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
         cwd=store,
         env=env,
         capture_output=True,
@@ -133,7 +134,7 @@ def _verify_authorship(store: Path, priv: str | None = None) -> subprocess.Compl
     if priv:
         env["REBAR_IDENTITY_SIGNING_KEY"] = priv
     return subprocess.run(
-        ["rebar", "verify-identity", "--all"],
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
         cwd=store,
         env=env,
         capture_output=True,

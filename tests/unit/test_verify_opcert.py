@@ -11,6 +11,7 @@ trigger. Tests use ssh-keygen and a repository-backed ticket store.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -104,7 +105,7 @@ def _write_trusted_env(repo: Path, env_id: str, pub: str, added_at_position: str
 
 def _run_verify_opcert(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["rebar", "verify-opcert", "--root", str(repo), *extra],
+        [sys.executable, "-m", "rebar", "verify-opcert", "--root", str(repo), *extra],
         capture_output=True,
         text=True,
         check=False,
@@ -166,7 +167,7 @@ def _tracker_head(repo: Path) -> str:
 
 def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["rebar", "verify-opcert", "--root", str(repo), *extra],
+        [sys.executable, "-m", "rebar", "verify-opcert", "--root", str(repo), *extra],
         capture_output=True,
         text=True,
         check=False,

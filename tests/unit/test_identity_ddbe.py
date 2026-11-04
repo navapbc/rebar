@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import get_args
 
@@ -215,6 +216,8 @@ def test_cli_identity_create_and_show_e2e(store: Path) -> None:
     env = {**__import__("os").environ, "REBAR_ROOT": str(store)}
     create = subprocess.run(
         [
+            sys.executable,
+            "-m",
             "rebar",
             "identity",
             "create",
@@ -237,7 +240,7 @@ def test_cli_identity_create_and_show_e2e(store: Path) -> None:
     ident_id = create.stdout.strip().split()[-1]
 
     show = subprocess.run(
-        ["rebar", "show", ident_id, "--output", "llm"],
+        [sys.executable, "-m", "rebar", "show", ident_id, "--output", "llm"],
         cwd=store,
         env=env,
         capture_output=True,
@@ -256,7 +259,7 @@ def test_cli_identity_use_sets_pointer_e2e(store: Path) -> None:
     env = {**__import__("os").environ, "REBAR_ROOT": str(store)}
     ident = rebar.create_identity("Ada", "ada@example.com", repo_root=str(store))
     use = subprocess.run(
-        ["rebar", "identity", "use", ident],
+        [sys.executable, "-m", "rebar", "identity", "use", ident],
         cwd=store,
         env=env,
         capture_output=True,

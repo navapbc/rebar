@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -31,7 +32,9 @@ def _clean_env(root: Path) -> dict:
 def _fresh_tracker(tmp: Path) -> Path:
     env = _clean_env(tmp)
     subprocess.run(["git", "init", "-q"], cwd=tmp, check=True, env=env)
-    subprocess.run(["rebar", "init"], cwd=tmp, check=True, capture_output=True, env=env)
+    subprocess.run(
+        [sys.executable, "-m", "rebar", "init"], cwd=tmp, check=True, capture_output=True, env=env
+    )
     return tmp
 
 

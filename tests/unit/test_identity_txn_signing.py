@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -112,7 +113,7 @@ def test_transition_event_passes_the_merge_gate(signed_repo: Path) -> None:
         }
     )
     res = subprocess.run(
-        ["rebar", "verify-identity", "--all"],
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
         cwd=signed_repo,
         env=env,
         capture_output=True,

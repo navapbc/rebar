@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -52,7 +53,7 @@ def _run_changed_since(
     repo: Path, ref: str, *, env: dict | None = None
 ) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["rebar", "criteria", "eval", "--changed-since", ref],
+        [sys.executable, "-m", "rebar", "criteria", "eval", "--changed-since", ref],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -245,7 +246,7 @@ def test_positional_id_and_changed_since_are_mutually_exclusive(tmp_path: Path) 
     repo = _seed_repo(tmp_path)
     base = _git(repo, "rev-parse", "HEAD")
     proc = subprocess.run(
-        ["rebar", "criteria", "eval", "T8", "--changed-since", base],
+        [sys.executable, "-m", "rebar", "criteria", "eval", "T8", "--changed-since", base],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -363,7 +364,7 @@ def test_positional_id_and_empty_changed_since_are_mutually_exclusive(tmp_path: 
     """Even an empty --changed-since value means the flag was present."""
     repo = _seed_repo(tmp_path)
     proc = subprocess.run(
-        ["rebar", "criteria", "eval", "T8", "--changed-since", ""],
+        [sys.executable, "-m", "rebar", "criteria", "eval", "T8", "--changed-since", ""],
         cwd=repo,
         capture_output=True,
         text=True,

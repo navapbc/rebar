@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -404,7 +405,7 @@ def test_enforce_since_reanchor_makes_verify_authorship_clean(tmp_path: Path) ->
         }
     )
     completed = subprocess.run(
-        ["rebar", "verify-identity", "--all"],
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -421,6 +422,8 @@ def test_cli_error_path_returns_two_for_shadow_safety_refusal(tmp_path: Path) ->
 
     result = subprocess.run(
         [
+            sys.executable,
+            "-m",
             "rebar",
             "reclaim-collapse",
             "--shadow-tracker",
@@ -457,6 +460,8 @@ def test_cli_dry_run_reports_plan_without_updating_head(tmp_path: Path) -> None:
     tracker, _ticket_id, boundary, tip = _build_collapsible_store(tmp_path)
     result = subprocess.run(
         [
+            sys.executable,
+            "-m",
             "rebar",
             "reclaim-collapse",
             "--shadow-tracker",

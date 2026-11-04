@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,12 @@ def _run(store: Path, *args: str, env_extra: dict | None = None) -> subprocess.C
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
-        ["rebar", *args], cwd=store, env=env, capture_output=True, text=True, check=False
+        [sys.executable, "-m", "rebar", *args],
+        cwd=store,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -85,7 +91,12 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _run_heldout(repo: Path, *args: str) -> subprocess.CompletedProcess:
     env = subprocess_env({"REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "0"})
     return subprocess.run(
-        ["rebar", *args], cwd=repo, env=env, capture_output=True, text=True, check=False
+        [sys.executable, "-m", "rebar", *args],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 

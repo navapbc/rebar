@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -137,7 +138,7 @@ def test_delete_composer_stamps_email(store_heldout: Path) -> None:
     # delete is CLI-only (destructive; requires --user-approved).
     env = subprocess_env({"REBAR_ROOT": str(store_heldout)})
     res = subprocess.run(
-        ["rebar", "delete", b, "--user-approved"],
+        [sys.executable, "-m", "rebar", "delete", b, "--user-approved"],
         cwd=store_heldout,
         env=env,
         capture_output=True,

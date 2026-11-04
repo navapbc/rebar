@@ -8,6 +8,7 @@ import importlib
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -158,7 +159,11 @@ def test_store_survives_snapshot_compaction_of_the_ticket_log(peer_confirmations
         store.save()
 
         subprocess.run(
-            ["rebar", "store", "compact", a], cwd=repo, check=False, capture_output=True, text=True
+            [sys.executable, "-m", "rebar", "store", "compact", a],
+            cwd=repo,
+            check=False,
+            capture_output=True,
+            text=True,
         )
 
         reopened = peer_confirmations.open_store(repo)

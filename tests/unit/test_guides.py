@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from importlib import resources
 from pathlib import Path
 
@@ -137,7 +138,7 @@ def test_t15_guidance_is_stack_agnostic_and_scopes_throwaway_cleanup() -> None:
 
 def test_rebar_explain_plan_cli_renders_t15_guidance() -> None:
     completed = subprocess.run(
-        ["rebar", "explain", "plan"],
+        [sys.executable, "-m", "rebar", "explain", "plan"],
         check=False,
         capture_output=True,
         text=True,
@@ -150,7 +151,7 @@ def test_rebar_explain_plan_cli_renders_t15_guidance() -> None:
 
 def test_rebar_explain_plan_cli_explains_out_of_loop_proof_move() -> None:
     completed = subprocess.run(
-        ["rebar", "explain", "plan"],
+        [sys.executable, "-m", "rebar", "explain", "plan"],
         check=False,
         capture_output=True,
         text=True,

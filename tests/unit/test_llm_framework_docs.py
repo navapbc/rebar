@@ -12,7 +12,6 @@ command strings to a copy of themselves.
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -91,9 +90,9 @@ def test_every_documented_command_resolves(argv: list[str], tmp_path: Path) -> N
     Run from ``tmp_path``, not the checkout: ``--help`` needs no store, and the unit tier
     requires a harness-owned root so a child cannot resolve ``REBAR_ROOT`` to this tree.
     """
-    if argv[0] == "rebar" and shutil.which("rebar") is None:
-        pytest.skip("rebar console script not installed")
-    cmd = [sys.executable, *argv[1:]] if argv[0] == "python" else list(argv)
+    # A documented ``rebar`` runs as the interpreter's own build, not PATH's copy.
+    launchers = {"python": [sys.executable], "rebar": [sys.executable, "-m", "rebar"]}
+    cmd = [*launchers.get(argv[0], argv[:1]), *argv[1:]]
     # drop placeholder operands; --help does not need them
     cmd = [c for c in cmd if not (c.startswith("<") or c.startswith("["))]
     result = subprocess.run(

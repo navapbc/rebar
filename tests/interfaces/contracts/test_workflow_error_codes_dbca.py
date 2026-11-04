@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -34,7 +35,9 @@ def _clean_env(root: Path) -> dict:
 def _fresh_tracker(tmp: Path) -> Path:
     env = _clean_env(tmp)
     subprocess.run(["git", "init", "-q"], cwd=tmp, check=True, env=env)
-    subprocess.run(["rebar", "init"], cwd=tmp, check=True, capture_output=True, env=env)
+    subprocess.run(
+        [sys.executable, "-m", "rebar", "init"], cwd=tmp, check=True, capture_output=True, env=env
+    )
     return tmp
 
 
@@ -138,7 +141,16 @@ def test_get_workflow_status_run_absent_from_ticket_is_not_found(tmp_path: Path)
     root = _fresh_tracker(tmp_path)
     env = _clean_env(root)
     created = subprocess.run(
-        ["rebar", "create", "task", "holds no workflow run", "--output", "json"],
+        [
+            sys.executable,
+            "-m",
+            "rebar",
+            "create",
+            "task",
+            "holds no workflow run",
+            "--output",
+            "json",
+        ],
         cwd=root,
         check=True,
         capture_output=True,

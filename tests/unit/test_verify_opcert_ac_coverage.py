@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -112,7 +113,7 @@ def _write_env(repo: Path, pub: str, added_at: str, revoked_at: str | None = Non
 
 def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["rebar", "verify-opcert", "--root", str(repo), *extra],
+        [sys.executable, "-m", "rebar", "verify-opcert", "--root", str(repo), *extra],
         capture_output=True,
         text=True,
         check=False,
@@ -342,7 +343,7 @@ def test_trusted_env_add_and_revoke_stamp_tip_position(
 
     tip_at_add = _tip_position(repo)
     add = subprocess.run(
-        ["rebar", "trusted-env", "add", ENV_ID, pub, "--root", str(repo)],
+        [sys.executable, "-m", "rebar", "trusted-env", "add", ENV_ID, pub, "--root", str(repo)],
         capture_output=True,
         text=True,
         check=False,
@@ -362,7 +363,7 @@ def test_trusted_env_add_and_revoke_stamp_tip_position(
     assert tip_at_revoke > tip_at_add
 
     revoke = subprocess.run(
-        ["rebar", "trusted-env", "revoke", ENV_ID, pub, "--root", str(repo)],
+        [sys.executable, "-m", "rebar", "trusted-env", "revoke", ENV_ID, pub, "--root", str(repo)],
         capture_output=True,
         text=True,
         check=False,

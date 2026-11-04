@@ -14,6 +14,7 @@ restores advisory checks while an existing pinned cert still verifies."""
 from __future__ import annotations
 
 import subprocess
+import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -139,7 +140,7 @@ def _write_verify_config(
 
 def _run_verify_opcert(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["rebar", "verify-opcert", "--root", str(repo), *extra],
+        [sys.executable, "-m", "rebar", "verify-opcert", "--root", str(repo), *extra],
         capture_output=True,
         text=True,
         check=False,

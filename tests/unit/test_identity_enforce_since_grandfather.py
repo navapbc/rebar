@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -55,7 +56,7 @@ def _gate_via_env(repo: Path, *args: str, enforce_since: str) -> subprocess.Comp
         }
     )
     return subprocess.run(
-        ["rebar", "verify-identity", *args],
+        [sys.executable, "-m", "rebar", "verify-identity", *args],
         cwd=repo,
         env=env,
         capture_output=True,
