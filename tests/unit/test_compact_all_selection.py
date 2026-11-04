@@ -279,35 +279,52 @@ def test_a_sweep_with_nothing_selected_still_pushes(
     assert calls, "the 'nothing selected' path must still push a pending earlier write"
 
 
-def test_dry_run_never_pushes(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dry_run_never_pushes(
+    store: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A dry run must have NO side effects. Pushing is a side effect even when this invocation
     committed nothing of its own — it delivers whatever was already pending."""
     from rebar._store import push as _push
 
     repo = store
     monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "9999")  # nothing selected: the early return
+    # conftest sets a 0 horizon, which lets the backfill arm select this snapshot-less ticket
+    # whatever the threshold; fresh events inside a 1-hour horizon are not foldable.
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", str(_HOUR_NS))
     _seed(repo, "dry run me", comments=1)
 
     calls: list[object] = []
     monkeypatch.setattr(_push, "push_after_commit", lambda *a, **k: calls.append(a))
 
-    _compact.compact_all_cli(["--dry-run"], repo_root=str(repo))
+    rc = _compact.compact_all_cli(["--dry-run"], repo_root=str(repo))
 
+    # Without these, a sweep that failed before its push decision passes the absence below.
+    assert rc == 0, f"the dry run failed (exit {rc}), so its push decision was never reached"
+    assert "Nothing to do." in capsys.readouterr().out, (
+        "the sweep did not reach the nothing-selected return, where the push decision is made"
+    )
     assert not calls, "--dry-run pushed; a dry run must not touch the remote"
 
 
-def test_no_commit_never_pushes(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_commit_never_pushes(
+    store: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     from rebar._store import push as _push
 
     repo = store
-    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "9999")
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "9999")  # nothing selected: the early return
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", str(_HOUR_NS))  # as in the dry-run test
     _seed(repo, "no commit", comments=1)
 
     calls: list[object] = []
     monkeypatch.setattr(_push, "push_after_commit", lambda *a, **k: calls.append(a))
 
-    _compact.compact_all_cli(["--no-commit"], repo_root=str(repo))
+    rc = _compact.compact_all_cli(["--no-commit"], repo_root=str(repo))
 
+    assert rc == 0, f"the --no-commit sweep failed (exit {rc}), so its push decision never ran"
+    assert "Nothing to do." in capsys.readouterr().out, (
+        "the sweep did not reach the nothing-selected return, where the push decision is made"
+    )
     assert not calls, "--no-commit pushed; it opts out of the commit and its delivery alike"
 
 

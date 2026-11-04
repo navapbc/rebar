@@ -94,8 +94,11 @@ def test_fsck_quiet_when_in_sync(
     _git_q("fetch", "origin", "tickets", cwd=tracker)
     assert _ahead(tracker) == 0, "fixture unexpectedly ahead of origin"
 
-    _cli.main(["store", "fsck"])
+    rc = _cli.main(["store", "fsck"])
     out = capsys.readouterr().out
+    # The absence below also holds for an fsck that failed before checking anything.
+    assert rc == 0, f"fsck failed on an in-sync store (exit {rc}):\n{out}"
+    assert "fsck complete: no issues found" in out, f"fsck did not finish its checks:\n{out}"
     assert "PUSH_PENDING" not in out, f"fsck emitted PUSH_PENDING when in sync:\n{out}"
 
 

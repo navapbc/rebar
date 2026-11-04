@@ -174,23 +174,45 @@ def test_no_history_walk_runs_while_the_store_lock_is_held(
 
     repo = store
     lock_dir = Path(_tracker(repo)) / ".ticket-write.lock.d"
+    walks: list[tuple[str, bool]] = []
     walks_under_lock: list[str] = []
+    lock_seen_in_fold: list[bool] = []
 
     for name in ("build_position_commit_map", "build_ticket_position_commit_map"):
         real = getattr(authorship, name)
 
         def wrapper(*a, _real=real, _name=name, **k):
+            walks.append((_name, lock_dir.exists()))
             if lock_dir.exists():
                 walks_under_lock.append(_name)
             return _real(*a, **k)
 
         monkeypatch.setattr(authorship, name, wrapper)
 
-    for n in range(3):
-        _age(_tdir(repo, _seed(repo, f"t{n}", comments=3)))
+    # The ledger is built inside the locked fold, so it shows whether this probe can see
+    # the held lock at all. Without it, `not walks_under_lock` holds for a probe that is blind.
+    real_ledger = _compact_txn._build_authorship_ledger
 
-    _compact.compact_all_cli([], repo_root=str(repo))
+    def ledger_probe(*a, **k):
+        lock_seen_in_fold.append(lock_dir.exists())
+        return real_ledger(*a, **k)
 
+    monkeypatch.setattr(_compact_txn, "_build_authorship_ledger", ledger_probe)
+
+    tids = [_seed(repo, f"t{n}", comments=3) for n in range(3)]
+    for tid in tids:
+        _age(_tdir(repo, tid))
+
+    rc = _compact.compact_all_cli([], repo_root=str(repo))
+
+    assert rc == 0, f"the sweep must succeed for its lock behaviour to mean anything (exit {rc})"
+    unfolded = [t for t in tids if not list(_tdir(repo, t).glob("*-SNAPSHOT.json"))]
+    assert not unfolded, f"the sweep left tickets unfolded, so no fold was observed: {unfolded}"
+    assert walks, "no history walk ran at all, so the lock check below observed nothing"
+    assert lock_seen_in_fold and all(lock_seen_in_fold), (
+        "the lock directory was not visible inside the locked fold, so this probe cannot "
+        f"detect a walk under the lock: {lock_seen_in_fold}"
+    )
     assert not walks_under_lock, (
         "a git-history walk ran while the store write lock was held — every concurrent writer "
         f"waits for it: {walks_under_lock}"
@@ -322,12 +344,20 @@ def test_the_sweep_yields_when_a_writer_takes_the_lock_mid_run(
 
     monkeypatch.setattr(_compact._lock, "write_lock_is_busy", busy_after_first)
 
-    _compact.compact_all_cli([], repo_root=str(repo))
+    rc = _compact.compact_all_cli([], repo_root=str(repo))
 
+    assert rc == 0, f"a sweep that yields is a clean stop, not a failure (exit {rc})"
     folded = [t for t in os.listdir(_tracker(repo)) if not t.startswith(".")]
     snapshotted = [t for t in folded if list((Path(_tracker(repo)) / t).glob("*-SNAPSHOT.json"))]
-    assert len(snapshotted) <= 1, (
-        f"the sweep kept folding after a writer took the lock (folded {len(snapshotted)})"
+    # Exactly one: zero means the sweep never folded on the quiet store, so "it stopped
+    # folding" would hold for a sweep that did nothing at all.
+    assert len(snapshotted) == 1, (
+        "the sweep must fold the first ticket on a quiet store and then stand aside once a "
+        f"writer takes the lock (folded {len(snapshotted)})"
+    )
+    assert calls["n"] == 2, (
+        "the sweep must probe before each ticket and stop at the first busy probe "
+        f"(probed {calls['n']} time(s))"
     )
 
 
