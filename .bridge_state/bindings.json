@@ -14139,6 +14139,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:50Z"
     },
+    "20e1-f766-929b-4951": {
+      "created_at": "2026-11-04T16:32:12Z",
+      "jira_id": "4598299",
+      "jira_key": "REB-6999",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T16:32:43Z"
+    },
     "20e9-7e2a-c2e6-41a2": {
       "baseline": {
         "assignee": null,
@@ -28211,9 +28218,17 @@
       "updated_at": "2026-08-15T14:57:23Z"
     },
     "40c3-d22a-3872-4c8c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\n`ensure_fresh` (`src/rebar/_engine_support/reads.py:192`) spawns `git rev-parse --verify <branch>` (line 221) on every read, before it checks the 60 s `/tmp/.ticket-sync-*` marker throttle. A throttled read therefore still costs 1 git process. Measured on the `rebar audit serve` index (`src/rebar/audit/server.py` `_audited_tickets`): one render with 1 audited ticket spawns 5 git processes while throttled (1 from `list_tickets`, 4 from the `show_ticket` / `verify_signature` reads inside `audit_trail`), so the index costs 1 + 4N git spawns per request for N tickets. Under host load that per-spawn cost dominates the request.\n\nDiscovered while root-causing smalltime-repressive-sealion (b0f0-3dd2-fcf2-4707).\n\n## Acceptance Criteria\n- [ ] A throttled read (marker younger than 60 s) spawns no git process, shown by a test that counts git spawns.\n- [ ] The branch-existence check still runs before any fetch on an unthrottled read.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Throttled reads still spawn a git rev-parse each"
+      },
       "created_at": "2026-11-04T15:33:01Z",
       "jira_id": "4598279",
       "jira_key": "REB-6996",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-04T15:33:09Z"
     },
@@ -63762,7 +63777,7 @@
         "assignee": null,
         "description": "## Observation\n\n2026-11-04 PST, worktree fix-jaeger at commit d413a0497e5 (bug bronze-commonable-jaeger, MCP auth wiring only). The integration tier as `make test` runs it (`pytest -m integration -n 4 --dist loadgroup --max-worker-restart=0 -q`) reported `1 failed, 201 passed, 3 skipped in 736.10s`. The failure was not an assertion: xdist worker gw2 terminated abnormally (\"node down: Not properly terminated\"; the rebar crash guard reported it) while running `tests/interfaces/io/test_import_batch_resume.py::test_benchmark_commit_count_is_ceil_per_pass`. The tier normally takes about 3 min 40 s; this run took 12 min 16 s.\n\nHost state shortly after: load average about 28-33 on 18 cores, `memory_pressure` reporting 14% free.\n\nIsolated reruns on the same tree all passed, but each took 204-297 s (3 runs: 250.8 s, 204.6 s, 297.5 s).\n\n## Hypotheses (unproven)\n\n- The worker process was killed under memory pressure (for example by the OS) while this long-running benchmark held a large working set.\n- The benchmark's runtime under load crossed a worker-level limit that ends the process abnormally.\n- Another defect in the test or the import batch path that only shows under parallel load.\n\n## Next check\n\nRerun the integration tier with per-worker peak RSS recorded, and check the macOS unified log for a jetsam/kill event for the worker pid at the crash time. A kill event would point at memory; no kill plus a stack would point at the test itself.\n\n## Acceptance Criteria\n\n- [ ] Root cause identified with evidence recorded as a ticket comment.\n- [ ] `pytest -m integration -n 4 --dist loadgroup --max-worker-restart=0 -q` completes with no worker crash in this test on a loaded host, or the class of failure is fixed with a regression test.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Integration worker crashes in test_benchmark_commit_count_is_ceil_per_pass under load"
       },
       "created_at": "2026-11-04T13:32:24Z",
@@ -76148,10 +76163,24 @@
     },
     "b0f0-3dd2-fcf2-4707": {
       "baseline": {
-        "assignee": null,
-        "description": "## Observation\ntests/unit/test_audit_serve.py:292 `urllib.request.urlopen(..., timeout=5)` raised `TimeoutError: timed out` after the uvicorn server reported started. Observed in make verify on worktree fix-chihuahua at commit 4f8cd749a61 (session a85e3cd3, 2026-11-03/04 PST). The run took 3 h 45 min (documented 25-30 min) while other sessions' review-plan gates ran on the host; the test passed in isolation (`pytest -n0 <nodeid>`) on the same code. The commit does not touch this test or its code under test. Earlier closed bug ignitable-noteworthy-osprey (edeb-c3ad-c051-4e6a) recorded the same test flaking under full-suite parallel load, so that fix did not hold.\n## Acceptance Criteria\n- [ ] Root cause identified with a deterministic reproduction (for example a throttled server thread) before any fix.\n- [ ] The test passes under that reproduction.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n`tests/unit/test_audit_serve.py::test_serve_binds_loopback_ephemeral_and_lists_ticket` fails with `TimeoutError: timed out` on its `urllib.request.urlopen(..., timeout=5)` during loaded full `make verify` runs (fix-chihuahua at 4f8cd749a61; fix-jaeger at d413a0497e5, load average 33 on 18 cores), while passing in isolation (5/5 on the branch, 3/3 on origin/main). Closed bug ignitable-noteworthy-osprey was a different failure (network guard leak), so this is a separate cause.\n\n## Root cause (measured)\nThe 5 s read bound covers the whole `GET /` render, and that render spawns git child processes whose cost scales with host load, not with the HTTP contract:\n- `create_app`'s index (`src/rebar/audit/server.py` `_audited_tickets`) calls `rebar.list_tickets` then `audit_trail` per ticket (`src/rebar/audit/read.py:205-217`).\n- Every one of those reads runs `ensure_fresh` (`src/rebar/_engine_support/reads.py:192`), which spawns `git rev-parse --verify <branch>` at line 221 before the 60 s marker throttle, and on the first read a `git fetch` via `_store/sync.py` `_coordinated_fetch`.\n- Profiled with one audited ticket: 6 git processes on the first render (fetch + 5 rev-parse), 5 on a throttled render; 0.2-0.45 s unloaded.\n- Deterministic reproduction: a PATH shim `git` that sleeps 0.8 s before exec'ing the real git makes the unchanged test fail with the same `TimeoutError` every run (1 failed in 68 s); with 0 s delay it passes.\nClassification: TEST bug. The work in the request is the store's uniform read policy, so the test's tight wall-clock bound measures host subprocess cost. The suite's designated hang guard is pytest-timeout (`pyproject.toml` `timeout = 300`, `timeout_method = \"thread\"`, documented as sized to dwarf legitimate cost). The 10 s `uv.started` deadline has the same flaw for server startup. Precedent: Gerrit 3297 (30f06afc412) replaced a wall-clock bound with an ordering check plus a mutant check. The probe-before-throttle cost at `reads.py:221` (1 + 4N git spawns per index render even when throttled) is a real but separate production inefficiency; it is filed as its own bug linked discovered_from this one and is out of scope here.\n\n## Approach\nMake the test measure the contract (binds 127.0.0.1 on the requested ephemeral port, answers 200, lists the seeded ticket) instead of elapsed time:\n1. Readiness by state, not deadline: a helper waits until `uv.started` is true or the server thread has exited. uvicorn 0.52.1 calls `sys.exit(STARTUP_FAILURE)` on a bind `OSError` (`uvicorn/server.py:183`), which ends the thread before `started` is set (`server.py:196`), so a bind failure is reported at once with no deadline.\n2. Assert the bind directly from the listening sockets (`uv.servers[*].sockets[*].getsockname()` == `(\"127.0.0.1\", port)`).\n3. Issue the request with no client-side read deadline; a genuine hang is bounded by the suite's 300 s pytest-timeout budget, the documented hang guard.\n4. Companion mutant check (precedent 3297 style): start the server on a port already held by another socket and assert the readiness helper reports \"thread exited without starting\" promptly instead of waiting, proving the state-based wait still catches the real failure.\nNo production code changes; no autouse fixtures added; no new child processes (if any are needed they go through `tests/_subprocess_env.subprocess_env`).\n\n## Scope\n- `tests/unit/test_audit_serve.py` \u2014 readiness helper, bind assertion, unbounded read, companion bind-failure test.\n\n## Testing\n- Failing first: under the slow-git PATH shim (0.8 s per git call) the current test fails with `TimeoutError`; after the change the same command passes.\n- Companion test: a pre-bound port makes the readiness helper return \"not started\" with the thread dead.\n- Unloaded: `pytest -n0 tests/unit/test_audit_serve.py` passes; `tests/unit -k audit` passes.\n- `make lint` and `make typecheck` pass with the worktree `.venv/bin` first on PATH.\n\n## Acceptance Criteria\n- [ ] Root cause identified with a deterministic reproduction (for example a throttled server thread) before any fix.\n- [ ] The test passes under that reproduction.\n- [ ] `test_serve_binds_loopback_ephemeral_and_lists_ticket` contains no wall-clock deadline on server startup or on the HTTP read; it asserts the listening socket is `127.0.0.1:<port>`.\n- [ ] A companion test starts the server on an occupied port and asserts the readiness helper reports failure with the server thread exited; it passes.\n- [ ] `pytest -n0 tests/unit/test_audit_serve.py` and `pytest tests/unit -k audit` pass; `make lint` and `make typecheck` exit 0.\n- [ ] The probe-before-throttle inefficiency is filed as a bug linked discovered_from this ticket.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "test_serve_binds_loopback_ephemeral_and_lists_ticket times out its 5 s HTTP read under a loaded full suite"
       },
       "created_at": "2026-11-04T07:32:22Z",
@@ -87852,9 +87881,17 @@
       "updated_at": "2026-08-15T15:11:41Z"
     },
     "cded-334b-a742-4082": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nOn 2026-11-04, `make verify` on macOS (load average 24-28) failed 2 default-tier tests whose asserted stderr starts with a `--- Logging error ---` traceback (`ValueError: I/O operation on closed file`):\n\n- `tests/interfaces/facades/test_plan_review_attestation_facades.py::test_cli_passed_but_unsigned_is_exit_11_with_byte_identical_stderr`\n- `tests/interfaces/facades/test_verify_completion_facades.py::test_cli_llm_error_is_clean_exit_one`\n\nThe failing log record is the `rebar._commands._seam._apply_authorship` warning `authorship: signing SKIPPED for event %s on %s \u2014 %s; writing unsigned` (`no resolvable identity (author_id) for this writer`), emitted from `create_ticket` while the test seeds its ticket. A logging handler still holds a stream from an earlier test's `capsys` capture, which is closed by then.\n\nDeterministic reproduction, on `origin/main` `fe6c2100292` and `1cb7ea41f0c` with no local changes: running the 2 tests together in one process, the plan-review test passes, then the verify-completion test fails, 3 of 3 runs. Running the verify-completion test alone passes. In the full `make verify` run, the plan-review test itself also failed, so some earlier test leaves the same state behind.\n\nDiscovered while verifying subsolar-sonorous-puppy, whose change touches only the importer and its test.\n\n## Next check\n\nFind which handler holds the closed stream: after the plan-review test's `rebar._cli.main([...])` call, list `logging.getLogger().handlers` and the `rebar` logger's handlers and their `stream` attributes. That tests whether the CLI entry point installs a stream handler bound to the `sys.stderr` that `capsys` had in place, and does not remove it on return.\n\n## Acceptance Criteria\n\n- [ ] The handler that outlives the test is identified, with the code that installs it.\n- [ ] The 2 tests above pass when run together in one process, in either order, and in the full default tier.\n- [ ] A regression test fails before the fix and passes after it.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "CLI facade tests fail on a logging handler bound to an earlier test's closed stderr"
+      },
       "created_at": "2026-11-04T15:33:09Z",
       "jira_id": "4598280",
       "jira_key": "REB-6997",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-04T15:33:20Z"
     },
@@ -98798,9 +98835,17 @@
       "updated_at": "2026-09-05T08:58:33Z"
     },
     "e55c-20d8-c5de-4ac1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nOn 2026-11-04 a local run of the integration tier (`pytest -m integration -n 4 --dist loadgroup --max-worker-restart=0`, the second half of `make test`) on macOS at load average 25-40 failed 1 test, with 202 passed and 3 skipped in 8 min 29 s:\n\n`tests/integration/test_reconcile_live_e2e.py::test_delete_permission_probe@live_reconcile_e2e` -> `AssertionError: created issue REB-6995 never became index-visible`.\n\nThis is the same symptom as the closed bug dutiable-shaded-honeyeater (`d30c-f491-395f-432e`), fixed by Gerrit 1914 (`09abac969c`), which made the visibility poll re-query Jira instead of returning a cached miss. The symptom recurs after that fix.\n\nThe test's teardown writes `leaked.log` only when the delete fails; no `leaked.log` exists for this run, so by the teardown's own accounting REB-6995 was deleted. That was not checked in Jira.\n\nA related observation: the live tests self-skip in CI, but they run, and write to the live Jira project, in any local `make test` whose environment sets `JIRA_URL`, `JIRA_USER` and `JIRA_API_TOKEN`. Agent shells on this host set all 3, so the `make verify` that AGENTS.md requires before every push creates and deletes live REB issues.\n\nDiscovered while verifying subsolar-sonorous-puppy, whose change touches only the importer and its test.\n\n## Next check\n\nTime the visibility poll on a failing run (attempts made, and elapsed time against the poll budget), and query REB-6995 read-only to confirm it is gone. That tests whether the poll is exhausting its budget under host load or is ending early.\n\n## Acceptance Criteria\n\n- [ ] The cause of the recurrence is identified from a timed failing run.\n- [ ] `test_delete_permission_probe` passes in the full integration tier under host load, or the tier no longer runs live-Jira writes by default in local `make test`, with the chosen behaviour recorded.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Live delete-permission probe flake recurs after the visibility-poll fix"
+      },
       "created_at": "2026-11-04T15:33:35Z",
       "jira_id": "4598281",
       "jira_key": "REB-6998",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-04T15:34:12Z"
     },
@@ -98868,7 +98913,7 @@
         },
         "description": "## Context / Problem\n\n`build_server` in `src/rebar/mcp_server.py:432` constructs `mcp.server.auth.settings.AuthSettings(issuer_url=..., resource_server_url=..., required_scopes=...)` without setting `validate_token_resource`. With `mcp` 1.30.0 installed (the version in the worktree venv), every authenticated server boot emits a `DeprecationWarning` from the `_check_validate_token_resource` validator in `mcp/server/auth/settings.py`: the field is unset while `resource_server_url` is set, so it behaves as False and the library says the default becomes True in `mcp` 3.0.\n\nReproduced 2026-11-04 PST: `pytest tests/interfaces/facades/test_mcp_auth_jwks.py -W error::DeprecationWarning -k transport` fails (1 failed) with that warning raised from `settings.py:48`. No code in `src/`, `tests/`, or `pyproject.toml` sets `validate_token_resource`. Today the resource-binding behaviour is decided by a library default rather than by rebar, and the warning appears in every authenticated test run and server boot.\n\nPrimary sources: the `mcp` v1.30.0 release notes list this as a new `DeprecationWarning` (\"Set it to `True` or `False`\"; both keep working as before in 1.x); upstream PR modelcontextprotocol/python-sdk#3451 adds the field and states unset behaves as off. The field's own description in `settings.py` says to set it False \"when your token verifier checks the token's audience itself\". When True, `FastMCP.streamable_http_app()` passes `resource_server_url` to `BearerAuthBackend`, which rejects any token whose `AccessToken.resource` is not that URL (`mcp/server/auth/middleware/bearer_auth.py`, `_issued_for_this_resource`).\n\n## Approach\n\nSet `validate_token_resource=False` explicitly in `build_server`, with a comment naming `CompositeTokenVerifier` as the component that enforces the RFC 8707 audience. This fits because rebar's verifier already checks the audience itself: `CompositeTokenVerifier.verify_token` (`src/rebar/_mcp_auth.py:560`) accepts a sub-verifier result only when `result.resource == self._resource`, the configured `auth_resource_server_url`, and `docs/mcp-auth.md` \u00a7\"The composite is the single audience / fail-closed choke point\" documents it as the one place audience is enforced. False is the value the SDK prescribes for that design and is exactly today's runtime behaviour (unset already behaves as False), so no token accepted today is rejected afterwards and no token rejected today is accepted.\n\nCorrect the two statements that say the SDK bearer backend \"never\" inspects `.resource` (true before 1.30, now true only while `validate_token_resource` is False): the `CompositeTokenVerifier` docstring (`src/rebar/_mcp_auth.py:542`) and `docs/mcp-auth.md:79`. ADR 0050 is a dated decision record and is left unchanged.\n\n## Scope\n\n- `src/rebar/mcp_server.py` \u2014 pass `validate_token_resource=False` to `AuthSettings` in `build_server`, with the comment.\n- `src/rebar/_mcp_auth.py` \u2014 `CompositeTokenVerifier` docstring wording only.\n- `docs/mcp-auth.md` \u2014 the composite choke-point paragraph wording only.\n- `tests/interfaces/facades/test_mcp_auth.py` \u2014 new regression test; set `validate_token_resource=False` on the hand-built `AuthSettings` in `test_wrong_resource_stub_verifier_401_at_transport` (line 327) so it mirrors the production wiring and stops emitting the same warning.\n- `tests/unit/test_mcp_health_startup_handshake.py` \u2014 set `validate_token_resource=False` on the hand-built `AuthSettings` in `_server` (line 57), whose docstring says it mirrors how `build_server` builds the HTTP transport. `git grep -n 'AuthSettings(' -- src tests` lists exactly these three construction sites (`tests/unit/test_mcp_on_box_infra.py:86` is a docstring mention, not a construction).\n\n## Testing\n\n- Regression (fails before the fix): a new test in `tests/interfaces/facades/test_mcp_auth.py` builds the server via `build_server(_auth_config(...))` inside `warnings.catch_warnings()` with `filterwarnings(\"error\", message=\".*validate_token_resource.*\", category=DeprecationWarning)`, then asserts `server.settings.auth.validate_token_resource is False`. Before the fix it raises the `DeprecationWarning`; after, it passes. No autouse fixture.\n- Behaviour preserved: the existing transport tests still pass unchanged in assertions \u2014 `test_wrong_resource_stub_verifier_401_at_transport` (wrong-resource token is 401 via the composite), `test_http_auth_valid_token_200_and_missing_token_401` (static PAT 200, missing 401), `test_missing_required_scope_403_and_present_200`, and `test_jwt_transport_valid_200_garbage_401` in `test_mcp_auth_jwks.py` (valid JWT 200, garbage 401).\n\n## Acceptance Criteria\n\n- [x] `build_server` passes `validate_token_resource=False` with a comment naming `CompositeTokenVerifier` as the audience enforcer; verified by the new regression test in `tests/interfaces/facades/test_mcp_auth.py` passing (and failing on the pre-fix tree).\n- [x] `pytest tests/interfaces/facades/test_mcp_auth_jwks.py -W error::DeprecationWarning -k transport` passes (it fails with 1 failed before the fix).\n- [x] `pytest tests/interfaces/facades/test_mcp_auth.py tests/interfaces/facades/test_mcp_auth_jwks.py tests/interfaces/facades/test_mcp_auth_proxy.py tests/interfaces/facades/test_mcp_http_transport.py` passes.\n- [x] Every `AuthSettings(` construction sets the field: `git grep -n -A1 'AuthSettings(' -- src tests` shows `validate_token_resource=False` at `src/rebar/mcp_server.py`, `tests/interfaces/facades/test_mcp_auth.py`, and `tests/unit/test_mcp_health_startup_handshake.py`, and `pytest tests/unit/test_mcp_health_startup_handshake.py -W error::DeprecationWarning` passes.\n- [x] The unconditional claim is gone: `git grep -n 'never inspects\\|never checks' -- src/rebar/_mcp_auth.py docs/mcp-auth.md` returns no hits, and both passages instead say the SDK checks `.resource` only when `validate_token_resource` is True, which rebar leaves False.\n- [x] `make lint` and `make typecheck` exit 0 with the worktree `.venv/bin` first on PATH.\n- [x] [non-codebase] The change lands through Gerrit at `LLM-Review +1` and `Verified +1`; evidence recorded as a ticket comment: Gerrit change number, both vote outcomes, and the merged SHA.\n  provenance: environment=gerrit-prod (rebar.solutions.navateam.com); principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 Gerrit REST read of change 3303 DETAILED_LABELS showed LLM-Review +1 and Verified +1 on 554def296fc, then revision-scoped submit merged it as 1cb7ea41f0c.\n- [x] [non-codebase] The MCP autodeploy picks up the merged SHA and the deployed server still authenticates; evidence recorded as a ticket comment: the value of `/var/lib/rebar/mcp-deployed-sha` on the prod host, read with a read-only `aws ssm send-command --profile frontier` running `cat`, matching the merged SHA, and the outcome of one read-only MCP call made with the existing PAT (token never printed), with timestamps.\n  provenance: environment=prod MCP host i-00880b2c7f13527c5 (us-east-1); principal=AWS profile frontier for SSM and the existing CLI MCP PAT; privilege_posture=production-equivalent; instrument=live-call \u2014 SSM cat of /var/lib/rebar/mcp-deployed-sha returned 1cb7ea41f0c at 06:06:27 PST, and an initialize call with the PAT returned 200 while no-token and garbage-token calls returned 401.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Set AuthSettings.validate_token_resource explicitly in build_server"
       },
       "created_at": "2026-11-04T08:33:51Z",
@@ -115534,7 +115579,8 @@
     "1793805588625119001": "__rebar_unknown_comment_id__",
     "1793805807310005001": "__rebar_unknown_comment_id__",
     "1793805835922324001": "__rebar_unknown_comment_id__",
-    "1793805866361205001": "__rebar_unknown_comment_id__"
+    "1793805866361205001": "__rebar_unknown_comment_id__",
+    "1793809204211741001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -120989,6 +121035,7 @@
     "REB-6996": "40c3-d22a-3872-4c8c",
     "REB-6997": "cded-334b-a742-4082",
     "REB-6998": "e55c-20d8-c5de-4ac1",
+    "REB-6999": "20e1-f766-929b-4951",
     "REB-7": "0333-3aea-0464-4b93",
     "REB-70": "301b-cbc4-5e81-4230",
     "REB-700": "4ff8-8d1d-ac17-4ed2",
