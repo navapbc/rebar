@@ -171,3 +171,74 @@ def test_zero_horizon_fold_keeps_clock_placement(store: Path, clock: _Clock) -> 
     assert os.path.exists(snap)
     sources = json.loads(snap.read_text(encoding="utf-8"))["data"]["source_event_uuids"]
     assert len(sources) == 2
+
+
+def _rebuild(repo: Path, tid: str) -> bool:
+    from rebar._commands import compact_rebuild
+
+    return compact_rebuild.rebuild_snapshot_from_full_log(
+        str(repo / ".tickets-tracker"), tid, str(_tdir(repo, tid)), no_commit=True
+    )
+
+
+def _compacted_with_orphan(repo: Path, clock: _Clock) -> tuple[str, int, Path]:
+    """A ticket folded at its clock, plus a merged-in COMMENT older than that SNAPSHOT.
+
+    Returns the ticket, the newest raw event's timestamp, and the clock-placed SNAPSHOT."""
+    tid, _ = _seed(repo, clock)
+    before = set(_live(repo, tid))
+    clock.now = _T0 + 2 * _MIN_NS
+    rebar.comment(tid, "orphan", repo_root=str(repo))
+    (orphan,) = set(_live(repo, tid)) - before
+    hidden = orphan.with_name(f".hidden-{orphan.name}")
+    orphan.rename(hidden)
+    clock.now = _T0 + 10 * _MIN_NS
+    assert _fold(repo, tid, 0) == 0
+    prior = _snapshot(repo, tid)
+    hidden.rename(orphan)
+    assert _orphans(repo, tid, prior), "SETUP: the merged-in COMMENT must be an orphan"
+    return tid, _ts(orphan), prior
+
+
+def test_rebuild_places_snapshot_after_newest_raw_event(
+    store: Path, clock: _Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under a positive horizon the rebuild anchors on the newest raw event it absorbs, not
+    on its clock and not on the clock-placed prior SNAPSHOT it replaces (valiant-supreme-erin)."""
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", str(_HORIZON_NS))
+    tid, newest_raw, prior = _compacted_with_orphan(store, clock)
+
+    clock.now = _T0 + 46 * _MIN_NS
+    assert _rebuild(store, tid)
+    snap = _snapshot(store, tid)
+
+    assert _ts(snap) == newest_raw + 1 < _ts(prior)
+    state = reduce_ticket(str(_tdir(store, tid)))
+    assert state is not None
+    assert [c["body"] for c in state["comments"]] == ["c0", "orphan"]
+    assert _orphans(store, tid, snap) == []
+
+
+def test_zero_horizon_rebuild_keeps_clock_placement(store: Path, clock: _Clock) -> None:
+    """``horizon=0`` rebuilds at the clock, as the zero-horizon fold does; unchanged."""
+    tid, _newest_raw, _prior = _compacted_with_orphan(store, clock)
+
+    repair_at = _T0 + 46 * _MIN_NS
+    clock.now = repair_at
+    assert _rebuild(store, tid)
+
+    assert _ts(_snapshot(store, tid)) > repair_at
+
+
+def test_rebuild_with_unreadable_horizon_aborts_untouched(
+    store: Path, clock: _Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No horizon means no placement rule, so the rebuild aborts before any mutation."""
+    tid, _newest_raw, prior = _compacted_with_orphan(store, clock)
+    before = sorted(p.name for p in _tdir(store, tid).iterdir())
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", "not-a-number")
+
+    assert not _rebuild(store, tid)
+
+    assert sorted(p.name for p in _tdir(store, tid).iterdir()) == before
+    assert _snapshot(store, tid) == prior

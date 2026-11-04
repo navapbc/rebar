@@ -38,13 +38,17 @@ _HORIZON_NS = 30 * _MIN_NS
 _T0 = 4_000_000_000_000_000_000
 
 
-def _run_at(repo: Path, *args: str, now: int) -> subprocess.CompletedProcess[str]:
+def _run_at(
+    repo: Path, *args: str, now: int, check: bool = True, **env_overrides: str
+) -> subprocess.CompletedProcess[str]:
     env = child_env(
-        subprocess_env(_engine.engine_env(repo_root=str(repo)), REBAR_COMPACT_TRIGGER="off"),
+        subprocess_env(
+            _engine.engine_env(repo_root=str(repo)), REBAR_COMPACT_TRIGGER="off", **env_overrides
+        ),
         hlc_now=now,
     )
     return subprocess.run(
-        [_CLI, *args], cwd=str(repo), env=env, text=True, capture_output=True, check=True
+        [_CLI, *args], cwd=str(repo), env=env, text=True, capture_output=True, check=check
     )
 
 
@@ -100,4 +104,60 @@ def test_fold_on_stale_clone_keeps_concurrent_tag(two_clones) -> None:  # noqa: 
     assert tag_b.name > snap.name, "B's tag must sort after A's SNAPSHOT"
     shown = json.loads(_run_at(repo_a, "show", tid, now=fold_at + _SEC_NS).stdout)
     assert "late" in shown["tags"], shown["tags"]
+    assert _orphan_rows(repo_a, tid) == []
+
+
+def test_snapshot_repair_on_stale_clone_keeps_concurrent_tag(two_clones) -> None:  # noqa: F811
+    """The same race on the ``store fsck --repair-snapshots`` rebuild (valiant-supreme-erin).
+
+    A holds a clock-placed SNAPSHOT with a merged-in orphan COMMENT, the state the 77b6 repair
+    starts from. B tags the ticket 24 s before A repairs without fetching. The rebuilt
+    SNAPSHOT must sit just after the newest event it absorbs, so B's tag sorts after it."""
+    _remote, repo_a, repo_b, _seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    tid = _create(repo_a, "task", "repair race victim")
+    _run_at(repo_a, "comment", tid, "linked", now=_T0)
+    _sync_from_origin(tracker_b)
+    _run_at(repo_b, "comment", tid, "early", now=_T0 + 10 * _MIN_NS)
+
+    # A folds at its clock before fetching B's comment, which then merges in as an orphan.
+    _run_at(
+        repo_a,
+        "store",
+        "compact",
+        tid,
+        "--threshold=0",
+        "--horizon=0",
+        "--skip-sync",
+        now=_T0 + 20 * _MIN_NS,
+    )
+    _git("fetch", "-q", "origin", "tickets", cwd=tracker_a)
+    _git("merge", "-q", "--no-edit", "FETCH_HEAD", cwd=tracker_a)
+    assert _orphan_rows(repo_a, tid), "SETUP: A must hold a COMMENT orphan to repair"
+
+    repair_at = _T0 + 46 * _MIN_NS
+    _sync_from_origin(tracker_b)
+    _run_at(repo_b, "edit", tid, "--add-tag=late", now=repair_at - 24 * _SEC_NS)
+    (tag_b,) = _events(tracker_b, tid, "TAG_DELTA")
+    assert not _events(tracker_a, tid, "TAG_DELTA"), "SETUP: A must not have fetched the tag"
+
+    _run_at(
+        repo_a,
+        "store",
+        "fsck",
+        "--repair-snapshots",
+        now=repair_at,
+        check=False,
+        REBAR_COMPACTION_HORIZON_NS=str(_HORIZON_NS),
+    )
+    (snap,) = _events(tracker_a, tid, "SNAPSHOT")
+    _git("fetch", "-q", "origin", "tickets", cwd=tracker_a)
+    _git("merge", "-q", "--no-edit", "FETCH_HEAD", cwd=tracker_a)
+    assert (tracker_a / tid / tag_b.name).exists(), "SETUP: the merge must land B's tag"
+
+    assert tag_b.name > snap.name, "B's tag must sort after A's rebuilt SNAPSHOT"
+    shown = json.loads(_run_at(repo_a, "show", tid, now=repair_at + _SEC_NS).stdout)
+    assert "late" in shown["tags"], shown["tags"]
+    assert [c["body"] for c in shown["comments"]] == ["linked", "early"]
     assert _orphan_rows(repo_a, tid) == []

@@ -8,9 +8,16 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import NamedTuple
 
+from rebar import config
 from rebar._commands import compact_plan, fsck_repair
-from rebar._commands.compact_txn import _build_authorship_ledger, _snapshot_strip_keys
+from rebar._commands.compact_plan import Candidate
+from rebar._commands.compact_txn import (
+    _build_authorship_ledger,
+    _snapshot_strip_keys,
+    _snapshot_timestamp,
+)
 from rebar._proc import store_repo_root
 from rebar._store import compat, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
@@ -31,8 +38,8 @@ def get_rebuild_count() -> int:
 
 def _partition_rebuild_sources(
     ticket_dir: str,
-) -> tuple[list[str], list[str], list[str], list[str]]:
-    """Scan the ticket dir and return ``(live_raw, source_uuids, old_snaps, raw_paths)``.
+) -> tuple[list[str], list[str], list[str], list[Candidate]]:
+    """Scan the ticket dir and return ``(live_raw, source_uuids, old_snaps, raw)``.
 
     Every raw (non-snapshot) event — active OR ``*.retired`` — becomes a source of the new
     SNAPSHOT; the live ones are retired by the caller, and superseded snapshot(s) are
@@ -44,17 +51,57 @@ def _partition_rebuild_sources(
     live_raw: list[str] = []
     source_uuids: list[str] = []
     old_snaps: list[str] = []
-    raw_paths: list[str] = []
+    raw: list[Candidate] = []
     for c in compact_plan.list_candidates(ticket_dir, include_retired=True):
         if c.is_snapshot:
             if c.is_active:
                 old_snaps.append(c.path)
             continue
         source_uuids.append(c.uuid)
-        raw_paths.append(c.path)
+        raw.append(c)
         if c.is_active:
             live_raw.append(c.path)
-    return live_raw, source_uuids, old_snaps, raw_paths
+    return live_raw, source_uuids, old_snaps, raw
+
+
+class _RebuildPlan(NamedTuple):
+    """What a rebuild writes, resolved before the first mutation."""
+
+    compiled_state: dict
+    live_raw: list[str]
+    source_uuids: list[str]
+    old_snaps: list[str]
+    raw: list[Candidate]
+    snapshot_ts: int
+
+
+def _plan_rebuild(tracker: str, ticket_id: str, ticket_dir: str) -> _RebuildPlan | None:
+    """Resolve the rebuild's state, sources and SNAPSHOT timestamp; ``None`` aborts it.
+
+    The state is the full raw history INCLUDING the merged-in orphan the stale snapshot
+    dropped. It is None when the rebuild must NOT proceed: the b636 fail-closed guard (prior
+    SNAPSHOT cites sources absent from disk => incomplete log) or a failed reduce. An
+    unreadable compaction config also aborts, since the horizon places the SNAPSHOT.
+
+    Placement is the fold's own rule (bug valiant-supreme-erin). A rebuild absorbs every
+    event, so it has no young ones; under a positive horizon the SNAPSHOT sits just after the
+    newest RAW event it absorbs, so an event another clone wrote since, not yet fetched, sorts
+    after it and replays instead of merging in as an uncited ``ORPHAN_EVENT``. A prior
+    SNAPSHOT is not the anchor: one placed at an earlier fold's clock would leave that gap
+    open. ``horizon <= 0`` keeps clock placement, as the fold does."""
+    try:
+        horizon = config.compose_config(None).compact.COMPACTION_HORIZON_NS
+    except config.ConfigError as exc:
+        logger.warning("fsck: cannot rebuild snapshot for %s: %s", ticket_id, exc)
+        return None
+    compiled_state = fsck_repair.rebuild_source_state(ticket_id, ticket_dir)
+    if compiled_state is None:
+        return None
+    live_raw, source_uuids, old_snaps, raw = _partition_rebuild_sources(ticket_dir)
+    snapshot_ts = _snapshot_timestamp(tracker, ticket_id, raw, [], hlc.physical_now(), horizon)
+    if snapshot_ts is None:  # only a young event can close the gap, and a rebuild has none
+        return None
+    return _RebuildPlan(compiled_state, live_raw, source_uuids, old_snaps, raw, snapshot_ts)
 
 
 def _commit_rebuild(tracker: str, ticket_id: str) -> None:
@@ -118,31 +165,28 @@ def rebuild_snapshot_under_lock(
             "fsck: interrupted snapshot rebuild for %s (.bak present) — restarting", ticket_id
         )
 
-    # Full raw-history state INCLUDING the merged-in orphan the stale snapshot dropped.
-    # None when the rebuild must NOT proceed — the b636 fail-closed guard (prior SNAPSHOT
-    # cites sources absent from disk => incomplete log) or a failed reduce.
-    compiled_state = fsck_repair.rebuild_source_state(ticket_id, ticket_dir)
-    if compiled_state is None:
+    plan = _plan_rebuild(tracker, ticket_id, ticket_dir)
+    if plan is None:
         logger.warning(
-            "fsck: snapshot rebuild for %s aborted (incomplete log or reduce failure)",
+            "fsck: snapshot rebuild for %s aborted (incomplete log, reduce failure "
+            "or unreadable config)",
             ticket_id,
         )
         return False
+    live_raw, source_uuids, old_snaps = plan.live_raw, plan.source_uuids, plan.old_snaps
     # The legacy ``signature`` mirror is never persisted into a rebuilt snapshot
     # either (task 7ed9 never-emit) — it is re-derived in memory on replay.
     _strip = _snapshot_strip_keys()
-    compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
+    compiled_state = {k: v for k, v in plan.compiled_state.items() if k not in _strip}
 
-    live_raw, source_uuids, old_snaps, raw_paths = _partition_rebuild_sources(ticket_dir)
     # Authorship ledger (epic gnu-whale-ichor / 3183): rebuild it from the FULL raw log
     # (active + retired) so a rebuilt SNAPSHOT preserves the signed-event ledger too.
     compiled_state["authorship_ledger"] = _build_authorship_ledger(
-        raw_paths, store_repo_root(tracker)
+        [c.path for c in plan.raw], store_repo_root(tracker)
     )
 
-    snapshot_ts = hlc.next_tick(tracker, ticket_id)
     snapshot_event, final_path = compact_plan.build_snapshot_event(
-        tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts
+        tracker, ticket_dir, compiled_state, source_uuids, plan.snapshot_ts
     )
 
     # Sentinel/back-up the pre-rebuild snapshot BEFORE mutating.
