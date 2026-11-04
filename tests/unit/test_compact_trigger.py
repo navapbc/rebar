@@ -18,7 +18,6 @@ import pytest
 
 import rebar
 from rebar._commands import compact_trigger
-from rebar._store.paths import StorePaths
 
 pytestmark = pytest.mark.unit
 
@@ -201,7 +200,6 @@ def test_a_stale_worker_lock_is_reclaimed(store: Path) -> None:
     """A worker that died between acquire and release must not disable the trigger forever —
     the exact failure the drain lock had to be fixed for."""
     tracker = _tracker(store)
-    os.makedirs(StorePaths(tracker).rebar_dir, exist_ok=True)
     path = compact_trigger._trigger_lock_path(tracker)
     # An unrecognised (pre-stamp shaped) lock, aged past the shared wall-clock ceiling.
     with open(path, "w", encoding="utf-8") as fh:
@@ -406,9 +404,13 @@ def test_a_stand_aside_does_not_reset_the_sweep_clock(
 
 
 def _canonical_store(tmp_path: Path) -> str:
-    """A canonical store: ``<root>/.tickets-tracker``. Returns the tracker path."""
+    """A canonical store: a git-backed ``<root>/.tickets-tracker``. Returns the tracker path.
+
+    Git-backed because every rebar store is, and the trigger's lock and stamp live in the
+    tracker's git dir (bug exemplary-silty-tuatara)."""
     tracker = Path(os.path.realpath(tmp_path)) / "canonical-repo" / ".tickets-tracker"
     tracker.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=tracker, check=True, capture_output=True)
     return str(tracker)
 
 
@@ -486,7 +488,7 @@ def test_the_trigger_sidecars_are_never_written_inside_an_ephemeral_worktree(
     worktree."""
     canonical = _canonical_store(tmp_path)
     wt = _worktree_tracker(tmp_path, canonical, "worktree-a")
-    canonical_rebar = os.path.join(os.path.dirname(canonical), ".rebar")
+    canonical_git_dir = os.path.join(canonical, ".git")
 
     fd = compact_trigger._acquire_trigger_lock(wt)
     assert fd is not None
@@ -495,10 +497,9 @@ def test_the_trigger_sidecars_are_never_written_inside_an_ephemeral_worktree(
         assert os.listdir(os.path.join(os.path.dirname(wt), ".rebar")) == [], (
             "the trigger wrote sidecars into the worktree that spawned it"
         )
-        assert sorted(os.listdir(canonical_rebar)) == [
-            "compact-sweep.stamp",
-            "compact-worker.lock",
-        ]
+        assert {"rebar-compact-sweep.stamp", "rebar-compact-worker.lock"} <= set(
+            os.listdir(canonical_git_dir)
+        )
     finally:
         compact_trigger.release_trigger_lock(wt, fd)
 

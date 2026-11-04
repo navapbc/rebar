@@ -17,19 +17,24 @@ from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
 
 logger = logging.getLogger(__name__)
 
-#: In the repo's ``.rebar/`` beside the clock lock — one compactor at a time.
-_TRIGGER_LOCK_NAME = "compact-worker.lock"
+#: One compactor at a time, per STORE. The lock and the stamp live in the tracker's git dir,
+#: beside the fold intent journal, not in the ``.rebar/`` next to the tracker: that sibling is
+#: not part of the store. In the MCP container it sits on each container's writable layer while
+#: the tracker is a volume both blue-green containers share, so keyed there every deploy lost
+#: the stamp and the overlap ran two locks over one store (bug exemplary-silty-tuatara).
+# mechanism-ok: lock rebar-compact-worker.lock — eac3-3f1b-69bb-414e compact-worker.lock, moved
+_TRIGGER_LOCK_NAME = "rebar-compact-worker.lock"
 #: Records when a sweep last ran, so the trigger can fire on staleness alone.
-_SWEEP_STAMP_NAME = "compact-sweep.stamp"
+_SWEEP_STAMP_NAME = "rebar-compact-sweep.stamp"
 _TRIGGER_LOG = "logs/compact-worker.log"
 
 
 def _trigger_lock_path(tracker: str) -> str:
-    return StorePaths(tracker).sidecar(_TRIGGER_LOCK_NAME)
+    return os.path.join(StorePaths(tracker).git_dir, _TRIGGER_LOCK_NAME)
 
 
 def _sweep_stamp_path(tracker: str) -> str:
-    return StorePaths(tracker).sidecar(_SWEEP_STAMP_NAME)
+    return os.path.join(StorePaths(tracker).git_dir, _SWEEP_STAMP_NAME)
 
 
 def _trigger_log_path(tracker: str) -> str:
@@ -40,7 +45,6 @@ def record_sweep(tracker: str) -> None:
     """Stamp "a sweep ran just now". Best-effort: a missing stamp only makes the staleness
     check fire sooner, which costs one no-op sweep, never correctness."""
     try:
-        os.makedirs(StorePaths(tracker).rebar_dir, exist_ok=True)
         with open(_sweep_stamp_path(tracker), "w", encoding="utf-8") as fh:
             fh.write(str(int(time.time())))
     except OSError:
@@ -107,11 +111,8 @@ def _acquire_trigger_lock(tracker: str) -> int | None:
     """Best-effort non-blocking advisory lock: an open fd, or ``None`` if a live compactor holds
     it. NOT the store write lock — a caller that cannot get it simply does not spawn. The
     mechanism is :func:`rebar._store.stamped_lock.stamped_file_lock`, shared with the drain and
-    snapshot-GC triggers; only the sidecar directory is this site's own."""
-    try:
-        os.makedirs(StorePaths(tracker).rebar_dir, exist_ok=True)
-    except OSError:
-        return None
+    snapshot-GC triggers; only the lock's location is this site's own. The git dir already
+    exists for any store compaction can commit to, so nothing is created here."""
     return stamped_file_lock(_trigger_lock_path(tracker), label="compaction trigger")
 
 

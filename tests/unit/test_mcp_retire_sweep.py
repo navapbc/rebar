@@ -67,9 +67,16 @@ def _reap(proc: subprocess.Popen[str]) -> None:
         proc.wait()
 
 
-def test_retire_stops_a_live_local_sweep_and_waits_for_it(tmp_path: Path) -> None:
+def _git_store(tmp_path: Path) -> str:
+    """A git-backed store: the sweep's worker lock lives in the tracker's git dir."""
     tracker = str(tmp_path / "store")
     os.makedirs(tracker)
+    subprocess.run(["git", "init", "-q"], cwd=tracker, check=True, capture_output=True, timeout=60)
+    return tracker
+
+
+def test_retire_stops_a_live_local_sweep_and_waits_for_it(tmp_path: Path) -> None:
+    tracker = _git_store(tmp_path)
     worker = _spawn(_WORKER_SRC, tracker)
     try:
         finish = compact_trigger.retire_local_sweep(tracker)
@@ -87,12 +94,10 @@ def test_retire_stops_a_live_local_sweep_and_waits_for_it(tmp_path: Path) -> Non
 
 
 def test_a_stamp_from_another_pid_namespace_is_never_signalled(tmp_path: Path) -> None:
-    tracker = str(tmp_path / "store")
-    os.makedirs(os.path.join(tracker, ".rebar"), exist_ok=True)
+    tracker = _git_store(tmp_path)
     bystander = _spawn(_IDLE_SRC)
     try:
         lock_path = compact_trigger._trigger_lock_path(tracker)
-        os.makedirs(os.path.dirname(lock_path), exist_ok=True)
         with open(lock_path, "w", encoding="utf-8") as fh:
             fh.write(
                 f"{lock_owner._STAMP_V2_PREFIX} host={lock_owner._host_identity()} "
