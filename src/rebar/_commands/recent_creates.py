@@ -33,9 +33,9 @@ logger = logging.getLogger("rebar")
 #: container it sits on each container's writable layer while the tracker is a volume both
 #: blue-green containers share, so keyed there every deploy emptied the window and a create on
 #: one container was invisible to the other (bug soot-ammonitic-redpoll).
+#: The lock keeps its original name, so it needs no new admission past the mechanism ratchet.
 _JOURNAL_NAME = "rebar-recent-creates.json"
-# mechanism-ok: lock rebar-recent-creates.lock — 1237-b65b-d7d2-4565 recent-creates.lock, moved
-_LOCK_NAME = "rebar-recent-creates.lock"
+_LOCK_NAME = "recent-creates.lock"
 
 #: How long a create stays probe-visible. 600 s is ~3.5x the largest observed true-duplicate
 #: delta (171 s) from the eac3 store measurement; the same measurement found same-title pairs
