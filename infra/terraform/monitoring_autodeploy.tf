@@ -537,17 +537,17 @@ resource "aws_cloudwatch_metric_alarm" "docker_unaccounted_bytes" {
 resource "aws_cloudwatch_metric_alarm" "journal_usage_high" {
   alarm_name        = "rebar-journal-usage-high"
   alarm_description = <<-EOT
-    The systemd journal is above 85% of its configured ceiling (SystemMaxUse; the value lives in
-    infra/scripts/journald-cap.sh, readable with `--print-env`). journald will vacuum ARCHIVED
-    journal files to stay under the ceiling, so this is a warning that history is about to be
-    discarded rather than that the disk is about to fill — but sustained growth here is a
-    generator to investigate, because the ceiling is not the whole story: only archived files
-    are vacuumed, so usage can exceed it by up to one active file. CHECK
-    rebar-journal-cap-not-in-effect FIRST: if that alarm is also firing, this percentage is
-    measured against a ceiling the running journald never read. DIAGNOSIS: `journalctl
-    --disk-usage`, `du -sx /var/log/journal`. REMEDIATION: `journalctl --vacuum-size=` (never
-    `rm` under /var/log/journal). Published as rebar/host:journal_used_percent by
-    observability.sh 2g. Runbook: infra/runbooks/review-bot-ops.md.
+    The systemd journal is above 112% of its configured ceiling (SystemMaxUse; the value lives
+    in infra/scripts/journald-cap.sh, readable with `--print-env`). A full journal is NORMAL:
+    journald fills to the ceiling and vacuums ARCHIVED files to hold it there, so steady state
+    reads ~100%. Only archived files are vacuumed, so usage can exceed the ceiling by one
+    active file (SystemMaxFileSize, default 1/8): 112.5% is the documented worst case. Above
+    it, journald is NOT vacuuming. CHECK rebar-journal-cap-not-in-effect FIRST: if it also
+    fires, the percentage is against a ceiling journald never read. DIAGNOSIS: `journalctl
+    --disk-usage`, `journalctl -u systemd-journald` for vacuum/rotation errors, `du -sx
+    /var/log/journal`. REMEDIATION: `journalctl --vacuum-size=` (never `rm` under
+    /var/log/journal). Published as rebar/host:journal_used_percent by observability.sh 2g.
+    Runbook: infra/runbooks/review-bot-ops.md.
   EOT
 
   namespace   = "rebar/host"
@@ -559,7 +559,10 @@ resource "aws_cloudwatch_metric_alarm" "journal_usage_high" {
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
-  threshold           = 85
+  # 112 = journald's documented 9/8 worst case, rounded to the published integer percent. At
+  # 85 this sat in ALARM for weeks at a healthy ~100% (bug 9716-01cb-db59-4f71); the
+  # cap-not-in-effect alarm below and rebar-root-disk-pressure cover the other failure modes.
+  threshold           = 112
   comparison_operator = "GreaterThanThreshold"
 
   # observability.sh 2g publishes this ONLY on a successful measurement, so absence means the

@@ -351,6 +351,17 @@ measuring the right quantity against the right bound. What was wrong was the evi
 turned "we did not look" into "it breached". Changing a threshold here would have masked that
 rather than fixed it.
 
+**Correction, 2026-11-03: the 85% threshold was wrong for `rebar-journal-usage-high`.** The claim
+above held on 2026-09-05 only because the journal had not yet filled. `SystemMaxUse` is a level
+journald fills to and then holds, not a limit it stays under: from about 2026-10-25 every
+5-minute sample read 99.4–101.2% of the ceiling while rotation worked and
+`rebar-journal-cap-not-in-effect` stayed OK, so the alarm sat in ALARM from 2026-10-09 with no
+signal. Its threshold is now `> 112`, journald's documented 9/8 worst case (one unarchived
+active file at the default `SystemMaxFileSize` of 1/8), so it pages only when journald is not
+vacuuming (bug `9716-01cb-db59-4f71`). The window shape in the table above is unchanged. The
+general lesson for the other `*_used_percent` alarms: a ceiling that its writer fills to by
+design needs a threshold above the writer's documented overshoot, not below the ceiling.
+
 ## Detection preserved, alarm by alarm
 
 The claim to check is that no alarm lost the ability to detect its real condition.

@@ -1069,13 +1069,19 @@ which is tmpfs: RAM, not the root volume.
 
 | Alarm | Metric | What it means | First move |
 |---|---|---|---|
-| `rebar-journal-usage-high` | `journal_used_percent` | the journal is >85% of its configured ceiling | check the other alarm FIRST — if it is also firing this percentage is measured against a ceiling that is not in force |
+| `rebar-journal-usage-high` | `journal_used_percent` | the journal is >112% of its configured ceiling, i.e. past journald's 9/8 worst case, so journald is not vacuuming | check the other alarm FIRST — if it is also firing this percentage is measured against a ceiling that is not in force; otherwise read `journalctl -u systemd-journald` for vacuum or rotation errors |
 | `rebar-journal-cap-not-in-effect` | `journal_cap_in_effect` | the ceiling on disk is NOT the one the running journald read | restart the logger, below |
 
 Both are `treat_missing_data = "breaching"`. `journal_used_percent` is published only on a
 SUCCESSFUL measurement, so its silence means the probe could not size the journal;
 `journal_cap_in_effect` is a heartbeat published on every tick including its `0` path, so ITS
 silence means the probe, the timer or the host is dead.
+
+**A full journal is the healthy state.** journald fills to `SystemMaxUse` and then holds it, so
+`journal_used_percent` reads ~100% in steady state (measured 99.4–101.2% on 2026-10-29..11-03),
+and up to 112.5% while the active file is unarchived. The usage alarm therefore fires only
+above 112 (bug `9716-01cb-db59-4f71`; at its original 85 it sat in ALARM from 2026-10-09 on a
+healthy journal). A reading near 100 is not a reason to vacuum.
 
 **Reading a cap heartbeat: three values, not two.** Every cap-compliance heartbeat
 (`journal_cap_in_effect`, `var_tmp_cleanup_active`, `container_reaper_active`, and the unalarmed

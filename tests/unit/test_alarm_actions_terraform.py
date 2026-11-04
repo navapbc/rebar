@@ -666,3 +666,51 @@ def test_liveness_heartbeats_have_matching_alarms() -> None:
             offenders.append(f"{metric} alarm is not wired to the shared SNS topic")
 
     assert not offenders, "liveness heartbeat alarm gap(s): " + "; ".join(offenders)
+
+
+def _numeric_attr(raw: str, masked: str, attr: str) -> float | None:
+    """Value of a top-level numeric attribute, located on the mask and read from the raw text."""
+    assign = re.compile(rf"^[ \t]*{re.escape(attr)}[ \t]*=", re.MULTILINE)
+    for hit in assign.finditer(masked):
+        value = re.match(r"[ \t]*(-?\d+(?:\.\d+)?)", raw[hit.end() :])
+        if value is not None:
+            return float(value.group(1))
+    return None
+
+
+def _alarm_block(file_name: str, label: str) -> tuple[str, str]:
+    for found_file, found_label, raw, masked in _alarm_blocks():
+        if (found_file, found_label) == (file_name, label):
+            return raw, masked
+    raise AssertionError(f"{file_name}:{label} is not declared")
+
+
+# journald holds the journal AT its SystemMaxUse ceiling in steady state and may exceed it by
+# one active file: SystemMaxFileSize defaults to 1/8 of the ceiling, so the documented worst
+# case is 9/8 = 112.5% (infra/scripts/journald-cap.sh). Measured on the host 2026-10-29..11-03:
+# every 5-minute sample read 99.4-101.2% (bug 9716-01cb-db59-4f71).
+_JOURNAL_WORST_CASE_PERCENT = 112.5
+_JOURNAL_ONE_MORE_FILE_PERCENT = 125.0
+
+
+def test_journal_usage_alarm_fires_only_past_journald_worst_case() -> None:
+    """``rebar-journal-usage-high`` must stay OK at a full, rotating journal.
+
+    At 85 the alarm sat in ALARM from 2026-10-09 onwards while journald was doing exactly what
+    the ceiling asks: an alarm that fires in steady state carries no signal. The threshold must
+    clear the 9/8 worst case (rounded to the published integer percent), and still fire before
+    a vacuum failure adds another file's worth past it.
+    """
+    raw, masked = _alarm_block("monitoring_autodeploy.tf", "journal_usage_high")
+    threshold = _numeric_attr(raw, masked, "threshold")
+    operator = _quoted_attr(raw, masked, "comparison_operator")
+    assert threshold is not None, "journal_usage_high declares no threshold"
+    assert operator == "GreaterThanThreshold", f"unexpected comparison_operator {operator!r}"
+    assert threshold >= int(_JOURNAL_WORST_CASE_PERCENT), (
+        f"threshold {threshold} pages inside journald's documented 9/8 worst case "
+        f"({_JOURNAL_WORST_CASE_PERCENT}%), i.e. on a healthy full journal"
+    )
+    assert threshold < _JOURNAL_ONE_MORE_FILE_PERCENT, (
+        f"threshold {threshold} would not page until a vacuum failure is a whole extra file past "
+        "the worst case"
+    )
