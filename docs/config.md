@@ -210,6 +210,13 @@ compact.trigger_interval_s = 21600  # env REBAR_COMPACT_TRIGGER_INTERVAL_S
                         # this the floor has a hole: a store whose closed tickets happen never
                         # to be foldable would never fold the ones that are. Default 6 h,
                         # matching the scheduled sweep's cadence. 0 disables the staleness arm.
+compact.worker_log = "file"  # file | stderr (env REBAR_COMPACT_WORKER_LOG)
+                        # Where the detached worker writes its log. "file" appends to the
+                        # store's .rebar/logs/compact-worker.log. "stderr" hands the worker the
+                        # spawning process's own stderr — set by the on-box MCP container, whose
+                        # .rebar/ is deleted on every deploy while its stderr is the journal
+                        # (`journalctl -t rebar-mcp`). Keep "file" where stderr is a terminal or
+                        # a pipe a caller waits on: the detached worker would hold it open.
 reclaim.horizon_days = 30  # env REBAR_RECLAIM_HORIZON_DAYS
                         # ADR 0106's remote-anchored reclamation horizon. A collapse
                         # checkpoint, and any `.retired` tombstone keyed to its folding

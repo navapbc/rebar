@@ -1207,6 +1207,25 @@ def test_docker_run_matches_compose_mcp_logging(mcp_box: dict[str, object]) -> N
     )
 
 
+def test_mcp_compaction_worker_logs_to_the_journal(mcp_box: dict[str, object]) -> None:
+    """The detached compaction worker's log must outlive the container (bug
+    individual-sonorous-snake). Its default file sits beside the tracker in
+    `/var/gerrit/site/.rebar/`, on the container's writable layer, which the deploy's
+    `docker rm` deletes. `stderr` hands the worker the server's own stderr, which the
+    journald driver above carries as `journalctl -t rebar-mcp` across every release."""
+    env, _volumes = _parse_compose_mcp_env_and_volumes()
+    assert env.get("REBAR_COMPACT_WORKER_LOG") == "stderr", (
+        "the compose mcp service must set REBAR_COMPACT_WORKER_LOG=stderr so the sweep log "
+        f"reaches the journal (got {env.get('REBAR_COMPACT_WORKER_LOG')!r})"
+    )
+    result = _run(mcp_box)
+    run_line = _run_line(_commands_eventually(mcp_box, "run --name"))
+    ctx = f"rc={result.returncode}\nrun_line={run_line}\n{result.stdout}\n{result.stderr}"
+    assert "-e REBAR_COMPACT_WORKER_LOG=stderr" in run_line, (
+        f"docker run must carry `-e REBAR_COMPACT_WORKER_LOG=stderr` (compose parity)\n{ctx}"
+    )
+
+
 def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> None:
     """`mcp_run_new` must reproduce the compose `mcp:` service env/mounts EXACTLY. /health is
     auth-independent (mounted outside the auth middleware), so it cannot catch a wrong

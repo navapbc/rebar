@@ -94,6 +94,8 @@ _SECTIONS: dict[str, dict] = {
         "COMPACTION_HORIZON_NS": lambda v, k: _as_int(v, k, minimum=0),
         "trigger": lambda v, k: _as_choice(v, k, {"async", "always", "off"}),
         "trigger_interval_s": lambda v, k: _as_int(v, k, minimum=0),
+        # mechanism-ok: config_key compact.worker_log — 4f4d-9a7a-3b2d-4b13 deploy log survival
+        "worker_log": lambda v, k: _as_choice(v, k, {"file", "stderr"}),
     },
     "reclaim": {
         "horizon_days": lambda v, k: _as_int(v, k, minimum=1),

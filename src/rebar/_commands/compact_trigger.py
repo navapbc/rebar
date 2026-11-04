@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 import time
+from typing import IO
 
 from rebar._store.paths import StorePaths
 from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
@@ -119,20 +120,33 @@ def release_trigger_lock(tracker: str, fd: int) -> None:
     release_stamped_lock(_trigger_lock_path(tracker), fd)
 
 
-def _spawn_detached_sweep(tracker: str) -> None:
+def _open_worker_log(tracker: str, worker_log: str) -> int | IO[str]:
+    """The detached worker's stderr sink, chosen by ``compact.worker_log``.
+
+    ``stderr`` hands over this process's own fd 2. The deployed MCP container sets it because
+    the store's ``.rebar/`` sits on the container's writable layer, which every blue-green
+    deploy deletes, while the server's stderr is the journald pipe read as
+    ``journalctl -t rebar-mcp`` (bug individual-sonorous-snake). ``file`` stays the default:
+    elsewhere fd 2 may be a terminal or a pipe a caller waits on for EOF."""
+    if worker_log == "stderr":
+        return 2
+    try:
+        os.makedirs(os.path.dirname(_trigger_log_path(tracker)), exist_ok=True)
+        return open(_trigger_log_path(tracker), "a")  # handed to the child as its stderr
+    except OSError:
+        return subprocess.DEVNULL
+
+
+def _spawn_detached_sweep(tracker: str, worker_log: str = "file") -> None:
     """Detach a sweep child that outlives this command (POSIX), via the shared
     detached-rebar-child spawner (:func:`rebar._proc.spawn_detached`), which owns the
     PYTHONPATH bootstrap, the ``-c`` re-entry stub, the detach flags and the durable-cwd
-    anchor. This site keeps its own stderr sink (the store-scoped worker log), its canonical
+    anchor. This site keeps its own stderr sink (:func:`_open_worker_log`), its canonical
     tracker argument, and its broad never-raise catch — a detach failure must not fail the
     close that triggered it."""
     from rebar._proc import spawn_detached
 
-    try:
-        os.makedirs(os.path.dirname(_trigger_log_path(tracker)), exist_ok=True)
-        log_fh = open(_trigger_log_path(tracker), "a")  # noqa: SIM115 — handed to the child
-    except OSError:
-        log_fh = subprocess.DEVNULL  # type: ignore[assignment]
+    log_fh = _open_worker_log(tracker, worker_log)
     try:
         spawn_detached(
             "rebar._commands.compact_trigger",
@@ -374,6 +388,6 @@ def maybe_compact(tracker: str, ticket_id: str, *, repo_root=None) -> None:
         if probe is None:
             return
         release_trigger_lock(tracker, probe)
-        _spawn_detached_sweep(tracker)
+        _spawn_detached_sweep(tracker, cfg.worker_log)
     except Exception:
         logger.warning("compaction trigger failed; continuing", exc_info=True)
