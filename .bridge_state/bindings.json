@@ -17047,10 +17047,24 @@
     },
     "27e0-a55f-baf1-4cf8": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\n`tests/unit/test_compact_all_selection.py::test_a_sweep_with_nothing_selected_still_pushes` is named for, and its docstring describes, the `Nothing to do.` early return in `compact_all_cli` (`src/rebar/_commands/compact.py:524-527`, the `total_needs == 0` branch that calls `_best_effort_push`, defined at `compact.py:277`). It never reaches that branch. `tests/conftest.py:664-665` sets `REBAR_COMPACTION_HORIZON_NS=0`, so the backfill arm selects the seeded snapshot-less ticket whatever `REBAR_COMPACT_THRESHOLD=9999` says; the sweep folds it and the fold path's own push (`compact.py:559`) satisfies `assert calls`.\n\nMeasured 2026-11-03 at `90d57e392ba` (session a85e3cd3, while working soldierly-arbitrary-hackee): with a scratch pytest plugin replacing `compact._best_effort_push` by a no-op, the test still PASSED. In the same setup, `compact_all_cli([\"--dry-run\"])` printed `Tickets needing compaction    : 1`, not `Nothing to do.`.\n\nSibling check: the 2 sibling push tests in the same file (`test_dry_run_never_pushes`, `test_no_commit_never_pushes`) were fixed by soldierly-arbitrary-hackee (Gerrit 3288, `731a2328295`). The other `REBAR_COMPACT_THRESHOLD=9999` tests (`tests/unit/test_compact_trigger.py`, 3 tests) give the ticket a SNAPSHOT first, so the backfill arm cannot select it; they do not share this defect and are out of scope.\n\n## Approach\n\nFollow the 3288 precedent in the test only:\n- set `REBAR_COMPACTION_HORIZON_NS` to `_HOUR_NS` (1 hour) in the test, so the fresh seeded events are not foldable and nothing is selected;\n- capture `rc = compact_all_cli([], ...)`, add the `capsys` fixture, and assert `rc == 0` and `\"Nothing to do.\"` in captured stdout, in addition to the existing `assert calls`.\n\nNo source change, no new fixture, no autouse fixture.\n\n## Scope\n\n- `tests/unit/test_compact_all_selection.py` \u2014 strengthen `test_a_sweep_with_nothing_selected_still_pushes`.\n\n## Testing\n\nFailing-first proof with a scratch-only pytest plugin (in `.rebar/scratch/`, loaded with `pytest -p`, never committed) that replaces `rebar._commands.compact._best_effort_push` with a no-op:\n- before the change the test PASSES under the plugin (the defect);\n- after the change the test FAILS under the plugin, and PASSES without it.\n\n`pytest tests/unit/test_compact_all_selection.py` passes; `make lint` and `make typecheck` pass with the worktree `.venv/bin` first on PATH.\n\n## Acceptance Criteria\n\n- [ ] The test sets a 1-hour `REBAR_COMPACTION_HORIZON_NS` and asserts exit 0 and `Nothing to do.` in captured stdout, in addition to `assert calls`.\n- [ ] The test FAILS when `_best_effort_push` is replaced by a no-op (scratch plugin), and PASSES without the plugin.\n- [ ] `pytest tests/unit/test_compact_all_selection.py`, `make lint`, and `make typecheck` pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Nothing-selected push test never reaches the early return"
       },
       "created_at": "2026-11-04T07:32:12Z",
@@ -17765,6 +17779,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:48Z"
+    },
+    "2977-df28-8e9f-4a50": {
+      "created_at": "2026-11-04T11:33:32Z",
+      "jira_id": "4598254",
+      "jira_key": "REB-6983",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T11:33:36Z"
     },
     "297d-a233-ce1b-4484": {
       "baseline": {
@@ -26312,9 +26333,9 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\n`tests/interfaces/facades/test_mcp_auth_jwks.py::test_rejects_bad_claims[mint_kwargs3]` fails whenever more than 1 hour passes between test collection and the moment the test runs.\n\nThe cause is the parametrize list (lines 165-173). Its `nbf` and `exp` values are computed with `int(time.time())` when pytest imports the module, not when the test runs.\n\nObserved on 2026-11-03 in a `make verify` run in fix-slug2 that took 4 h 58 min on a host with load average about 40:\n- The parametrized `nbf` was 1793758291, which is collection time plus 3600 s.\n- The token was minted later, at about 1793760867: its default `exp` of 1793764467 is mint time plus 3600 s.\n- By then `nbf` was already in the past, so the verifier accepted the \"not yet valid\" token, and the test's assertion that it is `None` failed.\n- In isolation the module passes 3 out of 3 runs.\n\nThe `exp` case (`mint_kwargs2`) has the same flaw, but there time only makes the token more expired, so that case stays correct by luck.\n\n### Reproduction (2026-11-03)\n\nImporting the module with `time.time` shifted 2 h into the past, then running each parametrized case on the real clock, makes the `nbf` case accept the token in 3 of 3 runs; the other 3 cases stay rejected.\n\nPatching `time.time` FORWARD between collection and the call does NOT reproduce it (all 4 cases rejected on the unfixed code): the token is minted with `time.time`, but PyJWT validates `nbf`/`exp` against `datetime.now()`, so only the minting clock moves and `nbf` stays in the verifier's future. A test built that way passes on the broken code and cannot prove the fix, so the acceptance criterion below shifts the collection clock instead.\n\n### Survey of the test tree\n\nAn AST scan of `tests/**/*.py` for clock calls (`time.time`, `time_ns`, `monotonic`, `perf_counter`, `datetime.now`/`utcnow`, `date.today`) evaluated at module level, class level, in decorators, or in argument defaults finds only lines 171-172 of this file; a text grep for module-level clock assignments (incl. `gmtime`/`localtime`/`strftime`) finds none. No other site shares the cause.\n\n## Approach\n\nCompute the claim values at test time. Each parametrized case becomes a function of the current time (`lambda now: {\"nbf\": now + 3600}`), with explicit ids, and the test body calls it with `int(time.time())`.\n\nAdd a regression test in the same module that loads a fresh, separate copy of the module (via `importlib.util`, not registered in `sys.modules`) with `time.time` shifted 2 h into the past, patches `jwt.PyJWKClient` with the copy's fake client, and runs the copy's `test_rejects_bad_claims` for every parametrized case on the real clock. No autouse fixture and no subprocess.\n\n## File impact\n\n- `tests/interfaces/facades/test_mcp_auth_jwks.py` (only file changed)\n\n## Acceptance Criteria\n\n- [ ] The time-relative claim values of `test_rejects_bad_claims` are computed in the test body. A regression test proves this: with the module collected under a clock 2 h in the past and the cases run on the real clock, the not-yet-valid (`nbf`) case still asserts rejection; that regression test fails on the unfixed code.\n- [ ] `pytest tests/interfaces/facades/test_mcp_auth_jwks.py` passes.",
+        "description": "## Context / Problem\n\n`tests/interfaces/facades/test_mcp_auth_jwks.py::test_rejects_bad_claims[mint_kwargs3]` fails whenever more than 1 hour passes between test collection and the moment the test runs.\n\nThe cause is the parametrize list (lines 165-173). Its `nbf` and `exp` values are computed with `int(time.time())` when pytest imports the module, not when the test runs.\n\nObserved on 2026-11-03 in a `make verify` run in fix-slug2 that took 4 h 58 min on a host with load average about 40:\n- The parametrized `nbf` was 1793758291, which is collection time plus 3600 s.\n- The token was minted later, at about 1793760867: its default `exp` of 1793764467 is mint time plus 3600 s.\n- By then `nbf` was already in the past, so the verifier accepted the \"not yet valid\" token, and the test's assertion that it is `None` failed.\n- In isolation the module passes 3 out of 3 runs.\n\nThe `exp` case (`mint_kwargs2`) has the same flaw, but there time only makes the token more expired, so that case stays correct by luck.\n\n### Reproduction (2026-11-03)\n\nImporting the module with `time.time` shifted 2 h into the past, then running each parametrized case on the real clock, makes the `nbf` case accept the token in 3 of 3 runs; the other 3 cases stay rejected.\n\nPatching `time.time` FORWARD between collection and the call does NOT reproduce it (all 4 cases rejected on the unfixed code): the token is minted with `time.time`, but PyJWT validates `nbf`/`exp` against `datetime.now()`, so only the minting clock moves and `nbf` stays in the verifier's future. A test built that way passes on the broken code and cannot prove the fix, so the acceptance criterion below shifts the collection clock instead.\n\n### Survey of the test tree\n\nAn AST scan of `tests/**/*.py` for clock calls (`time.time`, `time_ns`, `monotonic`, `perf_counter`, `datetime.now`/`utcnow`, `date.today`) evaluated at module level, class level, in decorators, or in argument defaults finds only lines 171-172 of this file; a text grep for module-level clock assignments (incl. `gmtime`/`localtime`/`strftime`) finds none. No other site shares the cause.\n\n## Approach\n\nCompute the claim values at test time. Each parametrized case becomes a function of the current time (`lambda now: {\"nbf\": now + 3600}`), with explicit ids, and the test body calls it with `int(time.time())`.\n\nAdd a regression test in the same module that loads a fresh, separate copy of the module (via `importlib.util`, not registered in `sys.modules`) with `time.time` shifted 2 h into the past, patches `jwt.PyJWKClient` with the copy's fake client, and runs the copy's `test_rejects_bad_claims` for every parametrized case on the real clock. No autouse fixture and no subprocess.\n\n## File impact\n\n- `tests/interfaces/facades/test_mcp_auth_jwks.py` (only file changed)\n\n## Acceptance Criteria\n\n- [x] The time-relative claim values of `test_rejects_bad_claims` are computed in the test body. A regression test proves this: with the module collected under a clock 2 h in the past and the cases run on the real clock, the not-yet-valid (`nbf`) case still asserts rejection; that regression test fails on the unfixed code.\n- [x] `pytest tests/interfaces/facades/test_mcp_auth_jwks.py` passes.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "JWKS rejection test computes nbf at collection time, so a run over 1 h accepts the token"
       },
       "created_at": "2026-11-04T06:38:59Z",
@@ -36962,9 +36983,17 @@
       "updated_at": "2026-08-15T14:59:44Z"
     },
     "5618-ebca-c29f-47c0": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n`tests/unit/test_mcp_entrypoint_provisioning.py::test_a_peer_finishing_the_clone_while_we_wait_skips_the_redundant_reclone` failed in `make verify` on 2026-11-04 PST (worktree fix-caudata, commit `ff107f59ce2`, change for `asthmatic-grave-caudata`, which touches only `src/rebar/_store/{paths,compat}.py`, a new test, and docs). This is an assertion failure, not a worker crash:\n\n`AssertionError: lock holder must re-probe HEAD before re-cloning`. The script stderr held only `mcp: tickets store provisioning finished`, with returncode 0 and no `was re-cloned by another container` line.\n\nObservations:\n- The full run took 2 h 11 min at host load average about 29 to 31.\n- Run alone 10 times afterwards at load average 31: 10 passed, 0 failed.\n- `stellar-sane-hawk` (closed) recorded the same test failing once under `make verify` and passing alone. Its closing root cause was a 3 s pytest-timeout in a different test (`test_review_bot.py`) crashing the worker. That cause does not produce this assertion message, so it does not cover this failure.\n\nHypotheses (unproven): the peer callback releases the lock after the script has already stopped waiting or taken a different branch under scheduler load; the second HEAD probe runs before `head-resolves` is visible; something else.\n\n## Approach\nReproduce under xdist with the neighbouring module order, adding a log of the fake-git call sequence and the lock-wait timing to the failure message. Confirm which branch the script took before changing the test or the script.\n\n## Acceptance Criteria\n- [ ] The failing branch is identified with recorded evidence (git call sequence and timing) in a comment on this ticket.\n- [ ] The test is deterministic under `make test` without weakening the re-probe assertion, shown by 1 full `make test` run that passes this test on a loaded host.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "MCP entrypoint peer-finished-clone test misses the re-probe message under a loaded make verify"
+      },
       "created_at": "2026-11-04T09:32:31Z",
       "jira_id": "4598250",
       "jira_key": "REB-6979",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-04T09:32:37Z"
     },
@@ -37451,6 +37480,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-16T21:34:13Z"
+    },
+    "571b-f552-5fa7-4b74": {
+      "created_at": "2026-11-04T11:33:38Z",
+      "jira_id": "4598255",
+      "jira_key": "REB-6984",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T11:33:42Z"
     },
     "571e-f50b-c337-49ae": {
       "baseline": {
@@ -56711,9 +56747,9 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nDuring slow, heavily loaded `make verify` runs (3 h 45 min to 4 h 51 min, against the usual 20 to 25 min), xdist workers died in `tests/unit/test_opcert_key_copy_leak_tortoise.py::test_signer_test_modules_leave_no_key_copy_in_the_temp_dir`. The crash guard printed `terminated abnormally: Not properly terminated`, and pytest printed no traceback. This happened 3 times on 2026-11-03 PST (fix-caudata gw1, fix-manta gw3, fix-chihuahua gw3). The test passes when run alone.\n\n## Root cause (evidence in the comment of 2026-11-03 23:4x PST)\n- `pyproject.toml` `[tool.pytest.ini_options]` sets `timeout = 300` and `timeout_method = \"thread\"`. When the budget runs out, the thread method calls `os._exit(1)` inside the worker (see the comment block above `timeout = 300` in `pyproject.toml`, and `tests/unit/test_timeout_budget_headroom.py`). So the timeout shows up as a node-down with no traceback.\n- The test is a single item that runs `tests/_nested_pytest.py::run_nested_pytest` (`timeout=None`) over the 14 tests in `tests/unit/test_opcert_service.py` and `tests/unit/test_opcert_service_integrity.py`, one after another, all under one 300 s budget.\n- Measured cost on main `a8cf8fffc2a`: 82.07 s call alone at load average 35. Gerrit 3283 (`5908e0d311d`, which none of the 3 crashed runs contained) measured 236 s at load 40. That leaves only 1.27x headroom.\n- Deterministic repro on current main: `pytest -n 2 -o timeout=20 tests/unit/test_opcert_key_copy_leak_tortoise.py` reproduces the exact node-down, no-traceback shape.\n- A memory kill is ruled out: the macOS jetsam log for 2026-11-03 records no kill of any python process.\n\n## Approach\nFollow the escape that `pyproject.toml` already documents for a test that legitimately runs long: a plain `@pytest.mark.timeout(N)` with a one-line comment saying why.\n- Give the tortoise test `@pytest.mark.timeout(900)`, with a comment citing the measured costs: 82 s alone and 236 s at load 40.\n- 900 s covers the 82 s measurement times the roughly 10x slowdown seen in the crashed runs. It is also 3.8x the 236 s figure, more than the 2.0x `_REQUIRED_HEADROOM` in `test_timeout_budget_headroom.py`.\n- It stays below the 1 h CI job cap, so the test is still guarded against hangs.\n- The test keeps the nested runtime check. That is its purpose: catching a key-copy leak that only appears when the signer modules actually run.\n\nOut of scope: making thread-method timeout kills report as timeouts instead of silent crashes. That is filed as `delighted-worthless-foal` (discovered_from this ticket).\n\n## Scope\n- `tests/unit/test_opcert_key_copy_leak_tortoise.py`: add the marker and its comment.\n- `tests/unit/test_timeout_budget_headroom.py`: add a regression test, using the existing `_timeout_marker_seconds` helper, that pins the tortoise test's marker at 900 s or more.\n\n## Testing\n- New test first (red): `test_tortoise_nested_signer_run_marker_covers_loaded_cost` in `test_timeout_budget_headroom.py` asserts the marker on `test_signer_test_modules_leave_no_key_copy_in_the_temp_dir` is not None and is at least 900 s. It fails before the marker is added because `_timeout_marker_seconds` returns None.\n- Behavior check before and after: `pytest -n 2 -o timeout=20 tests/unit/test_opcert_key_copy_leak_tortoise.py`. Before the fix it reports `1 failed, 5 passed` with a node-down. After the fix, the marker overrides the shrunken ini budget, so the result is `6 passed` with no node-down.\n- `make lint` and `make typecheck` exit 0, run with the worktree `.venv/bin` first on PATH.\n\n## Acceptance Criteria\n- [ ] The cause of the gw1 death is identified with recorded evidence (exit signal or log line) in a comment on this ticket.\n- [ ] `pytest tests/unit/test_timeout_budget_headroom.py` passes, including the new `test_tortoise_nested_signer_run_marker_covers_loaded_cost`, which failed before the marker was added.\n- [ ] `pytest -n 2 -o timeout=20 tests/unit/test_opcert_key_copy_leak_tortoise.py` reports 6 passed and no `node down`.\n- [ ] `make lint` and `make typecheck` exit 0 in the worktree.\n- [ ] The fix's Gerrit change is merged with LLM-Review +1 and Verified +1.",
+        "description": "## Context / Problem\nDuring slow, heavily loaded `make verify` runs (3 h 45 min to 4 h 51 min, against the usual 20 to 25 min), xdist workers died in `tests/unit/test_opcert_key_copy_leak_tortoise.py::test_signer_test_modules_leave_no_key_copy_in_the_temp_dir`. The crash guard printed `terminated abnormally: Not properly terminated`, and pytest printed no traceback. This happened 3 times on 2026-11-03 PST (fix-caudata gw1, fix-manta gw3, fix-chihuahua gw3). The test passes when run alone.\n\n## Root cause (evidence in the comment of 2026-11-03 23:4x PST)\n- `pyproject.toml` `[tool.pytest.ini_options]` sets `timeout = 300` and `timeout_method = \"thread\"`. When the budget runs out, the thread method calls `os._exit(1)` inside the worker (see the comment block above `timeout = 300` in `pyproject.toml`, and `tests/unit/test_timeout_budget_headroom.py`). So the timeout shows up as a node-down with no traceback.\n- The test is a single item that runs `tests/_nested_pytest.py::run_nested_pytest` (`timeout=None`) over the 14 tests in `tests/unit/test_opcert_service.py` and `tests/unit/test_opcert_service_integrity.py`, one after another, all under one 300 s budget.\n- Measured cost on main `a8cf8fffc2a`: 82.07 s call alone at load average 35. Gerrit 3283 (`5908e0d311d`, which none of the 3 crashed runs contained) measured 236 s at load 40. That leaves only 1.27x headroom.\n- Deterministic repro on current main: `pytest -n 2 -o timeout=20 tests/unit/test_opcert_key_copy_leak_tortoise.py` reproduces the exact node-down, no-traceback shape.\n- A memory kill is ruled out: the macOS jetsam log for 2026-11-03 records no kill of any python process.\n\n## Approach\nFollow the escape that `pyproject.toml` already documents for a test that legitimately runs long: a plain `@pytest.mark.timeout(N)` with a one-line comment saying why.\n- Give the tortoise test `@pytest.mark.timeout(900)`, with a comment citing the measured costs: 82 s alone and 236 s at load 40.\n- 900 s covers the 82 s measurement times the roughly 10x slowdown seen in the crashed runs. It is also 3.8x the 236 s figure, more than the 2.0x `_REQUIRED_HEADROOM` in `test_timeout_budget_headroom.py`.\n- It stays below the 1 h CI job cap, so the test is still guarded against hangs.\n- The test keeps the nested runtime check. That is its purpose: catching a key-copy leak that only appears when the signer modules actually run.\n\nOut of scope: making thread-method timeout kills report as timeouts instead of silent crashes. That is filed as `delighted-worthless-foal` (discovered_from this ticket).\n\n## Scope\n- `tests/unit/test_opcert_key_copy_leak_tortoise.py`: add the marker and its comment.\n- `tests/unit/test_timeout_budget_headroom.py`: add a regression test, using the existing `_timeout_marker_seconds` helper, that pins the tortoise test's marker at 900 s or more.\n\n## Testing\n- New test first (red): `test_tortoise_nested_signer_run_marker_covers_loaded_cost` in `test_timeout_budget_headroom.py` asserts the marker on `test_signer_test_modules_leave_no_key_copy_in_the_temp_dir` is not None and is at least 900 s. It fails before the marker is added because `_timeout_marker_seconds` returns None.\n- Behavior check before and after: `pytest -n 2 -o timeout=20 tests/unit/test_opcert_key_copy_leak_tortoise.py`. Before the fix it reports `1 failed, 5 passed` with a node-down. After the fix, the marker overrides the shrunken ini budget, so the result is `6 passed` with no node-down.\n- `make lint` and `make typecheck` exit 0, run with the worktree `.venv/bin` first on PATH.\n\n## Acceptance Criteria\n- [x] The cause of the gw1 death is identified with recorded evidence (exit signal or log line) in a comment on this ticket.\n- [x] `pytest tests/unit/test_timeout_budget_headroom.py` passes, including the new `test_tortoise_nested_signer_run_marker_covers_loaded_cost`, which failed before the marker was added.\n- [x] `pytest -n 2 -o timeout=20 tests/unit/test_opcert_key_copy_leak_tortoise.py` reports 6 passed and no `node down`.\n- [x] `make lint` and `make typecheck` exit 0 in the worktree.\n- [x] [non-codebase] The fix's Gerrit change is merged with LLM-Review +1 and Verified +1 (change id, vote outcome, and merge timestamp recorded in a ticket comment).\n  provenance: environment=production Gerrit rebar.solutions.navateam.com; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 read-only REST GET of change 3293 with DETAILED_LABELS showed both votes +1 on the submitted revision, and status MERGED after submit",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "xdist worker dies in opcert key-copy tortoise test during a slow, loaded make verify"
       },
       "created_at": "2026-11-04T07:32:15Z",
@@ -65309,6 +65345,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-28T23:28:26Z"
+    },
+    "98bc-13ff-2f80-48ba": {
+      "created_at": "2026-11-04T11:33:42Z",
+      "jira_id": "4598256",
+      "jira_key": "REB-6985",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T11:33:46Z"
     },
     "98c6-81c7-175e-416f": {
       "baseline": {
@@ -84234,6 +84277,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:54Z"
     },
+    "c4d9-7807-5c55-4b93": {
+      "created_at": "2026-11-04T11:33:48Z",
+      "jira_id": "4598257",
+      "jira_key": "REB-6986",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T11:33:51Z"
+    },
     "c4e1-abfd-ddb7-4b67": {
       "baseline": {
         "assignee": null,
@@ -97006,6 +97056,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-28T22:18:29Z"
     },
+    "e1dd-29e9-d123-47fc": {
+      "created_at": "2026-11-04T11:33:52Z",
+      "jira_id": "4598258",
+      "jira_key": "REB-6987",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T11:33:56Z"
+    },
     "e1ed-b700-c442-4d0c": {
       "baseline": {
         "assignee": {
@@ -98612,7 +98669,7 @@
     "e594-b9b0-304f-4496": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\n\n`build_server` in `src/rebar/mcp_server.py` (around line 432) constructs `mcp.server.auth.settings.AuthSettings(issuer_url=..., resource_server_url=..., required_scopes=...)` without setting `validate_token_resource`. With `mcp` 1.30.0 installed, every authenticated HTTP boot emits a `DeprecationWarning`: the field is unset, so bearer tokens are not checked against `resource_server_url`, and the library says the default becomes True in `mcp` 3.0 when `resource_server_url` is set.\n\nObserved 2026-11-03 PST in `pytest tests/interfaces/facades/test_mcp_auth_jwks.py` (`test_jwt_transport_valid_200_garbage_401`), while working bug `precosmic-convictive-aardwolf`. No code in `src/`, `tests/`, or `pyproject.toml` mentions `validate_token_resource`.\n\nImpact today is limited: `pyproject.toml` caps `mcp` below 2, so the default flip cannot arrive without a deliberate major bump. But the resource-binding behaviour is currently decided by a library default rather than by rebar, and the warning shows up in every authenticated test run.\n\n## Approach\n\nDecide whether the composite verifier already enforces the audience/resource (the JWKS verifier passes `audience=resource` to `jwt.decode`; the PAT/other strategies need checking). Set `validate_token_resource` explicitly in `build_server` to match that decision, and add a test asserting the constructed `AuthSettings` value so the warning stays gone.\n\n## Acceptance Criteria\n\n- [ ] `build_server` sets `validate_token_resource` explicitly, with a comment stating which component enforces token audience/resource.\n- [ ] `pytest tests/interfaces/facades/test_mcp_auth_jwks.py -W error::DeprecationWarning -k transport` passes.",
+        "description": "## Context / Problem\n\n`build_server` in `src/rebar/mcp_server.py:432` constructs `mcp.server.auth.settings.AuthSettings(issuer_url=..., resource_server_url=..., required_scopes=...)` without setting `validate_token_resource`. With `mcp` 1.30.0 installed (the version in the worktree venv), every authenticated server boot emits a `DeprecationWarning` from the `_check_validate_token_resource` validator in `mcp/server/auth/settings.py`: the field is unset while `resource_server_url` is set, so it behaves as False and the library says the default becomes True in `mcp` 3.0.\n\nReproduced 2026-11-04 PST: `pytest tests/interfaces/facades/test_mcp_auth_jwks.py -W error::DeprecationWarning -k transport` fails (1 failed) with that warning raised from `settings.py:48`. No code in `src/`, `tests/`, or `pyproject.toml` sets `validate_token_resource`. Today the resource-binding behaviour is decided by a library default rather than by rebar, and the warning appears in every authenticated test run and server boot.\n\nPrimary sources: the `mcp` v1.30.0 release notes list this as a new `DeprecationWarning` (\"Set it to `True` or `False`\"; both keep working as before in 1.x); upstream PR modelcontextprotocol/python-sdk#3451 adds the field and states unset behaves as off. The field's own description in `settings.py` says to set it False \"when your token verifier checks the token's audience itself\". When True, `FastMCP.streamable_http_app()` passes `resource_server_url` to `BearerAuthBackend`, which rejects any token whose `AccessToken.resource` is not that URL (`mcp/server/auth/middleware/bearer_auth.py`, `_issued_for_this_resource`).\n\n## Approach\n\nSet `validate_token_resource=False` explicitly in `build_server`, with a comment naming `CompositeTokenVerifier` as the component that enforces the RFC 8707 audience. This fits because rebar's verifier already checks the audience itself: `CompositeTokenVerifier.verify_token` (`src/rebar/_mcp_auth.py:560`) accepts a sub-verifier result only when `result.resource == self._resource`, the configured `auth_resource_server_url`, and `docs/mcp-auth.md` \u00a7\"The composite is the single audience / fail-closed choke point\" documents it as the one place audience is enforced. False is the value the SDK prescribes for that design and is exactly today's runtime behaviour (unset already behaves as False), so no token accepted today is rejected afterwards and no token rejected today is accepted.\n\nCorrect the two statements that say the SDK bearer backend \"never\" inspects `.resource` (true before 1.30, now true only while `validate_token_resource` is False): the `CompositeTokenVerifier` docstring (`src/rebar/_mcp_auth.py:542`) and `docs/mcp-auth.md:79`. ADR 0050 is a dated decision record and is left unchanged.\n\n## Scope\n\n- `src/rebar/mcp_server.py` \u2014 pass `validate_token_resource=False` to `AuthSettings` in `build_server`, with the comment.\n- `src/rebar/_mcp_auth.py` \u2014 `CompositeTokenVerifier` docstring wording only.\n- `docs/mcp-auth.md` \u2014 the composite choke-point paragraph wording only.\n- `tests/interfaces/facades/test_mcp_auth.py` \u2014 new regression test; set `validate_token_resource=False` on the hand-built `AuthSettings` in `test_wrong_resource_stub_verifier_401_at_transport` (line 327) so it mirrors the production wiring and stops emitting the same warning.\n- `tests/unit/test_mcp_health_startup_handshake.py` \u2014 set `validate_token_resource=False` on the hand-built `AuthSettings` in `_server` (line 57), whose docstring says it mirrors how `build_server` builds the HTTP transport. `git grep -n 'AuthSettings(' -- src tests` lists exactly these three construction sites (`tests/unit/test_mcp_on_box_infra.py:86` is a docstring mention, not a construction).\n\n## Testing\n\n- Regression (fails before the fix): a new test in `tests/interfaces/facades/test_mcp_auth.py` builds the server via `build_server(_auth_config(...))` inside `warnings.catch_warnings()` with `filterwarnings(\"error\", message=\".*validate_token_resource.*\", category=DeprecationWarning)`, then asserts `server.settings.auth.validate_token_resource is False`. Before the fix it raises the `DeprecationWarning`; after, it passes. No autouse fixture.\n- Behaviour preserved: the existing transport tests still pass unchanged in assertions \u2014 `test_wrong_resource_stub_verifier_401_at_transport` (wrong-resource token is 401 via the composite), `test_http_auth_valid_token_200_and_missing_token_401` (static PAT 200, missing 401), `test_missing_required_scope_403_and_present_200`, and `test_jwt_transport_valid_200_garbage_401` in `test_mcp_auth_jwks.py` (valid JWT 200, garbage 401).\n\n## Acceptance Criteria\n\n- [ ] `build_server` passes `validate_token_resource=False` with a comment naming `CompositeTokenVerifier` as the audience enforcer; verified by the new regression test in `tests/interfaces/facades/test_mcp_auth.py` passing (and failing on the pre-fix tree).\n- [ ] `pytest tests/interfaces/facades/test_mcp_auth_jwks.py -W error::DeprecationWarning -k transport` passes (it fails with 1 failed before the fix).\n- [ ] `pytest tests/interfaces/facades/test_mcp_auth.py tests/interfaces/facades/test_mcp_auth_jwks.py tests/interfaces/facades/test_mcp_auth_proxy.py tests/interfaces/facades/test_mcp_http_transport.py` passes.\n- [ ] Every `AuthSettings(` construction sets the field: `git grep -n -A1 'AuthSettings(' -- src tests` shows `validate_token_resource=False` at `src/rebar/mcp_server.py`, `tests/interfaces/facades/test_mcp_auth.py`, and `tests/unit/test_mcp_health_startup_handshake.py`, and `pytest tests/unit/test_mcp_health_startup_handshake.py -W error::DeprecationWarning` passes.\n- [ ] The unconditional claim is gone: `git grep -n 'never inspects\\|never checks' -- src/rebar/_mcp_auth.py docs/mcp-auth.md` returns no hits, and both passages instead say the SDK checks `.resource` only when `validate_token_resource` is True, which rebar leaves False.\n- [ ] `make lint` and `make typecheck` exit 0 with the worktree `.venv/bin` first on PATH.\n- [ ] [non-codebase] The change lands through Gerrit at `LLM-Review +1` and `Verified +1`; evidence recorded as a ticket comment: Gerrit change number, both vote outcomes, and the merged SHA.\n- [ ] [non-codebase] The MCP autodeploy picks up the merged SHA and the deployed server still authenticates; evidence recorded as a ticket comment: the value of `/var/lib/rebar/mcp-deployed-sha` on the prod host (written by `infra/scripts/autodeploy.sh` as `MCP_SHA_FILE`), read with a read-only `aws ssm send-command --profile frontier` running `cat`, matching the merged SHA, and the outcome of one read-only MCP call made with the existing PAT (token never printed), with timestamps.",
         "priority": "Low",
         "status": "To Do",
         "summary": "Set AuthSettings.validate_token_resource explicitly in build_server"
@@ -114890,6 +114947,7 @@
     "1793486456469686001": "__rebar_unknown_comment_id__",
     "1793486711703961001": "__rebar_unknown_comment_id__",
     "1793487485717610001": "__rebar_unknown_comment_id__",
+    "1793488005250556001": "__rebar_unknown_comment_id__",
     "1793488143649780001": "__rebar_unknown_comment_id__",
     "1793488425461719001": "__rebar_unknown_comment_id__",
     "1793488487742777001": "__rebar_unknown_comment_id__",
@@ -115221,7 +115279,11 @@
     "1793779425144244001": "__rebar_unknown_comment_id__",
     "1793780482006499001": "__rebar_unknown_comment_id__",
     "1793781943920708001": "__rebar_unknown_comment_id__",
-    "1793781957292843001": "__rebar_unknown_comment_id__"
+    "1793781957292843001": "__rebar_unknown_comment_id__",
+    "1793788446717292001": "__rebar_unknown_comment_id__",
+    "1793789366818624001": "__rebar_unknown_comment_id__",
+    "1793791175131732001": "__rebar_unknown_comment_id__",
+    "1793791786760364001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -120664,6 +120726,11 @@
     "REB-6977": "e594-b9b0-304f-4496",
     "REB-6979": "5618-ebca-c29f-47c0",
     "REB-698": "1733-6b71-e83d-49c3",
+    "REB-6983": "2977-df28-8e9f-4a50",
+    "REB-6984": "571b-f552-5fa7-4b74",
+    "REB-6985": "98bc-13ff-2f80-48ba",
+    "REB-6986": "c4d9-7807-5c55-4b93",
+    "REB-6987": "e1dd-29e9-d123-47fc",
     "REB-699": "315d-b4ba-6c9e-482d",
     "REB-7": "0333-3aea-0464-4b93",
     "REB-70": "301b-cbc4-5e81-4230",
