@@ -69,6 +69,24 @@ def test_base_spec_encodes_nit_framing_baseline() -> None:
     assert all(c.get("expect") == "pass" for c in nit)
 
 
+# The three antipattern kinds story e508 added to the `tests` criterion rubric. Each needs
+# BOTH a recall case and a false-positive guard case: a kind carrying only a fire case
+# measures recall while being blind to the false fires its FP guard exists to prevent, and
+# the spec-level balance check above passes on any single fire/no-fire pair in all 39 cases.
+E508_ANTIPATTERN_KINDS = ("reexport", "importshape", "gatererun")
+
+
+@pytest.mark.parametrize("kind", E508_ANTIPATTERN_KINDS)
+def test_tests_spec_pairs_each_new_antipattern_kind(kind: str) -> None:
+    ds = ev.load_eval_spec("code-review-tests").get("dataset", [])
+    fire = [c for c in ds if str(c.get("id", "")).startswith(f"R-{kind}-")]
+    nofire = [c for c in ds if str(c.get("id", "")).startswith(f"FP-{kind}-")]
+    assert fire, f"{kind}: no R-{kind}-* recall case"
+    assert nofire, f"{kind}: no FP-{kind}-* false-positive guard case"
+    assert {c.get("expect") for c in fire} <= sc.FIRE_EXPECTS, f"{kind}: R-* case must fire"
+    assert {c.get("expect") for c in nofire} <= sc.NOFIRE_EXPECTS, f"{kind}: FP-* must not fire"
+
+
 # ── the dedicated code_review_* scorers ────────────────────────────────────────
 
 _FINDINGS = {"findings": [{"claim": "x", "dimension": "bug", "evidence": "e"}]}

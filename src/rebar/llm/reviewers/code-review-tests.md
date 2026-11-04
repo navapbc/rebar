@@ -84,6 +84,41 @@ genuinely broken test — judge test quality on its own terms.
   in `100 <= count <= 500` the floor is exempt and the literal ceiling is not; flag only the
   upper half. Remediation is to delete the upper bound, or replace the literal with the
   single-sourced accessor.
+- **re-export identity**: a test whose whole assertion is that a symbol is IMPORTABLE FROM, or
+  RE-EXPORTED BY, a module — a bare `from pkg import thing`, `assert hasattr(pkg, "thing")`,
+  `assert pkg.thing is impl.thing`, or an `importlib.import_module(...)` followed only by an
+  attribute lookup — with no call into the behavior reached through it. It pins the IDENTITY of
+  the re-export, which a behavior-preserving move of the implementation changes while observable
+  behavior does not. Litmus: *once the import succeeds, does the test exercise anything?* If the
+  import IS the assertion, it is a change-detector on module layout. GUARD, do NOT flag: a
+  re-export that is ITSELF the declared contract — a documented compatibility alias, a
+  deprecation shim, or a stable public entry point whose whole deliverable is that the old path
+  keeps resolving — is a behavior contract, and asserting it still resolves is the only way to
+  test it. Remediation for the flaggable form is to call through the re-export and assert what
+  it returns.
+- **import shape**: a test asserting a module's IMPORT LIST, its `__all__` CONTENTS, or import
+  ORDERING instead of behavior — `assert mod.__all__ == [...]`, an AST walk counting `import`
+  statements, an assertion that one import precedes another. These break on any
+  behavior-preserving reorganization and assert nothing a caller can observe. Litmus: *does the
+  assertion read the module's import/export DECLARATIONS rather than call the module?* GUARD, do
+  NOT flag: a genuine PUBLIC-API SURFACE CENSUS that a NON-HUMAN consumer reads — a generated
+  surface manifest, or an `__all__`/packaging contract a downstream importer or a drift-checking
+  generator branches on — is the Rule-5 structural-boundary case, not this antipattern. The
+  distinction is the CONSUMER, not the syntax: `__all__` asserted because a tool reads it is a
+  contract; the same assertion written only because the author wrote that list is a
+  change-detector.
+- **gate-script re-run**: a test that INVOKES THE PROJECT'S OWN GATE SCRIPT — a CI check, a
+  ratchet, a lint/policy scanner — over the real tree and asserts the gate's verdict, e.g.
+  `subprocess.run([sys.executable, "scripts/check_x.py", "--check"]); assert rc == 0`. It
+  duplicates the gate rather than exercising the unit: CI already runs that script, so the copy
+  adds no detection, inherits the gate's whole runtime, and cannot fail independently of it.
+  Worse, it RATIFIES whatever the gate currently reports — when the gate's own logic or recorded
+  baseline is wrong, the test is green on the wrong answer. Litmus: *is the asserted value
+  produced by the gate's own pass/fail logic over the real tree, rather than by the unit under
+  test over a fixture?* GUARD, do NOT flag: executing the UNIT under test as a subprocess and
+  asserting its stdout/stderr/exit code is the Rule-5 command-output case of guard (iii) and
+  stays valid wherever producer liveness is established; and calling the gate's OWN functions
+  against a CONSTRUCTED fixture tree exercises the unit, so it is not a re-run.
 
 **False-positive GUARDS — do NOT flag these (they are VALID by the standard):**
 - **Four-Criterion Test.** Raise a test-coupling finding above a `minor` suggestion ONLY when at
@@ -128,7 +163,13 @@ genuinely broken test — judge test quality on its own terms.
   anchor is exactly the remediation, so do not flag the fixed form; (xi) an anti-fragmentation
   LOC FLOOR (`100 <= count`), and a LOC ceiling read from the authoritative limit file at
   runtime (`read_limit()` or an equivalent single-sourced accessor) — neither is
-  loc-ceiling-pinning; only a hard-coded UPPER bound is.
+  loc-ceiling-pinning; only a hard-coded UPPER bound is; (xii) a re-export assertion whose
+  re-export IS the declared contract — a documented compatibility alias, a deprecation shim, or
+  a stable public entry point — is not re-export identity; (xiii) an `__all__` or
+  surface-manifest assertion a NON-HUMAN consumer reads (a generated surface census, a packaging
+  contract a drift checker branches on) is not import shape; (xiv) running the UNIT under test
+  as a subprocess and asserting its output with a liveness anchor, and calling a gate's own
+  functions against a CONSTRUCTED fixture tree, are neither of them gate-script re-run.
 
 For each finding, conform to the evidence-record contract:
 - `finding`: the issue, as one specific, actionable claim.

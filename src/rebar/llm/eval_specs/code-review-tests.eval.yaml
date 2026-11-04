@@ -573,6 +573,108 @@ dataset:
        def test_prefetch_payload_stays_within_budget():
            base, out = prefetch(ticket)
       +    assert len(base) + len(out) <= 500
+  - id: R-reexport-identity-only
+    corpus: rebar
+    expect: finding
+    mode: re-export-identity
+    note: >-
+      Story e508: the assertion IS the import. Nothing is called through `claim`, so the test
+      pins where the symbol currently lives rather than what it does — moving the implementation
+      to another module breaks it with observable behaviour unchanged.
+    diff: |
+      --- a/tests/unit/test_public_api.py
+      +++ b/tests/unit/test_public_api.py
+      @@ -40,3 +40,6 @@
+       def test_claim_is_reexported():
+      +    import rebar
+      +    from rebar._engine import claim as impl
+      +    assert rebar.claim is impl
+  - id: FP-reexport-is-the-contract
+    corpus: rebar
+    expect: pass
+    mode: re-export-exempt
+    note: >-
+      Story e508: the re-export is ITSELF the declared contract — the same diff documents the old
+      path as a supported compatibility alias, and the test calls THROUGH it and asserts the
+      returned value. Guard (xii). Must NOT fire.
+    diff: |
+      --- a/src/rebar/compat.py
+      +++ b/src/rebar/compat.py
+      @@ -1,2 +1,5 @@
+      +# Supported compatibility alias: `rebar.compat.claim` must keep resolving for
+      +# downstream callers pinned to the pre-1.0 import path.
+      +from rebar._engine import claim
+      --- a/tests/unit/test_compat_alias.py
+      +++ b/tests/unit/test_compat_alias.py
+      @@ -10,3 +10,5 @@
+       def test_legacy_import_path_still_claims():
+      +    from rebar.compat import claim
+      +    assert claim(ticket_id)["status"] == "in_progress"
+  - id: R-importshape-all-literal
+    corpus: rebar
+    expect: finding
+    mode: import-shape
+    note: >-
+      Story e508: the assertion reads the module's export DECLARATION and compares it to a list
+      the author copied into the test. No consumer branches on it, so it breaks on a
+      behaviour-preserving reorganization and observes nothing a caller can see.
+    diff: |
+      --- a/tests/unit/test_llm_module.py
+      +++ b/tests/unit/test_llm_module.py
+      @@ -12,3 +12,6 @@
+       def test_exports_are_stable():
+      +    import rebar.llm as m
+      +    assert m.__all__ == ["review_plan", "review_code", "verify_completion"]
+  - id: FP-importshape-generated-surface-census
+    corpus: rebar
+    expect: pass
+    mode: import-shape-exempt
+    note: >-
+      Story e508: a NON-HUMAN consumer reads this one — the generator writes the surface manifest
+      and the test asserts the live surface matches it, which is the Rule-5 structural-boundary
+      case under guard (xiii). The manifest is the contract, not the author's wording. Must NOT
+      fire.
+    diff: |
+      --- a/tests/unit/test_api_surface.py
+      +++ b/tests/unit/test_api_surface.py
+      @@ -18,3 +18,6 @@
+       def test_public_surface_matches_the_generated_manifest():
+      +    recorded = json.loads(Path("docs/api-surface.json").read_text())
+      +    assert sorted(rebar.__all__) == sorted(recorded["exports"])
+  - id: R-gatererun-subprocess-verdict
+    corpus: rebar
+    expect: finding
+    mode: gate-script-re-run
+    note: >-
+      Story e508: the test shells out to the project's own ratchet over the REAL tree and asserts
+      its exit status. CI already runs that script, so the copy cannot fail independently — and
+      it ratifies the gate's current verdict, staying green when the gate's own baseline is wrong.
+    diff: |
+      --- a/tests/unit/test_complexity_gate.py
+      +++ b/tests/unit/test_complexity_gate.py
+      @@ -5,3 +5,8 @@
+       def test_complexity_ratchet_is_clean():
+      +    proc = subprocess.run(
+      +        [sys.executable, "scripts/check_complexity_baseline.py", "--check"],
+      +        capture_output=True,
+      +    )
+      +    assert proc.returncode == 0
+  - id: FP-gatererun-fixture-tree
+    corpus: rebar
+    expect: pass
+    mode: gate-script-re-run-exempt
+    note: >-
+      Story e508: this calls the gate's OWN comparison function against a CONSTRUCTED fixture
+      baseline and asserts the classification it returns. It exercises the unit over inputs the
+      test owns rather than re-running the gate over the real tree. Guard (xiv). Must NOT fire.
+    diff: |
+      --- a/tests/unit/test_mechanism_compare.py
+      +++ b/tests/unit/test_mechanism_compare.py
+      @@ -22,3 +22,6 @@
+       def test_removed_mechanism_buckets_as_stale():
+      +    baseline = {"lock:store": 1}
+      +    report = compare(baseline, active={})
+      +    assert report.stale == ["lock:store"]
 
 gold_set:
   - input: "A test that asserts a mock's own configured return value (tautological)."
