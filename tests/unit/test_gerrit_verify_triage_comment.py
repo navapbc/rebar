@@ -6,6 +6,9 @@ distinguished. Its steps must not delay the vote or alter the gate outcome."""
 from __future__ import annotations
 
 import importlib.util
+import json
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -106,19 +109,81 @@ def test_vote_normalization_preserves_cancelled_as_no_verdict(
     )
 
 
-def test_normalize_reads_a_jobs_snapshot_taken_before_it(steps: list[dict[str, Any]]) -> None:
-    """A never-acquired runner is only recognisable from the jobs list (20e1-f766-929b-4951)."""
-    names = [str(s.get("name", "")) for s in steps]
-    snapshot_index = names.index("Snapshot this run's jobs for normalization")
-    normalize_index = next(i for i, n in enumerate(names) if "Normalize the conclusion" in n)
-    assert snapshot_index < normalize_index
+def _run_normalize_step(
+    steps: list[dict[str, Any]], tmp_path: Path, gh_script: str, conclusion: str = "failure"
+) -> tuple[int, str]:
+    """Run the normalize step's own shell with a stub ``gh`` and return (rc, vote-type)."""
+    if shutil.which("jq") is None:
+        pytest.skip("jq is not installed")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    gh = bindir / "gh"
+    gh.write_text("#!/bin/sh\n" + gh_script, encoding="utf-8")
+    gh.chmod(0o755)
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    normalize = _step(steps, "Normalize the conclusion")
+    # The step runs from a sparse checkout holding only the trusted script; mirror that.
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(REPO_ROOT / "scripts" / "normalize_ci_conclusion.py", tmp_path / "scripts")
+    cp = subprocess.run(
+        ["bash", "-c", normalize["run"]],
+        cwd=tmp_path,
+        env={
+            "PATH": f"{bindir}:/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin",
+            "CONCLUSION": conclusion,
+            "FAILURE_OBSERVED": "false",
+            "JOBS_FILE": str(tmp_path / "verify-jobs.json"),
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_REPOSITORY": "navapbc/rebar",
+            "GITHUB_RUN_ID": "1",
+            "REBAR_ROOT": str(tmp_path),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    votes = [ln for ln in output.read_text(encoding="utf-8").splitlines() if ln]
+    return cp.returncode, votes[-1] if votes else ""
 
-    snapshot = steps[snapshot_index]
-    assert snapshot["continue-on-error"] is True
-    assert "actions/runs/${GITHUB_RUN_ID}/jobs" in snapshot["run"]
-    assert "verify-jobs.json" in snapshot["run"]
-    normalize = steps[normalize_index]
+
+def test_normalize_fetches_the_jobs_list_itself(steps: list[dict[str, Any]]) -> None:
+    """The jobs list is read inside the normalize step, not a separate workflow step."""
+    normalize = _step(steps, "Normalize the conclusion")
+    assert "actions/runs/${GITHUB_RUN_ID}/jobs" in normalize["run"]
     assert normalize["env"]["JOBS_FILE"] == "${{ runner.temp }}/verify-jobs.json"
+    assert normalize["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert not any("Snapshot" in str(s.get("name", "")) for s in steps)
+
+
+def test_a_failed_jobs_fetch_keeps_the_fail_closed_vote(
+    steps: list[dict[str, Any]], tmp_path: Path
+) -> None:
+    rc, vote = _run_normalize_step(steps, tmp_path, "exit 1\n")
+    assert rc == 0
+    assert vote == "vote-type=failure"
+
+
+def test_a_not_acquired_jobs_list_casts_no_verdict(
+    steps: list[dict[str, Any]], tmp_path: Path
+) -> None:
+    fixture = (
+        REPO_ROOT / "tests" / "fixtures" / "ci_jobs" / "run-41855161578-macos-not-acquired.json"
+    )
+    jobs = json.loads(fixture.read_text(encoding="utf-8"))["jobs"]
+    listing = tmp_path / "jobs.ndjson"
+    listing.write_text("\n".join(json.dumps(job) for job in jobs) + "\n", encoding="utf-8")
+    rc, vote = _run_normalize_step(steps, tmp_path, f"cat '{listing}'\n")
+    assert rc == 0
+    assert vote == "vote-type=cancelled"
+
+
+def test_a_success_conclusion_does_not_fetch_jobs(
+    steps: list[dict[str, Any]], tmp_path: Path
+) -> None:
+    rc, vote = _run_normalize_step(steps, tmp_path, "echo called >&2; exit 1\n", "success")
+    assert rc == 0
+    assert vote == "vote-type=success"
 
 
 def test_normalizer_exempts_the_vote_job_by_its_workflow_name(vote_job: dict[str, Any]) -> None:
