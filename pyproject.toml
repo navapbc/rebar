@@ -766,7 +766,7 @@ markers = [
     "repo_policy: immutable repository-text/AST policy scans; run once in the primary Ubuntu 3.13 default-suite process",
     "integration: integration-tier tests (may require live services)",
     "external: external-integration tests that hit third-party services (live LLM providers, etc.); excluded from the default run; run via the external-integration workflow with credentials",
-    "live: live Jira reconciler-validation tests (story d01e); hit a dedicated test project + require JIRA_URL/JIRA_USER/JIRA_API_TOKEN + acli; excluded from the default run, self-skip without live env; GUARANTEE bilateral cleanup",
+    "live: tests outside tests/external that reach a real Jira (story d01e); require JIRA_URL/JIRA_USER/JIRA_API_TOKEN + acli; excluded from make test and the CI integration tier (`integration and not live`), so credentials alone never run them; opt in with `pytest -m live`; GUARANTEE bilateral cleanup",
     "jira_live: a live test that requires Jira credentials + the acli binary",
     "llm_live: a live test that makes a REAL model call on the CONFIGURED provider; auto-applied to external modules carrying a `_live_llm_ready` sentinel, and the dimension the external suite's provider matrix selects on (story f124)",
     "interface: interface-parity tests (library / CLI / MCP over one store)",

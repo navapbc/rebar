@@ -511,6 +511,16 @@ The producer↔consumer sync contract (epic f89d) is guarded at two tiers:
 
 - **Connected checks.** `tests/external/test_verified_fake_contract_live.py` checks the verified-fake shape against the Jira client when `REBAR_RUN_EXTERNAL=1` and Jira credentials are available. The maintained scripts in `scripts/jira-pressure-test/` exercise the full sync and field contracts through manual execution outside CI. Both scripts require an explicit `JIRA_PROJECT`, use checkout-owned Python and rebar executables, and validate their preflight before mutations. `e2e_validation_probe.sh` requires `REBAR_E2E_VALIDATION_PROBE=1`. `e2e_field_validation_probe.sh` requires `REBAR_FIELD_VALIDATION_PROBE=1`. Their assertions detect regressions without encoding known gaps as expected outcomes.
 
+- **`live`-marked tests outside `tests/external/`.** A test that reaches a real Jira from the
+  integration tree carries the `live` marker: today
+  `tests/integration/test_reconcile_live_e2e.py::test_delete_permission_probe` (creates and
+  deletes an issue) and `tests/interfaces/facades/test_cli.py::test_bridge_preview_against_live_jira`
+  (a dry-run read). `make test`, `make verify` and CI's integration tier select
+  `integration and not live`, so exported Jira credentials never activate them. Opt in
+  explicitly, with `JIRA_URL`, `JIRA_USER`, `JIRA_API_TOKEN` and `acli` available:
+  `pytest -m live tests/integration/test_reconcile_live_e2e.py`. Credentials alone are not an
+  opt-in.
+
 ## Multi-project rehearsal against the ephemeral Jira DC harness
 
 The many-to-many bridge (one store -> many Jira projects) has a dedicated **opt-in,

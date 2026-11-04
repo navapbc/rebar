@@ -161,6 +161,9 @@ def test_top_level_reconcile_route_is_removed_before_operational_work(
 
 
 @pytest.mark.integration
+# `live` keeps it out of `make test` and CI's integration tier (`integration and not live`):
+# with `acli` and a Jira project in the shell it reads the real Jira (bug 5f29-9bed-5a47-4a25).
+@pytest.mark.live
 # Reaches the SAME live Jira project as tests/integration/test_reconcile_live_e2e.py, so it
 # must share their xdist group: without this mark it lands on a different worker under
 # `--dist loadgroup` and races the confined group. Module-scope pytestmark is wrong here —

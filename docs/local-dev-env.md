@@ -542,7 +542,7 @@ Verify with `command -v scc` and `command -v jscpd`.
 ```sh
 make check     # lint + typecheck — the tight loop (~40 s); NOT the pre-push gate
 make verify    # THE PRE-PUSH GATE: lint + typecheck + the default and integration tiers (25-30 min)
-make test      # default tier (-n 4 --dist worksteal), then integration tier (--dist loadgroup)
+make test      # default tier (-n 4 --dist worksteal), then integration tier minus live (--dist loadgroup)
 make format    # the ONLY target that rewrites files
 ```
 

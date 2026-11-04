@@ -6,9 +6,13 @@ retries each deletion and logs identifiers that remain after retry exhaustion.
 
 The matrix covers deduplicated conflict and dropped-field alerts, grace-based retirement
 and identity-preserving rebinds, bounded 429 retries, echo suppression, stable status
-round-trips, no-op equality, tombstone grace, and blast-radius rejection. Run
-credential-backed cases with ``pytest tests/integration/test_reconcile_live_e2e.py -m live``
-and the documented Jira credentials, acli, and test project.
+round-trips, no-op equality, tombstone grace, and blast-radius rejection.
+
+Only the credential-backed cases carry the ``live`` marker. ``make test``, ``make verify`` and
+CI's integration tier select ``integration and not live``, so they never run them, whatever
+credentials the shell exports. Running them is an explicit opt-in:
+``pytest tests/integration/test_reconcile_live_e2e.py -m live`` with the documented Jira
+credentials, acli, and test project. ``scripts/run_live_matrix.py`` runs the whole module.
 """
 
 from __future__ import annotations
@@ -26,10 +30,11 @@ import pytest
 from rebar.reconciler.create_route import _coordinated_create_core
 
 # Serialize Jira round-trips on one xdist worker. The mark requires ``--dist loadgroup``.
-# The credential collection guard rejects other parallel modes.
+# The credential collection guard rejects other parallel modes. ``live`` is applied per test,
+# only to the cases that reach Jira, so the deterministic core stays in the integration tier
+# while ``integration and not live`` keeps the live cases out of it (bug 5f29-9bed-5a47-4a25).
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.live,
     pytest.mark.xdist_group("live_reconcile_e2e"),
 ]
 
@@ -276,6 +281,7 @@ def test_blast_radius_breaker_via_census():
 # failures and records each artifact whose deletion retries exhaust.
 
 
+@pytest.mark.live
 @_requires_live
 def test_delete_permission_probe(tmp_path):
     """Setup probe (re-runnable): create one throwaway REB issue, poll until it is

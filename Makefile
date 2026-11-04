@@ -566,7 +566,7 @@ verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + type
 	@# as CI's gating ubuntu-latest/py3.13 cell, in the same order: the default tier
 	@# (`-m "not integration and not external"`, what DEFAULT_SUITE_MARKS in
 	@# _build-and-test.yml resolves to for that cell) and then the integration tier
-	@# (`-m integration`). The other two Ubuntu cells run a strict subset of the default tier
+	@# (`-m "integration and not live"`). The other two Ubuntu cells run a strict subset of the default tier
 	@# (`... and not repo_policy`) and macOS runs the platform_compat subset, each plus the
 	@# integration tier, so this is a superset of every cell. test_ci_workflow_parity.py
 	@# asserts both properties against the workflow, so the two cannot drift silently.
@@ -591,7 +591,7 @@ verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + type
 	@# make + ruff + mypy + pytest over this checkout only: no CI provider required
 	@# (project.portability).
 
-test:  ## Run the default suite, then the integration tier (excludes external), parallelised like CI.
+test:  ## Run the default suite, then the integration tier (excludes external and live), parallelised like CI.
 	@# Bug 1035-bed7-c855-4732. CI runs this tier under `-n 4 --dist worksteal` while a local
 	@# run was SERIAL — a local/CI divergence of the same class as the one this bug is about,
 	@# and the reason a full local suite cost ~29 min and so went unrun.
@@ -610,7 +610,11 @@ test:  ## Run the default suite, then the integration tier (excludes external), 
 	@# `make verify` pass a tree whose integration-marked policy test failed every CI cell.
 	@# Measured on a 6-performance-core host: 200 tests, ~3 min 40 s at -n 4.
 	@# test_ci_workflow_parity.py asserts these two lines equal the cell's pytest steps.
-	pytest -m integration -n $(PYTEST_WORKERS) --dist loadgroup --max-worker-restart=0 -q
+	@# Bug 5f29-9bed-5a47-4a25: `not live` keeps the tests that reach a real Jira out of this
+	@# tier, the same way `not external` keeps the external tier out of the line above. Their
+	@# only other guard is a credential skip, so on a host whose shell exports the Jira
+	@# variables every `make verify` wrote to production Jira. Opt in with `pytest -m live`.
+	pytest -m "integration and not live" -n $(PYTEST_WORKERS) --dist loadgroup --max-worker-restart=0 -q
 
 # mechanism-ok: ci_gate scanner-integration — aa9e-3d35 advisory native-scanner lane.
 scanner-integration:  ## Install pinned native review scanners, then run the nine real scanner contracts.
