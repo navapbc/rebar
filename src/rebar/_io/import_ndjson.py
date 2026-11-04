@@ -144,6 +144,7 @@ def import_tickets(
     )
     from rebar._commands import _seam
     from rebar._commands.transition import transition_compute
+    from rebar._lib_warn import suppress_cross_session_warning
     from rebar._store import event_append
 
     # Hard-code the importer-only batch size: independent phases use ceil(pass/CHUNK)
@@ -183,6 +184,10 @@ def import_tickets(
         # context-local cache is fallback-keyed, so command-specific fallback spelling
         # remains intact while the high-volume path pays for one lookup per fallback.
         _import_scope.enter_context(_seam.author_cache())
+        # Every ticket the passes below touch was created unclaimed by Pass 1 of this
+        # import, so skip the per-row cross-session advisory read (2 git processes each),
+        # as the CLI and MCP surfaces already do (bug subsolar-sonorous-puppy).
+        _import_scope.enter_context(suppress_cross_session_warning())
         # ── Pass 1: create new tickets; skip already-imported by source_id ─────
         # Batched: buffer every CREATE and flush in chunks. create_ticket returns the
         # fresh local id synchronously (composed before the deferred commit), so id_map
