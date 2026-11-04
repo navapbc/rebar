@@ -271,25 +271,6 @@ jobs:
         run: |
           uv venv --python 3.13
           uv pip install ".[dev,reviewbot,ui]"
-      # This step names the Windows evidence that the write lock excludes concurrent processes and
-      # releases after the holder exits. The default suite covers the same module without named
-      # output under `-q`. Running it first preserves the platform-specific verdicts in the log.
-      # mechanism-ok: ci_gate .github/workflows/test.yml::Prove the Windows exclusive leg (named verdicts) — 4cfc-2de2-747d-4388 AC4: windows-latest is the only place the real msvcrt.locking's cross-process exclusivity and release-on-process-death can be established, and under the default suite's `-q` a passing proof prints NOTHING, so the evidence was readable only as absence. This step gates nothing (the job is continue-on-error) and adds no new coverage — it re-runs one already-running module so its verdicts are named in the log.
-      - name: Prove the Windows exclusive leg (named verdicts)
-        # Skip trees predating the module. Use bash because Windows defaults to pwsh and the
-        # parity test executes this guard in bash. Non-blocking failure names the proof without
-        # suppressing the broader default-suite signal.
-        continue-on-error: true
-        shell: bash
-        run: |
-          if [ ! -f tests/unit/store/test_windows_exclusive_leg.py ]; then
-            echo "tests/unit/store/test_windows_exclusive_leg.py not in checked-out tree" \
-                 "(change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          uv run --no-sync pytest tests/unit/store/test_windows_exclusive_leg.py \
-            -v -p no:cacheprovider --timeout=600 --timeout-method=thread
       - name: Run the default suite
         run: >-
           uv run --no-sync pytest -m "not integration and not external"
