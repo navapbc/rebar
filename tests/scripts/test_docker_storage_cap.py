@@ -5,10 +5,10 @@
 the daemon's own ``builder.gc`` policy into ``/etc/docker/daemon.json``. Three properties are
 load-bearing and none of them is observable from a passing deploy:
 
-* **The rendered key must match the ENGINE VERSION.** Docker Engine 25.0 / BuildKit 0.13
-  introduced ``maxUsedSpace`` and deprecated ``defaultKeepStorage``. A key the running daemon
-  does not recognise is SILENTLY IGNORED — the config looks installed and the cap simply does
-  not exist, which is indistinguishable from a healthy box until the disk fills.
+* **The rendered key must be one the daemon parses.** ``dockerd`` reads ``builder.gc`` and
+  SILENTLY IGNORES a key its config struct lacks — the config looks installed and the cap
+  simply does not exist, which is indistinguishable from a healthy box until the disk fills.
+  ``defaultKeepStorage`` is the one key every Engine from 25.0 onward reads.
 * **The merge must preserve the daemon's other configuration.** ``daemon.json`` on this host
   is not ours alone; clobbering it is how a "storage cap" turns into an outage.
 * **A rejected config must change NOTHING.** A malformed ``daemon.json`` stops ``dockerd``
@@ -228,86 +228,95 @@ def test_a_buildkit_share_larger_than_the_budget_is_refused(tmp_path: Path) -> N
 
 
 # --------------------------------------------------------------------------------------
-# BuildKit-version-dependent rendering
+# One key on every Engine (bug 5bc1-7e5b-3b4c-46c8)
 # --------------------------------------------------------------------------------------
+# dockerd, not BuildKit, parses `builder.gc`. Engine 25.0-27.5's BuilderGCConfig carries only
+# `defaultKeepStorage`; Engine 28 adds `defaultReservedSpace`/`defaultMaxUsedSpace`/
+# `defaultMinFreeSpace` and keeps `defaultKeepStorage` as an alias of `defaultReservedSpace`,
+# which BuildKit enforces as the ceiling when the other two are unset. A gc-level
+# `maxUsedSpace` matches no field on ANY Engine and is dropped silently — and `dockerd
+# --validate` skips the whole `builder` subtree, so nothing catches it. Two version cutoffs
+# (Engine >= 25.0, then BuildKit >= 0.13) were each wrong; the one key every Engine reads
+# removes the guess.
+
+_CAP = str(5 * 1024**3)
+_STALE_GC_KEYS = (
+    "maxUsedSpace",
+    "defaultReservedSpace",
+    "defaultMaxUsedSpace",
+    "defaultMinFreeSpace",
+)
 
 
-@pytest.mark.parametrize("version", ["0.13.0", "0.13.2", "0.14.1", "1.0.0"])
-def test_modern_buildkit_gets_max_used_space(tmp_path: Path, version: str) -> None:
-    """>= 0.13 honours ``maxUsedSpace``; ``defaultKeepStorage`` is deprecated there."""
-    result = _run(
-        tmp_path,
-        ["--print-json", "--buildkit-version", version],
-        daemon_json=tmp_path / "daemon.json",
-    )
-    assert result.returncode == 0, result.stderr
-    gc = _builder_gc(result.stdout)
-    assert gc["enabled"] is True
-    assert gc["maxUsedSpace"] == str(5 * 1024**3)
-    assert "defaultKeepStorage" not in gc
-
-
-@pytest.mark.parametrize("version", ["0.12.6", "0.12.0", "0.11.6"])
-def test_older_buildkit_gets_default_keep_storage(tmp_path: Path, version: str) -> None:
-    """< 0.13 does not know ``maxUsedSpace``, and an unknown key is silently ignored."""
-    result = _run(
-        tmp_path,
-        ["--print-json", "--buildkit-version", version],
-        daemon_json=tmp_path / "daemon.json",
-    )
-    assert result.returncode == 0, result.stderr
-    gc = _builder_gc(result.stdout)
-    assert gc["enabled"] is True
-    assert gc["defaultKeepStorage"] == str(5 * 1024**3)
-    assert "maxUsedSpace" not in gc
-
-
-def test_a_modern_engine_with_old_buildkit_gets_the_legacy_schema(tmp_path: Path) -> None:
-    """Bug 3057, reproduced exactly.
-
-    The host ran Engine 25.0.16 — comfortably past the old ``>= 25.0`` discriminator — with
-    BuildKit 0.12.6 behind it. ``maxUsedSpace`` is a BuildKit 0.13 key, so that BuildKit
-    ignored it silently: the file said 5 GiB, the cap did not exist, and the box read healthy
-    for eleven days. The Engine version must not decide this.
-    """
-    bindir, _ = _bindir(tmp_path, server_version="25.0.16", buildkit_version="0.12.6")
-    result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
-    assert result.returncode == 0, result.stderr
-    gc = _builder_gc(result.stdout)
-    assert gc["defaultKeepStorage"] == str(5 * 1024**3)
-    assert "maxUsedSpace" not in gc
-
-
-def test_a_modern_engine_with_modern_buildkit_still_gets_the_modern_schema(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("server_version", "buildkit_version"),
+    [
+        ("25.0.16", "0.12.6"),  # rebar-gerrit, measured 2026-11-03
+        ("26.1.0", "0.13.1"),
+        ("27.4.0", "0.17.3"),
+        ("27.5.1", "0.18.2"),
+        ("28.0.0", "0.20.0"),
+        ("28.5.0", "0.25.0"),
+        ("28.5.0", ""),  # version unreadable
+    ],
+)
+def test_every_engine_gets_default_keep_storage(
+    tmp_path: Path, server_version: str, buildkit_version: str
 ) -> None:
-    """The fix is a correction to the discriminator, not a blanket downgrade."""
-    bindir, _ = _bindir(tmp_path, server_version="25.0.16", buildkit_version="0.13.2")
+    bindir, _ = _bindir(tmp_path, server_version=server_version, buildkit_version=buildkit_version)
     result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
     assert result.returncode == 0, result.stderr
     gc = _builder_gc(result.stdout)
-    assert gc["maxUsedSpace"] == str(5 * 1024**3)
-    assert "defaultKeepStorage" not in gc
+    assert gc == {"enabled": True, "defaultKeepStorage": _CAP}
 
 
-def test_the_buildkit_version_is_probed_when_not_supplied(tmp_path: Path) -> None:
-    """No ``--buildkit-version`` means ask the daemon, not assume."""
-    bindir, calls = _bindir(tmp_path, buildkit_version="0.12.6")
+def test_stale_and_overriding_space_keys_are_removed(tmp_path: Path) -> None:
+    """A gc-level `maxUsedSpace` from the old modern branch is dead weight, and on Engine 28 a
+    leftover `defaultReservedSpace` would REPLACE `defaultKeepStorage` (the alias only applies
+    when it is empty) while `defaultMaxUsedSpace` would raise the ceiling past the share."""
+    daemon_json = tmp_path / "daemon.json"
+    daemon_json.write_text(
+        json.dumps(
+            {
+                "log-driver": "journald",
+                "builder": {
+                    "entitlements": {"network-host": True},
+                    "gc": {
+                        "enabled": True,
+                        "policy": [{"keepStorage": "1GB"}],
+                        **{key: "30GB" for key in _STALE_GC_KEYS},
+                    },
+                },
+            }
+        )
+    )
+    result = _run(tmp_path, ["--print-json"], daemon_json=daemon_json)
+    assert result.returncode == 0, result.stderr
+    merged = json.loads(result.stdout)
+    gc = merged["builder"]["gc"]
+    for key in _STALE_GC_KEYS:
+        assert key not in gc, gc
+    assert gc["defaultKeepStorage"] == _CAP
+    # Per-key merge, not per-object: unrelated keys inside and outside `gc` survive.
+    assert gc["policy"] == [{"keepStorage": "1GB"}]
+    assert merged["builder"]["entitlements"] == {"network-host": True}
+    assert merged["log-driver"] == "journald"
+
+
+def test_rendering_does_not_probe_the_daemon(tmp_path: Path) -> None:
+    """The key no longer depends on any version, so --print-json asks the daemon nothing."""
+    bindir, calls = _bindir(tmp_path)
     result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
     assert result.returncode == 0, result.stderr
-    assert "defaultKeepStorage" in _builder_gc(result.stdout)
-    assert "buildx inspect" in calls.read_text()
+    assert "docker" not in calls.read_text()
+    assert "version" not in result.stderr.lower()
 
 
-def test_an_unreadable_buildkit_version_renders_the_modern_schema_and_says_so(
-    tmp_path: Path,
-) -> None:
-    """Failure disposition: degrade to the modern schema plus a loud log, never to silence."""
-    bindir, _ = _bindir(tmp_path, buildkit_version="")
-    result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
-    assert result.returncode == 0, result.stderr
-    assert "maxUsedSpace" in _builder_gc(result.stdout)
-    assert "buildkit version" in result.stderr.lower()
+def test_the_buildkit_version_flag_is_gone(tmp_path: Path) -> None:
+    flag = "--buildkit-version"
+    result = _run(tmp_path, ["--print-json", flag, "0.13.2"], daemon_json=tmp_path / "d.json")
+    assert result.returncode != 0
+    assert "unknown argument" in result.stderr
 
 
 # --------------------------------------------------------------------------------------
@@ -329,7 +338,7 @@ def test_the_merge_preserves_unrelated_daemon_configuration(tmp_path: Path) -> N
     )
     result = _run(
         tmp_path,
-        ["--print-json", "--buildkit-version", "0.13.2"],
+        ["--print-json"],
         daemon_json=daemon_json,
     )
     assert result.returncode == 0, result.stderr
@@ -338,7 +347,7 @@ def test_the_merge_preserves_unrelated_daemon_configuration(tmp_path: Path) -> N
     assert merged["live-restore"] is True
     # A sibling key INSIDE `builder` survives too: the merge is per-key, not per-object.
     assert merged["builder"]["entitlements"] == {"security-insecure": False}
-    assert merged["builder"]["gc"]["maxUsedSpace"] == str(5 * 1024**3)
+    assert merged["builder"]["gc"]["defaultKeepStorage"] == str(5 * 1024**3)
 
 
 def test_a_missing_daemon_json_is_created_rather_than_treated_as_an_error(
@@ -347,7 +356,7 @@ def test_a_missing_daemon_json_is_created_rather_than_treated_as_an_error(
     """A box that never had a ``daemon.json`` is the ordinary first-boot case."""
     result = _run(
         tmp_path,
-        ["--print-json", "--buildkit-version", "0.13.2"],
+        ["--print-json"],
         daemon_json=tmp_path / "absent" / "daemon.json",
     )
     assert result.returncode == 0, result.stderr
@@ -359,7 +368,7 @@ def test_print_json_never_writes_anything(tmp_path: Path) -> None:
     daemon_json = tmp_path / "daemon.json"
     daemon_json.write_text('{"log-driver": "journald"}')
     before = daemon_json.read_text()
-    _run(tmp_path, ["--print-json", "--buildkit-version", "0.13.2"], daemon_json=daemon_json)
+    _run(tmp_path, ["--print-json"], daemon_json=daemon_json)
     assert daemon_json.read_text() == before
     assert not list(tmp_path.glob("daemon.json.bak*"))
 

@@ -985,11 +985,15 @@ daemon-invisible content.
 
 ### The BuildKit cap is not taking effect
 
-The rendered `builder.gc` key depends on the **BuildKit** version embedded in dockerd, not the
-Engine version, and **a key BuildKit does not recognise is silently ignored** — the config looks
-installed and the cap simply does not exist. `docker-storage-cap.sh` renders `maxUsedSpace` at
-BuildKit >= 0.13 and `defaultKeepStorage` below it. Engine 25.0 does not imply BuildKit 0.13:
-rebar-gerrit runs Engine 25.0.16 with BuildKit 0.12.6 (bug `3057-4d76-9ee4-4817`). The
+dockerd, not BuildKit, parses `builder.gc`, and **a key dockerd does not parse is silently
+dropped** — the config looks installed and the cap simply does not exist (`dockerd --validate`
+skips the `builder` subtree, so it cannot catch this). `docker-storage-cap.sh` therefore writes
+`builder.gc.defaultKeepStorage` on every Engine: Engine 25.0-27.5 parse only that key, and Engine
+28+ keep it as an alias of `defaultReservedSpace`, which BuildKit enforces as the ceiling when no
+max-used or min-free limit is set. The script removes any gc-level `maxUsedSpace`,
+`defaultReservedSpace`, `defaultMaxUsedSpace` and `defaultMinFreeSpace` so the share stays the
+only limit. Earlier revisions branched on Engine >= 25.0 (bug `3057-4d76-9ee4-4817`) and then
+BuildKit >= 0.13 (bug `5bc1-7e5b-3b4c-46c8`), and both cutoffs wrote a key dockerd ignored. The
 `rebar-docker-buildkit-gc-not-enforced` alarm checks this every tick via
 `docker-storage-cap.sh --check-gc-enforced`; on 2026-11-03 it would have been firing because
 `--install` had never been run after the 3057 fix landed (bug `007c-dabe-21a5-4e92`).
