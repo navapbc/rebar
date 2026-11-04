@@ -435,3 +435,59 @@ steps:
 """
     findings = L.lint_workflow(wf)
     assert not any("credential" in f.message for f in findings), _msgs(findings)
+
+
+# ── Credential findings carry no value-derived material (bug c712-6cd1-276b-4841) ──
+#
+# A finding is printed by `rebar workflow validate` / `new` and so lands in terminals and CI
+# logs. It may name the credential family, the field path, and the line — never characters of
+# the value itself (the rule rebar.secret_screen follows). The old `abc…xyz`
+# preview printed 6 of a 10-character literal password.
+
+_SHORT_PASSWORD = "hunter2xyzq"
+_AWS_SHAPE = "AKIAIOSFODNN7EXAMPLE"
+
+
+def _literal_password_workflow(value: str) -> str:
+    return (
+        'schema_version: "1"\nname: x\nsteps:\n  - id: a\n    uses: u\n'
+        f"    with:\n      password: {value}\n"
+    )
+
+
+def _value_fragments(value: str) -> list[str]:
+    """The value itself plus the 3-character head and tail the old preview printed."""
+    return [value, value[:3], value[-3:]]
+
+
+def _assert_no_fragment(text: str, value: str) -> None:
+    leaked = [frag for frag in _value_fragments(value) if frag in text]
+    assert not leaked, f"value-derived fragment(s) {leaked!r} reached the finding: {text!r}"
+
+
+def test_literal_credential_finding_names_field_without_value_fragment() -> None:
+    findings = L.lint_workflow(_literal_password_workflow(_SHORT_PASSWORD))
+    hits = [f for f in findings if "looks like a credential" in f.message]
+    assert hits, _msgs(findings)
+    assert hits[0].location == "steps[a].with.password"
+    _assert_no_fragment(_msgs(findings), _SHORT_PASSWORD)
+
+
+def test_short_literal_credential_is_still_flagged() -> None:
+    findings = L.lint_workflow(_literal_password_workflow("abc12345"))
+    assert any("looks like a credential" in f.message for f in findings), _msgs(findings)
+    _assert_no_fragment(_msgs(findings), "abc12345")
+
+
+def test_credential_shape_finding_names_family_and_line_without_value_fragment() -> None:
+    findings = L.secret_scan(f"name: x\ntoken: {_AWS_SHAPE}\n", source="wf.yaml")
+    assert [f.location for f in findings] == ["wf.yaml:2"], _msgs(findings)
+    assert "AWS access key id" in findings[0].message
+    _assert_no_fragment(_msgs(findings), _AWS_SHAPE)
+
+
+def test_lint_workflow_shape_scan_carries_no_value_fragment() -> None:
+    wf = 'schema_version: "1"\nname: x\n# ' + _AWS_SHAPE + "\nsteps:\n  - id: a\n    uses: u\n"
+    findings = L.lint_workflow(wf)
+    assert any("AWS access key id" in f.message for f in findings), _msgs(findings)
+    _assert_no_fragment(_msgs(findings), _AWS_SHAPE)

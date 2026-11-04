@@ -118,3 +118,36 @@ def test_validate_expressions_off(tmp_path, capsys) -> None:
     rc = main(["workflow", "validate", str(f), "--no-expressions"])
     assert rc == 1
     assert "expressions are disabled" in capsys.readouterr().out
+
+
+# Bug c712-6cd1-276b-4841: `workflow validate` prints lint findings to stdout (and CI logs),
+# so a credential finding must not carry the value or its 3-character head/tail.
+_LEAKY_WORKFLOW = (
+    'schema_version: "1"\nname: x\nsteps:\n  - id: a\n    uses: u\n'
+    "    with:\n      password: hunter2xyzq\n"
+)
+
+
+def _leaked(text: str) -> list[str]:
+    return [frag for frag in ("hunter2xyzq", "hun", "yzq") if frag in text]
+
+
+def test_validate_text_output_withholds_credential_value(tmp_path, capsys) -> None:
+    f = tmp_path / "leaky.yaml"
+    f.write_text(_LEAKY_WORKFLOW)
+    rc = main(["workflow", "validate", str(f)])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "looks like a credential" in captured.out
+    assert _leaked(captured.out + captured.err) == []
+
+
+def test_validate_json_output_withholds_credential_value(tmp_path, capsys) -> None:
+    f = tmp_path / "leaky.yaml"
+    f.write_text(_LEAKY_WORKFLOW)
+    rc = main(["workflow", "validate", str(f), "--output", "json"])
+    assert rc == 1
+    raw = capsys.readouterr().out
+    payload = json.loads(raw)
+    assert any("looks like a credential" in fi["message"] for fi in payload["findings"])
+    assert _leaked(raw) == []

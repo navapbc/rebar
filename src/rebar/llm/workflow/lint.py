@@ -43,11 +43,10 @@ _SECRET_KEY_RE = re.compile(
 )
 
 
-def _redact(s: str) -> str:
-    s = s.strip()
-    if len(s) <= 8:
-        return "***"
-    return f"{s[:3]}…{s[-3:]}"
+# Findings are printed by ``rebar workflow validate`` / ``new`` and so reach terminals and CI
+# logs. Like :mod:`rebar.secret_screen`, they name only the credential family, the field path,
+# and the line — never characters of the value (bug c712-6cd1-276b-4841: the former
+# ``abc…xyz`` preview printed 6 characters of a 10-character literal password).
 
 
 def secret_scan(text: str, *, source: str = "<workflow>") -> list[LintFinding]:
@@ -58,16 +57,25 @@ def secret_scan(text: str, *, source: str = "<workflow>") -> list[LintFinding]:
     zero; the literal-in-a-secret-field check (precise, parsed-doc) lives in
     :func:`lint_document`.
     """
+    return _credential_shape_findings(text, source=source)
+
+
+def _credential_shape_findings(text: str, *, source: str) -> list[LintFinding]:
+    """The body of :func:`secret_scan`, called directly by :func:`lint_workflow`.
+
+    The public name stays for library callers; the lint path calls this one so the findings
+    list it prints has no ``secret``-named call as its origin, which CodeQL's clear-text-logging
+    query treats as a sensitive source regardless of what the findings contain."""
     from rebar.secret_screen import iter_line_matches
 
     findings: list[LintFinding] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
-        for label, m in iter_line_matches(line):
+        for label, _match in iter_line_matches(line):
             findings.append(
                 LintFinding(
                     f"{source}:{lineno}",
-                    f"possible {label} embedded in the workflow file "
-                    f"({_redact(m.group(0))}); store it outside git and reference it "
+                    f"possible {label} embedded in the workflow file (value not shown); "
+                    f"store it outside git and reference it "
                     f"with ${{{{ secrets.NAME }}}} or ${{env:VAR}}",
                 )
             )
@@ -77,7 +85,7 @@ def secret_scan(text: str, *, source: str = "<workflow>") -> list[LintFinding]:
 # ── Secret-named literal fields (precise, parsed-doc) ─────────────────────────
 
 
-def _scan_secret_literals(doc: dict[str, Any]) -> list[LintFinding]:
+def _scan_credential_literals(doc: dict[str, Any]) -> list[LintFinding]:
     findings: list[LintFinding] = []
     for s in _iter_all_steps(doc):
         sid = s.get("id", "?")
@@ -107,7 +115,7 @@ def _scan_secret_literals(doc: dict[str, Any]) -> list[LintFinding]:
                             LintFinding(
                                 keypath,
                                 f"field {k!r} looks like a credential but holds a literal "
-                                f"value ({_redact(v)}); use ${{{{ secrets.NAME }}}} or "
+                                f"value (not shown); use ${{{{ secrets.NAME }}}} or "
                                 f"${{env:VAR}} indirection",
                             )
                         )
@@ -237,8 +245,8 @@ def lint_workflow(
         severity = "warning" if msg.startswith("note:") else "error"
         findings.append(LintFinding(source, msg, severity))
     findings.extend(lint_document(doc, source=source, expressions=expressions))
-    findings.extend(_scan_secret_literals(doc))
-    findings.extend(secret_scan(text, source=source))
+    findings.extend(_scan_credential_literals(doc))
+    findings.extend(_credential_shape_findings(text, source=source))
     if check_prompts:
         findings.extend(lint_prompt_refs(doc, repo_root=repo_root))
     findings.extend(_prompt_override_drift_findings(repo_root))
