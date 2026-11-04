@@ -398,8 +398,9 @@ def test_a_reason_less_marker_is_itself_an_offence() -> None:
 
 
 def _tracker(tmp_path: Path, name: str) -> str:
+    """A tracker with a git dir: the compaction worker lock lives in it."""
     tracker = Path(os.path.realpath(tmp_path)) / name / ".tickets-tracker"
-    tracker.mkdir(parents=True)
+    (tracker / ".git").mkdir(parents=True)
     return str(tracker)
 
 

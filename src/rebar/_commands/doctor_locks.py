@@ -49,7 +49,6 @@ LEG_COMPACT_WORKER = "compact-worker"
 LEG_SNAPSHOT_GC_WORKER = "snapshot-gc-worker"
 
 _HLC_LOCK_NAME = "hlc.lock"
-_COMPACT_WORKER_LOCK_NAME = "compact-worker.lock"
 
 _STALE_ADVICE = (
     "no live process claims this lock; the next writer's acquire reclaims it "
@@ -254,6 +253,14 @@ def _existence_report(name: str, path: str, *, note: str) -> dict[str, Any]:
     }
 
 
+def _compact_worker_lock_path(canonical: str) -> str:
+    """The compaction worker lock, from the trigger's own derivation (it lives in the
+    tracker's git dir), so ``doctor`` and the sweep can never name different files."""
+    from rebar._commands import compact_trigger as _compact_trigger
+
+    return _compact_trigger._trigger_lock_path(canonical)
+
+
 def _snapshot_gc_worker_lock_path() -> str:
     """The snapshot-GC worker lock's per-host path, derived read-only.
 
@@ -307,7 +314,7 @@ def scan_locks(tracker: str) -> list[dict[str, Any]]:
             LEG_COMPACT_WORKER,
             lambda: _existence_report(
                 LEG_COMPACT_WORKER,
-                os.path.join(rebar_dir, _COMPACT_WORKER_LOCK_NAME),
+                _compact_worker_lock_path(canonical),
                 note="no detached compaction worker holds the compact-worker lock",
             ),
         ),

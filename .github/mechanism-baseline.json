@@ -618,7 +618,6 @@
     "lock::RefLockTimeoutError": 1,
     "lock::_UnderLockMismatch": 1,
     "lock::bytes.total.lock": 1,
-    "lock::compact-worker.lock": 1,
     "lock::fetch.lock": 1,
     "lock::hlc.lock": 1,
     "lock::index.lock": 1,

@@ -228,10 +228,13 @@ def test_the_guard_marker_requires_a_reason(tmp_path: Path) -> None:
     assert bare is not None and bare.group(1).strip() == ""
 
 
-def test_every_real_sidecar_helper_lands_in_the_one_canonical_rebar(tmp_path: Path) -> None:
-    """The ``compact_trigger`` and ``doctor_locks`` consumers place sidecars in the canonical
-    store behind a symlinked worktree view."""
+def test_every_real_sidecar_helper_lands_on_the_canonical_store(tmp_path: Path) -> None:
+    """The ``compact_trigger`` and ``doctor_locks`` consumers place sidecars on the canonical
+    store behind a symlinked worktree view: its ``.rebar``, or for the compaction worker lock
+    and sweep stamp its git dir, which is part of the store itself (bug
+    exemplary-silty-tuatara)."""
     from rebar._commands import compact_trigger, doctor_locks
+    from rebar._store.paths import StorePaths
 
     canonical = _canonical_store(tmp_path)
     wt = _worktree_tracker(tmp_path, canonical, "worktree-a")
@@ -251,8 +254,9 @@ def test_every_real_sidecar_helper_lands_in_the_one_canonical_rebar(tmp_path: Pa
             doctor_locks.LEG_COMPACT_WORKER,
         ):
             derived[f"doctor {row['name']} path"] = row["path"]
+    canonical_git_dir = StorePaths(canonical).git_dir
     for label, got in derived.items():
-        assert got.startswith(canonical_rebar + os.sep) or got == canonical_rebar, (
+        assert got.startswith((canonical_rebar + os.sep, canonical_git_dir + os.sep)), (
             f"{label} is not on the canonical store: {got}"
         )
         assert not got.startswith(worktree_rebar + os.sep), (

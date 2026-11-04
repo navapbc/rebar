@@ -14,7 +14,7 @@ from types import ModuleType
 
 import pytest
 
-from rebar._commands import doctor, doctor_locks
+from rebar._commands import compact_trigger, doctor, doctor_locks
 from rebar._snapshot import gc_trigger as _gc_trigger
 from rebar._snapshot import repo_snapshot as _repo_snapshot
 from rebar._store import lock as _lock
@@ -32,6 +32,14 @@ def _tracker(tmp_path: Path) -> Path:
     tracker = tmp_path / "repo" / ".tickets-tracker"
     tracker.mkdir(parents=True)
     return tracker
+
+
+def _compact_lock_path(tracker: Path) -> Path:
+    """Where the compaction trigger keeps its worker lock: the tracker's git dir (bug
+    exemplary-silty-tuatara). Derived through the trigger itself, never re-spelled here."""
+    path = Path(compact_trigger._trigger_lock_path(str(tracker)))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _by_name(reports: list[dict], name: str) -> dict:
@@ -266,9 +274,7 @@ def test_a_missing_rebar_dir_reports_absent_rather_than_raising(tmp_path: Path) 
 def _plant_stamped_lock(tracker: Path, stamp: str, *, age_s: float = 0.0) -> Path:
     """Plant the compact-worker lock (the stamped ``O_EXCL`` leg left after the retired
     enrichment drain lock was dropped, ADR 0086)."""
-    rebar_dir = tracker.parent / ".rebar"
-    rebar_dir.mkdir(exist_ok=True)
-    path = rebar_dir / "compact-worker.lock"
+    path = _compact_lock_path(tracker)
     path.write_text(stamp, encoding="utf-8")
     if age_s:
         when = time.time() - age_s
@@ -374,9 +380,7 @@ def test_an_incomplete_lock_stamp_is_stated_not_guessed(tmp_path: Path) -> None:
 
 
 def _plant_compact_lock(tracker: Path, stamp: str, *, age_s: float = 0.0) -> Path:
-    rebar_dir = tracker.parent / ".rebar"
-    rebar_dir.mkdir(exist_ok=True)
-    path = rebar_dir / "compact-worker.lock"
+    path = _compact_lock_path(tracker)
     path.write_text(stamp, encoding="utf-8")
     if age_s:
         when = time.time() - age_s
@@ -539,9 +543,7 @@ def test_doctor_never_touches_a_lock(
         f"ns={_owner._read_pid_namespace_id() or '-'} pid={_dead_pid()} start=-"
     )
     _stamp(lock_dir, stamp)
-    rebar_dir = tracker.parent / ".rebar"
-    rebar_dir.mkdir()
-    drain = rebar_dir / "compact-worker.lock"
+    drain = _compact_lock_path(tracker)
     drain.write_text("claimant", encoding="utf-8")
     monkeypatch.setattr(doctor, "tracker_dir", lambda _repo_root=None: tracker)
     monkeypatch.setattr(doctor, "_reconciler_in_flight", lambda *_a, **_k: False)
