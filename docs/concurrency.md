@@ -1000,6 +1000,37 @@ held-out test. For a held-out oracle, move the file outside the worktree instead
 `mkdir -p "$(git rev-parse --git-path heldout)" && mv <test> "$(git rev-parse --git-path heldout)/"`,
 then move it back for validation. Hold the same line in anything you write.
 
+### Never file-copy the tracker
+
+`.tickets-tracker` is a git **linked worktree**: its `.git` is a file holding
+`gitdir: <repo>/.git/worktrees/<name>`. A file copy (`cp -R`, `cp -a`, `shutil.copytree`) keeps
+that pointer, so the copy is **not** isolated. Every git command run in it acts on the shared
+repository. A commit moves the real `tickets` branch, and leaves the real tracker's index out of
+step with it. `git remote remove` edits the shared `.git/config`, which is how both remotes
+disappeared on 2026-10-27 (bug `affordable-omphacite-sunfish`).
+
+rebar refuses to write through such a copy. git records where each linked worktree lives in
+`<gitdir>/gitdir`. When that back-pointer names a different directory that still exists and still
+points at the same gitdir, so 2 directories share one index and HEAD, every store mutation stops
+with `Error: refusing to write: this tracker is a file copy of a linked git worktree` (exit 78)
+before it takes the write lock. This uses the same `check_store_compat` chokepoint that refuses an
+incompatible store. Reads still work. rebar cannot stop raw `git` typed inside a copy, so do not
+make one.
+
+To work on an isolated copy of the store, clone it, which gives the copy its own `.git`
+directory and object store:
+
+```sh
+git clone --local --branch tickets .tickets-tracker <dest>
+test -d <dest>/.git   # a directory means independent; a file means it still shares the repo
+```
+
+Check any directory with `git -C <dir> rev-parse --git-common-dir` before running git in it. A
+tracker that was **moved** (`mv`, `REBAR_TRACKER_DIR` pointing at the new place) is not a copy:
+nothing else uses its gitdir, so rebar keeps writing to it. `git -C <dir> worktree repair` updates
+git's record of the new location. Never run `repair` in a copy while the original exists, because
+it moves the registration away from the original.
+
 ### The supported door — `rebar store maintenance`
 
 For a store that rebar itself cannot write, use the maintenance entrypoint rather than

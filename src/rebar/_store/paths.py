@@ -146,3 +146,36 @@ class StorePaths:
         except OSError:
             return git_dir
         return _resolve_pointer(target, git_dir) if target else git_dir
+
+    def copied_worktree_origin(self) -> str | None:
+        """The real worktree this tracker was FILE-COPIED from, or ``None``.
+
+        ``cp -R`` of a linked worktree keeps its ``.git`` pointer file, so git in the copy acts
+        on the original repository: its config, branch refs, and the original's index and HEAD.
+        git records where a linked worktree lives in ``<git_dir>/gitdir``. The tracker is a
+        copy when that back-pointer names a DIFFERENT directory that still exists and still
+        points at the same git dir, so two directories share one index and HEAD. A moved
+        worktree (the recorded directory is gone) is a relocated store, not a copy. An ordinary
+        clone (``.git`` directory), a submodule (no back-pointer), or anything unreadable
+        answers ``None``, failing open as
+        :func:`rebar._store.lock.check_no_rebase_in_progress` does for an unresolvable gitdir.
+        """
+        here = self.canonical
+        if not os.path.isfile(os.path.join(here, ".git")):
+            return None
+        git_dir = self.git_dir
+        try:
+            with open(os.path.join(git_dir, "gitdir"), encoding="utf-8") as fh:
+                pointer = fh.read().strip()
+        except OSError:
+            return None
+        if not pointer:
+            return None
+        recorded = os.path.dirname(_resolve_pointer(pointer, git_dir))
+        if os.path.realpath(recorded) == os.path.realpath(here):
+            return None
+        if not os.path.isfile(os.path.join(recorded, ".git")):
+            return None  # moved, not copied: nothing else uses this git dir
+        if os.path.realpath(StorePaths(recorded).git_dir) != os.path.realpath(git_dir):
+            return None
+        return recorded
