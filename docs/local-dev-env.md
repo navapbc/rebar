@@ -265,7 +265,9 @@ remote` (or warns that `gerrit` is missing), and a bare `git fetch origin` repor
 One known cause: a file copy (`cp -R`) of a linked worktree is not an isolated copy. It keeps
 the original's `.git` file, so `git remote remove` run inside the copy edits the shared
 config. Check what a directory really points at with
-`git -C <dir> rev-parse --git-common-dir` before running git in it.
+`git -C <dir> rev-parse --git-common-dir` before running git in it. rebar refuses to write
+through such a copy; `docs/concurrency.md` §"Never file-copy the tracker" gives the isolated
+alternative (`git clone --local --branch tickets`).
 
 **`origin`** (GitHub; the code mirror and the `tickets` branch remote) has one URL:
 

@@ -21,10 +21,11 @@ Four record states (the whole contract):
    naming the parse error + record path. A corrupt record is **NEVER** silently
    treated as absent (that would let it bypass the gate) — it fails CLOSED.
 
-**Leaf module — stdlib + :mod:`rebar._store.fsutil` ONLY, no other ``rebar.*``
-imports.** :mod:`rebar._store.lock` imports :func:`check_store_compat` to run the
-gate inside ``acquire()``; a ``rebar._commands.*`` / ``rebar.config`` import here
-would create an import cycle. Keep it leaf.
+**Leaf module — stdlib, :mod:`rebar._store.fsutil`, :mod:`rebar._store.gitutil`, and
+:mod:`rebar._store.paths` (whose only ``rebar`` import is lazy) ONLY.**
+:mod:`rebar._store.lock` imports :func:`check_store_compat` to run the gate inside
+``acquire()``; a ``rebar._commands.*`` / ``rebar.config`` import here would create an
+import cycle. Keep it leaf.
 """
 
 from __future__ import annotations
@@ -34,12 +35,14 @@ import os
 
 from rebar._store import fsutil
 from rebar._store.gitutil import run_git
+from rebar._store.paths import StorePaths
 
 __all__ = [
     "COMPAT_FILENAME",
     "CURRENT_FORMAT_VERSION",
     "KNOWN_CAPABILITIES",
     "KNOWN_FORMAT_VERSIONS",
+    "CopiedWorktreeError",
     "StoreIncompatibleError",
     "check_store_compat",
     "describe_store_compat",
@@ -78,6 +81,33 @@ class StoreIncompatibleError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+class CopiedWorktreeError(StoreIncompatibleError):
+    """The tracker is a FILE COPY of a linked worktree (bug asthmatic-grave-caudata).
+
+    Its ``.git`` pointer still names the original's gitdir, so any commit here moves the
+    shared repository's refs and leaves the original worktree's index out of step. A
+    subclass of :class:`StoreIncompatibleError` so every existing write-path handler
+    surfaces it, with the same exit code, and reads stay available."""
+
+    def __init__(self, tracker: str, original: str, common_dir: str) -> None:
+        super().__init__(
+            "Error: refusing to write: this tracker is a file copy of a linked git worktree.\n"
+            f"  copy:     {tracker}\n"
+            f"  original: {original}\n"
+            f"  Git commands here act on the shared repository at {common_dir}, its config\n"
+            "  and branches included. Delete this copy. For an isolated copy of the store,\n"
+            "  clone it instead:\n"
+            f'  git clone --local --branch tickets "{original}" <dest>'
+        )
+
+
+def _check_not_copied_worktree(tracker: str | os.PathLike[str]) -> None:
+    paths = StorePaths(os.fspath(tracker))
+    original = paths.copied_worktree_origin()
+    if original is not None:
+        raise CopiedWorktreeError(paths.canonical, original, paths.git_common_dir)
 
 
 def _record_path(tracker: str | os.PathLike[str]) -> str:
@@ -301,12 +331,14 @@ def _analyze(tracker: str | os.PathLike[str]) -> dict[str, str] | None:
 def check_store_compat(tracker: str | os.PathLike[str]) -> None:
     """Fail CLOSED (raise :class:`StoreIncompatibleError`) when the store's committed
     ``.store-compat.json`` cannot be interpreted; return ``None`` when it is
-    compatible or ABSENT (implicit legacy pass-through).
+    compatible or ABSENT (implicit legacy pass-through). A tracker that is a file copy
+    of a linked worktree fails first, as :class:`CopiedWorktreeError`.
 
     Called inside :func:`rebar._store.lock.acquire` — the single write-lock chokepoint
     — so every locked mutation is gated once, and by the explicit gates on the
     lock-less publishing paths (``fsck_recover``, the reconciler's outbound apply).
     """
+    _check_not_copied_worktree(tracker)
     problem = _analyze(tracker)
     if problem is not None:
         raise StoreIncompatibleError(problem["detail"])
