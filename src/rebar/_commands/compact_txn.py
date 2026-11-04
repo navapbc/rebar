@@ -294,6 +294,32 @@ def _exclude_snapshot_orphans(old: list[Candidate]) -> list[Candidate]:
     return kept
 
 
+def _snapshot_timestamp(
+    tracker: str,
+    ticket_id: str,
+    old: list[Candidate],
+    young: list[Candidate],
+    now: int,
+    horizon: int,
+) -> int | None:
+    """The new SNAPSHOT's timestamp, or ``None`` when no safe placement gap exists.
+
+    Under a positive horizon the SNAPSHOT sits just after the newest folded event (the
+    fold boundary), so live events sort after it and replay. That holds with no young
+    event too: another clone may have written an event after the newest folded one that
+    this clone has not fetched yet, and a SNAPSHOT at the fold clock would bury it as an
+    uncited ``ORPHAN_EVENT`` once the union merge lands it (bug stormproof-stormy-toad).
+    ``horizon <= 0`` folds everything at the fold clock, unchanged."""
+    if horizon <= 0 and not young:
+        return hlc.next_tick(tracker, ticket_id)
+    old_ts = [c.timestamp for c in old if c.timestamp is not None]
+    young_ts = [c.timestamp for c in young if c.timestamp is not None]
+    snapshot_ts = (max(old_ts) if old_ts else now) + 1
+    if young_ts and snapshot_ts >= min(young_ts):
+        return None
+    return snapshot_ts
+
+
 def _retire_folded_sources(fold_files: list[str], ticket_id: str, final_path: str) -> int:
     """I1: RENAME folded sources to ``*.retired`` rather than deleting them. Returns 0 on
     success, 1 on failure (having already written the operator-facing stderr line).
@@ -625,24 +651,16 @@ def _fold_under_lock(
 
     fold_files = [c.path for c in old]
 
-    # Pick a SNAPSHOT timestamp strictly between the newest folded event and the
-    # youngest live one, so folded events sort before it (positionally skipped,
-    # their state in compiled_state) and live events sort after it (replayed).
-    if young:
-        old_ts = [c.timestamp for c in old if c.timestamp is not None]
-        young_ts = [c.timestamp for c in young if c.timestamp is not None]
-        max_old = max(old_ts) if old_ts else now
-        snapshot_ts = max_old + 1
-        if young_ts and snapshot_ts >= min(young_ts):
-            # No safe placement gap (adjacent straddling timestamps) — defer folding
-            # this pass rather than risk a mis-sorted snapshot.
-            sys.stdout.write("no safe horizon gap for a SNAPSHOT timestamp — deferring\n")
-            return 0
-        with timer.phase("reduce"):
+    snapshot_ts = _snapshot_timestamp(tracker, ticket_id, old, young, now, horizon)
+    if snapshot_ts is None:
+        # No safe placement gap (adjacent straddling timestamps) — defer folding
+        # this pass rather than risk a mis-sorted snapshot.
+        sys.stdout.write("no safe horizon gap for a SNAPSHOT timestamp — deferring\n")
+        return 0
+    with timer.phase("reduce"):
+        if young:
             compiled_state = reduce_ticket(ticket_dir, event_files_override=fold_files)
-    else:
-        snapshot_ts = hlc.next_tick(tracker, ticket_id)
-        with timer.phase("reduce"):
+        else:
             compiled_state = reduce_ticket(ticket_dir)
 
     if compiled_state is None:
