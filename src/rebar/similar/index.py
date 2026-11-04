@@ -77,7 +77,11 @@ class StaleIndex(Exception):
 
 
 def index_dir(tracker: str | os.PathLike[str]) -> str:
-    """The git-ignored directory holding the index, derived from the store's ``.rebar``."""
+    """The git-ignored directory holding the index, derived from the store's ``.rebar``.
+
+    A cache, so it may sit where a deploy wipes it (the MCP container's writable layer): it is
+    rebuilt from the shared tracker by catch-up, and a loss costs one rebuild, never a result
+    (bug soot-ammonitic-redpoll)."""
     from rebar._store.paths import StorePaths
 
     return os.path.join(StorePaths(str(tracker)).rebar_dir, *_CACHE_SUBDIR)

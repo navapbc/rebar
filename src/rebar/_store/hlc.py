@@ -65,6 +65,12 @@ def _max_event_prefix(tracker: str | os.PathLike, ticket_id: str) -> int:
     return best
 
 
+# The cache and its lock stay in the tracker-sibling ``.rebar/`` even where that dir is not
+# part of the store (the MCP container's writable layer, reset by every blue-green deploy and
+# split during the overlap). Losing or splitting them is harmless: every tick is floored by the
+# ticket's committed event prefixes in the shared tracker, the store write lock serializes the
+# writers that observe each other, and equal ticks from concurrent writers sort
+# deterministically (bug soot-ammonitic-redpoll; tests/unit/test_recent_creates_shared_journal.py).
 @contextmanager
 def _hlc_lock(rebar_dir: Path) -> Iterator[None]:
     """A dedicated, local exclusive lock on ``.rebar/hlc.lock`` — held only for the

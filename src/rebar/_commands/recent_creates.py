@@ -28,8 +28,14 @@ from rebar.similar import find_similar
 
 logger = logging.getLogger("rebar")
 
-_JOURNAL_NAME = "recent-creates.json"
-_LOCK_NAME = "recent-creates.lock"
+#: The journal and its lock live in the tracker's git dir, beside the compaction sidecars, not
+#: in the ``.rebar/`` next to the tracker: that sibling is not part of the store. In the MCP
+#: container it sits on each container's writable layer while the tracker is a volume both
+#: blue-green containers share, so keyed there every deploy emptied the window and a create on
+#: one container was invisible to the other (bug soot-ammonitic-redpoll).
+_JOURNAL_NAME = "rebar-recent-creates.json"
+# mechanism-ok: lock rebar-recent-creates.lock — 1237-b65b-d7d2-4565 recent-creates.lock, moved
+_LOCK_NAME = "rebar-recent-creates.lock"
 
 #: How long a create stays probe-visible. 600 s is ~3.5x the largest observed true-duplicate
 #: delta (171 s) from the eac3 store measurement; the same measurement found same-title pairs
@@ -45,13 +51,20 @@ def normalize_title(title: str) -> str:
     return " ".join(_NON_ALNUM.sub(" ", title.lower()).split())
 
 
+def _journal_path(tracker: Any) -> str:
+    """The store's journal, in the tracker's git dir (see ``_JOURNAL_NAME``)."""
+    from rebar._store.paths import StorePaths
+
+    return os.path.join(StorePaths(str(tracker)).git_dir, _JOURNAL_NAME)
+
+
 @contextmanager
-def _journal_lock(rebar_dir: str) -> Iterator[None]:
-    """A dedicated, local exclusive lock for the journal RMW — held only for the one
-    small-file read-modify-write, never across the store write lock (no ordering hazard)."""
+def _journal_lock(journal_path: str) -> Iterator[None]:
+    """A dedicated exclusive lock for the journal RMW, beside the journal — held only for the
+    one small-file read-modify-write, never across the store write lock (no ordering hazard)."""
     from rebar._store.fsutil import sibling_exclusive_lock
 
-    with sibling_exclusive_lock(os.path.join(rebar_dir, _JOURNAL_NAME), lock_name=_LOCK_NAME):
+    with sibling_exclusive_lock(journal_path, lock_name=_LOCK_NAME):
         yield
 
 
@@ -134,13 +147,11 @@ def duplicate_create_warning(
         if not compose_config(cfg_root).verify.suggest_duplicate_tickets:
             return None
 
-        from rebar._store.paths import StorePaths
-
-        paths = StorePaths(str(tracker))
+        journal_path = _journal_path(tracker)
         now_ns = time.time_ns()
-        with _journal_lock(paths.rebar_dir):
+        with _journal_lock(journal_path):
             matches = _probe_and_record(
-                paths.sidecar(_JOURNAL_NAME),
+                journal_path,
                 ticket_id=ticket_id,
                 alias=alias or "",
                 title=title,

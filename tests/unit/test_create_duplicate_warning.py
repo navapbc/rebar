@@ -22,7 +22,6 @@ import rebar
 from rebar._commands import main as commands_main
 from rebar._commands import recent_creates
 from rebar._commands._seam import tracker_dir
-from rebar._store.paths import StorePaths
 
 pytestmark = pytest.mark.unit
 
@@ -52,7 +51,7 @@ def flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _journal_path(root: Path) -> Path:
-    return Path(StorePaths(str(tracker_dir(str(root)))).sidecar("recent-creates.json"))
+    return Path(recent_creates._journal_path(tracker_dir(str(root))))
 
 
 def _collect_mcp_tools() -> dict[str, Any]:

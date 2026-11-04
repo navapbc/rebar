@@ -624,7 +624,6 @@
     "lock::poetry.lock": 1,
     "lock::rebar-fetch.lock": 1,
     "lock::rebar-git-op.lock": 1,
-    "lock::recent-creates.lock": 1,
     "lock::ticket-init.lock": 1,
     "lock::uv.lock": 1,
     "lock::worker.lock": 1,
