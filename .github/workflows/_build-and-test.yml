@@ -752,7 +752,8 @@ jobs:
           # Run OS-independent policy scanners once in the primary Ubuntu cell.
           # Other Ubuntu cells keep their remaining tests. The macOS cell runs the platform
           # compatibility subset plus integration tests for its distinct OS behavior.
-          DEFAULT_SUITE_MARKS: ${{ matrix.os == 'macos-latest' && 'platform_compat and not external' || (matrix.python-version == '3.13' && 'not integration and not external' || 'not integration and not external and not repo_policy') }}
+          # Every route excludes `live` like the integration tier (bug 5f29-9bed-5a47-4a25).
+          DEFAULT_SUITE_MARKS: ${{ matrix.os == 'macos-latest' && 'platform_compat and not external and not live' || (matrix.python-version == '3.13' && 'not integration and not external' || 'not integration and not external and not repo_policy') }}
         # The 300-second per-test watchdog comes from pytest ini. Its thread method
         # dumps stacks when a worker blocks in C code. Keep this command free of a
         # --timeout override because trusted-main workflow flags would shadow a
@@ -817,14 +818,15 @@ jobs:
       - name: Run the integration tier (concurrency + reconciler; network-guarded)
         # Run mocked integration tests in CI with loadgroup keeping reconciler
         # groups serial on one worker. The ini owns the per-test timeout. External
-        # Jira probes remain manual.
+        # Jira probes remain manual: `not live` excludes the tests that reach a real
+        # Jira, matching `make test` (bug 5f29-9bed-5a47-4a25); they skip here anyway.
         env:
           REBAR_REQUIRE_EXTRAS: "1"  # see the default-suite step above (bug 599e)
         # Stop the loadgroup suite at the first worker death instead of repeatedly
         # redispatching the crashed item. The separate worksteal lane keeps its
         # normal worker replacement because it does not replay the crash item.
         run: >-
-          pytest -m integration
+          pytest -m "integration and not live"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
           --max-worker-restart=0
           -q -p no:cacheprovider --durations=25

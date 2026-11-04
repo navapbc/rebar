@@ -33,9 +33,11 @@ three separate changes were pushed red by exactly those tests after their author
 = `lint` + `typecheck` + the bare-`pytest` `import-convention` guard + `test`, and
 `make test` runs exactly the two pytest selections CI's gating `ubuntu-latest, py3.13` cell
 runs, in order — the default tier (`not integration and not external`), then the integration
-tier (`-m integration`) — a superset of every other matrix cell, so it is the locally
+tier (`integration and not live`) — a superset of every other matrix cell, so it is the locally
 checkable half of `Verified`. `tests/unit/test_ci_workflow_parity.py` asserts both against
-the workflow, so the two cannot drift silently (bug `a8af-ac33-74aa-4ccd`).
+the workflow, so the two cannot drift silently (bug `a8af-ac33-74aa-4ccd`). `not live` keeps
+tests that reach a real Jira out even when your shell exports Jira credentials; they run only
+on an explicit `pytest -m live` (bug `5f29-9bed-5a47-4a25`, `docs/jira-sync-setup.md`).
 The import-convention guard is intentionally called out and run with the **BARE `pytest`
 console script**: `python -m pytest` injects the checkout root onto `sys.path`, so it can
 false-green `tests.`-rooted imports that fail under `make test` and CI.

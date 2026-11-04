@@ -763,6 +763,14 @@ reconciler seams, plus a small number of gated probes that actually mutate the r
 all under one guaranteed bilateral teardown harness. The module is marked so the default
 test selection excludes it; it is run explicitly.
 
+> **Erratum (2026-11-04, bug `5f29-9bed-5a47-4a25`).** The exclusion above relied on the
+> default tier's `not integration`. Once `make test` also ran CI's integration tier
+> (`-m integration`, bug `a8af-ac33-74aa-4ccd`), the live probes ran on every local
+> `make verify` whose shell exported Jira credentials and created a production issue. The
+> `live` marker now sits only on the probes that reach Jira, and both `make test` and CI's
+> integration tier select `integration and not live`. The deterministic core runs in that
+> tier; the probes still run only on an explicit `pytest -m live`.
+
 **Teardown is partial-setup aware and leak-loud.** An artifact tracker records exactly
 which synthetic keys and local ids were *actually* created, so a create that fails halfway
 leaves only what landed, and teardown removes precisely those — never a hard-coded list.

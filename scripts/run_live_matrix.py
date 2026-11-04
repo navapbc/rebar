@@ -4,8 +4,9 @@
 Decision: ADR 0085 (archived into ADR 0121 §20).
 Operator procedure: infra/runbooks/reconciler-live-matrix.md.
 
-One command makes the harness's report contract true end-to-end: it runs
-``tests/integration/test_reconcile_live_e2e.py -m live`` with ``--junitxml`` pointed at
+One command makes the harness's report contract true end-to-end: it runs every case in
+``tests/integration/test_reconcile_live_e2e.py`` (selected by path, so the deterministic core
+and the ``live``-marked probes both report) with ``--junitxml`` pointed at
 ``reports/d01e-live-matrix.junit.xml``, then derives the JSON summary the ADR promises at
 ``reports/d01e-live-matrix.report.json`` (totals + one entry per test with outcome and
 duration). Both are gitignored run artifacts; the durable evidence lives on ticket d01e.
@@ -82,8 +83,6 @@ def main(argv: list[str]) -> int:
         "-m",
         "pytest",
         MATRIX,
-        "-m",
-        "live",
         f"--junitxml={JUNIT_PATH}",
         *extra,
     ]

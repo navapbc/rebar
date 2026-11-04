@@ -18,7 +18,7 @@ One command produces both report artifacts:
 python scripts/run_live_matrix.py
 ```
 
-It runs `tests/integration/test_reconcile_live_e2e.py -m live` with `--junitxml` pointed at
+It runs every case in `tests/integration/test_reconcile_live_e2e.py`, selected by path, with `--junitxml` pointed at
 `reports/d01e-live-matrix.junit.xml`, then derives the JSON summary at
 `reports/d01e-live-matrix.report.json` (totals plus one entry per test with outcome and
 duration). Both are gitignored run artifacts. It exits with pytest's return code, or **2**
@@ -30,8 +30,10 @@ Extra pytest arguments pass through after `--`:
 python scripts/run_live_matrix.py -- -k c4 -q
 ```
 
-The module is marked `pytestmark = [integration, live]`, so `make test` excludes it
-(`-m "not integration and not external"`). To invoke pytest directly, select it explicitly:
+The module is marked `integration`; only its credential-backed probes also carry `live`.
+`make test`, `make verify` and CI's integration tier select `integration and not live`, so the
+deterministic core runs there and the probes never do, even when the shell exports Jira
+credentials (bug `5f29-9bed-5a47-4a25`). To run only the probes, opt in explicitly:
 
 ```sh
 pytest tests/integration/test_reconcile_live_e2e.py -m live

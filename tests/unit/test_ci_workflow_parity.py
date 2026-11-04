@@ -660,12 +660,15 @@ _OPTIONALITY_SUITE_ITEM_COUNT = 10
 _DEFAULT_SELECTION = "not integration and not external"
 
 
-def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
+def _collect_node_ids(
+    paths: tuple[str, ...], selection: str, env_overrides: dict[str, str] | None = None
+) -> list[str]:
     """Node ids pytest actually collects for `paths` under `-m selection`.
 
     Runs the REAL selection in a subprocess rather than grepping the files for marker text:
     that is what makes this see a mark applied anywhere — a file-level ``pytestmark``, a
-    per-test decorator, or one applied from a ``conftest.py`` hook.
+    per-test decorator, or one applied from a ``conftest.py`` hook. ``env_overrides`` is
+    layered over the ambient environment for the child only.
     """
     import tempfile
 
@@ -681,7 +684,7 @@ def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
             # ambient environment before it was routed through the helper, and
             # test_ci_workflow_parity_basetemp.py pins that PYTEST_DEBUG_TEMPROOT reaches
             # the child.
-            env=subprocess_env(),
+            env=subprocess_env(env_overrides),
             timeout=300,
             cwd=_ROOT,
             no_cacheprovider=False,
@@ -724,7 +727,7 @@ def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
         if isinstance(value, str) and _DEFAULT_SELECTION in value and "repo_policy" in value
     )
     routes = _default_suite_routes(selector_expression)
-    assert routes["macos"] == "platform_compat and not external"
+    assert routes["macos"] == "platform_compat and not external and not live"
     assert routes["primary"] == _DEFAULT_SELECTION
     assert routes["non_primary"] == f"{_DEFAULT_SELECTION} and not repo_policy"
     assert f'pytest -m "${selector_key}"' in default_step["run"]
@@ -736,11 +739,11 @@ def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
     integration_step = next(
         step for step in steps if step.get("name", "").startswith("Run the integration tier")
     )
-    assert "pytest -m integration" in integration_step["run"]
+    assert 'pytest -m "integration and not live"' in integration_step["run"]
 
 
 # Core OS-sensitive files that MUST remain in the reduced macOS compatibility suite
-# (story ci-runtime-round2). macOS runs ONLY `-m "platform_compat and not external"` +
+# (story ci-runtime-round2). macOS runs ONLY `-m "platform_compat and not external and not live"` +
 # the integration tier; if pattern drift in tests/conftest.py's platform_compat
 # auto-marking (or a file rename) silently drops these, the macOS cell would go green
 # while testing NONE of the platform behaviour it exists to protect (file locking,
@@ -757,16 +760,19 @@ _PLATFORM_COMPAT_CORE_MODULES = (
 
 def test_platform_compat_suite_covers_the_core_os_sensitive_seams() -> None:
     """The macOS compat subset must actually collect its load-bearing platform tests."""
-    node_ids = _collect_node_ids(_PLATFORM_COMPAT_CORE_MODULES, "platform_compat and not external")
+    node_ids = _collect_node_ids(
+        _PLATFORM_COMPAT_CORE_MODULES, "platform_compat and not external and not live"
+    )
     missing = [
         p for p in _PLATFORM_COMPAT_CORE_MODULES if not any(n.startswith(p) for n in node_ids)
     ]
     assert not missing, (
         f"platform-sensitive test file(s) {missing} collect NOTHING under "
-        '-m "platform_compat and not external". macOS runs only this subset + the integration '
-        "tier, so a file that stops matching tests/conftest.py's _PLATFORM_COMPAT_PATH_FRAGMENTS "
-        "(a rename, or a fragment edit) silently removes its platform coverage from CI on a green "
-        "build. Restore the match or update the fragment list deliberately."
+        '-m "platform_compat and not external and not live". macOS runs only this subset + '
+        "the integration tier, so a file that stops matching tests/conftest.py's "
+        "_PLATFORM_COMPAT_PATH_FRAGMENTS (a rename, or a fragment edit) silently removes its "
+        "platform coverage from CI on a green build. Restore the match or update the "
+        "fragment list deliberately."
     )
 
 
@@ -826,7 +832,7 @@ def test_macos_default_suite_lane_passes_when_platform_compat_collects_nothing(
     def run_lane(os_name: str, python_version: str) -> int:
         rendered = _render_default_suite_body(body, os_name, python_version, str(tmp_path))
         marks = (
-            "platform_compat and not external"
+            "platform_compat and not external and not live"
             if os_name == "macos-latest"
             else "not integration and not external"
         )
@@ -1485,3 +1491,40 @@ def test_selection_parity_detects_a_makefile_without_the_integration_tier() -> N
     assert make_selections != gating
     gaps = _uncovered_cell_selections(make_selections, gating)
     assert gaps and all(gap["integration"] for gap in gaps)
+
+
+# --------------------------------------------------------------------------- #
+# `make test` must never select a `live` test (bug 5f29-9bed-5a47-4a25). Those tests reach a
+# real Jira, and their only guard was a credential skip, so on a host whose shell exports
+# the Jira variables every `make verify` wrote to the production project. The guard is the
+# marker selection itself, so it must hold whatever credentials the environment carries.
+# --------------------------------------------------------------------------- #
+
+# Inert placeholders: the child only collects (no test body runs), and these stand in for a
+# shell that exports real Jira credentials, which is what armed the live module's skip gate.
+_PLACEHOLDER_JIRA_ENV = {
+    "JIRA_URL": "https://jira.invalid",
+    "JIRA_USER": "collect-only@example.invalid",
+    "JIRA_API_TOKEN": "collect-only-placeholder",
+}
+# Tests known to reach a real Jira; collected under `-m live` so the check is not vacuous.
+_KNOWN_LIVE_NODES = (
+    "tests/integration/test_reconcile_live_e2e.py::test_delete_permission_probe",
+    "tests/interfaces/facades/test_cli.py::test_bridge_preview_against_live_jira",
+)
+
+
+def test_make_test_never_selects_a_live_test_even_with_jira_credentials_set() -> None:
+    """Collect-only: `make test`'s selections, intersected with `live`, collect nothing."""
+    selections = _make_test_selections(_read(_MAKEFILE))
+    assert len(selections) >= 2, f"expected the default and integration tiers, found {selections}"
+    union = " or ".join(f"({expression})" for expression, _ in selections)
+    live = _collect_node_ids(_KNOWN_LIVE_NODES, "live", _PLACEHOLDER_JIRA_ENV)
+    assert sorted(live) == sorted(_KNOWN_LIVE_NODES), (
+        f"tests that reach a real Jira must carry `live`; collected under -m live: {live}"
+    )
+    selected = _collect_node_ids(("tests",), f"({union}) and live", _PLACEHOLDER_JIRA_ENV)
+    assert selected == [], (
+        f"`make test` ({[e for e, _ in selections]}) selects live-Jira tests when Jira "
+        f"credentials are set; every `make verify` would write to production Jira: {selected}"
+    )
