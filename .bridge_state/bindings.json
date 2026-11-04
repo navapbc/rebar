@@ -11282,6 +11282,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:14Z"
     },
+    "1a62-acd6-6ab7-4152": {
+      "created_at": "2026-11-04T07:32:07Z",
+      "jira_id": "4598241",
+      "jira_key": "REB-6970",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T07:32:12Z"
+    },
     "1a63-056e-98b9-4ab7": {
       "baseline": {
         "assignee": {
@@ -17001,6 +17008,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-04T23:43:16Z"
+    },
+    "27e0-a55f-baf1-4cf8": {
+      "created_at": "2026-11-04T07:32:12Z",
+      "jira_id": "4598242",
+      "jira_key": "REB-6971",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T07:32:15Z"
     },
     "27fa-9a47-0ea1-470a": {
       "baseline": {
@@ -26238,9 +26252,17 @@
       "updated_at": "2026-09-04T21:36:43Z"
     },
     "3cde-75da-b413-426c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`tests/interfaces/facades/test_mcp_auth_jwks.py::test_rejects_bad_claims[mint_kwargs3]` fails whenever more than 1 hour passes between test collection and the moment the test runs.\n\nThe cause is the parametrize list (lines 165-173). Its `nbf` and `exp` values are computed with `int(time.time())` when pytest imports the module, not when the test runs.\n\nObserved on 2026-11-03 in a `make verify` run in fix-slug2 that took 4 h 58 min on a host with load average about 40:\n- The parametrized `nbf` was 1793758291, which is collection time plus 3600 s.\n- The token was minted later, at about 1793760867: its default `exp` of 1793764467 is mint time plus 3600 s.\n- By then `nbf` was already in the past, so the verifier accepted the \"not yet valid\" token, and the test's assertion that it is `None` failed.\n- In isolation the module passes 3 out of 3 runs.\n\nThe `exp` case (`mint_kwargs2`) has the same flaw, but there time only makes the token more expired, so that case stays correct by luck.\n\n## Approach\n\nCompute the claim values at test time. Parametrize with offsets, for example `(\"nbf\", +3600)`, and add `int(time.time())` inside the test body.\n\n## Acceptance Criteria\n\n- [ ] The values of `test_rejects_bad_claims` are computed in the test body. A test proves this: with `time.time` monkeypatched forward 2 h between collection and the call, `mint_kwargs3` still asserts rejection.\n- [ ] `pytest tests/interfaces/facades/test_mcp_auth_jwks.py` passes.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "JWKS rejection test computes nbf at collection time, so a run over 1 h accepts the token"
+      },
       "created_at": "2026-11-04T06:38:59Z",
       "jira_id": "4598239",
       "jira_key": "REB-6968",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-04T06:39:02Z"
     },
@@ -50155,7 +50177,7 @@
         },
         "description": "## Context / Problem\n\nIn `tests/unit/reconciler/apply/test_peer_confirmations_store.py`, `test_store_survives_snapshot_compaction_of_the_ticket_log` runs `python -m rebar store compact <id>` with `check=False`, discards the result, and then asserts that the peer confirmation is still recorded. If compaction fails, the confirmation stays untouched and the assertion still holds, so the test passes without testing anything.\n\nObserved 2026-11-03 (session a85e3cd3): with a fake `rebar` that exits 99 first on `PATH`, at a time when the test still started the bare `rebar`, the test passed even though compaction never ran. Gerrit 3281 (`1a7b92d137d`) switched the test to `[sys.executable, \"-m\", \"rebar\", ...]`, so it now runs the build under test, but a failed compaction would still pass.\n\nRoot cause, measured 2026-11-03 against `2e8e8051796` by replaying the test's exact scenario in a scratch script: even when the command succeeds, it folds nothing. The ticket has 2 events (CREATE + LINK), and the command prints `below threshold (2 <= 10) \u2014 skipping compaction` with exit 0; both event files are still present afterwards. The default threshold is 10 (`compact.threshold`, usage text in `src/rebar/_commands/compact.py:_usage`) and the default horizon keeps events younger than 1800 s live. With `--threshold=0 --horizon=0` the same scenario exits 0, prints `compacted events into SNAPSHOT for <id>`, writes one `*-SNAPSHOT.json`, and renames both event files to `*.json.retired`. So the test has 2 defects: it ignores the result, and the compaction it relies on never occurs.\n\n## Approach\n\nChange only that test:\n\n1. Pass `--threshold=0 --horizon=0` to `store compact` so the 2-event ticket is actually folded. Both flags are parsed by `compact_cli` in `src/rebar/_commands/compact.py` (the `--threshold=`/`--horizon=` branch).\n2. Keep `[sys.executable, \"-m\", \"rebar\", \"store\", \"compact\", ...]` from Gerrit 3281, and pass `env=subprocess_env(...)` from `tests/_subprocess_env.py` so the child environment is built the repo's standard way.\n3. Assert `result.returncode == 0` (message includes stdout and stderr), then assert the observable fold in the ticket directory: at least 1 `*-SNAPSHOT.json` exists and no live (non-retired) `*-CREATE.json`/`*-LINK.json` event remains. Only then assert the peer confirmation survived.\n\nRejected: checking stdout text only (wording can change without behavior changing); calling `rebar.compact()` in-process (the test deliberately exercises the CLI path the build ships).\n\n## Scope\n\n- `tests/unit/reconciler/apply/test_peer_confirmations_store.py` \u2014 the compaction test only.\n\nNo production code changes. Other tests that drop a compaction or fsck result are tracked separately (see the linked `discovered_from` bug), because each needs its own per-test anchor and they are outside this test's edit set.\n\n## Testing\n\n- Red first, seeded failure: run a scratch-only copy of the test (under `.rebar/scratch/`, never committed) whose `store compact` argv carries an extra unknown argument `--seeded-failure`. `compact_cli` rejects any argument other than `--threshold=`/`--horizon=`/`--skip-sync`/`--no-commit` with exit 1 (the reject guard in `src/rebar/_commands/compact.py:compact_cli`). Show the strengthened copy FAILS on the exit-code assertion, and the old test body passes under the same seeded failure, demonstrating the bug.\n- Red for the no-op case: run the strengthened test without `--threshold=0 --horizon=0` and show it fails on the SNAPSHOT assertion (exit 0 but nothing folded).\n- Green: `pytest tests/unit/reconciler/apply/test_peer_confirmations_store.py` passes.\n- Gates: `make lint` and `make typecheck` with the worktree `.venv/bin` first on `PATH` both exit 0. CI `Verified +1` on the Gerrit change.\n\n## Acceptance Criteria\n\n- [x] The compaction test asserts that `store compact` succeeded (exit 0) and that it actually compacted the ticket (a `*-SNAPSHOT.json` exists and no live CREATE/LINK event file remains), before it checks that the confirmation survived.\n- [x] A seeded failure (compaction made to exit non-zero) makes the test fail, shown by a recorded run on the ticket.\n- [x] `pytest tests/unit/reconciler/apply/test_peer_confirmations_store.py` passes, and `make lint` and `make typecheck` exit 0.\n\n## Result\n\nLanded as Gerrit 3286, merged `5b7ddceab21` (LLM-Review +1, Verified +1). Seeded-failure, no-op, and green runs are recorded in the ticket comment dated 2026-11-03. Remaining vacuous compaction tests: soldierly-arbitrary-hackee.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Peer-confirmation compaction test passes with no compaction"
       },
       "created_at": "2026-11-04T03:33:40Z",
@@ -55323,10 +55345,24 @@
     },
     "83ba-5be6-dad3-43ec": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\n\n4 compaction tests drop the integer exit code of the in-process `compact_all_cli` call and then assert only absences, so they pass when compaction does nothing and fails.\n\nObserved 2026-11-03 at `2e8e8051796` (session a85e3cd3, while working depressant-existent-squirrel): a scratch-only pytest plugin replaced `rebar._commands.compact.compact_all_cli` and `compact_cli` with a function that returns 1 without doing anything. All 4 tests below still PASSED (`4 passed in 77.35s`):\n\n- `tests/unit/test_compact_sweep_perf.py::test_no_history_walk_runs_while_the_store_lock_is_held`: the only assertion is `assert not walks_under_lock`.\n- `tests/unit/test_compact_sweep_perf.py::test_the_sweep_yields_when_a_writer_takes_the_lock_mid_run`: the only assertion is `len(snapshotted) <= 1`, which 0 folds satisfies.\n- `tests/unit/test_compact_all_selection.py::test_dry_run_never_pushes`: the only assertion is `assert not calls`.\n- `tests/unit/test_compact_all_selection.py::test_no_commit_never_pushes`: the only assertion is `assert not calls`.\n\nThe sibling tests in `tests/unit/test_compact_fold_prelock.py` already guard against this with an `ANCHOR:` assertion (for example `assert seen, \"ANCHOR: ...\"`) or a SNAPSHOT precondition. In the same plugin run, those tests were not separated out, so their behavior under the seeded failure has not been measured.\n\nNot checked: `tests/interfaces/store/test_fsck_push_pending.py:97` drops the `_cli.main([\"store\", \"fsck\"])` result and asserts only `\"PUSH_PENDING\" not in out`. That shape is the same, but it is unmeasured.\n\n## Acceptance Criteria\n\n- [ ] Each of the 4 tests asserts `compact_all_cli(...) == 0` and an anchor showing the sweep reached the code under test (for the 2 sweep-perf tests, at least 1 SNAPSHOT or 1 recorded walk; for the 2 selection tests, the expected early-return or no-commit path ran), so the seeded no-op-returning-1 plugin makes each one FAIL.\n- [ ] The fsck_push_pending site is measured under a seeded fsck failure and either strengthened the same way or recorded on this ticket as not vacuous.\n- [ ] The touched test files pass under `pytest`.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\n4 compaction tests drop the integer exit code of the in-process `compact_all_cli` call and then assert only absences, so they pass when compaction does nothing and fails.\n\nObserved 2026-11-03 at `2e8e8051796` (session a85e3cd3, while working depressant-existent-squirrel): a scratch-only pytest plugin replaced `rebar._commands.compact.compact_all_cli` and `compact_cli` with a function that returns 1 without doing anything. All 4 tests below still PASSED (`4 passed in 77.35s`); re-measured at `90d57e392ba` with the same result (`4 passed in 90.65s`):\n\n- `tests/unit/test_compact_sweep_perf.py::test_no_history_walk_runs_while_the_store_lock_is_held`: the only assertion is `assert not walks_under_lock`.\n- `tests/unit/test_compact_sweep_perf.py::test_the_sweep_yields_when_a_writer_takes_the_lock_mid_run`: the only assertion is `len(snapshotted) <= 1`, which 0 folds satisfies.\n- `tests/unit/test_compact_all_selection.py::test_dry_run_never_pushes`: the only assertion is `assert not calls`.\n- `tests/unit/test_compact_all_selection.py::test_no_commit_never_pushes`: the only assertion is `assert not calls`.\n\nfsck site, measured at `90d57e392ba` with a scratch plugin replacing `rebar._commands.fsck.fsck_cli` (the `store fsck` handler named at `src/rebar/_cli/_registry.py:457`) by a no-op returning 1: `tests/interfaces/store/test_fsck_push_pending.py::test_fsck_quiet_when_in_sync` PASSED, so it is vacuous the same way (it drops the `_cli.main([\"store\", \"fsck\"])` result and asserts only `\"PUSH_PENDING\" not in out`). The 3 sibling tests that call fsck through the CLI failed as they should; the other 4 call `fsck._tracker_sync_status` or a write directly and are unaffected by the seed.\n\n## Approach\n\nFollow the precedent of `5b7ddceab21` (depressant-existent-squirrel): capture the exit status, assert it, and assert a real effect that only a working run produces. Each anchor must test the behaviour the test is named for, not only the exit code:\n\n- **Lock test.** Assert `compact_all_cli([]) == 0`, and that all 3 seeded tickets now hold a `*-SNAPSHOT.json`. Also wrap `rebar._commands.compact_txn._build_authorship_ledger` (called under the lock from `_fold_under_lock`, `src/rebar/_commands/compact_txn.py:666`) to record whether `.ticket-write.lock.d` (`MKDIR_LOCK_NAME`, `src/rebar/_store/lock.py:37`) exists at that moment, and assert it was observed present at least once. That proves the probe can see the held lock, so `not walks_under_lock` is a real negative. Also assert at least 1 history walk was recorded (the pre-lock sweep map from `_sweep_position_map`, `src/rebar/_commands/compact.py:405`), so the wrappers were reached.\n- **Yield test.** Assert rc 0, exactly 1 SNAPSHOT (the first ticket folds, then the second probe reports busy and `_sweep_should_yield`, `compact.py:316`, breaks the loop in `_run_sweep`, `compact.py:419`), and that `write_lock_is_busy` was probed exactly 2 times. Exactly-1 replaces `<= 1`, so a sweep that never folded fails, and so does one that ignored the busy probe.\n- **dry-run / no-commit tests.** Both seed `REBAR_COMPACT_THRESHOLD=9999`, so they exercise the \"Nothing to do.\" early return (`compact.py:524-527`), which calls `_best_effort_push` (`compact.py:277`) with the flag. Assert rc 0 and `\"Nothing to do.\"` in captured stdout (add `capsys`), in addition to `not calls`.\n- **fsck in-sync test.** Assert rc 0 and `\"fsck complete: no issues found\"` in stdout (the healthy summary, `src/rebar/_commands/fsck.py:412`; observed on a probe store at `90d57e392ba`), in addition to the existing absence check.\n\nNo source change, no new fixture, no autouse fixture. Thresholds are already forced: the sweep-perf fixture sets `REBAR_COMPACT_THRESHOLD=1` and ages events by 1 hour past the 1800 s horizon, so no `--threshold=0 --horizon=0` is needed there.\n\n## Scope\n\n- `tests/unit/test_compact_sweep_perf.py` \u2014 strengthen the 2 sweep tests.\n- `tests/unit/test_compact_all_selection.py` \u2014 strengthen the 2 push tests.\n- `tests/interfaces/store/test_fsck_push_pending.py` \u2014 strengthen `test_fsck_quiet_when_in_sync`.\n\n## Testing\n\nFailing-first proof: the scratch plugin (outside the repo, in `.rebar/scratch/`) is loaded with `pytest -p`; with `SEED_MODE=compact` each of the 4 strengthened compaction tests must FAIL, and with `SEED_MODE=fsck` the strengthened in-sync test must FAIL. Without the plugin, all touched files pass under `pytest`. `make lint` and `make typecheck` pass.\n\n## Acceptance Criteria\n\n- [ ] Each of the 4 tests asserts `compact_all_cli(...) == 0` and an anchor showing the sweep reached the code under test (for the 2 sweep-perf tests, at least 1 SNAPSHOT or 1 recorded walk; for the 2 selection tests, the expected early-return or no-commit path ran), so the seeded no-op-returning-1 plugin makes each one FAIL.\n- [ ] The fsck_push_pending site is measured under a seeded fsck failure and either strengthened the same way or recorded on this ticket as not vacuous.\n- [ ] The touched test files pass under `pytest`.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Compaction sweep tests pass when the sweep fails"
       },
       "created_at": "2026-11-04T04:32:57Z",
@@ -56592,6 +56628,13 @@
       "peer_parent": "REB-1562",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:29Z"
+    },
+    "8629-d0b1-30fd-4c34": {
+      "created_at": "2026-11-04T07:32:15Z",
+      "jira_id": "4598243",
+      "jira_key": "REB-6972",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T07:32:18Z"
     },
     "863f-52ef-c3a8-4794": {
       "baseline": {
@@ -75337,6 +75380,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:59Z"
     },
+    "aff8-ad69-3194-46b0": {
+      "created_at": "2026-11-04T07:32:19Z",
+      "jira_id": "4598244",
+      "jira_key": "REB-6973",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T07:32:21Z"
+    },
     "aff9-1252-ad21-4695": {
       "baseline": {
         "assignee": null,
@@ -75818,6 +75868,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T15:38:42Z"
+    },
+    "b0f0-3dd2-fcf2-4707": {
+      "created_at": "2026-11-04T07:32:22Z",
+      "jira_id": "4598245",
+      "jira_key": "REB-6974",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T07:32:24Z"
     },
     "b0f5-eb05-ed27-4671": {
       "baseline": {
@@ -100962,9 +101019,9 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\n`infra/scripts/docker-storage-cap.sh` `effective_gc_verdict` reads BuildKit's effective GC ceiling from `docker buildx inspect` with a `sed` that matches only `Keep Bytes:` lines. Both the `--install` read-back (`report_effective_gc_policy`) and the every-tick `--check-gc-enforced` probe behind the `docker_buildkit_gc_enforced` metric and the `rebar-docker-buildkit-gc-not-enforced` alarm use it.\n\nFrom buildx v0.18.0, `inspect` no longer prints `Keep Bytes:`. On any host whose buildx CLI plugin is v0.18.0 or later, the parser finds nothing, the verdict is \"unreadable\" (return 2), `--check-gc-enforced` prints nothing, and the metric reads unknown permanently. buildx is a CLI plugin versioned independently of dockerd, so a package update alone triggers this. Not live: rebar-gerrit still prints `Keep Bytes:`.\n\nEvidence (primary sources):\n- docker/buildx `commands/inspect.go` at v0.17.0 prints `\\tKeep Bytes:\\t%s` from `rule.KeepBytes`. At v0.18.0 it prints `\\tReserved Space:\\t%s`, `\\tMax Used Space:\\t%s` and `\\tMin Free Space:\\t%s`, each only when non-zero, all via go-units `BytesSize` (`%.4g` + binary suffix, e.g. `5GiB`). The change is buildx commit 64c5139ab6 (2024-10-08), first tagged in v0.18.0. https://github.com/docker/buildx/blob/v0.18.0/commands/inspect.go\n- The buildx reference doc `docs/reference/buildx_inspect.md` still shows `Keep Bytes:` at v0.18.0 through main. The doc contradicts the source, and the source is what runs, so test fixtures follow `inspect.go`.\n- moby/buildkit `api/types/worker.proto`: v0.16.0 field 3 is `keepBytes`. v0.17.0 renames field 3 to `reservedSpace` and adds `maxUsedSpace` = 5 and `minFreeSpace` = 6. So buildx >= 0.18 against an old daemon (BuildKit 0.12.6, as on production) shows the old keep-bytes as `Reserved Space:`.\n- BuildKit v0.20.0 `cache/manager.go` `calculateKeepBytes`: keep = maxUsedSpace, lowered by the min-free excess, then raised to at least reservedSpace. So a rule's upper bound is `max(reservedSpace, maxUsedSpace)`, and `minFreeSpace` only ever lowers it. The widest ceiling over all rules is therefore the largest value on any `Keep Bytes:`, `Reserved Space:` or `Max Used Space:` line. `Min Free Space:` is a disk-free floor, not a cache size, and must be excluded.\n\n## Approach\n\nWiden the one existing extractor rather than add a second parser. In `effective_gc_verdict`, change the `sed` expression to capture the value after `Keep Bytes:`, `Reserved Space:` or `Max Used Space:` (case-insensitive first letters, as today). The Python comparison needs no change. Both shapes print the same value format: buildx v0.17.0 `inspect.go:126` already formats `Keep Bytes:` with `units.BytesSize(float64(rule.KeepBytes))`, the same go-units `BytesSize` (e.g. `5.588GiB`) that v0.18.0 uses for the three new labels. The existing `as_bytes` in the heredoc (`docker-storage-cap.sh:211-218`, `UNITS` with `b`, `kb`...`tb`, `kib`...`tib`) already parses that format, and the existing live-host test `test_check_gc_enforced_prints_0_on_the_live_host_shape` feeds it `5.588GiB`. It already takes the largest captured size, so the widest-rule semantics stay unchanged for legacy output. `Min Free Space:` is deliberately not matched. Then update the surrounding comments, the \"keep-bytes\" wording in the three read-back warnings, and the `--check-gc-enforced` header, so they name both output shapes. `--install` and `--check-gc-enforced` share this function, so both are fixed by one edit.\n\n`infra/runbooks/review-bot-ops.md`: the diagnostic `grep -E 'Buildkit|Keep Bytes'` also matches the new labels.\n\nOut of scope: `infra/terraform/monitoring_autodeploy.tf` alarm descriptions that say \"Keep Bytes\". Editing them makes a Terraform diff that only an apply clears, and production is read-only here.\n\n## Scope\n\n- `infra/scripts/docker-storage-cap.sh` \u2014 the `effective_gc_verdict` extractor, its comments and the read-back warnings.\n- `tests/scripts/test_docker_storage_cap.py` \u2014 a buildx >= 0.18 inspect fixture in `_bindir`'s `docker` stub (new `inspect_shape` keyword, default the current legacy shape) and the new tests.\n- `infra/runbooks/review-bot-ops.md` \u2014 the diagnostic grep.\n\n## Testing\n\nWritten first, failing on the current tree. The new fixture reproduces v0.18.0 `inspect.go` output for a Docker-driver builder: tab-separated labels, rule#0 filtered with `Max Used Space` (small temp-cache cap), and rules #1-#3 with `Reserved Space` only (the Engine 25-27 / BuildKit <= 0.16 daemon mapping, and the Engine 28 `defaultKeepStorage` mapping):\n- `--check-gc-enforced` prints `1` when the widest `Reserved Space` is 5GiB.\n- It prints `0` on the production value (5.588GiB) in the new shape.\n- It prints `1` when the widest ceiling is a `Max Used Space` of 5GiB with a smaller `Reserved Space`.\n- A `Min Free Space: 5GiB` line beside a `Reserved Space: 20GiB` gives `0` (min-free not counted).\n- A new-shape output with no space lines prints nothing and exits non-zero (unreadable).\n- `--install` read-back over the new shape warns \"IS being enforced\" on a match and \"does NOT match\" on a mismatch.\n- Every existing legacy `Keep Bytes:` test passes unchanged.\n\n## Acceptance Criteria\n\n- [ ] `--check-gc-enforced` prints `1`, `0` or nothing for the buildx >= 0.18 fixtures in the Testing section. Verified by the new tests in `tests/scripts/test_docker_storage_cap.py`.\n- [ ] The `--install` read-back reports enforced or mismatch over the buildx >= 0.18 fixture. Verified by the new tests.\n- [ ] A `Min Free Space:` value never counts as the ceiling. Verified by the min-free test.\n- [ ] Legacy `Keep Bytes:` output gives the same verdicts as before. Verified by the existing `--check-gc-enforced` and read-back tests passing unmodified.\n- [ ] `.venv/bin/pytest tests/scripts/test_docker_storage_cap.py` passes.\n- [ ] `make lint` exits 0, with the worktree `.venv/bin` first on PATH.\n- [ ] `make typecheck` exits 0, with the worktree `.venv/bin` first on PATH.\n- [ ] [non-codebase] The change lands on `main` through Gerrit with `LLM-Review +1` and `Verified +1`.",
+        "description": "## Context / Problem\n\n`infra/scripts/docker-storage-cap.sh` `effective_gc_verdict` reads BuildKit's effective GC ceiling from `docker buildx inspect` with a `sed` that matches only `Keep Bytes:` lines. Both the `--install` read-back (`report_effective_gc_policy`) and the every-tick `--check-gc-enforced` probe behind the `docker_buildkit_gc_enforced` metric and the `rebar-docker-buildkit-gc-not-enforced` alarm use it.\n\nFrom buildx v0.18.0, `inspect` no longer prints `Keep Bytes:`. On any host whose buildx CLI plugin is v0.18.0 or later, the parser finds nothing, the verdict is \"unreadable\" (return 2), `--check-gc-enforced` prints nothing, and the metric reads unknown permanently. buildx is a CLI plugin versioned independently of dockerd, so a package update alone triggers this. Not live: rebar-gerrit still prints `Keep Bytes:`.\n\nEvidence (primary sources):\n- docker/buildx `commands/inspect.go` at v0.17.0 prints `\\tKeep Bytes:\\t%s` from `rule.KeepBytes`. At v0.18.0 it prints `\\tReserved Space:\\t%s`, `\\tMax Used Space:\\t%s` and `\\tMin Free Space:\\t%s`, each only when non-zero, all via go-units `BytesSize` (`%.4g` + binary suffix, e.g. `5GiB`). The change is buildx commit 64c5139ab6 (2024-10-08), first tagged in v0.18.0. https://github.com/docker/buildx/blob/v0.18.0/commands/inspect.go\n- The buildx reference doc `docs/reference/buildx_inspect.md` still shows `Keep Bytes:` at v0.18.0 through main. The doc contradicts the source, and the source is what runs, so test fixtures follow `inspect.go`.\n- moby/buildkit `api/types/worker.proto`: v0.16.0 field 3 is `keepBytes`. v0.17.0 renames field 3 to `reservedSpace` and adds `maxUsedSpace` = 5 and `minFreeSpace` = 6. So buildx >= 0.18 against an old daemon (BuildKit 0.12.6, as on production) shows the old keep-bytes as `Reserved Space:`.\n- BuildKit v0.20.0 `cache/manager.go` `calculateKeepBytes`: keep = maxUsedSpace, lowered by the min-free excess, then raised to at least reservedSpace. So a rule's upper bound is `max(reservedSpace, maxUsedSpace)`, and `minFreeSpace` only ever lowers it. The widest ceiling over all rules is therefore the largest value on any `Keep Bytes:`, `Reserved Space:` or `Max Used Space:` line. `Min Free Space:` is a disk-free floor, not a cache size, and must be excluded.\n\n## Approach\n\nWiden the one existing extractor rather than add a second parser. In `effective_gc_verdict`, change the `sed` expression to capture the value after `Keep Bytes:`, `Reserved Space:` or `Max Used Space:` (case-insensitive first letters, as today). The Python comparison needs no change. Both shapes print the same value format: buildx v0.17.0 `inspect.go:126` already formats `Keep Bytes:` with `units.BytesSize(float64(rule.KeepBytes))`, the same go-units `BytesSize` (e.g. `5.588GiB`) that v0.18.0 uses for the three new labels. The existing `as_bytes` in the heredoc (`docker-storage-cap.sh:211-218`, `UNITS` with `b`, `kb`...`tb`, `kib`...`tib`) already parses that format, and the existing live-host test `test_check_gc_enforced_prints_0_on_the_live_host_shape` feeds it `5.588GiB`. It already takes the largest captured size, so the widest-rule semantics stay unchanged for legacy output. `Min Free Space:` is deliberately not matched. Then update the surrounding comments, the \"keep-bytes\" wording in the three read-back warnings, and the `--check-gc-enforced` header, so they name both output shapes. `--install` and `--check-gc-enforced` share this function, so both are fixed by one edit.\n\n`infra/runbooks/review-bot-ops.md`: the diagnostic `grep -E 'Buildkit|Keep Bytes'` also matches the new labels.\n\nOut of scope: `infra/terraform/monitoring_autodeploy.tf` alarm descriptions that say \"Keep Bytes\". Editing them makes a Terraform diff that only an apply clears, and production is read-only here.\n\n## Scope\n\n- `infra/scripts/docker-storage-cap.sh` \u2014 the `effective_gc_verdict` extractor, its comments and the read-back warnings.\n- `tests/scripts/test_docker_storage_cap.py` \u2014 a buildx >= 0.18 inspect fixture in `_bindir`'s `docker` stub (new `inspect_shape` keyword, default the current legacy shape) and the new tests.\n- `infra/runbooks/review-bot-ops.md` \u2014 the diagnostic grep.\n\n## Testing\n\nWritten first, failing on the current tree. The new fixture reproduces v0.18.0 `inspect.go` output for a Docker-driver builder: tab-separated labels, rule#0 filtered with `Max Used Space` (small temp-cache cap), and rules #1-#3 with `Reserved Space` only (the Engine 25-27 / BuildKit <= 0.16 daemon mapping, and the Engine 28 `defaultKeepStorage` mapping):\n- `--check-gc-enforced` prints `1` when the widest `Reserved Space` is 5GiB.\n- It prints `0` on the production value (5.588GiB) in the new shape.\n- It prints `1` when the widest ceiling is a `Max Used Space` of 5GiB with a smaller `Reserved Space`.\n- A `Min Free Space: 5GiB` line beside a `Reserved Space: 20GiB` gives `0` (min-free not counted).\n- A new-shape output with no space lines prints nothing and exits non-zero (unreadable).\n- `--install` read-back over the new shape warns \"IS being enforced\" on a match and \"does NOT match\" on a mismatch.\n- Every existing legacy `Keep Bytes:` test passes unchanged.\n\n## Acceptance Criteria\n\n- [x] `--check-gc-enforced` prints `1`, `0` or nothing for the buildx >= 0.18 fixtures in the Testing section. Verified by the new tests in `tests/scripts/test_docker_storage_cap.py`.\n- [x] The `--install` read-back reports enforced or mismatch over the buildx >= 0.18 fixture. Verified by the new tests.\n- [x] A `Min Free Space:` value never counts as the ceiling. Verified by the min-free test.\n- [x] Legacy `Keep Bytes:` output gives the same verdicts as before. Verified by the existing `--check-gc-enforced` and read-back tests passing unmodified.\n- [x] `.venv/bin/pytest tests/scripts/test_docker_storage_cap.py` passes.\n- [x] `make lint` exits 0, with the worktree `.venv/bin` first on PATH.\n- [x] `make typecheck` exits 0, with the worktree `.venv/bin` first on PATH.\n- [x] [non-codebase] The change lands on `main` through Gerrit with `LLM-Review +1` and `Verified +1`.\n      provenance: environment=rebar.solutions.navateam.com (Gerrit, project rebar); principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 Gerrit change 3287 read via REST /a/changes/3287 with DETAILED_LABELS: LLM-Review +1 (2026-11-04 05:06:08 UTC), Verified +1 (05:27:40 UTC, GitHub Actions run 41776732938), 0 unresolved comments; submitted at revision c3eaed011e8 and merged as 90d57e392ba, now on origin/main.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "docker-storage-cap GC readback misses buildx>=0.18 labels"
       },
       "created_at": "2026-11-04T04:33:02Z",
@@ -103326,6 +103383,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-28T12:17:46Z"
+    },
+    "f121-ed38-6939-43b9": {
+      "created_at": "2026-11-04T07:32:24Z",
+      "jira_id": "4598246",
+      "jira_key": "REB-6975",
+      "state": "confirmed",
+      "updated_at": "2026-11-04T07:32:27Z"
     },
     "f124-f14a-fd62-4973": {
       "baseline": {
@@ -114999,7 +115063,15 @@
     "1793765399154099001": "__rebar_unknown_comment_id__",
     "1793767062136800001": "__rebar_unknown_comment_id__",
     "1793773436596624001": "__rebar_unknown_comment_id__",
-    "1793774148835020001": "__rebar_unknown_comment_id__"
+    "1793774148835020001": "__rebar_unknown_comment_id__",
+    "1793774626023856001": "__rebar_unknown_comment_id__",
+    "1793774663616151001": "__rebar_unknown_comment_id__",
+    "1793774664980866001": "__rebar_unknown_comment_id__",
+    "1793774788946145001": "__rebar_unknown_comment_id__",
+    "1793775811043963001": "__rebar_unknown_comment_id__",
+    "1793776153324195001": "__rebar_unknown_comment_id__",
+    "1793776177798621001": "__rebar_unknown_comment_id__",
+    "1793777023855816001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -120432,6 +120504,12 @@
     "REB-6967": "eb89-806b-8f46-4dbd",
     "REB-6968": "3cde-75da-b413-426c",
     "REB-697": "9f78-ccbf-9248-4097",
+    "REB-6970": "1a62-acd6-6ab7-4152",
+    "REB-6971": "27e0-a55f-baf1-4cf8",
+    "REB-6972": "8629-d0b1-30fd-4c34",
+    "REB-6973": "aff8-ad69-3194-46b0",
+    "REB-6974": "b0f0-3dd2-fcf2-4707",
+    "REB-6975": "f121-ed38-6939-43b9",
     "REB-698": "1733-6b71-e83d-49c3",
     "REB-699": "315d-b4ba-6c9e-482d",
     "REB-7": "0333-3aea-0464-4b93",
