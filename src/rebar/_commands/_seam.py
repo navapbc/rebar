@@ -383,16 +383,17 @@ def finalize_event(
     writes. It neither commits nor pushes."""
     screen_event(data)
     if _batch_sink.get() is None:
-        _refuse_unpublishable_store(tracker)
+        _refuse_unpublishable_store(tracker, repo_root=repo_root)
     event.update(attribution_fields(repo_root))
     _apply_authorship(event, ticket_id, event_type, data, tracker, repo_root)
 
 
-def _refuse_unpublishable_store(tracker) -> None:
-    """Fail before committing an event to a tracker with an unrecoverable split history."""
+def _refuse_unpublishable_store(tracker, repo_root=None) -> None:
+    """Fail before committing an event to a tracker with an unrecoverable split history.
+    ``repo_root`` is the write's code repo; ``None`` resolves the ambient one."""
     from rebar._store.freshness import write_blocking_divergence
 
-    stale = write_blocking_divergence(tracker)
+    stale = write_blocking_divergence(tracker, repo_root=repo_root)
     if stale is None:
         return
     remote_ref = stale.get("remote_ref", "the shared store")

@@ -7,11 +7,13 @@ writes retain B4 policy. Push failure is a signal, never an exception."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 from _git_upkeep import init_bare_remote
+from _subprocess_env import subprocess_env
 
 from rebar._store import freshness, push_state
 
@@ -203,6 +205,65 @@ def test_write_divergence_probe_ignores_non_store_remote_ref(
     monkeypatch.setattr(gitutil, "run_git", _run_git)
 
     assert freshness.write_blocking_divergence(str(store)) is None
+
+
+def _code_repo(path: Path, origin_url: str, *, sync_remote: str = "origin") -> Path:
+    """A plain code checkout whose ``sync_remote`` points at ``origin_url``."""
+    path.mkdir()
+    env = subprocess_env()
+    for args in (("init", "-q"), ("remote", "add", sync_remote, origin_url)):
+        subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True, env=env)
+    if sync_remote != "origin":
+        (path / "rebar.toml").write_text(f'[sync]\nremote = "{sync_remote}"\n')
+    return path
+
+
+def test_write_divergence_probe_reads_the_explicit_repo_not_the_ambient_one(
+    store: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cliffy-nonliving-blacklab: a write's ``repo_root`` owns the guard's config and git.
+
+    The ambient repo (``REBAR_ROOT``) configures a different ``sync.remote``. Read from it,
+    the guard probes a remote the tracker lacks and skips a real split history.
+    """
+    from rebar._store import gitutil
+
+    origin = _git(store, "remote", "get-url", "origin").stdout.strip()
+    owner = _code_repo(tmp_path / "owner", origin)
+    ambient = _code_repo(tmp_path / "ambient", str(tmp_path / "other.git"), sync_remote="upstream")
+    monkeypatch.setenv("REBAR_ROOT", str(ambient))
+    _git(store, "checkout", "-q", "--orphan", "rebuilt")
+    _git(store, "commit", "-q", "-m", "independently rebuilt store")
+    # The guard only trusts a remote ref that holds a ticket store.
+    other = tmp_path / "publisher"
+    subprocess.run(
+        ["git", "clone", "-q", "-b", "tickets", origin, str(other)],
+        check=True,
+        capture_output=True,
+        env=subprocess_env(),
+    )
+    (other / ".store-compat.json").write_text("{}\n")
+    _git(other, "-c", "user.email=o@e.com", "-c", "user.name=O", "add", ".store-compat.json")
+    _git(other, "-c", "user.email=o@e.com", "-c", "user.name=O", "commit", "-q", "-m", "compat")
+    _git(other, "push", "-q", "origin", "HEAD:tickets")
+    _git(store, "fetch", "-q", "origin", "+refs/heads/tickets:refs/remotes/origin/tickets")
+
+    calls: list[tuple[str, tuple[str, ...]]] = []
+    real_run_git = gitutil.run_git
+
+    def _spy(cwd, *args, **kwargs):
+        calls.append((os.path.realpath(str(cwd)), args))
+        return real_run_git(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(gitutil, "run_git", _spy)
+
+    stale = freshness.write_blocking_divergence(str(store), repo_root=str(owner))
+
+    ambient_real = os.path.realpath(ambient)
+    assert not [c for c in calls if c[0] == ambient_real], f"git ran in the ambient repo: {calls}"
+    assert (os.path.realpath(owner), ("remote", "get-url", "origin")) in calls, calls
+    assert stale is not None and stale["verdict"] == "diverged", (stale, calls)
+    assert stale["remote_ref"] == "origin/tickets"
 
 
 def test_the_probe_fails_OPEN_on_its_own_error(

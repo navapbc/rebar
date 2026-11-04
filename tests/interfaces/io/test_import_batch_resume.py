@@ -71,7 +71,8 @@ def test_import_checks_publishability_once_per_batch_commit(tmp_path: Path, monk
     n = 10
     checks: list[str] = []
 
-    def counted_refusal(probed_tracker: str) -> None:
+    def counted_refusal(probed_tracker: str, repo_root: str | None = None) -> None:
+        assert repo_root == str(dst), "the importer must probe with its own repo_root"
         checks.append(str(probed_tracker))
 
     monkeypatch.setattr(_seam, "_refuse_unpublishable_store", counted_refusal)

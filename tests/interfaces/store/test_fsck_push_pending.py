@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar import _cli
@@ -227,6 +228,51 @@ def test_first_write_refuses_unrelated_diverged_store(
     assert "ticket write refused" in msg
     assert "DIVERGED" in msg
     assert "fsck-recover" in msg
+
+
+def _ambient_repo(path: Path, *, sync_remote: str) -> Path:
+    """An unrelated checkout whose ``sync_remote`` points somewhere else entirely."""
+    path.mkdir()
+    env = subprocess_env()
+    for args in (("init", "-q"), ("remote", "add", sync_remote, str(path / "elsewhere.git"))):
+        subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, env=env)
+    if sync_remote != "origin":
+        (path / "rebar.toml").write_text(f'[sync]\nremote = "{sync_remote}"\n')
+    return path
+
+
+@pytest.mark.parametrize("ambient_sync_remote", ["origin", "upstream"])
+def test_split_store_write_is_refused_when_cwd_repo_is_unrelated(
+    repo_with_origin: tuple[Path, Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    ambient_sync_remote: str,
+) -> None:
+    """cliffy-nonliving-blacklab: the guard follows the write's ``repo_root``.
+
+    With ``REBAR_ROOT`` at an unrelated repo, the guard used to read that repo's remote:
+    a different URL (``origin``) or a remote the tracker lacks (``upstream``) made it
+    allow the write, stranding the event on a history with no common ancestor.
+    """
+    repo, tracker, seed = repo_with_origin
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
+    _git("checkout", "-q", "--orphan", "independent-ticket-store", cwd=tracker)
+    _git("add", "-A", cwd=tracker)
+    _git("commit", "-qm", "independently rebuilt ticket store", cwd=tracker)
+    _git("branch", "-qM", "tickets", cwd=tracker)
+    _git_q("fetch", "origin", "tickets", cwd=tracker)
+    assert _git_q("merge-base", "HEAD", "origin/tickets", cwd=tracker).returncode != 0
+    ambient = _ambient_repo(tmp_path / "ambient", sync_remote=ambient_sync_remote)
+    monkeypatch.setenv("REBAR_ROOT", str(ambient))
+    before = _git_q("rev-parse", "HEAD", cwd=tracker).stdout.strip()
+
+    with pytest.raises(rebar.RebarError) as exc:
+        rebar.comment(seed, "this write must not be stranded", repo_root=str(repo))
+
+    after = _git_q("rev-parse", "HEAD", cwd=tracker).stdout.strip()
+    assert after == before, "the refusal must happen before committing a stranded event"
+    assert "ticket write refused" in str(exc.value)
+    assert "origin/tickets" in str(exc.value)
 
 
 def test_push_pending_names_the_configured_sync_remote(
