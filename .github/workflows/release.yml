@@ -111,7 +111,7 @@ jobs:
             echo "pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3"
           } > evidence-shapin.txt
           cat evidence-shapin.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: evidence-shapin
           path: evidence-shapin.txt
@@ -167,12 +167,12 @@ jobs:
           cat dist/SHA256SUMS
       # ONE named bundle: wheel + sdist + SHA256SUMS. Downstream jobs download THIS and
       # promote the exact bytes — they never rebuild.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: dist
           path: dist/
       # The build-toolchain evidence fragment (the frozen tool versions actually used).
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: evidence-build
           path: tool-versions.txt
@@ -188,7 +188,7 @@ jobs:
           cat evidence-artifacts.txt
         env:
           GITHUB_SHA: ${{ github.sha }}
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: evidence-artifacts
           path: evidence-artifacts.txt
@@ -202,7 +202,7 @@ jobs:
     # packaging defect (missing data files, a `COMMIT = None` bake) that an editable
     # install would mask.
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist
           path: dist/
@@ -231,7 +231,7 @@ jobs:
     # wheel in a tree with no `.git` and no env override, so a non-null `_build_info.COMMIT`
     # here PROVES the preserve-existing precedence step (the sdist shipped the baked SHA).
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist
           path: dist/
@@ -268,7 +268,7 @@ jobs:
     permissions:
       id-token: write   # mint the short-lived OIDC token for Trusted Publishing
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist
           path: dist/
@@ -297,7 +297,7 @@ jobs:
     permissions:
       contents: write   # create the tag + release + upload its asset
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: dist
           path: dist/
@@ -355,11 +355,11 @@ jobs:
           } > evidence-mcp.txt
           cat evidence-mcp.txt
       # Hand the verified binary to the OIDC-privileged job as an artifact.
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: mcp-publisher-verified
           path: mcp-publisher
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: evidence-mcp
           path: evidence-mcp.txt
@@ -385,7 +385,7 @@ jobs:
           persist-credentials: false
       # Use the digest-verified binary from mcp_verify — not a fresh unverified
       # download. upload-artifact drops the exec bit, so restore it before running.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: mcp-publisher-verified
       - name: Restore exec bit on the verified binary
@@ -445,7 +445,7 @@ jobs:
     needs: [evidence_shapin, build, mcp_verify]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           pattern: evidence-*
           path: evidence
@@ -458,7 +458,7 @@ jobs:
           done
           echo "===== release-evidence.txt ====="
           cat release-evidence.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: release-evidence
           path: release-evidence.txt
