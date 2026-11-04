@@ -308,3 +308,69 @@ def test_an_abandoned_certified_tool_releases_the_gauge_when_its_body_finishes()
         return gauge.value
 
     assert anyio.run(scenario) == 0
+
+
+def test_a_drained_call_is_counted_before_its_worker_runs_it(monkeypatch) -> None:
+    """Bug leprous-uncivic-crab: the count must start when the call is handed to a worker.
+
+    A worker can pick the call up and not yet have run a line of it while the transport
+    stops. If the gauge reads 0 then, ``run_mcp`` returns and the signer's key copy is
+    deleted under the call. The pause below holds the worker in exactly that gap.
+    """
+
+    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.server import Settings
+
+    Settings.model_rebuild()
+    mcp = FastMCP("offload-count")
+
+    @mcp.tool(name="sign_review")
+    def _sign() -> str:
+        return "signed"
+
+    gauge = wire_health(mcp, InFlightGauge())
+    picked_up, observed = threading.Event(), threading.Event()
+    seen: list[int] = []
+    real_run_sync = anyio.to_thread.run_sync
+
+    def _late_worker(func, *args, **kwargs):
+        def _paused():
+            picked_up.set()
+            observed.wait(timeout=5)
+            return func()
+
+        return real_run_sync(_paused, *args, **kwargs)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", _late_worker)
+
+    async def scenario() -> None:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(mcp._tool_manager.call_tool, "sign_review", {})
+            while not picked_up.is_set():  # noqa: ASYNC110 - set off-loop
+                await anyio.sleep(0.005)
+            seen.append(gauge.value)
+            observed.set()
+
+    anyio.run(scenario)
+
+    assert seen == [1], "a drained call handed to a worker must already hold the gauge"
+    assert gauge.value == 0
+
+
+def test_an_ordinary_tool_is_not_counted() -> None:
+    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.server import Settings
+
+    Settings.model_rebuild()
+    mcp = FastMCP("offload-uncounted")
+    seen: list[int] = []
+    gauge = InFlightGauge()
+
+    @mcp.tool()
+    def show() -> str:
+        seen.append(gauge.value)
+        return "ok"
+
+    wire_health(mcp, gauge)
+    anyio.run(mcp._tool_manager.call_tool, "show", {})
+    assert seen == [0]
