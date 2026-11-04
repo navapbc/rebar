@@ -54,12 +54,16 @@ def _server_with_llm_tools(readonly: bool = False):
 
 
 class _BlockingReviewPlan:
-    """A stand-in for ``rebar.llm.review_plan`` that blocks until released, counting calls."""
+    """A stand-in for ``rebar.llm.review_plan`` that blocks until released, counting calls.
 
-    def __init__(self):
+    ``hold`` caps the wait for ``release``; ``finished`` is set when the body returns."""
+
+    def __init__(self, hold: float = 5):
         self.calls = 0
         self.started = threading.Event()
         self.release = threading.Event()
+        self.finished = threading.Event()
+        self._hold = hold
         self._lock = threading.Lock()
 
     def __call__(
@@ -68,8 +72,30 @@ class _BlockingReviewPlan:
         with self._lock:
             self.calls += 1
         self.started.set()
-        self.release.wait(timeout=5)
+        self.release.wait(timeout=self._hold)
+        self.finished.set()
         return {"verdict": "PASS", "ticket_id": ticket_id}
+
+
+def _start_review_plan_and_check_gate(mcp, fake: _BlockingReviewPlan) -> tuple[dict, bool]:
+    """Call ``review_plan_start`` with the stub gate held; return ``(handle, gate_finished)``.
+
+    ``gate_finished`` is read the moment the call returns. Nothing releases the gate before
+    then, so a start that waits on the gate returns only after the stub's ``hold`` expires,
+    with ``finished`` already set; a start that hands the gate to its daemon returns with the
+    gate still held, however loaded the host. That ordering is the contract. A wall-clock
+    bound measured the start's dedup-key git calls along with it (bug 2698-ff06-5f35-463c).
+    """
+    holder: dict = {}
+
+    async def scenario():
+        holder["started"] = await mcp._tool_manager.call_tool(
+            "review_plan_start", {"ticket_id": "d80d"}
+        )
+        holder["gate_finished"] = fake.finished.is_set()
+
+    anyio.run(scenario)
+    return holder["started"], holder["gate_finished"]
 
 
 def test_begin_gate_job_attaches_to_an_inflight_key_with_the_same_job_id():
@@ -398,30 +424,17 @@ def test_gate_daemon_records_failed_when_the_gate_raises(store):
 
 def test_review_plan_start_returns_a_handle_fast_then_polls_to_passed(store, monkeypatch):
     inflight.reset_registry()
-    fake = _BlockingReviewPlan()
+    # The hold only bounds a regressed start; a correct one is released below, long before.
+    fake = _BlockingReviewPlan(hold=60)
     import rebar.llm
 
     monkeypatch.setattr(rebar.llm, "review_plan", fake)
     mcp = _server_with_llm_tools()
 
-    holder: dict = {}
+    started, gate_finished = _start_review_plan_and_check_gate(mcp, fake)
 
-    async def scenario():
-        # The gate stays blocked on ``fake.release`` for the whole scenario, so a start body
-        # that (incorrectly) blocked on the gate could never return here. ``fail_after`` turns
-        # that into a deterministic failure instead of a hang; the wall-clock bound below then
-        # only has to clear one-time cold pydantic/thread-pool warm-up, not race the gate.
-        t0 = time.monotonic()
-        with anyio.fail_after(3):
-            started = await mcp._tool_manager.call_tool("review_plan_start", {"ticket_id": "d80d"})
-        holder["elapsed"] = time.monotonic() - t0
-        holder["started"] = started
-
-    anyio.run(scenario)
-
-    started = holder["started"]
     assert started["status"] == "running"
-    assert holder["elapsed"] < 2, "async start must return a handle without blocking on the gate"
+    assert not gate_finished, "async start must return a handle without blocking on the gate"
     job_id = started["job_id"]
     # Wait for the daemon to enter the gate, then release it and poll to a terminal verdict.
     assert fake.started.wait(timeout=5)
@@ -434,6 +447,25 @@ def test_review_plan_start_returns_a_handle_fast_then_polls_to_passed(store, mon
         time.sleep(0.02)
     out = gate_runs.gate_run_status(job_id)
     assert out["status"] == "passed"
+    assert fake.calls == 1
+
+
+def test_review_plan_start_ordering_check_flags_a_synchronous_gate(store, monkeypatch):
+    # The oracle above must catch the regression it exists for: a start that runs the gate
+    # in the request. Running the daemon body inline is exactly that mutant; the short hold
+    # keeps the stub from waiting on a release this test never sends.
+    import rebar._mcp_llm as mcp_llm
+    import rebar.llm
+
+    inflight.reset_registry()
+    fake = _BlockingReviewPlan(hold=0.2)
+    monkeypatch.setattr(rebar.llm, "review_plan", fake)
+    monkeypatch.setattr(mcp_llm, "spawn_context_daemon", lambda target, *, name=None: target())
+    mcp = _server_with_llm_tools()
+
+    _, gate_finished = _start_review_plan_and_check_gate(mcp, fake)
+
+    assert gate_finished, "a start that runs the gate before returning must be flagged"
     assert fake.calls == 1
 
 
