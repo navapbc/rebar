@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -158,13 +159,27 @@ def test_store_survives_snapshot_compaction_of_the_ticket_log(peer_confirmations
         store.record(a, b, "blocks", link_id="55")
         store.save()
 
-        subprocess.run(
-            [sys.executable, "-m", "rebar", "store", "compact", a],
+        # The ticket holds 2 fresh events; the default threshold (10) and horizon (1800 s)
+        # would skip the fold, so force it.
+        result = subprocess.run(
+            [sys.executable, "-m", "rebar", "store", "compact", a, "--threshold=0", "--horizon=0"],
             cwd=repo,
             check=False,
             capture_output=True,
             text=True,
+            env=subprocess_env(REBAR_ROOT=str(repo)),
         )
+        assert result.returncode == 0, (
+            f"store compact failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
+        )
+        ticket_dir = repo / ".tickets-tracker" / a
+        assert list(ticket_dir.glob("*-SNAPSHOT.json")), (
+            f"store compact wrote no SNAPSHOT, so nothing was compacted:\n{result.stdout}"
+        )
+        live = sorted(
+            p.name for p in (*ticket_dir.glob("*-CREATE.json"), *ticket_dir.glob("*-LINK.json"))
+        )
+        assert not live, f"compaction left events unretired: {live}"
 
         reopened = peer_confirmations.open_store(repo)
         assert reopened.is_confirmed(a, b, "blocks") is True
