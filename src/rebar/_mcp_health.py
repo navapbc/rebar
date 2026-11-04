@@ -113,10 +113,27 @@ class InFlightGauge:
     def hold(self) -> Callable[[], None]:
         """Count already-accepted background work; return its idempotent release.
 
-        Unlike :meth:`track` this never refuses while draining: the request that started
+        Unlike :meth:`admit` this never refuses while draining: the request that started
         the work was already accepted, so the work is waited for, not rejected.
         """
         self._increment()
+        return self._releaser()
+
+    def admit(self, tool_name: str) -> Callable[[], None]:
+        """Count a NEW drained call, or raise :class:`MCPRetiringError` while draining.
+
+        Returns the call's idempotent release.
+        """
+        with self._lock:
+            if self._draining:
+                raise MCPRetiringError(
+                    f"certified tool {tool_name!r} refused: this MCP container is retiring "
+                    "(draining for shutdown) — retry against the live container"
+                )
+            self._value += 1
+        return self._releaser()
+
+    def _releaser(self) -> Callable[[], None]:
         released = [False]
 
         def _release() -> None:
@@ -133,17 +150,16 @@ class InFlightGauge:
         if tool_name not in DRAINED_TOOLS:
             yield
             return
-        with self._lock:
-            if self._draining:
-                raise MCPRetiringError(
-                    f"certified tool {tool_name!r} refused: this MCP container is retiring "
-                    "(draining for shutdown) — retry against the live container"
-                )
-            self._value += 1
+        release = self.admit(tool_name)
         try:
             yield
         finally:
-            self._decrement()
+            release()
+
+
+_COUNTED_ATTR = "_rebar_counted_body"
+"""Set on an instrumented wrapper to ``(gauge, name, body)`` so :func:`offload_sync_tools`
+can count the call at handoff instead of when the worker first runs it."""
 
 
 def _wrap_tool_fn(fn: Callable[..., Any], gauge: InFlightGauge, name: str):
@@ -155,6 +171,7 @@ def _wrap_tool_fn(fn: Callable[..., Any], gauge: InFlightGauge, name: str):
         with gauge.track(name):
             return fn(*args, **kwargs)
 
+    setattr(_sync_wrapper, _COUNTED_ATTR, (gauge, name, fn))
     return _sync_wrapper
 
 
@@ -205,7 +222,47 @@ def serving_gauge(gauge: InFlightGauge | None) -> Iterator[None]:
         yield
 
 
-def _thread_offloaded(fn: Callable[..., Any]) -> Callable[..., Any]:
+class _CountedHandoff:
+    """Keep a drained call counted from the moment it is handed to a worker.
+
+    ``track`` only counts once the worker runs the body's first line. Between the worker
+    picking the call up and that line, a stopped transport saw a 0 count, ``run_mcp``
+    returned, and the signer's key copy was deleted under the call (bug
+    leprous-uncivic-crab; free-threaded CPython exposes the gap). The count is therefore
+    taken on the event loop before handoff, with the same refusal while draining, and the
+    worker runs the uncounted body. Exactly one side releases it: the worker once
+    the body ends, or the abandoning caller if the worker never started, in which case
+    the body is skipped because nothing counts it any more.
+    """
+
+    def __init__(self, release: Callable[[], None], call: Callable[[], Any]) -> None:
+        # mechanism-ok: lock _CountedHandoff._lock — start/abandon handshake, leprous-uncivic-crab
+        self._lock = threading.Lock()
+        self._release = release
+        self._call = call
+        self._state = "queued"
+
+    def run(self) -> Any:
+        with self._lock:
+            if self._state == "abandoned":
+                return None
+            self._state = "running"
+        try:
+            return self._call()
+        finally:
+            self._release()
+
+    def abandon(self) -> None:
+        with self._lock:
+            if self._state != "queued":
+                return
+            self._state = "abandoned"
+        self._release()
+
+
+def _thread_offloaded(
+    fn: Callable[..., Any], admit: Callable[[], Callable[[], None]] | None = None
+) -> Callable[..., Any]:
     """An async wrapper that runs ``fn`` on a worker thread, preserving its signature.
 
     ``functools.wraps`` matters: the SDK already built this tool's ``fn_metadata`` (and
@@ -217,16 +274,23 @@ def _thread_offloaded(fn: Callable[..., Any]) -> Callable[..., Any]:
     its worker-limiter token so later MCP calls are not queued behind work whose caller is
     already gone. The sync body still runs to completion in the background, and its result
     or exception is intentionally discarded by AnyIO because there is no caller left to
-    receive it."""
+    receive it.
+
+    ``admit`` (drained tools only) counts the call before handoff; see
+    :class:`_CountedHandoff`."""
 
     @functools.wraps(fn)
     async def _offloaded(*args: Any, **kwargs: Any) -> Any:
         import anyio.to_thread
 
-        return await anyio.to_thread.run_sync(
-            functools.partial(fn, *args, **kwargs),
-            abandon_on_cancel=True,
-        )
+        call = functools.partial(fn, *args, **kwargs)
+        if admit is None:
+            return await anyio.to_thread.run_sync(call, abandon_on_cancel=True)
+        handoff = _CountedHandoff(admit(), call)
+        try:
+            return await anyio.to_thread.run_sync(handoff.run, abandon_on_cancel=True)
+        finally:
+            handoff.abandon()
 
     return _offloaded
 
@@ -236,7 +300,8 @@ def offload_sync_tools(mcp: Any) -> int:
 
     Ordinary reads can block too, so this covers all tools. It must run after certified
     instrumentation, whose synchronous wrapper fails loud if ordering is reversed; the
-    gauge lock makes worker-thread increments safe.
+    gauge lock makes worker-thread increments safe. An instrumented drained tool is
+    counted from handoff, not from when its worker first runs it.
     """
 
     manager = getattr(mcp, "_tool_manager", None)
@@ -247,7 +312,12 @@ def offload_sync_tools(mcp: Any) -> int:
         # An already-async tool is not a problem and must not be double-wrapped.
         if getattr(tool, "is_async", False):
             continue
-        tool.fn = _thread_offloaded(tool.fn)
+        counted = getattr(tool.fn, _COUNTED_ATTR, None)
+        if counted is None:
+            tool.fn = _thread_offloaded(tool.fn)
+        else:
+            gauge, name, body = counted
+            tool.fn = _thread_offloaded(body, functools.partial(gauge.admit, name))
         tool.is_async = True
         moved += 1
     return moved
