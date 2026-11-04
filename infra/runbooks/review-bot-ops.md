@@ -999,7 +999,7 @@ BuildKit >= 0.13 (bug `5bc1-7e5b-3b4c-46c8`), and both cutoffs wrote a key docke
 `--install` had never been run after the 3057 fix landed (bug `007c-dabe-21a5-4e92`).
 
 ```bash
-docker buildx inspect | grep -E 'Buildkit|Keep Bytes'   # BuildKit version + enforced keep-bytes
+docker buildx inspect | grep -E 'Buildkit|Keep Bytes|Reserved Space|Max Used Space'  # version + enforced ceiling (buildx <0.18 | >=0.18)
 bash infra/scripts/docker-storage-cap.sh --check-gc-enforced   # 1 = share enforced, 0 = not
 python3 -m json.tool /etc/docker/daemon.json     # what is actually installed
 bash infra/scripts/docker-storage-cap.sh --print-json   # what SHOULD be installed (writes nothing)

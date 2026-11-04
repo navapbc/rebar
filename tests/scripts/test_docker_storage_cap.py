@@ -55,12 +55,18 @@ def _bindir(
     systemctl_active: bool = True,
     systemctl_reload_exit: int = 0,
     daemon_pid: int = 4242,
+    inspect_gc_block: str | None = None,
 ) -> tuple[Path, Path]:
     """A PATH-front stub dir plus the log every stub appends its argv to."""
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     calls = tmp_path / "calls.log"
     calls.write_text("")  # each stub set starts from a clean argv log
+    # `inspect_gc_block` replaces the legacy GC-policy block with literal text, so a test can
+    # reproduce another buildx release's exact `inspect` output.
+    gc_block = tmp_path / "inspect-gc-block.txt"
+    if inspect_gc_block is not None:
+        gc_block.write_text(inspect_gc_block)
     # `docker` dispatches on the subcommand because the script asks it three different
     # questions: the Engine version, the BuildKit version behind the default builder, and
     # BuildKit's effective keep-bytes. An empty stub answer is the "unreadable" case.
@@ -78,7 +84,9 @@ def _bindir(
         case "$1 $2" in
           "buildx inspect")
             [ -n "{buildkit_version}" ] && printf ' Buildkit:  v%s\\n' "{buildkit_version}"
-            if [ -n "{buildkit_keep_bytes}" ]; then
+            if [ -f "{gc_block}" ]; then
+              cat "{gc_block}"
+            elif [ -n "{buildkit_keep_bytes}" ]; then
               printf 'GC Policy rule#0:\\n'
               printf ' Filters:       type==source.local,type==exec.cachemount\\n'
               printf ' Keep Duration: 48h0m0s\\n'
@@ -829,3 +837,118 @@ def test_check_gc_enforced_is_side_effect_free(tmp_path: Path) -> None:
     assert not daemon_json.exists(), "a read-only check must never write daemon.json"
     logged = calls.read_text()
     assert "systemctl" not in logged and "dockerd" not in logged, logged
+
+
+# --------------------------------------------------------------------------------------
+# buildx >= 0.18 `inspect` output (bug eb89-806b-8f46-4dbd)
+# --------------------------------------------------------------------------------------
+# docker/buildx commands/inspect.go printed one `Keep Bytes:` per GC rule through v0.17.0.
+# From v0.18.0 (commit 64c5139ab6) it prints `Reserved Space:`, `Max Used Space:` and
+# `Min Free Space:` instead, each only when non-zero, through a tabwriter padded with single
+# spaces. BuildKit v0.17 renamed the wire field `keepBytes` to `reservedSpace`, so a new buildx
+# against an old daemon (production: BuildKit 0.12.6) shows the old keep-bytes as `Reserved
+# Space:`. A rule's ceiling is max(reservedSpace, maxUsedSpace) (BuildKit cache/manager.go
+# calculateKeepBytes); `Min Free Space` is a disk-free floor, not a cache size.
+
+
+def _buildx_018_inspect(rules: list[list[tuple[str, str]]]) -> str:
+    """Render GC rules the way buildx v0.18.0's tabwriter(0, 0, 1, ' ') lays them out."""
+    out = []
+    for index, rule in enumerate(rules):
+        out.append(f"GC Policy rule#{index}:")
+        width = max(len(label) + 1 for label, _ in rule)
+        out.extend(" " + f"{label}:".ljust(width + 1) + value for label, value in rule)
+    return "\n".join(out) + "\n"
+
+
+def _docker_driver_rules(reserved: str, *, max_used: str | None = None) -> str:
+    """The Docker-driver default policy: a filtered temp-cache rule#0, then catch-alls."""
+    temp = [
+        ("All", "false"),
+        ("Filters", "type==source.local,type==exec.cachemount,type==source.git.checkout"),
+        ("Keep Duration", "48h0m0s"),
+        ("Max Used Space", "790.6MiB"),
+    ]
+    tail = [("Reserved Space", reserved)]
+    if max_used is not None:
+        tail.append(("Max Used Space", max_used))
+    return _buildx_018_inspect(
+        [
+            temp,
+            [("All", "false"), ("Keep Duration", "1440h0m0s"), *tail],
+            [("All", "false"), *tail],
+            [("All", "true"), *tail],
+        ]
+    )
+
+
+def test_the_buildx_018_fixture_matches_the_upstream_layout() -> None:
+    sample = _docker_driver_rules("5GiB")
+    assert sample.splitlines()[:5] == [
+        "GC Policy rule#0:",
+        " All:            false",
+        " Filters:        type==source.local,type==exec.cachemount,type==source.git.checkout",
+        " Keep Duration:  48h0m0s",
+        " Max Used Space: 790.6MiB",
+    ]
+    assert "Keep Bytes" not in sample
+
+
+def test_check_gc_enforced_reads_buildx_018_reserved_space(tmp_path: Path) -> None:
+    result, _, _ = _check(tmp_path, inspect_gc_block=_docker_driver_rules("5GiB"))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "1"
+
+
+def test_check_gc_enforced_flags_the_live_host_value_in_the_buildx_018_shape(
+    tmp_path: Path,
+) -> None:
+    result, _, _ = _check(tmp_path, inspect_gc_block=_docker_driver_rules("5.588GiB"))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0"
+
+
+def test_check_gc_enforced_takes_max_used_space_as_the_ceiling(tmp_path: Path) -> None:
+    block = _docker_driver_rules("1GiB", max_used="5GiB")
+    result, _, _ = _check(tmp_path, inspect_gc_block=block)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "1"
+
+
+def test_min_free_space_is_never_taken_as_the_ceiling(tmp_path: Path) -> None:
+    """20 GiB reserved is the ceiling; a 5 GiB min-free floor must not make it look capped."""
+    block = _buildx_018_inspect(
+        [[("All", "true"), ("Reserved Space", "20GiB"), ("Min Free Space", "5GiB")]]
+    )
+    result, _, _ = _check(tmp_path, inspect_gc_block=block)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0"
+
+
+def test_buildx_018_output_without_space_lines_is_unreadable(tmp_path: Path) -> None:
+    block = _buildx_018_inspect([[("All", "true"), ("Min Free Space", "5GiB")]])
+    result, _, _ = _check(tmp_path, inspect_gc_block=block)
+    assert result.returncode != 0
+    assert result.stdout.strip() == ""
+
+
+@pytest.mark.parametrize(
+    ("reserved", "expected"),
+    [("5GiB", "IS being enforced"), ("5.588GiB", "does NOT match")],
+)
+def test_install_readback_reads_the_buildx_018_shape(
+    tmp_path: Path, reserved: str, expected: str
+) -> None:
+    daemon_json = tmp_path / "daemon.json"
+    assert _run(tmp_path, ["--install"], daemon_json=daemon_json).returncode == 0
+    bindir, _ = _bindir(tmp_path, inspect_gc_block=_docker_driver_rules(reserved))
+    result = _run(
+        tmp_path,
+        ["--install"],
+        bindir=bindir,
+        daemon_json=daemon_json,
+        env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() + 60))},
+    )
+    assert result.returncode == 0, result.stderr
+    assert expected in result.stderr, result.stderr
+    assert "UNVERIFIED" not in result.stderr
