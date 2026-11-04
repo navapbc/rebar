@@ -86,14 +86,20 @@ def run_job(
     (:func:`sign_completion_verdict`) and the plan-review path sign from ``signer.key_path`` /
     ``signer.principal`` — WITHOUT setting ``REBAR_OPCERT_KEY_PATH`` / ``REBAR_OPCERT_ENV_ID`` in
     the process env. The binding also carries the ``off`` push policy, so no gate write is pushed.
+
+    Reads run under ``reads.local_read_context``: the workspace was just fetched from the
+    authoritative remotes and has no remote, so a per-read freshness fetch could only fail
+    and would cost one git start per read (bug upset-prissy-olm).
     """
+    from rebar._engine_support import reads as ticket_reads
+
     factory = workspace_factory or prepare_workspace
     llm_error, llm_unavailable = _llm_error_classes()
     fields = new_record("", ticket_id, kind)
     fields.pop("job_id")
     ws: Workspace | None = None
     try:
-        with bound_signer(signer, push_mode="off"):
+        with bound_signer(signer, push_mode="off"), ticket_reads.local_read_context():
             ws = factory(cfg)
             fields["merged_log_commit"] = ws.merged_log_commit
             fields["material_fingerprint"] = _server_material(ticket_id, ws.repo_root)

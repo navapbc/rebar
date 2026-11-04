@@ -366,10 +366,9 @@ def mint_opcert_record(
     _refuse_if_pinned_principal_key_mismatch(key_path, principal, repo_root)
     material_fingerprint = _manifest_material_fingerprint(steps) or ""
     # Bound commit: the manifest's signed `verified-at-sha:` when present (an attested review or
-    # close), else current HEAD.
-    merged_log_commit = verified_at_sha_from_manifest(steps) or head_sha(
-        config.repo_root(repo_root)
-    )
+    # close), else current HEAD. HEAD is resolved once: nothing below moves it.
+    current_head = head_sha(config.repo_root(repo_root))
+    merged_log_commit = verified_at_sha_from_manifest(steps) or current_head
     # Subject kind: manifest[0] is authoritative for gated kinds (plan-review / completion); fall
     # back to the caller hint, then a generic label for a raw `rebar sign` (ungated).
     subject_kind = (
@@ -402,7 +401,7 @@ def mint_opcert_record(
         "principal": principal,
         # Retained so the plan-review claim gate's UNSCOPED whole-HEAD freshness check
         # (compute_validity) works identically for every record shape.
-        "head_sha": head_sha(config.repo_root(repo_root)),
+        "head_sha": current_head,
     }
     if kind is not None:
         record["kind"] = kind
