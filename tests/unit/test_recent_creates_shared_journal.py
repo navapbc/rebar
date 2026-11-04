@@ -11,6 +11,8 @@ is exactly what two containers see.
 The HLC cache is the contrast case: its loss is harmless because every tick is floored by the
 ticket's committed event prefixes, which live in the shared tracker. One test pins that.
 
+The lock keeps its original name ``recent-creates.lock``; only its directory moved.
+
 No autouse fixtures. Every child is started through ``_subprocess_env.subprocess_env``
 and bounded by a ``communicate`` timeout, then killed and reaped on every path.
 """
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import subprocess
 import sys
 import textwrap
@@ -52,6 +55,28 @@ _CHILD = textwrap.dedent(
         print(json.dumps(duplicate_create_warning(
             tracker, ticket_id=ticket_id, alias=ticket_id, title=title, cfg_root=tracker
         )))
+    elif action == "hold":
+        from rebar._commands import recent_creates as rc
+
+        with rc._journal_lock(rc._journal_path(tracker)):
+            print(json.dumps("held"), flush=True)
+            sys.stdin.read()  # hold until the parent closes our stdin
+    elif action == "try_lock":
+        from rebar._commands import recent_creates as rc
+        from rebar._store import lock_kernel
+
+        lock = os.path.join(os.path.dirname(rc._journal_path(tracker)), rc._LOCK_NAME)
+        fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            lock_kernel.take_exclusive(fd)
+            lock_kernel.release_exclusive(fd)
+            print(json.dumps("acquired"))
+        except OSError as exc:
+            if not lock_kernel.is_contention(exc):
+                raise
+            print(json.dumps("refused"))
+        finally:
+            os.close(fd)
     elif action == "tick_write":
         from rebar._store import hlc
 
@@ -78,27 +103,64 @@ def _container_rebar(tmp_path: Path, name: str) -> str:
     return str(own)
 
 
-def _run(tracker: str, own_rebar: str, action: str, arg: str) -> object:
+def _spawn(tracker: str, own_rebar: str, action: str, arg: str) -> subprocess.Popen[str]:
     root = str(Path(__file__).resolve().parents[2])
     env = subprocess_env(
         PYTHONPATH=os.pathsep.join([root, os.path.join(root, "src")]),
         REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS="1",
     )
-    proc = subprocess.Popen(
+    return subprocess.Popen(
         [sys.executable, "-c", _CHILD, tracker, own_rebar, action, arg],
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         env=env,
     )
+
+
+def _run(tracker: str, own_rebar: str, action: str, arg: str) -> object:
+    proc = _spawn(tracker, own_rebar, action, arg)
     try:
-        out, err = proc.communicate(timeout=_CHILD_BOUND_S)
+        out, err = proc.communicate("", timeout=_CHILD_BOUND_S)
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate()
+        _reap(proc)
     assert proc.returncode == 0, err
     return json.loads(out.strip().splitlines()[-1])
+
+
+def _reap(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is None:
+        proc.kill()
+    try:
+        proc.communicate(timeout=_CHILD_BOUND_S)
+    except (subprocess.TimeoutExpired, ValueError, OSError):
+        pass
+
+
+def test_two_processes_with_different_rebar_dirs_take_one_journal_lock(tmp_path: Path) -> None:
+    """The blue-green overlap: while one container holds the journal lock, the other, with its
+    own `.rebar`, must find the SAME lock file taken; once released, it can take it."""
+    tracker = _git_store(tmp_path)
+    blue = _container_rebar(tmp_path, "blue")
+    green = _container_rebar(tmp_path, "green")
+
+    holder = _spawn(tracker, blue, "hold", "")
+    try:
+        assert holder.stdout is not None
+        ready, _, _ = select.select([holder.stdout], [], [], _CHILD_BOUND_S)
+        assert ready, "holder printed nothing within its bound"
+        assert json.loads(holder.stdout.readline()) == "held", "precondition: blue holds it"
+        assert _run(tracker, green, "try_lock", "") == "refused", (
+            "a second process over the SAME store took the journal lock concurrently"
+        )
+        assert holder.stdin is not None
+        holder.stdin.close()
+        assert holder.wait(timeout=_CHILD_BOUND_S) == 0
+        # Negative control: the refusal came from blue's live hold, not a stuck lock.
+        assert _run(tracker, green, "try_lock", "") == "acquired"
+    finally:
+        _reap(holder)
 
 
 def test_a_create_on_one_container_is_seen_by_a_same_title_create_on_the_other(
@@ -127,7 +189,7 @@ def test_the_journal_and_its_lock_live_in_the_trackers_git_dir(tmp_path: Path) -
 
     assert os.path.dirname(recent_creates._journal_path(tracker)) == git_dir
     assert os.path.isfile(os.path.join(git_dir, "rebar-recent-creates.json"))
-    assert os.path.isfile(os.path.join(git_dir, "rebar-recent-creates.lock"))
+    assert os.path.isfile(os.path.join(git_dir, recent_creates._LOCK_NAME))
     assert not (sibling / "recent-creates.json").exists()
 
 
