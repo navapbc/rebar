@@ -41,10 +41,15 @@ case "$1" in
     exit 0
     ;;
   rev-parse)
-    # Barrier marker: lets a test wait until the script has actually probed HEAD.
+    # Decide BEFORE signalling. The barrier marker lets a test wait until the script has
+    # probed HEAD; it must announce a probe whose answer is already fixed, or a peer acting
+    # on the marker can still change that answer (bug 5618-ebca-c29f-47c0).
+    rc=128
+    [ -f "$GIT_STUB_STATE/head-resolves" ] && rc=0
     printf 'x' >> "$GIT_STUB_STATE/rev-parse-seen"
-    [ -f "$GIT_STUB_STATE/head-resolves" ] && exit 0
-    exit 128
+    # Optional post-signal stall: stands in for a stub descheduled under host load.
+    [ -f "$GIT_STUB_STATE/rev-parse-stall" ] && sleep 1
+    exit "$rc"
     ;;
   clone)
     # Which branch is being cloned tells the two clones apart: `--branch tickets` is the
@@ -159,6 +164,7 @@ def _provision(
     code_clone_fails: bool = False,
     ensure_fails: bool = False,
     config_fails: bool = False,
+    probe_stall: bool = False,
     code_dir: str | None = None,
     env: dict[str, str] | None = None,
     during: Callable[[Path], None] | None = None,
@@ -188,6 +194,7 @@ def _provision(
         ("code-clone-fails", code_clone_fails),
         ("ensure-fails", ensure_fails),
         ("config-fails", config_fails),
+        ("rev-parse-stall", probe_stall),
     ):
         if on:
             (state / marker).touch()
@@ -475,7 +482,8 @@ def test_a_peer_finishing_the_clone_while_we_wait_skips_the_redundant_reclone(
     """Recheck HEAD under the store lock before clearing a purportedly bad clone.
 
     A peer may make it healthy after the first probe but before this worker gets
-    the lock. The ordered handoff proves the second probe matters."""
+    the lock. The ordered handoff proves the second probe matters. The stub stalls
+    after each probe's barrier signal, so the handoff stays ordered under any load."""
     tracker = tmp_path / "tracker"
     tracker.mkdir()
     fd = _peer_lock_fd(tracker)
@@ -489,7 +497,7 @@ def test_a_peer_finishing_the_clone_while_we_wait_skips_the_redundant_reclone(
         released = True
 
     try:
-        run = _provision(tmp_path, head_resolves=False, during=peer_finishes)
+        run = _provision(tmp_path, head_resolves=False, probe_stall=True, during=peer_finishes)
     finally:
         if not released:
             _release(fd)
