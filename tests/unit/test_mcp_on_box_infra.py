@@ -14,6 +14,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -168,6 +169,60 @@ def test_dockerfile_mcp_boots_rebar_mcp() -> None:
     assert 'CMD ["rebar-mcp"]' in _DOCKERFILE.read_text()
 
 
+_ACLI_HOST = "acli.atlassian.com"
+# A `curl` line that writes the acli tarball, capturing its quoted source URL.
+_ACLI_CURL_RE = re.compile(r"""\bcurl\b[^\n]*?["'](?P<url>[^"'\s]+)["'][^\n]*-o\s+\S*acli\S*""")
+
+
+def _acli_download_origins(text: str) -> list[tuple[str, str | None]]:
+    """``(scheme, hostname)`` of every acli download URL in a Dockerfile.
+
+    The host is compared after ``urlsplit`` parsing, never by substring: ``"acli.atlassian.com"
+    in text`` also accepts ``https://evil.example/?x=acli.atlassian.com`` and
+    ``https://acli.atlassian.com.evil.example/`` (CodeQL ``py/incomplete-url-substring-
+    sanitization``, bug c712-6cd1-276b-4841)."""
+    origins = []
+    for m in _ACLI_CURL_RE.finditer(text):
+        parts = urlsplit(m.group("url"))
+        origins.append((parts.scheme, parts.hostname))
+    return origins
+
+
+def _assert_acli_downloaded_from_atlassian(text: str) -> None:
+    origins = _acli_download_origins(text)
+    assert origins, "no acli download step in Dockerfile.mcp"
+    assert all(origin == ("https", _ACLI_HOST) for origin in origins), (
+        f"acli must download over https from {_ACLI_HOST}, got {origins!r}"
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example/?x=acli.atlassian.com",
+        "https://evil.example/acli.atlassian.com/linux/acli.tar.gz",
+        "https://acli.atlassian.com.evil.example/linux/acli.tar.gz",
+        "https://notacli.atlassian.com/linux/acli.tar.gz",
+        "http://acli.atlassian.com/linux/acli.tar.gz",
+    ],
+)
+def test_acli_host_check_rejects_lookalike_urls(url: str) -> None:
+    text = f'RUN curl -sSL "{url}" -o /root/acli.tar.gz\n# mentions {_ACLI_HOST} elsewhere\n'
+    with pytest.raises(AssertionError, match="acli must download"):
+        _assert_acli_downloaded_from_atlassian(text)
+
+
+def test_acli_host_check_rejects_a_dockerfile_without_an_acli_download() -> None:
+    with pytest.raises(AssertionError, match="no acli download step"):
+        _assert_acli_downloaded_from_atlassian(f"# {_ACLI_HOST}\nRUN echo nothing\n")
+
+
+def test_acli_host_check_accepts_the_atlassian_download_url() -> None:
+    url = "https://acli.atlassian.com/linux/1.0/acli_1.0.tar.gz"
+    text = f'RUN curl -sSL "{url}" -o /root/acli.tar.gz'
+    _assert_acli_downloaded_from_atlassian(text)
+
+
 def test_dockerfile_mcp_provisions_pinned_acli_on_path() -> None:
     """Bug royalistic-gorgeable-norwayrat (AC1/AC2): the image MUST provision the `acli`
     (Atlassian CLI) binary the Jira-mutating bridge transport shells out to
@@ -179,7 +234,7 @@ def test_dockerfile_mcp_provisions_pinned_acli_on_path() -> None:
     text = _DOCKERFILE.read_text()
 
     # Sourced from the same Atlassian download host CI pins against.
-    assert "acli.atlassian.com" in text, "no acli download step in Dockerfile.mcp"
+    _assert_acli_downloaded_from_atlassian(text)
 
     # Version pinned to an explicit build (never floating "latest").
     m = re.search(r"ARG\s+ACLI_VERSION=(\S+)", text)
