@@ -55,6 +55,8 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return box
 
 
+# 14 signer tests run serially: 82 s alone, 236 s at load 40; 300 s killed loaded workers.
+@pytest.mark.timeout(900)
 def test_signer_test_modules_leave_no_key_copy_in_the_temp_dir(tmp_path: Path) -> None:
     box = tmp_path / "tmpdir-sandbox"
     box.mkdir()
