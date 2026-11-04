@@ -110,12 +110,13 @@ services:
       start_period: 1s
 
   minio:
-    # MinIO is no longer published on Docker Hub: `docker.io/minio/minio` returns 404
-    # "object not found" from the Hub API and 401 from the registry, which is the
-    # `pull access denied for minio/minio` failure that made Live External red. quay.io is
-    # MinIO's supported registry. Pinned to a release tag rather than `latest` so the
-    # scheduled run cannot change images underneath us, matching every other image here.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    # MinIO no longer serves public images: Docker Hub dropped `minio/minio` (404), and
+    # `quay.io/minio/minio` now answers 401 to anonymous pulls, which made Live External's
+    # `docker compose up` fail with `unauthorized`. Chainguard's build is what upstream
+    # Langfuse's own compose file runs here, with the same `sh` entrypoint. Its free tier
+    # publishes only `latest`, which scripts/check_uv_pin.py rejects, so this pins the
+    # multi-arch (amd64 + arm64) index digest: immutable, and pullable without a login.
+    image: cgr.dev/chainguard/minio@sha256:3c60a2a8c4d33409a9bc7a623a7fcbfb4605adc3d89422d2f53b3f673a6e5597
     restart: always
     entrypoint: sh
     command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
