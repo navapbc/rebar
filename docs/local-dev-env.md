@@ -98,43 +98,39 @@ make venv                    # .venv on the pinned interpreter (uv fetches it if
 uv python install 3.12       # only if make venv reports it cannot find that version
 ```
 
-## Prerequisite — uv is pinned, and uv enforces the pin on you
+## Prerequisite — uv 0.12.7 or newer
 
-`uv` itself is pinned to an exact version by **`[tool.uv] required-version` in
-`pyproject.toml`** — one line, the single source of truth for CI and for your laptop alike. If
-your local `uv` is a different version, **every** `uv` command in this repository stops with:
+`[tool.uv] required-version = ">=0.12.7"` in `pyproject.toml` sets the **minimum** uv. Any
+newer uv works, including whatever `uv self update`, Homebrew, or your installer gives you;
+you do not need a separate side-by-side uv install or a PATH entry for one. uv enforces the
+floor itself, so an older uv stops every `uv` command in this repository with:
 
 ```
-error: Required uv version `==0.13.6` does not match the running version `0.7.18`.
-Update `uv` by running `uv self update 0.13.6`.
+error: Required uv version `>=0.12.7` does not match the running version `0.7.18`.
 ```
 
-That error is **expected and self-describing, not a broken checkout** — run the command it
-names. It is the same class of guard as the interpreter pin above: `make venv` refuses to build
-on an unpinned Python for the same reason this refuses to build on an unpinned uv, because a
-local toolchain that silently differs from CI's teaches you to discount local failures.
+Upgrade with `uv self update` (or your package manager). `make venv` checks the same floor
+before provisioning and names the uv it selected, its version, and the minimum.
 
-The pin also makes CI's uv deterministic. `astral-sh/setup-uv` is SHA-pinned at all 25 call
-sites, but with no version resolvable from the checkout it fell back to fetching a remote
-manifest from `raw.githubusercontent.com` to decide which uv to install — so the version could
-change between runs, `release.yml` included, with no repository change at all. An exact `==` pin
-is resolved locally with no network call, and CI logs `Found version for uv in
-.../pyproject.toml` instead of the fallback.
+The floor is a floor, not an exact pin, because uv refuses to run outside `required-version`.
+An exact `==` pin refused every other uv: every Dependabot uv update failed (its updater runs
+one bundled uv; bug `ad14-c714-4619-4cd2`), and operator hosts broke whenever their uv
+updated. 0.12.7 is the oldest uv verified to write this repository's `uv.lock` byte-identically
+to newer releases; raise it when the repository starts depending on a newer uv feature or
+lockfile revision.
 
-It does **not** yet remove the network dependency itself: the action fetches that same manifest a
-second time, in `downloadVersion` -> `getArtifact`, to obtain the download URL, and that call is
-unconditional whenever uv is not already in the runner tool cache. So the `##[error]fetch failed`
-failure mode (bug `56b7-b21a-c8ab-4afc`; run 33214025855 died that way in 21 seconds) is still
-reachable — tracked as bug `5caa-4b63-7ea2-4e71`.
-
-The `==` form is load-bearing: a range such as `>=0.13.6` reads as pinned but sends the action
-back down the manifest-fetch path. `scripts/check_uv_pin.py` (run by `make lint`) fails the
-build if the pin is removed, loosened to a range, shadowed by a root `uv.toml`, or overridden
-by a per-call-site `version:` input. **Upgrading uv is a deliberate change** to that line, the
-`ghcr.io/astral-sh/uv:<version>` stage in each `infra/compose/Dockerfile.*`, and the six release
-checksums in `.github/actions/setup-uv/action.yml` and `REQUIRED_CHECKSUMS` in
-`scripts/check_uv_pin.py`, which must match the release's published `.sha256` assets; the guard
-fails the build if any of them disagree.
+**CI still runs one exact uv.** `.github/actions/setup-uv` installs the release named by its
+`UV_VERSION` env entry straight from the uv GitHub release, verifies it against the six
+committed `.sha256` checksums, and never fetches the `astral-sh/setup-uv` version manifest
+(bugs `56b7-b21a-c8ab-4afc` and `5caa-4b63-7ea2-4e71`: that fetch failed jobs with
+`##[error]fetch failed`). The container images copy uv from an exact
+`ghcr.io/astral-sh/uv:<version>` tag. `scripts/check_uv_pin.py` (run by `make lint`) fails the
+build if `required-version` is missing or is anything but a bare `>=X.Y.Z` floor, if a root
+`uv.toml` shadows it, if a workflow uses the upstream action or a per-call-site `version:`
+input, or if CI's release or a Dockerfile uv tag is below the floor. **Upgrading CI's uv** is
+one change to `UV_VERSION` and the six checksums in `.github/actions/setup-uv/action.yml`,
+plus `REQUIRED_UV_VERSION` and `REQUIRED_CHECKSUMS` in `scripts/check_uv_pin.py` (the guard
+fails if they disagree); bump the `infra/compose/Dockerfile.*` uv stages in the same change.
 
 ## TL;DR (canonical setup)
 

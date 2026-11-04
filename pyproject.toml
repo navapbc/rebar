@@ -331,35 +331,24 @@ dev = [
 rebar = "rebar.cli:main"
 rebar-mcp = "rebar.mcp_server:main"
 
-# uv version pin (bug 56b7-b21a-c8ab-4afc). SINGLE SOURCE OF TRUTH for the uv version,
-# for CI and for local development alike. Bump this one line to upgrade uv.
+# Minimum uv (bug ad14-c714-4619-4cd2). uv enforces `required-version` itself: it refuses to
+# run when the running uv falls outside it. An exact `==` pin therefore refused every other
+# uv, which broke every Dependabot uv update (its updater ships one bundled uv; dependabot-core
+# #13199) and every operator host whose uv self-updated (tickets 2d87-7428-abcf-4bd9,
+# 0461-3c72-9e38-4ce5). A floor admits any newer uv and still refuses an older one.
 #
-# Why it lives here rather than in a `.github/uv-version.txt` alongside python-version.txt:
-# `astral-sh/setup-uv` resolves a version with NO action inputs by scanning exactly two paths
-# in the working directory — `uv.toml`, then `pyproject.toml` (WorkspaceVersionResolver /
-# getWorkspaceCandidates in the action's src/version/version-request-resolver.ts, at the SHA
-# every call site pins). Any other filename would need a `version-file:` input repeated at all
-# 25 call sites. A `uv.toml` would also be read, but uv treats it as a REPLACEMENT for the
-# section below, so it would silently orphan any future setting added here.
+# 0.12.7 is the oldest uv verified against this repository: it passes `uv lock --check` and
+# rewrites uv.lock (version 1, revision 5) byte-identically to 0.13.6, and it is what CI ran
+# from 2026-08-28 to 2026-10-28. Raise the floor when the repository starts depending on a
+# newer uv feature or lockfile revision.
 #
-# Why the `==` form is load-bearing and NOT cosmetic: the action normalizes a leading `==` away
-# and then classifies the remainder with `tc.isExplicitVersion` (src/version/specifier.ts). An
-# exact version takes the ExactVersionResolver branch, which returns without any network call in
-# the upstream action. rebar's local setup action keeps the same single source but bypasses the
-# upstream manifest entirely by downloading the version-pinned GitHub release artifact directly
-# and verifying its committed checksum. scripts/check_uv_pin.py (run from `make lint`) fails the
-# build if this is ever loosened to a range, removed, shadowed by a root uv.toml, overridden by a
-# per-call-site `version:` input, or bypassed through the upstream setup action.
-#
-# The pin started at 0.12.7, what CI already resolved to via "falling back to latest" (run
-# 33225196631). It moved to 0.13.6 deliberately (ticket 2d87-7428-abcf-4bd9) after `uv self
-# update` kept replacing operators' pinned 0.12.7 installs; upgrading is a change to this line,
-# the Dockerfile `uv` stages, and the release checksums in setup-uv and check_uv_pin.py.
-#
-# NOTE: uv reads `required-version` itself, so a local uv that differs now fails fast with
-# `Update uv by running uv self update 0.13.6`. That is intended — see docs/local-dev-env.md.
+# CI does not float: `.github/actions/setup-uv` installs the one release named by its
+# `UV_VERSION`, verified against that release's committed checksums with no manifest fetch
+# (bugs 56b7-b21a-c8ab-4afc, 5caa-4b63-7ea2-4e71). scripts/check_uv_pin.py (run from
+# `make lint`) keeps this a bare floor and keeps CI's release and the Dockerfile uv tags
+# exact and at or above it.
 [tool.uv]
-required-version = "==0.13.6"
+required-version = ">=0.12.7"
 
 # Bake the gate-code commit SHA into the wheel/sdist for non-git installs (epic
 # jira-reb-596). Auto-discovers hatch_build.py at the repo root; writes the generated,

@@ -27,10 +27,12 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PIN_FILE = REPO_ROOT / ".github" / "python-version.txt"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
-# The stub uv must report the live pin, since `_sandbox` copies the real pyproject.toml.
-_PINNED_UV = re.search(
-    r'^required-version = "==([^"]+)"', PYPROJECT.read_text(encoding="utf-8"), re.M
-).group(1)
+# The stub uv reports the live floor by default, since `_sandbox` copies the real pyproject.toml.
+_UV_FLOOR_MATCH = re.search(
+    r'^required-version = ">=([^"]+)"', PYPROJECT.read_text(encoding="utf-8"), re.M
+)
+assert _UV_FLOOR_MATCH is not None, 'pyproject.toml must declare required-version = ">=X.Y.Z"'
+_UV_FLOOR = _UV_FLOOR_MATCH.group(1)
 MAKEFILE = REPO_ROOT / "Makefile"
 BUILD_AND_TEST = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -112,7 +114,7 @@ def test_makefile_does_not_provision_from_ambient_python3() -> None:
 
 
 def _sandbox(
-    tmp_path: Path, *, uv_exit: int, uv_version: str = _PINNED_UV
+    tmp_path: Path, *, uv_exit: int, uv_version: str = _UV_FLOOR
 ) -> tuple[Path, dict[str, str]]:
     """A throwaway tree with the real Makefile and pin file, and a recording `uv` stub."""
 
@@ -178,15 +180,15 @@ def test_make_venv_fails_loudly_rather_than_falling_back(tmp_path: Path) -> None
     assert not (tmp_path / ".venv").exists()
 
 
-def test_make_venv_reports_uv_version_mismatch_before_python_hint(tmp_path: Path) -> None:
-    _, env = _sandbox(tmp_path, uv_exit=1, uv_version="0.12.9")
+def test_make_venv_reports_uv_older_than_the_floor_before_python_hint(tmp_path: Path) -> None:
+    _, env = _sandbox(tmp_path, uv_exit=1, uv_version="0.12.6")
 
     result = _run_make_venv(tmp_path, env)
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr
     assert (
-        f"ERROR: selected uv is version 0.12.9, but this repository requires {_PINNED_UV}"
+        f"ERROR: selected uv is version 0.12.6, older than this repository's minimum {_UV_FLOOR}"
         in combined
     )
     assert str(tmp_path / "bin" / "uv") in combined
@@ -197,6 +199,17 @@ def test_make_venv_reports_uv_version_mismatch_before_python_hint(tmp_path: Path
     assert "uv python install" not in combined
     assert "could not provision .venv on Python" not in combined
     assert "✓ worktree ready" not in combined
+
+
+def test_make_venv_accepts_uv_newer_than_the_floor(tmp_path: Path) -> None:
+    # A newer uv is what Dependabot and a self-updated host run; only an older one is refused.
+    _, env = _sandbox(tmp_path, uv_exit=0, uv_version="99.0.0")
+
+    result = _run_make_venv(tmp_path, env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    invocation = (tmp_path / "uv-args.txt").read_text(encoding="utf-8")
+    assert f"venv --python {_pinned_version()} .venv" in invocation
 
 
 def test_worktree_target_provisions_through_the_pinned_venv_target() -> None:

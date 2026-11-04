@@ -72,7 +72,7 @@ balancer, KMS-CMK state encryption, tighter ingress) is explicitly out of scope
 - The **`nava-rebar[agents]`** extra installed in the review-bot image — this pulls
   the `rebar.llm` review kernel. The image installs with
   `uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock`
-  (pinned uv `0.13.6`), baked by `infra/compose/Dockerfile.reviewbot`; `--locked`
+  (uv `0.13.6` from an exact image tag), baked by `infra/compose/Dockerfile.reviewbot`; `--locked`
   refuses a drifted `uv.lock`, so the image runs the dependency set CI verified.
 - A workstation with `gh` (GitHub CLI), `git`, the AWS CLI, and an SSH key you'll
   register as the Gerrit admin.
@@ -214,7 +214,8 @@ The compose stack (`infra/compose/docker-compose.yml`) runs **four services** �
 (`gerritcodereview/gerrit:3.14.1`, publishes arm64), the rebar review-bot
 (`Dockerfile.reviewbot`,
 `uv sync --locked --no-dev --extra agents --extra reviewbot --extra bedrock`, with
-`pyproject.toml`'s `[tool.uv] required-version` pinning uv to `==0.13.6`), the
+uv `0.13.6` copied from an exact `ghcr.io/astral-sh/uv` tag, at or above
+`pyproject.toml`'s `[tool.uv] required-version` floor), the
 `opcert` signer, and the `mcp` server. **nginx is NOT in the
 stack** — it runs as a host package so host certbot can manage the cert and reload it
 (ADR-0007).
