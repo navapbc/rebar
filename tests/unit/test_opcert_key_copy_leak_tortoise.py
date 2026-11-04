@@ -65,6 +65,22 @@ def test_signer_test_modules_leave_no_key_copy_in_the_temp_dir(tmp_path: Path) -
     assert _leftovers(box) == [], "signer test modules left private-key copies in the temp dir"
 
 
+@pytest.mark.parametrize("module", _SIGNER_MODULES)
+def test_signer_module_builds_its_authoritative_source_once(tmp_path: Path, module: str) -> None:
+    """Each test there once built its own source store, about 52 git processes apiece; on a host
+    where git is slow to start that pushed the nested run above past the per-test budget (bug
+    deformed-cherubical-flycatcher). ``--setup-plan`` lists fixture setups without running any
+    test body, so this checks the sharing cheaply."""
+    result = run_nested_pytest(
+        tmp_path / "plan", "-q", "-p", "no:xdist", "--setup-plan", module, env=subprocess_env()
+    )
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
+    setups = [line.split() for line in result.stdout.splitlines() if " authority" in line]
+    assert [s[:3] for s in setups if s[0] == "SETUP"] == [["SETUP", "M", "authority"]], (
+        result.stdout[-4000:]
+    )
+
+
 def test_compose_signer_removes_its_dir_when_writing_the_copy_fails(
     tmp_path: Path, sandbox: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

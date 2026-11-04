@@ -39,23 +39,29 @@ def _run(cwd: str, *args: str) -> str:
     return proc.stdout.strip()
 
 
-def _make_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str, str]:
-    """A local rebar store with `main` (code) + `tickets` (state) branches and one ticket.
+@pytest.fixture(scope="module")
+def authority(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str, str]]:
+    """One authoritative rebar store per module: `main` (code) + `tickets` (state) and one ticket.
 
-    Returns ``(source_url, ticket_id, main_head_sha)``. Used as BOTH the review and tickets remote.
-    """
-    src = tmp_path / "authoritative"
-    src.mkdir()
+    Yields ``(source_url, ticket_id, main_head_sha)``; the URL is both the review and tickets
+    remote. Shared because every job only clones it and never pushes back. Building it starts
+    about 52 git processes, which per test pushed this module past the per-test budget on a host
+    where git is slow to start (bug deformed-cherubical-flycatcher). Teardown fails if any test
+    moved a ref."""
+    src = tmp_path_factory.mktemp("authoritative")
     subprocess.run(["git", "init", "-q", "-b", "main", str(src)], check=True, capture_output=True)
     _run(str(src), "config", "user.email", "src@e.test")
     _run(str(src), "config", "user.name", "src")
     _run(str(src), "commit", "-q", "--allow-empty", "-m", "genesis")
-    monkeypatch.setenv("REBAR_ROOT", str(src))
-    rebar.init_repo(repo_root=str(src))
-    tid = rebar.create_ticket("story", "build the widget", description=_AC, repo_root=str(src))
-    main_head = _run(str(src), "rev-parse", "main")
-    monkeypatch.delenv("REBAR_ROOT", raising=False)
-    return str(src), tid, main_head
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("REBAR_ROOT", str(src))
+        rebar.init_repo(repo_root=str(src))
+        tid = rebar.create_ticket("story", "build the widget", description=_AC, repo_root=str(src))
+    refs_before = _run(str(src), "show-ref")
+    yield str(src), tid, _run(str(src), "rev-parse", "main")
+    assert _run(str(src), "show-ref") == refs_before, (
+        "a test wrote to the shared authoritative source"
+    )
 
 
 @pytest.fixture
@@ -95,8 +101,8 @@ def _pass_completion(tid, rr):
 # ─────────────────────────── integrity: server derives bound values ───────────
 
 
-def test_completion_pass_binds_server_derived_values(tmp_path, monkeypatch, signer):
-    src, tid, main_head = _make_source(tmp_path, monkeypatch)
+def test_completion_pass_binds_server_derived_values(authority, signer):
+    src, tid, main_head = authority
     cfg = _cfg(src)
     fields = jobs.run_job(
         ticket_id=tid,
@@ -124,8 +130,8 @@ def test_completion_pass_binds_server_derived_values(tmp_path, monkeypatch, sign
 # ─────────────────────────── the server never pushes ──────────────────────────
 
 
-def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch, signer):
-    src, tid, _main = _make_source(tmp_path, monkeypatch)
+def test_server_never_pushes_and_workspace_is_isolated(authority, signer):
+    src, tid, _main = authority
     cfg = _cfg(src)
     before = _run(src, "rev-parse", "tickets")
 
@@ -159,13 +165,13 @@ def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch, si
 # ─────────────────────────── key materialization + cleanup ────────────────────
 
 
-def test_key_is_0600_and_gate_sees_no_env_key(tmp_path, monkeypatch, signer):
+def test_key_is_0600_and_gate_sees_no_env_key(authority, monkeypatch, signer):
     """Post-6f14: the composed signer key is 0600 and process-owned, and the gate runs WITHOUT
     ``REBAR_OPCERT_KEY_PATH``/``REBAR_OPCERT_ENV_ID`` leaking into ``os.environ`` (the binding is
     threaded context-locally, not via a process-global env patch)."""
     monkeypatch.delenv("REBAR_OPCERT_KEY_PATH", raising=False)
     monkeypatch.delenv("REBAR_OPCERT_ENV_ID", raising=False)
-    src, tid, _main = _make_source(tmp_path, monkeypatch)
+    src, tid, _main = authority
     cfg = _cfg(src)
     assert oct(os.stat(signer.key_path).st_mode & 0o777) == "0o600"
     seen: dict = {}
@@ -192,10 +198,10 @@ def test_key_is_0600_and_gate_sees_no_env_key(tmp_path, monkeypatch, signer):
     assert not os.path.exists(signer.key_path)
 
 
-def test_signer_key_survives_a_raised_gate_and_cleanup_removes_it(tmp_path, monkeypatch, signer):
+def test_signer_key_survives_a_raised_gate_and_cleanup_removes_it(authority, signer):
     """A gate raising mid-run maps to ``error`` and does NOT tear down the process-owned signer
     key (the signer is composed once at startup, not per job); ``cleanup`` removes it."""
-    src, tid, _main = _make_source(tmp_path, monkeypatch)
+    src, tid, _main = authority
     cfg = _cfg(src)
 
     def boom(tid_, rr):
@@ -218,8 +224,8 @@ def test_signer_key_survives_a_raised_gate_and_cleanup_removes_it(tmp_path, monk
 # ─────────────────────────── per-kind verdict mapping ─────────────────────────
 
 
-def test_completion_fail_completes_with_null_envelope(tmp_path, monkeypatch, signer):
-    src, tid, _main = _make_source(tmp_path, monkeypatch)
+def test_completion_fail_completes_with_null_envelope(authority, signer):
+    src, tid, _main = authority
     cfg = _cfg(src)
     fields = jobs.run_job(
         ticket_id=tid,
@@ -237,8 +243,8 @@ def test_completion_fail_completes_with_null_envelope(tmp_path, monkeypatch, sig
     ("exc_name", "err_class"),
     [("LLMUnavailableError", jobs.ERR_LLM_UNAVAILABLE), ("LLMError", jobs.ERR_LLM_ERROR)],
 )
-def test_completion_llm_raise_maps_to_error(tmp_path, monkeypatch, signer, exc_name, err_class):
-    src, tid, _main = _make_source(tmp_path, monkeypatch)
+def test_completion_llm_raise_maps_to_error(authority, signer, exc_name, err_class):
+    src, tid, _main = authority
     cfg = _cfg(src)
     from rebar.llm import errors as _errors
 
@@ -261,8 +267,8 @@ def test_completion_llm_raise_maps_to_error(tmp_path, monkeypatch, signer, exc_n
 
 
 @pytest.mark.parametrize("verdict", ["BLOCK", "INDETERMINATE"])
-def test_plan_review_nonpass_completes_with_null_envelope(tmp_path, monkeypatch, signer, verdict):
-    src, tid, _main = _make_source(tmp_path, monkeypatch)
+def test_plan_review_nonpass_completes_with_null_envelope(authority, signer, verdict):
+    src, tid, _main = authority
     cfg = _cfg(src)
     fields = jobs.run_job(
         ticket_id=tid,
@@ -276,8 +282,8 @@ def test_plan_review_nonpass_completes_with_null_envelope(tmp_path, monkeypatch,
     assert fields["envelope"] is None
 
 
-def test_plan_review_pass_signs_internally_and_returns_envelope(tmp_path, monkeypatch, signer):
-    src, tid, _main_head = _make_source(tmp_path, monkeypatch)
+def test_plan_review_pass_signs_internally_and_returns_envelope(authority, signer):
+    src, tid, _main_head = authority
     cfg = _cfg(src)
 
     def review_plan_signs(t, rr):

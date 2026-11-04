@@ -38,19 +38,29 @@ def _run(cwd: str, *args: str) -> str:
     ).stdout.strip()
 
 
-def _make_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str, str]:
-    src = tmp_path / "authoritative"
-    src.mkdir()
+@pytest.fixture(scope="module")
+def authority(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, str, str]]:
+    """One authoritative rebar store per module: `main` (code) + `tickets` (state) and one ticket.
+
+    Yields ``(source_url, ticket_id, main_head_sha)``; the URL is both the review and tickets
+    remote. Shared because every job only clones it and never pushes back. Building it starts
+    about 52 git processes, which per test pushed this module past the per-test budget on a host
+    where git is slow to start (bug deformed-cherubical-flycatcher). Teardown fails if any test
+    moved a ref."""
+    src = tmp_path_factory.mktemp("authoritative")
     subprocess.run(["git", "init", "-q", "-b", "main", str(src)], check=True, capture_output=True)
     _run(str(src), "config", "user.email", "src@e.test")
     _run(str(src), "config", "user.name", "src")
     _run(str(src), "commit", "-q", "--allow-empty", "-m", "genesis")
-    monkeypatch.setenv("REBAR_ROOT", str(src))
-    rebar.init_repo(repo_root=str(src))
-    tid = rebar.create_ticket("story", "build the widget", description=_AC, repo_root=str(src))
-    main_head = _run(str(src), "rev-parse", "main")
-    monkeypatch.delenv("REBAR_ROOT", raising=False)
-    return str(src), tid, main_head
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("REBAR_ROOT", str(src))
+        rebar.init_repo(repo_root=str(src))
+        tid = rebar.create_ticket("story", "build the widget", description=_AC, repo_root=str(src))
+    refs_before = _run(str(src), "show-ref")
+    yield str(src), tid, _run(str(src), "rev-parse", "main")
+    assert _run(str(src), "show-ref") == refs_before, (
+        "a test wrote to the shared authoritative source"
+    )
 
 
 @pytest.fixture
@@ -81,9 +91,9 @@ def _cfg(source_url: str) -> OpcertServiceConfig:
 
 
 def test_signed_cert_binds_server_derived_commit_and_never_pushes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, signer: OpcertSigner
+    authority: tuple[str, str, str], signer: OpcertSigner
 ) -> None:
-    source_url, tid, main_head = _make_source(tmp_path, monkeypatch)
+    source_url, tid, main_head = authority
     cfg = _cfg(source_url)
     # Snapshot the authoritative source's tickets branch BEFORE the job (no-push precondition).
     tickets_before = _run(source_url, "rev-parse", "tickets")
