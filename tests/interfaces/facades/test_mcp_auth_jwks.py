@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -163,17 +164,42 @@ def test_valid_jwt_yields_access_token(patched_jwks):
 
 
 # ── rejections (each a distinct negative control) ────────────────────────────
+# Each case maps "now" to its claims, so time-relative values are computed when the
+# test runs, not when pytest collects the module (bug precosmic-convictive-aardwolf).
 @pytest.mark.parametrize(
     "mint_kwargs",
     [
-        {"iss": "https://evil.example.com"},  # wrong issuer
-        {"aud": "https://other.example.com"},  # wrong audience
-        {"exp": int(time.time()) - 3600},  # expired
-        {"nbf": int(time.time()) + 3600},  # not yet valid
+        lambda now: {"iss": "https://evil.example.com"},
+        lambda now: {"aud": "https://other.example.com"},
+        lambda now: {"exp": now - 3600},
+        lambda now: {"nbf": now + 3600},
     ],
+    ids=["wrong_issuer", "wrong_audience", "expired", "not_yet_valid"],
 )
 def test_rejects_bad_claims(patched_jwks, mint_kwargs):
-    assert asyncio.run(_verifier().verify_token(_mint(**mint_kwargs))) is None
+    claims = mint_kwargs(int(time.time()))
+    assert asyncio.run(_verifier().verify_token(_mint(**claims))) is None, claims
+
+
+def test_rejects_bad_claims_survives_collection_to_call_gap(monkeypatch):
+    """Bug precosmic-convictive-aardwolf: a long ``make verify`` reaches this module
+    hours after pytest collected it. Load a separate copy of the module under a
+    clock 2 h in the past (collection), then run its rejection cases on the real
+    clock (execution). Shifting ``time.time`` forward instead would prove nothing:
+    PyJWT validates ``nbf``/``exp`` against ``datetime.now()``, so only the minting
+    clock would move and the unfixed module would still pass."""
+    spec = importlib.util.spec_from_file_location("_jwks_collected_2h_ago", __file__)
+    assert spec is not None and spec.loader is not None
+    early = importlib.util.module_from_spec(spec)
+    real_time = time.time
+    with monkeypatch.context() as clock:
+        clock.setattr(time, "time", lambda: real_time() - 7200)
+        spec.loader.exec_module(early)
+
+    monkeypatch.setattr("jwt.PyJWKClient", early._FakeJWKClient)
+    (cases,) = [m.args[1] for m in early.test_rejects_bad_claims.pytestmark]
+    for mint_kwargs in cases:
+        early.test_rejects_bad_claims(early._FakeJWKClient, mint_kwargs)
 
 
 def test_rejects_alg_none(patched_jwks):
