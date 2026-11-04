@@ -190,6 +190,19 @@ def _sync_disabled(root: str | None = None) -> bool:
         return False
 
 
+def _sync_marker_age(tracker_abs: str, now: int) -> tuple[str, int]:
+    """Return the tracker's throttle-marker path and its age in seconds.
+
+    The path depends only on ``tracker_abs``, so reading it spawns no process. A
+    missing or unreadable marker reports an age past any throttle window."""
+    marker = f"/tmp/.ticket-sync-{hashlib.md5(tracker_abs.encode()).hexdigest()[:12]}"
+    try:
+        with open(marker) as fh:
+            return marker, now - int(fh.read().strip() or 0)
+    except (OSError, ValueError):
+        return marker, 9999
+
+
 def ensure_fresh(tracker: str, *, no_sync: bool = False, force: bool = False) -> None:
     """Best-effort, at-most-once-per-minute fetch and in-process reconvergence.
 
@@ -198,11 +211,23 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False, force: bool = False) ->
     a read. ``force`` skips only the throttle's age check, for gate material reads
     that must not pin a description another clone has already superseded; the
     opt-outs, the marker write and the best-effort contract are unchanged.
+
+    The age check runs before any git process (bug synonymous-destined-cricket):
+    every later exit — sync off, no tracker, no tickets branch — is a no-op just
+    like the throttle's, so a read inside the window spawns nothing.
     """
     if _LOCAL_READ_CONTEXT.get() or no_sync:
         return
+    try:
+        tracker_abs = os.path.realpath(tracker)
+        now = int(time.time())
+        marker, marker_age = _sync_marker_age(tracker_abs, now)
+        if marker_age < 60 and not force:
+            return
+    except Exception:  # noqa: BLE001 — freshness is best-effort; never let it break a read
+        return
     # Resolve ``sync.pull`` and ``tickets.branch`` from the code checkout, not a
-    # relocated tracker's parent, after the cheap local/no-sync exits.
+    # relocated tracker's parent, after the cheap local/no-sync/throttle exits.
     from rebar.config import repo_root_or_none
 
     cfg_root = repo_root_or_none()
@@ -211,7 +236,6 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False, force: bool = False) ->
     try:
         from rebar.config import tickets_branch
 
-        tracker_abs = os.path.realpath(tracker)
         if not os.path.isdir(tracker_abs):
             return
         # Branch resolved from the CODE repo config (same cfg_root as _sync_disabled above);
@@ -225,17 +249,6 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False, force: bool = False) ->
             check=False,
         )
         if r.returncode != 0:
-            return
-        md5_12 = hashlib.md5(tracker_abs.encode()).hexdigest()[:12]
-        marker = f"/tmp/.ticket-sync-{md5_12}"
-        now = int(time.time())
-        marker_age = 9999
-        try:
-            with open(marker) as fh:
-                marker_age = now - int(fh.read().strip() or 0)
-        except (OSError, ValueError):
-            marker_age = 9999
-        if marker_age < 60 and not force:
             return
         # Write the marker before reconverging so only the first read in a burst
         # waits on the lock. Later reads immediately use consistent snapshots.
