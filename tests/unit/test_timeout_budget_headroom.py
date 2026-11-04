@@ -109,3 +109,29 @@ def test_review_bot_lifespan_marker_covers_autouse_setup() -> None:
 
     assert seconds is not None
     assert seconds >= 30
+
+
+# The tortoise test runs 14 signer tests serially in one nested pytest: 82.07 s alone at load
+# 35 on an 18-core host, and about 10x that in the 3 crashed make-verify runs (3 h 45 min to
+# 4 h 51 min against the usual 25 min), so the marker must cover 82 s x 10.
+_TORTOISE_NESTED_RUN_ALONE_SECS = 82.07
+_LOADED_HOST_SLOWDOWN = 10.0
+
+
+def test_tortoise_nested_signer_run_marker_covers_loaded_cost() -> None:
+    """The nested signer run must carry its own budget (bug uneducated-conveyable-nabarlek).
+
+    Under the 300 s ini budget it killed its xdist worker on loaded hosts with no traceback.
+    """
+    root = Path(__file__).resolve().parents[2]
+    seconds = _timeout_marker_seconds(
+        root / "tests" / "unit" / "test_opcert_key_copy_leak_tortoise.py",
+        "test_signer_test_modules_leave_no_key_copy_in_the_temp_dir",
+    )
+
+    floor = _TORTOISE_NESTED_RUN_ALONE_SECS * _LOADED_HOST_SLOWDOWN
+    assert seconds is not None, (
+        "the tortoise nested signer run has no @pytest.mark.timeout(N), so the 300 s ini "
+        f"budget applies; it needs at least {floor:g}s on a loaded host"
+    )
+    assert seconds >= floor
