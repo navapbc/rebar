@@ -114,6 +114,23 @@ def test_reidentification_warns_loudly_and_names_the_prior_identity(
     assert _OTHER_ENV in outcome.detail, "the ensure outcome hides what it wrote over"
 
 
+def _assert_states_the_current_attestation_policy(text: str) -> None:
+    """A re-clone no longer invalidates op-certs (bug c21f-6f29-5d2d-4a5a): a cert from the
+    lost identity verifies on the key embedded in its signature, and turns ``foreign_key``
+    only under the opt-in ``verify.require_environment`` (bug westbound-chivalric-pinemarten)."""
+    assert "verify.require_environment" in text, "the condition for foreign_key is not named"
+    assert "foreign_key" in text
+    for stale in ("unverifiable", "re-earned", "cannot be verified", "no existing attestation"):
+        assert stale not in text, f"still claims attestations are lost: {stale!r}"
+
+
+def test_reidentification_warning_says_old_attestations_still_certify() -> None:
+    warning = env_identity.reidentification_warning({_OTHER_ENV}, acknowledged=False)
+
+    _assert_states_the_current_attestation_policy(warning)
+    assert ".opcert-key" in warning, "the carry-over remedy was dropped"
+
+
 def test_mounting_a_shared_store_still_works(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -315,6 +332,13 @@ def test_overlapping_spans_are_reported() -> None:
     line = _report((100, 300), (200, 400))
     assert line is not None and line.startswith("ENV_ID_MISMATCH:")
     assert _OTHER_ENV in line and _HERE in line
+
+
+def test_divergence_report_says_old_attestations_still_certify() -> None:
+    line = _report((100, 300), (200, 400))
+
+    assert line is not None
+    _assert_states_the_current_attestation_policy(line)
 
 
 def test_a_span_nested_inside_the_other_is_reported() -> None:

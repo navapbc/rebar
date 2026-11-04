@@ -1,10 +1,11 @@
 """Mint and diagnose the ignored ``.env-id`` environment identity.
 
 Every event carries this environment's identifier, which is also the principal of
-its op-cert attestations under ADR 0044. Verification uses the local op-cert key,
-so attestations from another environment do not verify here. Re-cloning a tracker
-copies events but omits this ignored state, which can surface later as a store-wide
-``foreign_key`` verdict (bug gold-distinct-lacewing).
+its op-cert attestations under ADR 0044. Re-cloning a tracker copies events but omits
+this ignored state, so the clone mints a new identity and its audit trail splits from
+the old one (bug gold-distinct-lacewing). The old identity's attestations still verify
+on the public key embedded in each signature; they turn ``foreign_key`` only under the
+opt-in ``verify.require_environment`` (bug c21f-6f29-5d2d-4a5a).
 
 This module applies three minting policies.
 
@@ -55,8 +56,9 @@ CARRY_OVER = (
     ),
     (
         ".opcert-key",
-        "the op-cert signing key — without it no existing attestation "
-        "verifies, even with the matching .env-id",
+        "the op-cert signing key — carry it with .env-id: under the old id, the "
+        "first op-cert this clone signs mints a new key, and attestations the old "
+        "key signed then fail as `mismatch` unless that key is pinned",
     ),
     (
         ".opcert-key.pub",
@@ -151,7 +153,7 @@ def reidentification_warning(prior_ids: set[str], *, acknowledged: bool) -> str:
 
     The store cannot tell the two cases apart, so the text does not pretend to: a second
     collaborating clone legitimately needs its own identity, while a RE-clone of an
-    environment you already worked in has just orphaned its own attestations. Both need
+    environment you already worked in has just split its audit trail. Both need
     the same fact — the prior env id(s) — and only the operator knows which case it is.
     """
     ids = ", ".join(sorted(prior_ids))
@@ -166,10 +168,13 @@ def reidentification_warning(prior_ids: set[str], *, acknowledged: bool) -> str:
         "  If this is an additional clone collaborating on a shared store, that is normal "
         "— it simply starts with no attestations of its own.\n"
         "  If this is a RE-CLONE of a tracker you were already working in, you have just "
-        "lost that environment's identity: every op-cert attestation it signed is now "
-        "unverifiable here (a `foreign_key` verdict at the claim/close gates) and must be "
-        "re-earned. Recover it by copying this git-ignored state out of the old tracker "
-        "and re-running the command:\n"
+        "lost that environment's identity. Its op-cert attestations still certify here on "
+        "the public key embedded in each signature; they turn `foreign_key` only under the "
+        "opt-in `verify.require_environment`, which trusts only the own or pinned keys of "
+        "the environment it names. What is lost is one continuous audit identity (new "
+        "events carry the new id) and the ability to sign as the old identity. Recover both "
+        "by copying this "
+        "git-ignored state out of the old tracker and re-running the command:\n"
         f"{_carry_over_lines()}\n"
         "  Prior events are NOT wrong — they are correctly stamped with whoever wrote "
         "them — so rebar will not rewrite them.\n"
@@ -269,9 +274,10 @@ def divergence_report(current: str, spans: Mapping[tuple[str, str], Span]) -> st
         f"ENV_ID_MISMATCH: this environment ('{current}') has also written events under "
         f"{len(foreign)} other environment id(s) ({', '.join(foreign)}) — the same "
         "author(s) wrote under both during overlapping periods, so these are not "
-        "successive re-clones. Op-cert attestations signed by those identities "
-        "cannot be verified here (`foreign_key` at the claim/close gates) and must be "
-        "re-earned. This is the signature of a second clone writing while the first was "
+        "successive re-clones. Op-cert attestations signed by those identities still "
+        "certify here on the public key embedded in each signature; they turn "
+        "`foreign_key` only under the opt-in `verify.require_environment`. This is the "
+        "signature of a second clone writing while the first was "
         "still active, or of a re-clone that did not carry over its git-ignored local "
         f"state ({', '.join(name for name, _ in CARRY_OVER)}) while the old clone kept writing."
     )

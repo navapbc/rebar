@@ -1035,17 +1035,17 @@ git-ignored, live only on disk, and are never in any clone:
 | File | What it is | What breaks without it |
 |---|---|---|
 | `.env-id` | this environment's identity, **stamped into every event** and the `principal` of every op-cert attestation | a new identity is minted, so events and attestations split across two identities. Existing attestations still certify (the signing environment is not a gate — bug `c21f-6f29-5d2d-4a5a`), but the audit trail is no longer one identity, so carry the old id over |
-| `.opcert-key` | the op-cert signing key (mode `0600`) | nothing verifies, even with the matching `.env-id` — the signature was made by the missing key |
+| `.opcert-key` | the op-cert signing key (mode `0600`) | under the old `.env-id`, the first op-cert this clone signs mints a new key, and attestations the old key signed then fail as `mismatch` unless that key is pinned in `.rebar/trusted_environments.yaml` |
 | `.opcert-key.pub` | the op-cert public key the verifier reads (or re-derives from the private key) | verification cannot find a key to check against |
 | `.ensure-applied` | the ensure-registry marker | harmless: every unit simply re-runs and re-converges |
 
 Copy all four out of the old tracker **before** you replace it.
 
-The first row is the one that bites, because losing it fails **silently and late**. rebar
-therefore never mints an identity into a populated store *quietly*: when `.env-id` is
-absent and the store already holds events from another environment, the new id is written
-and a warning naming that environment, the attestation consequence, and this carry-over
-list is printed to stderr.
+Losing the first row produces no error: the clone simply starts writing under a new
+identity. rebar therefore never mints an identity into a populated store *quietly*: when
+`.env-id` is absent and the store already holds events from another environment, the new
+id is written and a warning naming that environment, what the new identity does and does
+not change for its attestations, and this carry-over list is printed to stderr.
 
 It **warns rather than refuses** because the store cannot tell the two cases apart, and
 only one of them is a fault:
@@ -1053,11 +1053,13 @@ only one of them is a fault:
 - **A second clone collaborating on a shared tickets branch** legitimately needs its own
   identity. It simply starts with no attestations of its own. Refusing the mint here would
   break a first-class workflow.
-- **A re-clone of a tracker you were already working in** has just orphaned that
-  environment's attestations. Recover by copying the four files above out of the old
-  tracker and re-running the command — but only if the old tracker still exists. Restoring
-  `.env-id` alone does **not** help: the signature was made by `.opcert-key`, so without
-  the key nothing it signed can ever be verified again.
+- **A re-clone of a tracker you were already working in** has just split that
+  environment's audit trail and lost the ability to sign as it; its attestations still
+  certify (see the paragraph after the `fsck` one below). Recover by copying the four files
+  above out of the old tracker and re-running the command — but only if the old tracker
+  still exists. Restore `.env-id` together with `.opcert-key`, never alone: with the old id
+  but a newly minted key, a cert the old key signed is checked against the new key and
+  fails as `mismatch` unless the old key is pinned in `.rebar/trusted_environments.yaml`.
 
 Set `REBAR_ALLOW_ENV_REIDENTIFY=1` to acknowledge the situation and quieten the warning.
 
@@ -1073,8 +1075,8 @@ successive re-clones of one store and not reported. Ranges are closed, so a shar
 boundary timestamp counts as overlap, and a range with no timestamp counts as
 overlapping. The accepted trade-off (bug `bbd4-cec2-ecdb-46d9`) is that a clone retired
 and then replaced, the ordinary re-clone, is **not** flagged by fsck; the mint warning
-above is the signal for that case. It is a counted integrity issue, because the
-alternative is discovering the loss one ticket at a time at a gate, hours later. Prior
+above is the signal for that case. It is a counted integrity issue because two live
+clones writing as one author split that author's audit trail while both keep writing. Prior
 events are **not** rewritten — they are correctly stamped with whichever environment
 actually wrote them.
 
