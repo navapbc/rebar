@@ -260,6 +260,12 @@ class CompactConfig:
         21_600,
         "Starts a compaction sweep when the prior sweep is older than this many seconds.",
     )
+    # mechanism-ok: config_key compact.worker_log — 4f4d-9a7a-3b2d-4b13 deploy log survival
+    worker_log: str = _documented(
+        "file",
+        "Sends the detached compaction worker's log to the store's worker log file or to "
+        "the spawning process's stderr.",
+    )  # file | stderr
 
 
 @dataclass

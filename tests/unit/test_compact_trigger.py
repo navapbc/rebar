@@ -80,7 +80,9 @@ def _trigger_async_here(monkeypatch: pytest.MonkeyPatch) -> None:
 def spawns(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Record spawn decisions instead of detaching a child that would outlive the test."""
     calls: list[str] = []
-    monkeypatch.setattr(compact_trigger, "_spawn_detached_sweep", lambda t: calls.append(t))
+    monkeypatch.setattr(
+        compact_trigger, "_spawn_detached_sweep", lambda t, *_a, **_k: calls.append(t)
+    )
     return calls
 
 
@@ -531,3 +533,92 @@ def test_a_detached_sweep_child_is_handed_the_canonical_store_tracker(
     assert canonical in seen[0], (
         f"the detached sweep was handed the ephemeral worktree tracker: {seen[0]}"
     )
+
+
+# ── where the detached worker's log goes (bug individual-sonorous-snake) ─────────────────────
+# The deployed MCP container keeps `.rebar/` beside its tracker on the container's writable
+# layer, so a file log there dies with every blue-green deploy. `compact.worker_log = "stderr"`
+# hands the worker the spawner's own stderr instead, which in the container is the journald
+# pipe that already carries `journalctl -t rebar-mcp`.
+
+
+def _record_popen(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Capture the spawner's Popen kwargs without launching a child (patch `_proc`'s own
+    `subprocess` reference, as the canonical-tracker test above does)."""
+    from rebar import _proc
+
+    seen: list[dict[str, object]] = []
+
+    def _fake_popen(argv: list[str], **kwargs: object) -> object:
+        seen.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(
+        _proc,
+        "subprocess",
+        types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
+    )
+    return seen
+
+
+def test_stderr_worker_log_hands_the_child_the_spawners_stderr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker = _canonical_store(tmp_path)
+    seen = _record_popen(monkeypatch)
+
+    compact_trigger._spawn_detached_sweep(tracker, "stderr")
+
+    assert seen, "precondition: a child was spawned"
+    assert seen[0]["stderr"] == 2, f"the child must inherit fd 2, got {seen[0]['stderr']!r}"
+    assert not os.path.exists(compact_trigger._trigger_log_path(tracker)), (
+        "stderr mode must not create the container-local worker log file"
+    )
+
+
+def test_file_worker_log_stays_the_default_and_writes_the_store_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker = _canonical_store(tmp_path)
+    seen = _record_popen(monkeypatch)
+
+    compact_trigger._spawn_detached_sweep(tracker)
+
+    assert seen, "precondition: a child was spawned"
+    sink = seen[0]["stderr"]
+    try:
+        assert getattr(sink, "name", None) == compact_trigger._trigger_log_path(tracker), (
+            f"the default child stderr must be the store's worker log, got {sink!r}"
+        )
+    finally:
+        if hasattr(sink, "close"):
+            sink.close()
+
+
+def test_maybe_compact_passes_the_configured_worker_log(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[str, tuple[object, ...]]] = []
+    monkeypatch.setattr(
+        compact_trigger, "_spawn_detached_sweep", lambda t, *a: calls.append((t, a))
+    )
+    monkeypatch.setenv("REBAR_COMPACT_WORKER_LOG", "stderr")
+    tid = _seed(store, "stale sweep", comments=0)
+    tracker = _tracker(store)
+
+    compact_trigger.maybe_compact(tracker, tid, repo_root=str(store))  # never swept: stale
+
+    assert calls == [(tracker, ("stderr",))], calls
+
+
+def test_worker_log_config_defaults_to_file_and_rejects_unknown_values(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rebar import config as _config
+
+    assert _config.compose_config(str(store)).compact.worker_log == "file"
+    monkeypatch.setenv("REBAR_COMPACT_WORKER_LOG", "stderr")
+    assert _config.compose_config(str(store)).compact.worker_log == "stderr"
+    monkeypatch.setenv("REBAR_COMPACT_WORKER_LOG", "journal")
+    with pytest.raises(_config.ConfigError):
+        _config.compose_config(str(store))
