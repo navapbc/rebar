@@ -20,7 +20,6 @@ import socket
 import subprocess
 import sys
 import threading
-import time
 import urllib.request
 from pathlib import Path
 
@@ -183,6 +182,27 @@ def _free_port() -> int:
     return port
 
 
+def _start_live_server(uvicorn, app, port: int):
+    """Run ``app`` under a real uvicorn server on ``127.0.0.1:port`` in a daemon thread."""
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
+    uv = uvicorn.Server(config)
+    thread = threading.Thread(target=uv.run, daemon=True)
+    thread.start()
+    return uv, thread
+
+
+def _await_listening(uv, thread: threading.Thread) -> bool:
+    """Wait until the server is listening or its thread has exited; return ``uv.started``.
+
+    This waits on state, not elapsed time. uvicorn sets ``started`` only after it binds,
+    and a bind ``OSError`` makes it call ``sys.exit``, which ends the thread. Either outcome
+    ends the wait at once, at any host speed. A wedged startup is bounded by the suite's
+    pytest-timeout budget (``pyproject.toml``)."""
+    while not uv.started and thread.is_alive():
+        thread.join(timeout=0.05)
+    return bool(uv.started)
+
+
 # ── AC2: disabled by default → refuse, naming the flag; no web import ────────
 def test_serve_disabled_refuses_and_names_flag(
     store_heldout: Path, capsys: pytest.CaptureFixture[str]
@@ -279,20 +299,43 @@ def test_serve_binds_loopback_ephemeral_and_lists_ticket(store_heldout: Path) ->
     assert plan_sidecar.emit(_plan_verdict_heldout(tid), material="m1", repo_root=r)
 
     port = _free_port()
-    app = server.create_app(repo_root=r)
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-    uv = uvicorn.Server(config)
-    thread = threading.Thread(target=uv.run, daemon=True)
-    thread.start()
+    uv, thread = _start_live_server(uvicorn, server.create_app(repo_root=r), port)
     try:
-        deadline = time.time() + 10
-        while not uv.started and time.time() < deadline:
-            time.sleep(0.05)
-        assert uv.started, "server did not start within 10s"
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5) as resp:
+        assert _await_listening(uv, thread), "server thread exited before it was listening"
+        bound = [s.getsockname()[:2] for srv in uv.servers for s in srv.sockets]
+        assert bound == [("127.0.0.1", port)]
+        # No read deadline: rendering the index runs the store's read path, whose git child
+        # processes slow down with host load (bug b0f0-3dd2-fcf2-4707). A hung request is
+        # bounded by the suite's pytest-timeout budget.
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=None) as resp:
             assert resp.status == 200
             body = resp.read().decode()
         assert tid in body
     finally:
         uv.should_exit = True
         thread.join(timeout=5)
+
+
+def test_await_listening_reports_a_server_that_cannot_bind(tmp_path: Path) -> None:
+    """The readiness wait above has no deadline, so it must still end, reporting failure,
+    when the server cannot bind: here the port is already held by a listening socket."""
+    pytest.importorskip("fastapi")
+    uvicorn = pytest.importorskip("uvicorn")
+
+    from rebar.audit import server
+
+    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        port = holder.getsockname()[1]
+        app = server.create_app(repo_root=str(tmp_path))
+        uv, thread = _start_live_server(uvicorn, app, port)
+        try:
+            assert not _await_listening(uv, thread)
+            assert not thread.is_alive()
+        finally:
+            uv.should_exit = True
+            thread.join(timeout=5)
+    finally:
+        holder.close()
