@@ -168,6 +168,8 @@ def store_freshness(tracker: str | os.PathLike[str] | None = None) -> dict[str, 
 
 def write_blocking_divergence(
     tracker: str | os.PathLike[str] | None = None,
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any] | None:
     """Return the proven divergence that must block the next ticket write, if any.
 
@@ -177,16 +179,19 @@ def write_blocking_divergence(
     bug ``2d52-5abe-abb8-44ab``: no shared ancestor with the already-fetched shared store,
     so every new local event would be stranded on a history the remote can never
     fast-forward to.
+
+    ``repo_root`` is the write's code repo. Its config names the shared store's remote and
+    branch, and its remote URL tells a real shared store from a copied fixture's. Without
+    it the ambient root (``REBAR_ROOT`` or cwd) is used, which for an explicit-root write
+    is an unrelated repo (bug ``cliffy-nonliving-blacklab``).
     """
     try:
-        if tracker is None:
-            from rebar.config import tracker_dir
-
-            tracker = tracker_dir()
         from rebar import config
         from rebar._store.gitutil import run_git
 
-        base = config.repo_root_or_none()
+        if tracker is None:
+            tracker = config.tracker_dir(repo_root)
+        base = config.repo_root_or_none(repo_root)
         branch = config.tickets_branch(base)
         remote = config.tickets_remote(base)
         remote_ref = f"{remote}/{branch}"
