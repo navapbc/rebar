@@ -33,9 +33,16 @@ _GIT_ADD_ATTEMPTS = 3
 # (bug fix-indexlock-retry).
 
 
-# Bound every Git child that runs while holding the store lock (c2ba). This avoids
-# orphaned locks after a stalled volume or forced process stop and matches push.
-_GIT_TIMEOUT = 30
+# Bound every Git child that runs while holding the store lock (c2ba), so a stalled
+# volume fails the write and releases the lock instead of holding it forever. c2ba
+# chose 30 s only to match push; every call here is local index work, whose cost
+# grows with index entries, not with the network. A 213,713-entry store with a stale
+# stat cache spent ~49 s per index refresh, so its commits timed out and the writes
+# were lost (bug evolutive-descendent-manta). As ruled for sync (bug
+# painted-epidermal-shelduck), local index work uses gitutil's local bound and
+# network git keeps push's 30 s. The cost: a stalled volume holds the lock up to this
+# bound per call. review_bot.config derives its force-exit grace from this value.
+_GIT_TIMEOUT = _LOCAL_GIT_TIMEOUT
 
 
 # raw-git-ok: locked store seam internal

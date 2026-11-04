@@ -1,26 +1,48 @@
-"""Bound every lock-held Git call in ``event_append`` (c2ba AC3).
+"""Bound every lock-held Git call in ``event_append`` at the local index bound.
 
-Add, commit, and recovery commands previously used unbounded ``subprocess.run`` while holding
-the MKDIR write lock. ``event_append._run_git`` now mirrors ``push._git``: apply
-``_GIT_TIMEOUT`` and convert :class:`subprocess.TimeoutExpired` to return code 124. Existing
-callers then fail cleanly and release the lock instead of hanging or leaving it orphaned.
+Bug c2ba (melting-resting-serpent) replaced unbounded ``subprocess.run`` calls held under the
+MKDIR write lock with ``event_append._run_git``, which applies ``_GIT_TIMEOUT`` and folds
+:class:`subprocess.TimeoutExpired` into return code 124 so callers fail cleanly and release the
+lock. c2ba set that bound to match the network push bound (30 s).
+
+Bug evolutive-descendent-manta: every call on this path is local index work (``add``,
+``commit``, ``rm``, ``checkout``, ``reset`` and recovery reads), whose cost grows with the number
+of index entries, not with the network. A 213,713-entry tracker with a stale stat cache took
+~49 s per index refresh, so its commits timed out at 30 s and the writes were lost. Following
+the sync ruling (painted-epidermal-shelduck), the event write path now uses gitutil's
+``_LOCAL_GIT_TIMEOUT``; network operations keep the push bound.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
-from rebar._store import event_append
+from rebar._store import event_append, event_commit_git, gitutil, sync
 from rebar._store import push as _push
+from rebar._store.event_append import StoreError
 
 pytestmark = pytest.mark.unit
 
+# The incident's measured index refresh, and the scale that shrinks it and every bound
+# together so the reproduction runs in seconds while keeping their ratios.
+_MEASURED_REFRESH_S = 49
+_SCALE = 1 / 30
+
 
 def _git(d, *a, check=True):
-    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        ["git", "-C", str(d), *a],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=subprocess_env(),
+    )
     if check and r.returncode != 0:
         raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")
     return r
@@ -50,10 +72,80 @@ def tracker(tmp_path: Path) -> str:
     return str(td)
 
 
-def test_git_timeout_constant_matches_push():
-    """The bound is single-valued across the store's git plumbing: event_append reuses the
-    same constant push.py already applies, so 'matching push.py' is enforced, not aspirational."""
-    assert event_append._GIT_TIMEOUT == _push._GIT_TIMEOUT
+@pytest.fixture
+def slow_index_commit(tracker: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> float:
+    """Stall every ``git -C <tracker> … commit`` by the scaled index refresh, then run it.
+
+    A ``git`` wrapper on ``PATH`` hands the commit to ``perl``, which sleeps and then ``exec``s
+    the real git in the same process. A watchdog kill therefore lands on the one process doing
+    the work, sleeping or committing, and nothing is orphaned. Other git calls pass straight
+    through. Returns the stall in seconds."""
+    real_git = shutil.which("git")
+    perl = shutil.which("perl")
+    assert real_git
+    if perl is None:
+        pytest.skip("perl is needed to stall git in-process")
+    stall = _MEASURED_REFRESH_S * _SCALE
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    wrapper = bindir / "git"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        f'if [ "$1" = "-C" ] && [ "$2" = "{tracker}" ]; then\n'
+        '  for a in "$@"; do\n'
+        '    if [ "$a" = "commit" ]; then\n'
+        f"      exec \"{perl}\" -e 'select(undef, undef, undef, shift); exec {{ $ARGV[0] }} @ARGV'"
+        f' "{stall}" "{real_git}" "$@"\n'
+        "    fi\n"
+        "  done\n"
+        "fi\n"
+        f'exec "{real_git}" "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    return stall
+
+
+def _commit_count(tracker: str) -> int:
+    return int(_git(tracker, "rev-list", "--count", "HEAD").stdout.strip())
+
+
+def test_event_write_bound_is_the_local_index_bound():
+    """The event write path reuses gitutil's local bound, the one ``run_git_write`` and sync's
+    index-wide operations already use, and it is longer than the network bound."""
+    assert event_append._GIT_TIMEOUT == gitutil._LOCAL_GIT_TIMEOUT
+    assert event_commit_git._GIT_TIMEOUT == gitutil._LOCAL_GIT_TIMEOUT
+    assert event_append._GIT_TIMEOUT > _push._GIT_TIMEOUT
+
+
+def test_network_git_keeps_the_push_bound():
+    """Push and sync's network calls keep the 30 s bound this change leaves alone."""
+    assert _push._GIT_TIMEOUT == sync._GIT_TIMEOUT == 30
+
+
+def test_slow_index_commit_loses_the_write_at_the_push_bound(
+    tracker, slow_index_commit, monkeypatch
+):
+    """Reproduction: at the old push-sized bound, a commit slowed by the measured index refresh
+    is killed, so the write fails and nothing is committed. This also proves the stall is real,
+    so the passing case below is not vacuous."""
+    monkeypatch.setattr(event_commit_git, "_GIT_TIMEOUT", _push._GIT_TIMEOUT * _SCALE)
+    before = _commit_count(tracker)
+    with pytest.raises(StoreError, match="timed out"):
+        event_append.stage_and_commit(tracker, "tk", _event("u-old", 1700000000000000000))
+    assert _commit_count(tracker) == before
+
+
+def test_slow_index_commit_survives_at_the_event_write_bound(
+    tracker, slow_index_commit, monkeypatch
+):
+    """Regression: at the event write path's own bound, scaled the same way, the slow commit
+    finishes and the write is durable."""
+    monkeypatch.setattr(event_commit_git, "_GIT_TIMEOUT", event_commit_git._GIT_TIMEOUT * _SCALE)
+    before = _commit_count(tracker)
+    rc = event_append.stage_and_commit(tracker, "tk", _event("u-new", 1700000000000000001))
+    assert rc == 0
+    assert _commit_count(tracker) == before + 1
 
 
 def test_run_git_passes_the_timeout(monkeypatch):

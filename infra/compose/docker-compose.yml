@@ -50,12 +50,14 @@ services:
     restart: unless-stopped
     mem_limit: 2048m
     # Allow an in-flight review and its store write to finish on SIGTERM.
-    # The 1320s grace covers the 1200s review drain, 60s lock acquisition,
-    # and 45s push reconcile lock, with 15s margin. Lock-held git calls and
-    # cancellation have their own bounds. A SIGKILL inside the mkdir lock
-    # would leave the next container unable to reclaim it. The review-bot
-    # stop-grace test checks this budget relationship.
-    stop_grace_period: 1320s
+    # Grace = 1200s review drain + 10s cancel + 60s lock acquisition
+    # + 120s lock-held local git call (event_commit_git._GIT_TIMEOUT, the
+    # gitutil local bound) + 45s push reconcile lock = 1435s, rounded up to
+    # 24 min. The first 4 terms (1390s) are the force-exit deadline, which
+    # must fire first. The old 1320s left out cancel and the git call.
+    # A SIGKILL inside the mkdir lock would leave the next container unable
+    # to reclaim it. The review-bot stop-grace tests check these budgets.
+    stop_grace_period: 1440s
     env_file:
       - .env
     environment:
