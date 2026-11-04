@@ -11,8 +11,10 @@ staying a thin sequencer.
 STRICT LEAF: this module imports NOTHING from ``gate_dispatch`` (that would be a
 back-import). The two plan-review step ids it shares (``verify`` / ``decide``) and the
 billable-tier kind set are re-declared below as small private constants that MIRROR the
-canonical definitions in ``gate_dispatch`` (``STEP_VERIFY`` / ``STEP_DECIDE`` /
-``_LLM_STEP_KINDS``) — a rename of those there must be mirrored here.
+canonical definitions in :mod:`rebar.llm.workflow.plan_review_recovery` (``STEP_VERIFY`` /
+``STEP_DECIDE`` / ``_LLM_STEP_KINDS``) — a rename of those there must be mirrored here. A
+third copy of ``_LLM_STEP_KINDS`` lives in :mod:`rebar.llm.workflow.runs`; a rename must be
+mirrored there too.
 """
 
 from __future__ import annotations
@@ -22,9 +24,11 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Local mirrors of gate_dispatch's shared step ids/kinds, re-declared here to keep this a strict
-# leaf (no back-import into gate_dispatch). These MUST track gate_dispatch.STEP_VERIFY /
-# gate_dispatch.STEP_DECIDE / gate_dispatch._LLM_STEP_KINDS (identical string/set values).
+# Local mirrors of plan_review_recovery's shared step ids/kinds, re-declared here to keep this a
+# strict leaf (no back-import into gate_dispatch/plan_review_recovery). These MUST track
+# plan_review_recovery.STEP_VERIFY / plan_review_recovery.STEP_DECIDE /
+# plan_review_recovery._LLM_STEP_KINDS (identical string/set values) — see also the third copy
+# in rebar.llm.workflow.runs._LLM_STEP_KINDS.
 _STEP_VERIFY = "verify"
 _STEP_DECIDE = "decide"
 _LLM_STEP_KINDS = frozenset({"agent", "batch"})  # the billable LLM tier (finders/verify/coach)

@@ -75,6 +75,10 @@ class _Candidate:
             for e in (raw.get("file_impact") or [])
             if isinstance(e, dict) and e.get("path")
         }
+        # Retained (always empty) for output/schema compatibility: nothing in this repo
+        # populates it — it is emitted under the different name "files_likely_read"
+        # (see NextBatchResult / next_batch.schema.json), which is why the gap went
+        # unnoticed. Clients may still read either field.
         self.files_read: set[str] = set()
 
 
@@ -232,6 +236,10 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             }
         )
 
+    # Blocked-id set: active tickets with open blockers, using canonical
+    # direction for both ``depends_on`` and inbound ``blocks`` edges.
+    _blocked_ids = set(open_blockers_by_ticket)
+
     # ── Parent-story gate helpers (lookups over the full reduced set) ──────────
     def find_parent_story(task_id: str) -> str | None:
         s = state_by_id.get(task_id) or {}
@@ -252,10 +260,6 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
         if tag in tags:
             return pid
         return None
-
-    # Blocked-id set: active tickets with open blockers, using canonical
-    # direction for both ``depends_on`` and inbound ``blocks`` edges.
-    _blocked_ids = set(open_blockers_by_ticket)
 
     # ── Build candidate list (skip stories, blocked/awaiting parents) ─────────
     skipped_blocked_story = []

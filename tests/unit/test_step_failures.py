@@ -247,6 +247,9 @@ def test_both_new_gate_run_scopes_activate_the_sink():
     from rebar.llm.workflow import gate_dispatch
 
     src = Path(gate_dispatch.__file__).read_text(encoding="utf-8")
+    # LOAD-BEARING ORDER: this slices gate_dispatch.py's raw source by def name. Critically,
+    # `_consumed_diagnostic` must stay AFTER `_run_code_review_gate` (each marked there too) —
+    # hoisting it above would make `code_review` empty/negative.
     cr_start = src.index("def _run_code_review_gate")
     code_review = src[cr_start : src.index("def _consumed_diagnostic")]
     completion = src[src.index("def produce_completion_verdict") :]

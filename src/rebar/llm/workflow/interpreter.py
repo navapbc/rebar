@@ -250,10 +250,12 @@ _NULL_GUARD = nullcontext()
 
 
 def _commit_state(rc: _RunCtx, frame_key: str, outputs: dict[str, Any], status: str) -> None:
-    """Write a step/frame's outputs + status under the guard (a no-op lock on the
-    serial path). The single chokepoint for shared-state mutation, so EVERY write —
-    leaf, skip, and the branch/loop/map summaries — is serialized when a concurrent
-    map is in flight (the invariant map_fanout relies on)."""
+    """Write a step/frame's outputs + status under the guard (a no-op lock on the serial
+    path). This is ONE caller of the guard, not the sole chokepoint: several frame-summary
+    writes (branch/loop/map) and ``_fail`` call ``with _guard(rc):`` directly rather than
+    through this helper. The actual invariant map_fanout relies on — every shared-state
+    mutation in this module is serialized when a concurrent map is in flight — is guaranteed
+    by ``_guard`` itself, not by routing through ``_commit_state``."""
     with _guard(rc):
         rc.outputs[frame_key] = outputs
         rc.statuses[frame_key] = status

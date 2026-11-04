@@ -30,7 +30,12 @@ def _apply_floor_to_verdict(
     (the sidecar persists it with ``norm_id``), and the coverage records ``narrowed``/
     ``floored_criteria``/``floored_finding_ids`` AND its ``counts`` are corrected (advisory_surfaced
     down, dropped up) so the post-floor counts stay consistent with the buckets. Pure (no LLM); the
-    novelty per index is injected. A no-drop run leaves the verdict byte-identical."""
+    novelty per index is injected. A no-drop run leaves the verdict byte-identical.
+
+    Unlike ``drift_floor``/``xcheck``'s drop appliers, this never calls
+    ``decide._recompute_verdict_after_drop``: it only ever moves findings between
+    ``advisory`` and ``dropped``, never touches ``verdict["blocking"]``, so the overall
+    PASS/BLOCK decision cannot change here."""
     from rebar.llm.review_kernel import decide
 
     advisory = verdict.get("advisory") or []
@@ -127,7 +132,10 @@ def _apply_completion_floor_to_verdict(
     the coverage records the completion-specific ``completion_floored_criteria`` /
     ``completion_floored_finding_ids`` (namespaced so they never collide with the novelty floor's
     keys) AND corrects its ``counts``. Pure (no LLM); the completion answers per index + the
-    delivered-now id set are injected. A no-drop run leaves the verdict byte-identical."""
+    delivered-now id set are injected. A no-drop run leaves the verdict byte-identical.
+
+    Same ``_recompute_verdict_after_drop``-free shape as :func:`_apply_floor_to_verdict` above,
+    for the same reason: only ``advisory``/``dropped`` are touched here, never ``blocking``."""
     from . import completion_subcall
 
     advisory = verdict.get("advisory") or []

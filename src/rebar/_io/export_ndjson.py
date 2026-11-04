@@ -87,8 +87,8 @@ def iter_export_states(
 ) -> Iterator[dict]:
     """Yield export-ready ticket-state dicts (one per ticket) honoring scope flags.
 
-    Scope defaults (P1.2): all work types & statuses incl. closed; the non-graph
-    artifact types (session_log AND code_review) EXCLUDED (opt in with
+    Scope defaults (P1.2): all work types & statuses incl. closed; the NON-GRAPH ARTIFACT
+    types (:data:`~rebar.reducer._api._NON_GRAPH_ARTIFACT_TYPES`) EXCLUDED (opt in with
     ``include_session_logs``); archived INCLUDED with its
     ``archived: true`` marker (opt out with ``exclude_archived``); deleted EXCLUDED
     (opt in with ``include_deleted``). ``status`` / ``ticket_type`` accept a

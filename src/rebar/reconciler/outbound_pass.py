@@ -167,8 +167,9 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
                     comments=tuple(om.comments),
                     labels=tuple(om.labels),
                     # Cycle 3: link adds ride the existing update payload
-                    # (no new MutationAction) — _apply_outbound_update reads
-                    # payload["links"] and calls client.set_relationship.
+                    # (no new MutationAction) — _apply_outbound_update delegates to
+                    # update_one, whose link-dispatch phase (dispatch_apply_phases.py)
+                    # reads payload["links"] and calls client.set_relationship.
                     links=tuple(getattr(om, "links", [])),
                 ),
                 provenance={

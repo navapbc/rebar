@@ -65,8 +65,9 @@ def find_ready_tickets(
     if not tracker_path.is_dir():
         return []
 
-    # session_log tickets never participate in the dependency graph — exclude them
-    # so ready-computation timings are unaffected by verbose log bodies.
+    # The NON-GRAPH ARTIFACT types never participate in the dependency graph — exclude
+    # them (reducer._api._NON_GRAPH_ARTIFACT_TYPES) so ready-computation timings are
+    # unaffected by their verbose bodies.
     #
     # PASS 1 (readiness): reduce LEAN. The computation below reads only
     # ticket_id/status/parent_id/deps, so the bulky bodies + signature material are
