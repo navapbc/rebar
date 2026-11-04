@@ -61,6 +61,27 @@ import sys
 _HANDLER_MARKER = "_rebar_stderr_handler"
 
 
+class _ProcessStderrHandler(logging.StreamHandler):
+    """A ``StreamHandler`` that writes to the PROCESS's stderr, ``sys.__stderr__``.
+
+    ``StreamHandler(sys.stderr)`` froze whatever object ``sys.stderr`` was at install, and the
+    install is idempotent, so after an in-process swap (pytest ``capsys``, an embedding app)
+    every diagnostic went to a stale, possibly closed stream (bug bald-diagnostic-cricket).
+    Following the *current* ``sys.stderr`` is wrong too: rebar captures command output with
+    ``contextlib.redirect_stderr`` (e.g. ``compact.py``'s ``2>/dev/null``), and diagnostics
+    must not vanish into those buffers — a detached sweep's stderr IS its worker log.
+    ``sys.__stderr__`` is never swapped by either; it is resolved at emit time and falls back
+    to ``sys.stderr`` where the interpreter has none (``pythonw``).
+    """
+
+    def __init__(self) -> None:
+        logging.Handler.__init__(self)
+
+    @property
+    def stream(self):
+        return sys.__stderr__ if sys.__stderr__ is not None else sys.stderr
+
+
 def install_stderr_handler(root: str = "rebar", *, level: int | None = None) -> None:
     """Install a single stderr ``StreamHandler`` on the ``root`` logger (idempotent).
 
@@ -78,7 +99,7 @@ def install_stderr_handler(root: str = "rebar", *, level: int | None = None) -> 
     if level is None:
         level = _resolve_level()
 
-    handler = logging.StreamHandler(sys.stderr)
+    handler = _ProcessStderrHandler()
     handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     setattr(handler, _HANDLER_MARKER, True)
     logger.addHandler(handler)

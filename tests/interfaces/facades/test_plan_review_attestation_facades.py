@@ -83,6 +83,9 @@ def test_cli_passed_but_unsigned_is_exit_11_with_byte_identical_stderr(
     from rebar._cli import main
 
     tid = _seed(rebar_repo)
+    # Pin only the command's stderr: seeding may log (e.g. an unsigned-write warning) once
+    # an earlier in-process main() has installed the stderr handler.
+    capsys.readouterr()
     monkeypatch.setattr(rebar.llm, "review_plan", _gate(_UNSIGNED_TRANSIENT))
     rc = main(["review-plan", tid, "-o", "json"])
     err = capsys.readouterr().err
