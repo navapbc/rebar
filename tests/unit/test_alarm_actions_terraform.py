@@ -28,7 +28,7 @@ _TF_DIR = Path(__file__).resolve().parents[2] / "infra" / "terraform"
 
 # This floor makes an empty or incomplete alarm parse fail. Raise it when alarms are
 # added, and lower it only when alarms are deleted.
-_MIN_EXPECTED_ALARMS = 32
+_MIN_EXPECTED_ALARMS = 34
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',

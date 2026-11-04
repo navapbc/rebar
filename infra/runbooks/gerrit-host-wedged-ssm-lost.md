@@ -136,6 +136,72 @@ specific workload is proven from independent logs.
 
 ---
 
+## Preserve evidence BEFORE any restart (about 1 minute)
+
+A reboot or stop/start wipes the kernel ring buffer and the console, and on 2026-09-04 it
+destroyed the only record of the outage. Do this before every restart in this runbook. It costs
+about 1 minute of added downtime, and it is the only step that captures what the kernel printed
+in the last seconds before the host went quiet.
+
+```bash
+evidence="$HOME/rebar-incident-$(date -u +%Y%m%dT%H%M%SZ)"; mkdir -p "$evidence"
+aws ec2 get-console-output --profile frontier --region us-east-1 --instance-id i-00880b2c7f13527c5 --latest --output text > "$evidence/console-latest.txt"
+aws ec2 describe-instance-status --profile frontier --region us-east-1 --instance-ids i-00880b2c7f13527c5 --include-all-instances --output json > "$evidence/instance-status.json"
+```
+
+Use `--latest`. Without it, EC2 returns a cached snapshot, which on 2026-09-04 was two days old.
+Serial console access is disabled at the account level, so this file is the only console record.
+Everything the host already logged is off-box in CloudWatch Logs (next section) and survives the
+restart. Do not wait for the logs before restarting.
+
+## Read the host's logs without the host
+
+Since bug `fab-dismal-haddock`, the CloudWatch agent ships the host's journal and nginx
+`error.log` to the log group `/rebar/gerrit-host`, kept for 90 days, with one stream per source:
+`<instance-id>/kernel`, `/docker` (every compose container: gerrit, review-bot, opcert,
+rebar-mcp), `/rebar` (the `rebar-*` units), `/nginx`, `/systemd` (unit start/stop/failure lines)
+and `/nginx-error`. None of this needs the host alive.
+
+```bash
+# The last 30 minutes of everything, oldest first.
+aws logs tail /rebar/gerrit-host --profile frontier --region us-east-1 --since 30m --format short
+# Just the kernel (OOM kills, I/O errors, hung tasks) around an alarm time.
+aws logs tail /rebar/gerrit-host --profile frontier --region us-east-1 \
+  --log-stream-name-prefix i-00880b2c7f13527c5/kernel --since 2h
+# Where the record ends, which dates the moment the host stopped shipping.
+aws logs describe-log-streams --profile frontier --region us-east-1 --log-group-name /rebar/gerrit-host \
+  --order-by LastEventTime --descending --max-items 6 \
+  --query 'logStreams[].{Stream:logStreamName,Last:lastEventTimestamp}' --output table
+```
+
+The path from an alarm to a cause is: date the failure from the alarm (or from where the streams
+above stop), then read the kernel and docker streams for the 30 minutes before it. Alongside the
+logs, use the run-up host metrics described above.
+
+Two alarms back this path. `rebar-host-logs-not-arriving` pages when the group receives nothing
+for 15 minutes, so a dead pipeline cannot pass for a working one. `rebar-gerrit-external-probe-down`
+is a Route 53 health check, the one Gerrit health signal that does not come from the host.
+
+If the logs stop and the host is healthy, check the 2 State Manager associations
+(`rebar-gerrit-cwagent-install`, `rebar-gerrit-cwagent-configure`). On a rebuilt host, they may
+have run in the wrong order. Re-run them in order:
+
+```bash
+for a in rebar-gerrit-cwagent-install rebar-gerrit-cwagent-configure; do
+  id=$(aws ssm list-associations --profile frontier --region us-east-1 \
+    --association-filter-list key=AssociationName,value=$a --query 'Associations[0].AssociationId' --output text)
+  aws ssm start-associations-once --profile frontier --region us-east-1 --association-ids "$id"
+  sleep 120
+done
+```
+
+**What cannot be recovered.** The 2026-09-04 21:28 UTC outage predates this log group. No
+off-box copy of its logs exists, and the on-box journal (capped at 3 GiB) now starts at
+2026-09-06. Questions about what the kernel or containers did in that window are unanswerable;
+only the AWS-published metrics (EC2, EBS) survive for it.
+
+---
+
 ## Act — snapshot, grow, reboot (no shell required)
 
 1. **Snapshot the root volume FIRST.** This is the reversibility step and it costs nothing but
@@ -156,7 +222,7 @@ specific workload is proven from independent logs.
    **Wait for `optimizing`, not `completed`.** `optimizing` means the new capacity is already
    available to the instance; `completed` only marks the end of background re-striping and can
    take hours. On 2026-09-02 `optimizing` was reached in **~16 seconds**.
-3. **Reboot.** AL2023's cloud-init runs `growpart` at boot, so the **partition and the
+3. **Reboot**, after "Preserve evidence BEFORE any restart" above. AL2023's cloud-init runs `growpart` at boot, so the **partition and the
    filesystem both expand with no shell** — you do not need to run `growpart`/`xfs_growfs`
    yourself, which is what makes this path viable when SSM is gone.
    ```bash
