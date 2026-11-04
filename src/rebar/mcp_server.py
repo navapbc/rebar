@@ -433,6 +433,10 @@ def build_server(cfg=None):
             issuer_url=mcp_cfg.auth_issuer_url,
             resource_server_url=mcp_cfg.auth_resource_server_url,
             required_scopes=list(mcp_cfg.auth_required_scopes) or None,
+            # CompositeTokenVerifier enforces the RFC 8707 audience: it accepts a token only
+            # when its resource equals auth_resource_server_url. Keep the SDK's duplicate
+            # check off explicitly rather than inheriting a default that flips in mcp 3.0.
+            validate_token_resource=False,
         )
 
     if mcp_cfg.transport == "http":

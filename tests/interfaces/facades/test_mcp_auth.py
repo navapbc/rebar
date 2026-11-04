@@ -324,7 +324,9 @@ def test_wrong_resource_stub_verifier_401_at_transport():
         streamable_http_path="/mcp",
         transport_security=ts,
         token_verifier=composite,
-        auth=AuthSettings(issuer_url=ISSUER, resource_server_url=RESOURCE),
+        auth=AuthSettings(
+            issuer_url=ISSUER, resource_server_url=RESOURCE, validate_token_resource=False
+        ),
     )
     with TestClient(server.streamable_http_app(), base_url="http://127.0.0.1:8000") as client:
         resp = client.post(
@@ -351,6 +353,25 @@ def test_http_auth_valid_token_200_and_missing_token_401(tmp_path):
     assert authed.status_code == 200
     assert '"result"' in authed.text
     assert anon.status_code == 401
+
+
+def test_build_server_sets_validate_token_resource_false_without_warning(tmp_path):
+    """build_server decides RFC 8707 resource binding itself instead of inheriting the SDK
+    default: CompositeTokenVerifier already rejects a token whose resource is not
+    auth_resource_server_url, so the SDK's own check stays off. Leaving the field unset makes
+    mcp>=1.30 warn on every authenticated boot (and flips to True in mcp 3.0)."""
+    import warnings
+
+    from rebar.mcp_server import build_server
+
+    cfg = _auth_config(_tokens_file(tmp_path, _record("ci", "boot-high-entropy-token-0000")))
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "error", message=".*validate_token_resource.*", category=DeprecationWarning
+        )
+        server = build_server(cfg)
+    assert server.settings.auth is not None
+    assert server.settings.auth.validate_token_resource is False
 
 
 def test_prm_served_with_single_authorization_server(tmp_path):
