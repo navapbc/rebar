@@ -1,0 +1,2319 @@
+{
+  "jobs": [
+    {
+      "id": 126661693919,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "clear Verified (reset to 0)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:11:36Z",
+      "started_at": "2026-11-04T15:11:38Z",
+      "completed_at": "2026-11-04T15:11:42Z",
+      "runner_id": 1000683140,
+      "runner_name": "GitHub Actions 1000683140",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126661693919",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Reset Verified->0 at run start (GerriScary-safe)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Post Reset Verified->0 at run start (GerriScary-safe)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 5,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126661754837,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "require resolvable rebar ticket",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:11:42Z",
+      "started_at": "2026-11-04T15:11:44Z",
+      "completed_at": "2026-11-04T15:12:56Z",
+      "runner_id": 1000683141,
+      "runner_name": "GitHub Actions 1000683141",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126661754837",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 3,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 4,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 8,
+          "name": "Install rebar (core)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Configure git identity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Require a resolvable rebar ticket in the commit message",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 19,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "Post Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662500761,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "classify Verify route from trusted main",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:12:56Z",
+      "started_at": "2026-11-04T15:12:59Z",
+      "completed_at": "2026-11-04T15:13:32Z",
+      "runner_id": 1000683143,
+      "runner_name": "GitHub Actions 1000683143",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662500761",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 3,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 4,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Deepen until the exact patchset parent is diffable",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 8,
+          "name": "Fetch the trusted route classifier",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Classify the exact HEAD^..HEAD path set",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 17,
+          "name": "Post Fetch the trusted route classifier",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 18,
+          "name": "Post Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 19,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662867976,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "verify-identity (whole-store authorship gate)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:20:57Z",
+      "runner_id": 1000683151,
+      "runner_name": "GitHub Actions 1000683151",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662867976",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 3,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 4,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 8,
+          "name": "Install rebar (core)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Configure git identity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Mount the tickets store (FULL history for commit-ancestry era scoping)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "verify-identity (config-driven posture; reads rebar.toml from this change)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Post Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868487,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "mutation (changed behavioral shards on the patchset) / select mutation shards",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:14:43Z",
+      "runner_id": 1000683150,
+      "runner_name": "GitHub Actions 1000683150",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868487",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch or PR head",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Set up Python 3.12",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Install uv with dependency caching",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install bubblewrap (Linux mutation sandbox)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Select mutation shards",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "Post Install uv with dependency caching",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "Post Set up Python 3.12",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Post Checkout the Gerrit patchset attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868511,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "eval-discipline (offline eval gate on the patchset) / eval discipline (offline — no model)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:14:25Z",
+      "runner_id": 1000683149,
+      "runner_name": "GitHub Actions 1000683149",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868511",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install rebar from the committed lock (dev extra)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Enforce eval discipline (offline)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "Post Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868550,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "golden-path (clean install)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:14:17Z",
+      "runner_id": 1000683152,
+      "runner_name": "GitHub Actions 1000683152",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868550",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 3,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 4,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 8,
+          "name": "Ensure jq is installed",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Install rebar from a built wheel (clean, non-editable)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Configure git identity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "README quickstart golden-path (against the installed rebar)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 12,
+          "name": "End-to-end CLI probe (against the installed rebar)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 24,
+          "name": "Post Checkout the Gerrit change (mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 25,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868632,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "scanner-integration (pinned Semgrep + Gitleaks on the patchset) / pinned Semgrep + Gitleaks contracts",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:35Z",
+      "completed_at": "2026-11-04T15:15:19Z",
+      "runner_id": 1000683144,
+      "runner_name": "GitHub Actions 1000683144",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868632",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install rebar from the committed lock (dev extra)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Run hash-locked scanner integration contracts",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "Post Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868713,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "build-and-test (gate + suite on the patchset) / pip-audit (dependency vulnerabilities)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:14:09Z",
+      "runner_id": 1000683147,
+      "runner_name": "GitHub Actions 1000683147",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868713",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install rebar from the committed lock (dev extra) and pip-audit",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Deepen the checkout so the patchset's parent is diffable (Gerrit lane)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 12,
+          "name": "Dependency advisories (lane-routed verdict; network-retried)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Post Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 24,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 25,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868729,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "build-and-test (gate + suite on the patchset) / sandbox enforcement (Linux bwrap, gating)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:14:42Z",
+      "runner_id": 1000683146,
+      "runner_name": "GitHub Actions 1000683146",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868729",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Prove bwrap can namespace and enforce (fail the lane if not)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run the sandbox enforcement tests under a real bwrap",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 18,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 19,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868801,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "optionality (lean-runtime + packaging on the patchset) / terraform-config-inspect pinned canary",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:35Z",
+      "completed_at": "2026-11-04T15:14:41Z",
+      "runner_id": 1000683157,
+      "runner_name": "GitHub Actions 1000683157",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868801",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install the audited terraform-config-inspect commit",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Run the opt-in pinned canary",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "Post Run actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868821,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "build-and-test (gate + suite on the patchset) / lint + type-check",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:22:58Z",
+      "runner_id": 1000683148,
+      "runner_name": "GitHub Actions 1000683148",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868821",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "uv lock --check (committed lock is current)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Install rebar from the committed lock (dev extra)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 12,
+          "name": "ShellCheck 0.11.0 smoke check (gating)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 13,
+          "name": "lint (ruff check + format --check, gating)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 14,
+          "name": "pre-commit (all hooks, all files, gating)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 15,
+          "name": "mypy — full library + scripts/ (gating)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 16,
+          "name": "config-check (infra configs parse; gating)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 17,
+          "name": "Verified-gate parity gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 18,
+          "name": "comment-hygiene gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 19,
+          "name": "raw-git-write gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "wall-clock-assert gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "Complexity-baseline lock",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 40,
+          "name": "Post Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 41,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 42,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 43,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662868829,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "optionality (lean-runtime + packaging on the patchset) / clean core wheel (no extras → heavy deps absent)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:14:37Z",
+      "runner_id": 1000683145,
+      "runner_name": "GitHub Actions 1000683145",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662868829",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Build the wheel",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install the wheel with NO extras, in a clean venv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "import rebar + a core command work; heavy deps are NOT importable",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 12,
+          "name": "a core CLI command runs on the clean wheel",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 13,
+          "name": "parser-derived docs are byte-current on the lean wheel",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 14,
+          "name": "clean-wheel distribution + every-help-form byte contract (portable pytest)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 15,
+          "name": "degradation-path tests run with NO agents extra",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 29,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 30,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 31,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662869228,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "build-and-test (gate + suite on the patchset) / pytest (ubuntu-latest, py3.13)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:37Z",
+      "completed_at": "2026-11-04T15:41:50Z",
+      "runner_id": 1000683155,
+      "runner_name": "GitHub Actions 1000683155",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662869228",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install bubblewrap (Linux mutation-sandbox enforcement tests)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Install rebar from the committed lock (dev + reviewbot + ui extras)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 12,
+          "name": "Configure git identity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 13,
+          "name": "Git version floor gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 14,
+          "name": "pandoc pin + NOTICE provenance gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 15,
+          "name": "Module-size gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 16,
+          "name": "Restore documentation action for a patchset that predates it",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 17,
+          "name": "Documentation gates (shared with Gerrit docs-only route)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 18,
+          "name": "Prompt-index drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 19,
+          "name": "Security-rules freshness gate (warn-only)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "Criteria-routing parity gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "server.json env-contract drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Public-types drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Run the default suite (Python tiers; excludes integration + external)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 24,
+          "name": "Diff coverage on changed lines (report-only; Gerrit Verified lane)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 25,
+          "name": "Run the integration tier (concurrency + reconciler; network-guarded)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 48,
+          "name": "Post Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 49,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 50,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 51,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662869304,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "build-and-test (gate + suite on the patchset) / pytest (ubuntu-latest, py3.11)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:34:27Z",
+      "runner_id": 1000683154,
+      "runner_name": "GitHub Actions 1000683154",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662869304",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install bubblewrap (Linux mutation-sandbox enforcement tests)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Install rebar from the committed lock (dev + reviewbot + ui extras)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 12,
+          "name": "Configure git identity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 13,
+          "name": "Git version floor gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 14,
+          "name": "pandoc pin + NOTICE provenance gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 15,
+          "name": "Module-size gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 16,
+          "name": "Restore documentation action for a patchset that predates it",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 17,
+          "name": "Documentation gates (shared with Gerrit docs-only route)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 18,
+          "name": "Prompt-index drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 19,
+          "name": "Security-rules freshness gate (warn-only)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "Criteria-routing parity gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "server.json env-contract drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Public-types drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Run the default suite (Python tiers; excludes integration + external)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 24,
+          "name": "Diff coverage on changed lines (report-only; Gerrit Verified lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 25,
+          "name": "Run the integration tier (concurrency + reconciler; network-guarded)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 48,
+          "name": "Post Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 49,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 50,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 51,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662869315,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "build-and-test (gate + suite on the patchset) / pytest (macos-latest, py3.13)",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:32Z",
+      "completed_at": "2026-11-04T15:28:33Z",
+      "runner_id": 0,
+      "runner_name": "",
+      "runner_group_id": 0,
+      "labels": [
+        "macos-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662869315",
+      "steps": []
+    },
+    {
+      "id": 126662869407,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "build-and-test (gate + suite on the patchset) / pytest (ubuntu-latest, py3.12)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:34Z",
+      "completed_at": "2026-11-04T15:32:13Z",
+      "runner_id": 1000683156,
+      "runner_name": "GitHub Actions 1000683156",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662869407",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Install bubblewrap (Linux mutation-sandbox enforcement tests)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Install rebar from the committed lock (dev + reviewbot + ui extras)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 12,
+          "name": "Configure git identity",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 13,
+          "name": "Git version floor gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 14,
+          "name": "pandoc pin + NOTICE provenance gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 15,
+          "name": "Module-size gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 16,
+          "name": "Restore documentation action for a patchset that predates it",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 17,
+          "name": "Documentation gates (shared with Gerrit docs-only route)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 18,
+          "name": "Prompt-index drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 19,
+          "name": "Security-rules freshness gate (warn-only)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 20,
+          "name": "Criteria-routing parity gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 21,
+          "name": "server.json env-contract drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 22,
+          "name": "Public-types drift gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 23,
+          "name": "Run the default suite (Python tiers; excludes integration + external)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 24,
+          "name": "Diff coverage on changed lines (report-only; Gerrit Verified lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 25,
+          "name": "Run the integration tier (concurrency + reconciler; network-guarded)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 48,
+          "name": "Post Run ./.github/actions/setup-uv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 49,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 50,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 51,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662869492,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "artifact-probe (wheel/sdist provenance on the patchset) / artifact provenance (wheel/sdist probe)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:35Z",
+      "completed_at": "2026-11-04T15:14:40Z",
+      "runner_id": 1000683153,
+      "runner_name": "GitHub Actions 1000683153",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662869492",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Record the checked-out commit",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 10,
+          "name": "Build wheel + sdist (REBAR_BUILD_COMMIT baked)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 11,
+          "name": "Validate package metadata (twine check)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 12,
+          "name": "Probe the built wheel (no source tree on the path)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 13,
+          "name": "Probe install-from-sdist (REBAR_BUILD_COMMIT unset, preserve-existing)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 25,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 26,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 27,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662869642,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "optionality (lean-runtime + packaging on the patchset) / optional extras isolate (per-extra venvs + union)",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:35Z",
+      "completed_at": "2026-11-04T15:15:08Z",
+      "runner_id": 1000683159,
+      "runner_name": "GitHub Actions 1000683159",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662869642",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Checkout branch head (push/PR lane)",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 3,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Wait before retrying Gerrit patchset checkout",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 5,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 2",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 6,
+          "name": "Wait before final Gerrit patchset checkout retry",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 7,
+          "name": "Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 3",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "number": 8,
+          "name": "Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 9,
+          "name": "Each extra installs into its OWN fresh venv, plus a joint union venv",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 17,
+          "name": "Post Run actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 18,
+          "name": "Post Checkout the Gerrit patchset (Verified lane; mirror first, Gerrit fallback) attempt 1",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 19,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 126662871394,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "documentation gates (docs-only route)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-11-04T15:13:32Z",
+      "started_at": "2026-11-04T15:13:32Z",
+      "completed_at": "2026-11-04T15:13:32Z",
+      "runner_id": null,
+      "runner_name": null,
+      "runner_group_id": null,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126662871394",
+      "steps": []
+    },
+    {
+      "id": 126663596112,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "mutation (changed behavioral shards on the patchset) / bounded mutation gate",
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-11-04T15:14:43Z",
+      "started_at": "2026-11-04T15:14:43Z",
+      "completed_at": "2026-11-04T15:14:43Z",
+      "runner_id": null,
+      "runner_name": null,
+      "runner_group_id": null,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126663596112",
+      "steps": []
+    },
+    {
+      "id": 126680362648,
+      "run_id": 41855161578,
+      "run_attempt": 1,
+      "name": "cast Verified",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-11-04T15:41:50Z",
+      "started_at": "2026-11-04T15:41:53Z",
+      "completed_at": "2026-11-04T15:42:04Z",
+      "runner_id": 1000683254,
+      "runner_name": "GitHub Actions 1000683254",
+      "runner_group_id": 0,
+      "labels": [
+        "ubuntu-latest"
+      ],
+      "html_url": "https://github.com/navapbc/rebar/actions/runs/41855161578/job/126680362648",
+      "steps": [
+        {
+          "number": 1,
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 2,
+          "name": "Aggregate the run conclusion",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 3,
+          "name": "Fetch the trusted conclusion-normalization script",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 4,
+          "name": "Normalize the conclusion into the vote-type domain",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 5,
+          "name": "Cast Verified from the CI conclusion",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 6,
+          "name": "Summarize the jobs that did not succeed",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 7,
+          "name": "Post the triage detail to Gerrit (comment only, no vote)",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 8,
+          "name": "Remove the Gerrit comment key",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 16,
+          "name": "Post Fetch the trusted conclusion-normalization script",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "number": 17,
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ]
+}

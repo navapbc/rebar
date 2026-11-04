@@ -961,7 +961,8 @@ def test_scanner_workflow_is_shared_by_mirror_and_gerrit_voting():
     assert gerrit_job["uses"] == "./.github/workflows/_scanner-integration.yml"
     assert gerrit_job["with"]["gerrit-refspec"] == "${{ inputs.GERRIT_REFSPEC }}"
     assert "route == 'full'" in gerrit_job["if"]
-    conclusion = vote["steps"][2]["env"]["CONCLUSION"]
+    normalize = next(step for step in vote["steps"] if step.get("id") == "normalize")
+    conclusion = normalize["env"]["CONCLUSION"]
     assert "needs.scanner-integration.result == 'success'" in conclusion
     assert "needs.scanner-integration.result == 'skipped'" in conclusion
     assert "env.WORKFLOW_CONCLUSION" not in conclusion

@@ -5,6 +5,7 @@ distinguished. Its steps must not delay the vote or alter the gate outcome."""
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +104,31 @@ def test_vote_normalization_preserves_cancelled_as_no_verdict(
     assert conclusion.index("contains(needs.*.result, 'failure')") < conclusion.index(
         "contains(needs.*.result, 'cancelled')"
     )
+
+
+def test_normalize_reads_a_jobs_snapshot_taken_before_it(steps: list[dict[str, Any]]) -> None:
+    """A never-acquired runner is only recognisable from the jobs list (20e1-f766-929b-4951)."""
+    names = [str(s.get("name", "")) for s in steps]
+    snapshot_index = names.index("Snapshot this run's jobs for normalization")
+    normalize_index = next(i for i, n in enumerate(names) if "Normalize the conclusion" in n)
+    assert snapshot_index < normalize_index
+
+    snapshot = steps[snapshot_index]
+    assert snapshot["continue-on-error"] is True
+    assert "actions/runs/${GITHUB_RUN_ID}/jobs" in snapshot["run"]
+    assert "verify-jobs.json" in snapshot["run"]
+    normalize = steps[normalize_index]
+    assert normalize["env"]["JOBS_FILE"] == "${{ runner.temp }}/verify-jobs.json"
+
+
+def test_normalizer_exempts_the_vote_job_by_its_workflow_name(vote_job: dict[str, Any]) -> None:
+    """The in-progress vote job has no conclusion yet; the script skips it by name."""
+    script = REPO_ROOT / "scripts" / "normalize_ci_conclusion.py"
+    spec = importlib.util.spec_from_file_location("normalize_ci_conclusion_vote_name", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert vote_job["name"] == module.VOTE_JOB_NAME
 
 
 def test_the_final_vote_uses_the_tolerant_local_helper(steps: list[dict[str, Any]]) -> None:

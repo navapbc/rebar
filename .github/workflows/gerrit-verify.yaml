@@ -610,6 +610,27 @@ jobs:
             scripts/summarize_ci_failures.py
           sparse-checkout-cone-mode: false
 
+      # A matrix cell GitHub never placed on a runner ("not acquired by Runner of type hosted")
+      # is cancelled with no steps, but inside a reusable workflow it does not surface as a
+      # `cancelled` needs result, so the expression below falls through to `failure`. Snapshot
+      # this run's jobs so normalize can tell that no-verdict case from a real failure
+      # (ticket 20e1-f766-929b-4951). The summary step below fetches the same list but runs
+      # after normalize, because it is gated on the vote-type. Best-effort: a missing snapshot
+      # leaves normalize on its fail-closed path.
+      # mechanism-ok: ci_gate .github/workflows/gerrit-verify.yaml::Snapshot this run's jobs for normalization — 20e1-f766-929b-4951 continue-on-error input to the existing normalize step; it gates nothing and stops runner-capacity cancellations from casting false Verified -1 votes.
+      - name: Snapshot this run's jobs for normalization
+        id: jobs-snapshot
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/verify-jobs.json"
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs" \
+            -q '.jobs[]' | jq -s -c '{jobs: .}' > "${out}.partial"
+          mv "${out}.partial" "${out}"
+
       # im-open/workflow-conclusion can set WORKFLOW_CONCLUSION to `skipped` (its fallback
       # when none of success/failure/cancelled is observed) or leave it empty — neither is in
       # gerrit-review-action's vote-type domain {clear,success,failure,cancelled}. Piping it
@@ -655,6 +676,9 @@ jobs:
               )
             ) && 'success' || 'failure' }}
           FAILURE_OBSERVED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+          # Read only to downgrade `failure` to the no-label `cancelled` when every
+          # unsuccessful job never got a runner; absent or malformed keeps `failure`.
+          JOBS_FILE: ${{ runner.temp }}/verify-jobs.json
         run: |
           set -euo pipefail
           # predates-gate-ok: the preceding step checks out the DEFAULT branch (not the
