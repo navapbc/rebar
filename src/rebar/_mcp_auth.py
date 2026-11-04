@@ -538,8 +538,9 @@ class CompositeTokenVerifier:
     ``verify_token`` tries each verifier IN ORDER. A verifier that raises is logged
     (redacted) at debug and treated as non-acceptance — never swallowed-to-accept. A
     result is accepted only when it is an ``AccessToken`` AND its ``resource`` equals
-    this composite's resource (the independent RFC 8707 audience re-check — the SDK's
-    bearer backend never checks ``.resource``, so this is where audience is enforced).
+    this composite's resource (the independent RFC 8707 audience re-check). The SDK's
+    bearer backend checks ``.resource`` only when ``AuthSettings.validate_token_resource``
+    is True, and ``build_server`` sets it False, so this is where audience is enforced.
     The first accepted token short-circuits; if none is accepted, returns ``None``."""
 
     def __init__(self, verifiers: list, *, resource: str) -> None:

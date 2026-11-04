@@ -75,9 +75,10 @@ strategy.
 
 Every configured verifier is placed in one `CompositeTokenVerifier`. Regardless of what
 a sub-verifier returns, the composite **independently re-checks** that the token's
-`resource` equals `auth_resource_server_url` (RFC 8707) before accepting it — the SDK's
-own bearer backend never inspects `.resource`, so this is the only place audience is
-enforced. A verifier that raises is treated as **non-acceptance** (never
+`resource` equals `auth_resource_server_url` (RFC 8707) before accepting it. The SDK's
+own bearer backend checks `.resource` only when `AuthSettings.validate_token_resource` is
+True (added in `mcp` 1.30); rebar sets it to False explicitly, so this is the only place
+audience is enforced. A verifier that raises is treated as **non-acceptance** (never
 swallow-to-accept). If no verifier yields a valid, audience-matching token the request
 is denied **401**; a principal lacking a `required_scope` is **403**. Tokens and secrets
 are never logged.

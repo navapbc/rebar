@@ -54,7 +54,11 @@ def _server(allowed_hosts: list[str], resource_url: str | None = None) -> Any:
             async def verify_token(self, token: str) -> None:
                 return None
 
-        auth = AuthSettings(issuer_url=resource_url, resource_server_url=resource_url)
+        auth = AuthSettings(
+            issuer_url=resource_url,
+            resource_server_url=resource_url,
+            validate_token_resource=False,
+        )
         verifier = _NoTokens()
     mcp = FastMCP(
         "rebar-handshake-test",
