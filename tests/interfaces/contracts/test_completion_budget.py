@@ -17,8 +17,12 @@ from pathlib import Path
 import rebar
 import rebar.llm
 from rebar._config_schema import VerifyConfig
-from rebar.llm.completion import _VERIFY_STEP_FLOOR_MAX, verify_step_floor
-from rebar.llm.config import DEFAULT_MAX_ITERATIONS, LLMConfig
+from rebar.llm.config import (
+    _VERIFY_STEP_FLOOR_MAX,
+    DEFAULT_MAX_ITERATIONS,
+    LLMConfig,
+    verify_step_floor,
+)
 
 
 def _seed(repo: Path, n_criteria: int = 1) -> str:

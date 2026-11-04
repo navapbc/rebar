@@ -546,8 +546,7 @@ def test_looping_tool_still_trips_backstop_under_larger_budget() -> None:
     from pydantic_ai.messages import ModelResponse, ToolCallPart
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-    from rebar.llm.completion import verify_step_floor
-    from rebar.llm.config import LLMConfig
+    from rebar.llm.config import LLMConfig, verify_step_floor
     from rebar.llm.errors import RunawayToolLoopError
     from rebar.llm.runner import PydanticAIRunner, RunRequest
 

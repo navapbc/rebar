@@ -511,3 +511,26 @@ def agents_extra_installed() -> bool:
     provider-agnostic Pydantic AI runtime is present. The provider is selected by the
     model string, so no per-provider integration package is required to run."""
     return available_backends()["pydantic_ai"]
+
+
+# The criteria-scaled step floor accounts for explicit criteria, direct-child traversal, and
+# fixed evidence overhead. Existing tool and loop guards bound runaway behavior. This clamp is
+# the floor formula's ceiling, while an explicit operator budget remains authoritative.
+_VERIFY_STEP_FLOOR_MAX = 960
+
+
+def verify_step_floor(criteria_count: int, verify_cfg, direct_children: int = 0) -> int:
+    """The evidence-surface-scaled PRIMARY completion-verifier step floor:
+    ``clamp(steps_per_criterion × c + child_traversal × direct_children + fixed_overhead,
+    step_floor_min, 960)``. Runaway prevention ONLY (ticket 8d74) — for valid tool use it is
+    generous, scaling with the whole evidence surface: ``c`` explicit criteria (floored at 1),
+    a traversal term per DIRECT child (epic criteria read child tickets), and a fixed
+    show_ticket+parse overhead. Config keys (``verify.completion_verify_*``):
+    ``steps_per_criterion`` 24, ``step_floor_min`` 160, ``child_traversal_steps`` and
+    ``fixed_overhead_steps`` both 16."""
+    per = verify_cfg.completion_verify_steps_per_criterion
+    lo = verify_cfg.completion_verify_step_floor_min
+    child = verify_cfg.completion_verify_child_traversal_steps
+    overhead = verify_cfg.completion_verify_fixed_overhead_steps
+    scaled = per * max(int(criteria_count), 1) + child * max(int(direct_children), 0) + overhead
+    return max(lo, min(scaled, _VERIFY_STEP_FLOOR_MAX))

@@ -36,8 +36,9 @@ from rebar.llm.completion_reconcile import (
     deterministic_child_failure,
     reconcile_verdict,
 )
-from rebar.llm.config import VERIFIER_DEFAULT_MODEL, LLMConfig
+from rebar.llm.config import VERIFIER_DEFAULT_MODEL, LLMConfig, verify_step_floor
 from rebar.llm.runner import Runner
+from rebar.llm.workflow import gate_dispatch
 
 # Public seam: these deterministic helpers are the completion gate's stable API, consumed by
 # the workflow gate ops (rebar.llm.workflow.gate_ops) and external callers. They are exported
@@ -61,10 +62,6 @@ __all__ = [
 # frontier-model over-exploration, while an explicit operator class still wins. The literal is
 # single-sourced with the plan-review verifier in ``config.py``.
 _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
-# The criteria-scaled step floor accounts for explicit criteria, direct-child traversal, and
-# fixed evidence overhead. Existing tool and loop guards bound runaway behavior. This clamp is
-# the floor formula's ceiling, while an explicit operator budget remains authoritative.
-_VERIFY_STEP_FLOOR_MAX = 960
 
 
 def _record_elapsed(metrics: dict[str, int] | None, key: str, started_ns: int) -> None:
@@ -253,23 +250,6 @@ def _run_completion_at_handle(
         annotated = gate_source.annotate_result(result, handle)
         _record_elapsed(phase_metrics, "verifier_annotation_ms", started_ns)
         return annotated
-
-
-def verify_step_floor(criteria_count: int, verify_cfg, direct_children: int = 0) -> int:
-    """The evidence-surface-scaled PRIMARY completion-verifier step floor:
-    ``clamp(steps_per_criterion × c + child_traversal × direct_children + fixed_overhead,
-    step_floor_min, 960)``. Runaway prevention ONLY (ticket 8d74) — for valid tool use it is
-    generous, scaling with the whole evidence surface: ``c`` explicit criteria (floored at 1),
-    a traversal term per DIRECT child (epic criteria read child tickets), and a fixed
-    show_ticket+parse overhead. Config keys (``verify.completion_verify_*``):
-    ``steps_per_criterion`` 24, ``step_floor_min`` 160, ``child_traversal_steps`` and
-    ``fixed_overhead_steps`` both 16."""
-    per = verify_cfg.completion_verify_steps_per_criterion
-    lo = verify_cfg.completion_verify_step_floor_min
-    child = verify_cfg.completion_verify_child_traversal_steps
-    overhead = verify_cfg.completion_verify_fixed_overhead_steps
-    scaled = per * max(int(criteria_count), 1) + child * max(int(direct_children), 0) + overhead
-    return max(lo, min(scaled, _VERIFY_STEP_FLOOR_MAX))
 
 
 def _verifier_model_for_completion(repo_root: str | None = None) -> str:
@@ -466,7 +446,6 @@ def _verify_completion_inner(
     # `child_closure_findings` / `deterministic_child_failure` from this module, so there is
     # exactly ONE child-closure implementation and no double check.) The close gate's signing
     # wrapper (_commands.transition) is unchanged; cfg is already tuned (model + floor) above.
-    from rebar.llm.workflow import gate_dispatch
 
     if phase_metrics is None:
         return gate_dispatch.produce_completion_verdict(

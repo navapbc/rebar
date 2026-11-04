@@ -46,6 +46,8 @@ from rebar.llm.workflow.completion_metrics import (  # noqa: F401
     attach_completion_workflow_phases,
 )
 
+from .completion_recovery import CompletionAgentStep, raise_completion_workflow_failure
+
 
 def _gate_doc(name: str, repo_root) -> dict[str, Any]:
     """Load a packaged gate workflow (``src/rebar/llm/workflow/gates/<name>.yaml``).
@@ -681,7 +683,6 @@ def produce_completion_verdict(
     from rebar.llm.step_failures import collect_step_failures
 
     from . import executor as _ex
-    from .completion_recovery import CompletionAgentStep, raise_completion_workflow_failure
     from .recorder import MemoryRecorder
 
     runner_sel = get_runner(cfg, override=runner)
