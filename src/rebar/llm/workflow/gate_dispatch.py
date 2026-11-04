@@ -504,9 +504,9 @@ def _activated_code_review_project_criteria(
     )
 
 
+# LOAD-BEARING ORDER: test_step_failures.py source-slices this def to `_consumed_diagnostic`.
 def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> dict[str, Any]:
     """Run the four-pass gate in a snapshot session, then finalize.
-
     Systemic runtime outages degrade to ``INDETERMINATE``. Project configuration errors,
     including invalid project-criterion prompts, fail loudly so they cannot silently remove
     review coverage.
@@ -621,9 +621,9 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     )
 
 
+# LOAD-BEARING ORDER: paired with `_run_code_review_gate` above (test_step_failures.py).
 def _consumed_diagnostic(rec: Any) -> dict[str, Any] | None:
     """Best-effort CONSUMED counters for a mid-run gate_error sidecar (df94, Part 2).
-
     A mid-run :class:`LLMUnavailableError` can strike AFTER some agent/batch steps already ran
     and recorded their ``_usage``; this sums the ``requests``/``tool_calls`` consumed so far off
     the in-scope recorder so the gate_error record carries what was spent before the outage (not

@@ -116,6 +116,14 @@ def _tolerant_value(argv: list[str], i: int, name: str, default):
     return None
 
 
+def _read_or(path: str, default: str) -> str:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
 def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
     tracker_dir = ""
     detect_only = False
@@ -325,11 +333,3 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
     if recovered_count == 0 and rebase_kind:
         return 1
     return 0
-
-
-def _read_or(path: str, default: str) -> str:
-    try:
-        with open(path, encoding="utf-8") as f:
-            return f.read().strip()
-    except OSError:
-        return default

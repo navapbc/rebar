@@ -79,6 +79,21 @@ def test_code_review_required_set_is_built_from_the_referenced_constants():
     assert CODE_REVIEW_STEP_IDS == frozenset({_STEP_VERIFY, _STEP_DECIDE, STEP_ASSEMBLE_DIFF})
 
 
+def test_finalize_step_mirrors_match_their_canonical_plan_review_recovery_definitions():
+    """finalize.py stays a strict leaf (no back-import into gate_dispatch /
+    plan_review_recovery) by re-declaring `_STEP_VERIFY` / `_STEP_DECIDE` / `_LLM_STEP_KINDS`
+    as small private mirrors. A third `_LLM_STEP_KINDS` copy lives in `workflow.runs`. Nothing
+    enforces these by import, so pin the 3-way equality here to catch drift the mirror comments
+    alone cannot."""
+    from rebar.llm.code_review import finalize
+    from rebar.llm.workflow import plan_review_recovery, runs
+
+    assert finalize._STEP_VERIFY == plan_review_recovery.STEP_VERIFY
+    assert finalize._STEP_DECIDE == plan_review_recovery.STEP_DECIDE
+    assert finalize._LLM_STEP_KINDS == plan_review_recovery._LLM_STEP_KINDS
+    assert runs._LLM_STEP_KINDS == plan_review_recovery._LLM_STEP_KINDS
+
+
 def test_completion_required_set_is_exactly_the_metrics_mapping_keys():
     assert WORKFLOW_STEP_IDS == frozenset(_WORKFLOW_STEP_FIELDS)
 

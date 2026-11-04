@@ -18,9 +18,10 @@ from ._replay import replay_events
 from ._state import make_error_dict, make_initial_state
 from .marker import check_marker, remove_marker, write_marker
 
-# The NON-GRAPH ARTIFACT ticket types — verbose/bulk bodies (session_log, code_review) kept OUT
-# of the dependency-graph / store-health hot paths and default `list` (searchable via search/show).
-# The `exclude_session_logs` reducer flag drops exactly these (the flag name predates code_review).
+# The NON-GRAPH ARTIFACT ticket types — verbose/bulk bodies kept OUT of the dependency-graph /
+# store-health hot paths and default `list` (searchable via search/show). The exact member list
+# is this tuple; the `exclude_session_logs` reducer flag drops exactly these (the flag name
+# predates the later members).
 _NON_GRAPH_ARTIFACT_TYPES = ("session_log", "code_review", "identity")
 
 
@@ -302,9 +303,9 @@ def reduce_all_tickets(
             must still surface deleted tickets for tombstone inspection. Uses
             the reduced ``status`` field (the authoritative net-deleted signal),
             not an event re-scan; error dicts (status ``"error"``) are kept.
-        exclude_session_logs: When True, drop the NON-GRAPH ARTIFACT types —
-            ``session_log`` AND ``code_review`` (see :data:`_NON_GRAPH_ARTIFACT_TYPES`).
-            Default on for the dependency-graph / store-health hot paths (``ready``,
+        exclude_session_logs: When True, drop the NON-GRAPH ARTIFACT types — every type in
+            :data:`_NON_GRAPH_ARTIFACT_TYPES`. Default on for the dependency-graph /
+            store-health hot paths (``ready``,
             ``next_batch``, ``deps``, ``validate``) so verbose log/artifact bodies never
             tax those compiles; keeps them out of default ``list``. ``search`` and
             single-ticket ``show`` deliberately do NOT set this (they stay
