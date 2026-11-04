@@ -61,6 +61,23 @@ import sys
 _HANDLER_MARKER = "_rebar_stderr_handler"
 
 
+class _CurrentStderrHandler(logging.StreamHandler):
+    """A ``StreamHandler`` that writes to whatever ``sys.stderr`` is at emit time.
+
+    ``StreamHandler(sys.stderr)`` freezes the object current at install, and the install is
+    idempotent, so a later swap of ``sys.stderr`` (pytest capture, ``redirect_stderr``, an
+    embedding application) left every diagnostic going to a stale, possibly closed stream
+    (bug bald-diagnostic-cricket). Same pattern as the stdlib's ``logging._StderrHandler``.
+    """
+
+    def __init__(self) -> None:
+        logging.Handler.__init__(self)
+
+    @property
+    def stream(self):
+        return sys.stderr
+
+
 def install_stderr_handler(root: str = "rebar", *, level: int | None = None) -> None:
     """Install a single stderr ``StreamHandler`` on the ``root`` logger (idempotent).
 
@@ -78,7 +95,7 @@ def install_stderr_handler(root: str = "rebar", *, level: int | None = None) -> 
     if level is None:
         level = _resolve_level()
 
-    handler = logging.StreamHandler(sys.stderr)
+    handler = _CurrentStderrHandler()
     handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
     setattr(handler, _HANDLER_MARKER, True)
     logger.addHandler(handler)
