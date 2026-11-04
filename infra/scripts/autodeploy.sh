@@ -557,12 +557,20 @@ fi
 TARGET="$(git -C "$MIRROR_DIR" rev-parse "$MIRROR_REMOTE/main")"
 DEPLOYED="$(cat "$SHA_FILE" 2>/dev/null || true)"
 
-# First run adopts an existing marker or the current tip without deploying.
+# First run adopts an existing marker or the current tip without deploying. The legacy
+# hand-deploy marker counts only when it names a commit on main: an off-main ref would make
+# every later component delta start from a commit main never contained.
 if [ -z "$DEPLOYED" ]; then
   seed="$TARGET"
   if [ -f "$DEPLOY_REPO/.deployed_ref" ]; then
     ref="$(awk '{print $1}' "$DEPLOY_REPO/.deployed_ref" 2>/dev/null)"
-    git -C "$MIRROR_DIR" rev-parse --verify -q "$ref^{commit}" >/dev/null 2>&1 && seed="$(git -C "$MIRROR_DIR" rev-parse "$ref")"
+    if git -C "$MIRROR_DIR" rev-parse --verify -q "$ref^{commit}" >/dev/null 2>&1; then
+      if git -C "$MIRROR_DIR" merge-base --is-ancestor "$ref" "$TARGET" 2>/dev/null; then
+        seed="$(git -C "$MIRROR_DIR" rev-parse "$ref")"
+      else
+        err deployed-ref-off-main "$DEPLOY_REPO/.deployed_ref names $ref, which is not on $MIRROR_REMOTE/main; adopting $TARGET instead. Remove the stale marker."
+      fi
+    fi
   fi
   echo "$seed" > "$SHA_FILE.tmp" && mv "$SHA_FILE.tmp" "$SHA_FILE"
   log "first run: adopting $seed as deployed-sha (no deploy)"; exit 0
