@@ -20,6 +20,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from _git_counts import commit_count
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar import config
@@ -154,6 +155,90 @@ def test_batched_import_equivalent_to_per_event(tmp_path: Path, monkeypatch) -> 
     # Same logical state; the per-event path makes strictly more commits.
     assert _state_by_source(dst_batched) == _state_by_source(dst_per_event)
     assert _commit_count(dst_batched) < _commit_count(dst_per_event)
+
+
+_SESSION_ID_VARS = (
+    "REBAR_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ID",
+    "OPENCODE_SESSION_ID",
+    "SESSION_ID",
+)
+
+
+def _git_processes_for_import(
+    tmp_path: Path, monkeypatch, label: str, *, session: str | None
+) -> int:
+    """Count git child processes started by one import of 6 parented, linked,
+    commented tickets, with or without an acting session id in the environment."""
+    for var in _SESSION_ID_VARS:
+        monkeypatch.delenv(var, raising=False)
+    if session is not None:
+        monkeypatch.setenv("REBAR_SESSION_ID", session)
+    repo = tmp_path / label
+    repo.mkdir()
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "t@e.com"],
+        ["git", "config", "user.name", "T"],
+    ):
+        subprocess.run(cmd, cwd=repo, check=True, env=subprocess_env())
+    rebar.init_repo(repo_root=str(repo))
+    records: list[dict] = [
+        {"ticket_id": "src-epic", "ticket_type": "epic", "title": "E"},
+        {"ticket_id": "src-peer", "ticket_type": "task", "title": "P"},
+    ]
+    for i in range(6):
+        records.append(
+            {
+                "ticket_id": f"src-{i:03d}",
+                "ticket_type": "task",
+                "title": f"T{i}",
+                "parent_id": "src-epic",
+                "deps": [{"target_id": "src-peer", "relation": "relates_to"}],
+                "file_impact": [{"path": f"m{i}.py", "reason": "r"}],
+                "comments": [{"body": f"note {i}"}],
+            }
+        )
+
+    started = 0
+    real_init = subprocess.Popen.__init__
+
+    def counting_init(self, args, *a, **k):
+        nonlocal started
+        argv = [args] if isinstance(args, (str, bytes)) else list(args)
+        if argv and Path(str(argv[0])).name == "git":
+            started += 1
+        real_init(self, args, *a, **k)
+
+    with monkeypatch.context() as m:
+        m.setattr(subprocess.Popen, "__init__", counting_init)
+        meta = rebar.import_tickets(records, repo_root=str(repo))
+    assert (meta["created"], meta["comments"], meta["links"]) == (8, 6, 6)
+    return started
+
+
+def test_import_git_process_count_does_not_depend_on_acting_session(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Bug subsolar-sonorous-puppy: the import's per-row single-ticket calls each ran the
+    advisory cross-session read when a session id was set (any agent shell), and that read
+    starts git processes. The import only touches tickets it just created unclaimed, so the
+    acting session must not add a single git process."""
+    # The first import in a process pays one-time lookups; keep them out of the comparison.
+    _git_processes_for_import(tmp_path, monkeypatch, "warm-up", session=None)
+    without_session = _git_processes_for_import(tmp_path, monkeypatch, "no-session", session=None)
+    with_session = _git_processes_for_import(
+        tmp_path, monkeypatch, "with-session", session="importer-session"
+    )
+
+    assert with_session == without_session, (
+        f"import started {with_session} git processes with a session id set, "
+        f"{without_session} without one"
+    )
+    # The import releases its suppression guard when it returns.
+    from rebar._lib_warn import _EMITTING
+
+    assert _EMITTING.get() is False
 
 
 def test_batched_import_full_wireup_equivalent(tmp_path: Path, monkeypatch) -> None:
