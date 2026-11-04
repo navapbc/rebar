@@ -35,23 +35,25 @@
 #      prune (four rounds recovered ~1.06 GB against a 29 GB problem). It cannot be capped —
 #      it can only be MEASURED and alarmed, which observability.sh §2f does.
 #
-# ## Why the rendered key depends on the BuildKit version
+# ## One key, on every Engine — and why no version is consulted
 #
-# BuildKit 0.13 introduced `builder.gc.maxUsedSpace` (with `reservedSpace`/`minFreeSpace`) and
-# deprecated `defaultKeepStorage`. A key the running BuildKit does not recognise is SILENTLY
-# IGNORED: the config looks installed, the cap does not exist, and the box reads healthy until
-# it fills. The discriminator is BUILDKIT's version, not the Engine's — Engine 25.0 does NOT
-# imply BuildKit 0.13, and this host ran Engine 25.0.16 with BuildKit 0.12.6 for eleven days
-# with an inert cap because an earlier revision keyed off the Engine (bug 3057). So BuildKit's
-# version is PROBED and the schema that BuildKit honours is what gets written. An unreadable
-# version renders the modern schema and says so on stderr — worst case "no new cap plus a loud
-# log", never a broken daemon. `--install` then READS THE EFFECTIVE POLICY BACK, because a
-# rendered key and an enforced ceiling are different claims.
+# `builder.gc` is parsed by DOCKERD, not by BuildKit, and dockerd drops a key its config struct
+# lacks without a word (moby daemon/config/builder.go). Engine 25.0-27.5's BuilderGCConfig has
+# only `defaultKeepStorage`; Engine 28.0 added `defaultReservedSpace`/`defaultMaxUsedSpace`/
+# `defaultMinFreeSpace` and kept `defaultKeepStorage` as an alias of `defaultReservedSpace`,
+# which BuildKit enforces as the ceiling when the other two are unset (BuildKit
+# cache/manager.go calculateKeepBytes). A gc-level `maxUsedSpace` matches no field on ANY
+# Engine, and `dockerd --validate` skips the whole `builder` subtree, so it cannot catch a
+# wrong key either. Two version cutoffs were each wrong — Engine >= 25.0 (bug 3057), then
+# BuildKit >= 0.13 (bug 5bc1-7e5b-3b4c-46c8) — so nothing is guessed any more: the script
+# writes the one key every supported Engine reads. Should moby ever drop that alias, `--install`
+# READS THE EFFECTIVE POLICY BACK and `--check-gc-enforced` alarms, because the rendered key and
+# the enforced ceiling are different claims.
 #
 # ## Usage
 #
 #   docker-storage-cap.sh --print-env                          # budget + split, for other scripts
-#   docker-storage-cap.sh --print-json [--buildkit-version V]  # the merged daemon.json, no writes
+#   docker-storage-cap.sh --print-json  # the merged daemon.json, no writes
 #   docker-storage-cap.sh --install                         # backup, validate, install, reload
 #   docker-storage-cap.sh --check-gc-enforced               # 1/0: BuildKit enforces the share?
 #
@@ -80,14 +82,6 @@ DOCKER_BUILDKIT_CACHE_BYTES="${DOCKER_BUILDKIT_CACHE_BYTES:-5368709120}"  # 5 Gi
 DOCKER_CONTAINER_WRITABLE_BYTES="${DOCKER_CONTAINER_WRITABLE_BYTES:-2147483648}"  # 2 GiB
 DOCKER_ROOT="${DOCKER_ROOT:-/var/lib/docker}"
 DOCKER_DAEMON_JSON="${DOCKER_DAEMON_JSON:-/etc/docker/daemon.json}"
-
-#: BuildKit version from which `maxUsedSpace` replaces `defaultKeepStorage`, as major/minor.
-#: The discriminator is BUILDKIT's version, not the Engine's, because the key is a BuildKit
-#: feature. Engine 25.0 does not imply BuildKit 0.13: this host ran Engine 25.0.16 with
-#: BuildKit 0.12.6, which ignores `maxUsedSpace` entirely — so the file said 5 GiB, BuildKit
-#: enforced its own default, and the cap was inert while reading as installed (bug 3057).
-DOCKER_MODERN_GC_BUILDKIT_MAJOR=0
-DOCKER_MODERN_GC_BUILDKIT_MINOR=13
 
 #: How far the effective BuildKit keep-bytes may sit from the configured share before the
 #: read-back calls it a mismatch. BuildKit renders that number to four significant figures, so
@@ -161,18 +155,18 @@ report_activation_state() {
   if ! command -v systemctl >/dev/null 2>&1 || ! systemctl is-active --quiet docker 2>/dev/null; then
     # compose-up.sh installs the policy BEFORE `systemctl enable --now docker`, so on a first
     # boot this is the ordinary path and the next start reads the file for free.
-    warn "Docker is not running; it will read the ${schema} builder.gc policy when it next starts"
+    warn "Docker is not running; it will read the builder.gc policy when it next starts"
     return 0
   fi
   written="$(mtime_of "$DOCKER_DAEMON_JSON")" || written=""
   started="$(docker_started_at)" || started=""
   if [ -n "$written" ] && [ -n "$started" ] && [ "$started" -ge "$written" ]; then
-    warn "the live Docker daemon started after this policy was written, so the ${schema} builder.gc policy (BuildKit share ${DOCKER_BUILDKIT_CACHE_BYTES}B) IS in effect"
+    warn "the live Docker daemon started after this policy was written, so the builder.gc policy (BuildKit share ${DOCKER_BUILDKIT_CACHE_BYTES}B) IS in effect"
     return 0
   fi
   # Never an automatic restart: bouncing Docker takes Gerrit, the review-bot and the on-box
   # MCP server down with it, which is an operator's scheduling decision, not a boot script's.
-  warn "WARNING — the ${schema} builder.gc policy is INSTALLED but is NOT in effect: the live Docker daemon predates it (or its start time could not be read), and dockerd's SIGHUP reload does not apply builder.gc. Docker is deliberately NOT restarted here; schedule the restart per infra/runbooks/review-bot-ops.md"
+  warn "WARNING — the builder.gc policy is INSTALLED but is NOT in effect: the live Docker daemon predates it (or its start time could not be read), and dockerd's SIGHUP reload does not apply builder.gc. Docker is deliberately NOT restarted here; schedule the restart per infra/runbooks/review-bot-ops.md"
   return 0
 }
 
@@ -249,14 +243,14 @@ report_effective_gc_policy() {
   local status=0
   effective_gc_verdict || status=$?
   if [ "$status" -eq 2 ]; then
-    warn "could not read or interpret BuildKit's effective keep-bytes from \`docker buildx inspect\`, so the ${schema} builder.gc policy is INSTALLED but UNVERIFIED: whether BuildKit is enforcing ${DOCKER_BUILDKIT_CACHE_BYTES}B is unknown"
+    warn "could not read or interpret BuildKit's effective keep-bytes from \`docker buildx inspect\`, so the builder.gc policy is INSTALLED but UNVERIFIED: whether BuildKit is enforcing ${DOCKER_BUILDKIT_CACHE_BYTES}B is unknown"
     return 0
   fi
   if [ "$status" -eq 0 ]; then
-    warn "BuildKit's effective keep-bytes is ${GC_VERDICT}, which matches the configured ${DOCKER_BUILDKIT_CACHE_BYTES}B share; the ${schema} builder.gc policy IS being enforced"
+    warn "BuildKit's effective keep-bytes is ${GC_VERDICT}, which matches the configured ${DOCKER_BUILDKIT_CACHE_BYTES}B share; the builder.gc policy IS being enforced"
     return 0
   fi
-  warn "WARNING — BuildKit's effective keep-bytes is ${GC_VERDICT}, which does NOT match the configured ${DOCKER_BUILDKIT_CACHE_BYTES}B share. The ${schema} builder.gc policy is loaded but is not the policy in force — the most likely cause is a space key this BuildKit does not recognise, which it ignores silently. Check the BuildKit version against the ${DOCKER_MODERN_GC_BUILDKIT_MAJOR}.${DOCKER_MODERN_GC_BUILDKIT_MINOR} boundary before trusting the cap"
+  warn "WARNING — BuildKit's effective keep-bytes is ${GC_VERDICT}, which does NOT match the configured ${DOCKER_BUILDKIT_CACHE_BYTES}B share. The builder.gc policy is loaded but is not the policy in force — the most likely cause is a space key this dockerd does not parse, which it drops silently. Check that this Engine still reads builder.gc.defaultKeepStorage before trusting the cap"
   return 0
 }
 
@@ -276,46 +270,11 @@ prune_daemon_json_backups() {
   done
 }
 
-# --- Version probe ---------------------------------------------------------
-# The version of the BuildKit EMBEDDED in the running daemon — the component that reads
-# `builder.gc` — which `docker buildx inspect` reports for the default (docker-driver)
-# builder. Deliberately NOT `docker buildx version`: that is the buildx CLI plugin's own
-# version, which moves independently of the BuildKit inside dockerd. Bounded: a wedged
-# daemon must not hang a boot orchestrator.
-probe_buildkit_version() {
-  local v
-  v="$(docker buildx inspect 2>/dev/null \
-       | sed -n 's/^[[:space:]]*[Bb]uild[Kk]it:[[:space:]]*v\{0,1\}\([0-9][0-9.]*\).*/\1/p' \
-       | head -1)"
-  [ -n "$v" ] && { printf '%s\n' "$v"; return 0; }
-  return 1
-}
-
-# Echo `modern` or `legacy` for a BuildKit version string. An unparseable version renders the
-# modern schema and the caller says so on stderr — worst case "no new cap plus a loud log",
-# never a broken daemon.
-gc_schema_for() {
-  local major minor rest
-  major="${1%%.*}"
-  rest="${1#*.}"
-  minor="${rest%%.*}"
-  case "$major" in ''|*[!0-9]*) printf 'modern\n'; return 0 ;; esac
-  case "$minor" in ''|*[!0-9]*) minor=0 ;; esac
-  if [ "$major" -gt "$DOCKER_MODERN_GC_BUILDKIT_MAJOR" ]; then printf 'modern\n'; return 0; fi
-  if [ "$major" -eq "$DOCKER_MODERN_GC_BUILDKIT_MAJOR" ] \
-     && [ "$minor" -ge "$DOCKER_MODERN_GC_BUILDKIT_MINOR" ]; then
-    printf 'modern\n'; return 0
-  fi
-  printf 'legacy\n'
-}
-
 # --- Rendering -------------------------------------------------------------
 # The merge is per-KEY, not per-object: daemon.json on this host is not ours alone, and
 # replacing it wholesale is how a "storage cap" becomes an outage. Only `builder.gc`'s space
 # keys are asserted; every sibling key, inside `builder` and outside it, is carried through.
 render_daemon_json() {
-  local schema="$1"
-  DSC_SCHEMA="$schema" \
   DSC_CAP="$DOCKER_BUILDKIT_CACHE_BYTES" \
   DSC_PATH="$DOCKER_DAEMON_JSON" \
   python3 - <<'PY'
@@ -325,13 +284,10 @@ import sys
 
 path = os.environ["DSC_PATH"]
 # The cap is written as a STRING holding an exact byte count, which is what Docker's own
-# daemon.json reference uses for these keys ("reservedSpace": "30GB"). Both the legacy
-# `defaultKeepStorage` (a plain string field) and the modern `maxUsedSpace` (a DiskSpace,
-# which unmarshals from a string or a number) parse it through go-units, where a bare digit
-# string is bytes — so this is exact rather than unit-ambiguous, and it is what `dockerd
-# --validate` checks below before the file is ever moved into place.
+# daemon.json reference uses for these keys ("reservedSpace": "30GB"). dockerd parses
+# `defaultKeepStorage` through go-units RAMInBytes, where a bare digit string is bytes, so this
+# is exact rather than unit-ambiguous.
 cap = os.environ["DSC_CAP"]
-schema = os.environ["DSC_SCHEMA"]
 
 try:
     with open(path, encoding="utf-8") as handle:
@@ -354,14 +310,13 @@ if not isinstance(gc, dict):
     gc = {}
 
 gc["enabled"] = True
-# Assert exactly ONE of the two space keys and drop the other, so a box upgraded across the
-# BuildKit 0.13 boundary cannot end up carrying a stale key beside the live one.
-if schema == "modern":
-    gc["maxUsedSpace"] = cap
-    gc.pop("defaultKeepStorage", None)
-else:
-    gc["defaultKeepStorage"] = cap
-    gc.pop("maxUsedSpace", None)
+gc["defaultKeepStorage"] = cap
+# The share must be the ONLY gc-level space limit. `maxUsedSpace` is what an earlier revision
+# wrote here, and no Engine parses it. On Engine 28 the other three would change the cap:
+# `defaultReservedSpace` replaces `defaultKeepStorage` outright (the alias applies only when it
+# is empty), and `defaultMaxUsedSpace`/`defaultMinFreeSpace` move the ceiling off the share.
+for stale in ("maxUsedSpace", "defaultReservedSpace", "defaultMaxUsedSpace", "defaultMinFreeSpace"):
+    gc.pop(stale, None)
 
 builder["gc"] = gc
 config["builder"] = builder
@@ -371,11 +326,9 @@ PY
 
 # --- Argument handling -----------------------------------------------------
 mode=""
-buildkit_version=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --print-env|--print-json|--install|--check-gc-enforced) mode="$1" ;;
-    --buildkit-version) shift; buildkit_version="${1:-}" ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
@@ -409,15 +362,7 @@ if [ "$mode" = "--check-gc-enforced" ]; then
   exit 0
 fi
 
-if [ -z "$buildkit_version" ]; then
-  if ! buildkit_version="$(probe_buildkit_version)"; then
-    buildkit_version=""
-    warn "could not read the BuildKit version (daemon down or buildx unavailable); rendering the >= ${DOCKER_MODERN_GC_BUILDKIT_MAJOR}.${DOCKER_MODERN_GC_BUILDKIT_MINOR} schema"
-  fi
-fi
-schema="$(gc_schema_for "$buildkit_version")"
-
-rendered="$(render_daemon_json "$schema")" || die "could not render ${DOCKER_DAEMON_JSON}"
+rendered="$(render_daemon_json)" || die "could not render ${DOCKER_DAEMON_JSON}"
 
 if [ "$mode" = "--print-json" ]; then
   printf '%s\n' "$rendered"
@@ -428,7 +373,7 @@ fi
 # No-op fast path FIRST: re-running the boot orchestrator must not bounce Docker to install
 # bytes that are already there.
 if [ -f "$DOCKER_DAEMON_JSON" ] && [ "$rendered" = "$(cat "$DOCKER_DAEMON_JSON" 2>/dev/null)" ]; then
-  warn "${DOCKER_DAEMON_JSON} already carries the ${schema} builder.gc policy (BuildKit share ${DOCKER_BUILDKIT_CACHE_BYTES}B); nothing to write"
+  warn "${DOCKER_DAEMON_JSON} already carries the builder.gc policy (BuildKit share ${DOCKER_BUILDKIT_CACHE_BYTES}B); nothing to write"
   # "Nothing to write" is NOT "the cap is in force" — this is the one path on which it may
   # genuinely be, so it is the one path worth checking rather than assuming.
   report_activation_state
@@ -475,7 +420,7 @@ if [ -f "$DOCKER_DAEMON_JSON" ]; then
 fi
 
 mv -f "$candidate" "$DOCKER_DAEMON_JSON" || die "could not install ${DOCKER_DAEMON_JSON}"
-warn "installed the ${schema} builder.gc policy (BuildKit share ${DOCKER_BUILDKIT_CACHE_BYTES}B of a ${DOCKER_BUDGET_BYTES}B /var/lib/docker budget)"
+warn "installed the builder.gc policy (BuildKit share ${DOCKER_BUILDKIT_CACHE_BYTES}B of a ${DOCKER_BUDGET_BYTES}B /var/lib/docker budget)"
 prune_daemon_json_backups
 
 # No `systemctl reload` is attempted, and its removal is the point rather than a tidy-up: a
