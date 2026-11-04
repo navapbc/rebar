@@ -443,18 +443,16 @@ resource "aws_cloudwatch_metric_alarm" "docker_du_not_ok" {
 resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
   alarm_name        = "rebar-docker-buildkit-cache-high"
   alarm_description = <<-EOT
-    BuildKit's cache is above 85% of ITS OWN share of the Docker budget. A GENERATOR alarm: it
-    fires while the volume is still comfortable - at 85% of the root disk the box is already
-    an incident. The cache is capped by the daemon's builder.gc policy
-    (/etc/docker/daemon.json, from infra/scripts/docker-storage-cap.sh), so a cache above its
-    cap means that policy is not in force. LOADED is not EFFECTIVE: the right number in
-    daemon.json only proves it was written, a later daemon start only that it was read.
-    BuildKit SILENTLY ignores a space key it does not recognise, so both can hold while the
-    enforced ceiling is BuildKit's default. That key is a BUILDKIT feature, not an Engine one
-    (maxUsedSpace at BuildKit >= 0.13, defaultKeepStorage below), and the Engine version does
-    not imply the BuildKit version - bug 3057: Engine 25.0.16, BuildKit 0.12.6. Re-run
-    docker-storage-cap.sh --install; it reports effective keep-bytes and warns on mismatch.
-    Metric: rebar/host:docker_buildkit_cache_used_percent (observability.sh 2f).
+    BuildKit's build cache is above 110% of ITS OWN share of the Docker budget (share in
+    infra/scripts/docker-storage-cap.sh). An ENFORCED cap is filled to, not stayed under:
+    BuildKit trims only after builds, so a healthy cache reads ~86-104% of its limit, and this
+    alarm means the cache is well past it. CHECK rebar-docker-buildkit-gc-not-enforced FIRST:
+    if it also fires, BuildKit is enforcing its own default ceiling, not this share - a GC key
+    it does not recognise (BuildKit 0.12 needs defaultKeepStorage, bug 3057), or daemon.json
+    never installed. DIAGNOSIS: `docker buildx inspect` (Keep Bytes), `docker system df`.
+    REMEDIATION: `docker-storage-cap.sh --install`, then restart Docker in a quiet window per
+    the runbook; or `docker builder prune --keep-storage`. Published as
+    rebar/host:docker_buildkit_cache_used_percent by observability.sh 2f.
   EOT
 
   namespace   = "rebar/host"
@@ -466,7 +464,9 @@ resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
   period              = 300
   evaluation_periods  = 6
   datapoints_to_alarm = 6
-  threshold           = 85
+  # 110 clears an ENFORCED cap's measured peak (103.6%, bug 007c-dabe-21a5-4e92); the
+  # gc-not-enforced alarm below catches the ignored-cap case this threshold cannot see.
+  threshold           = 110
   comparison_operator = "GreaterThanThreshold"
 
   # Silence here means `docker system df` did not answer — a wedged or dead daemon, which is
@@ -479,6 +479,44 @@ resource "aws_cloudwatch_metric_alarm" "docker_buildkit_cache_high" {
   tags = {
     Project = "rebar"
     Ticket  = "9183"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "docker_buildkit_gc_not_enforced" {
+  alarm_name        = "rebar-docker-buildkit-gc-not-enforced"
+  alarm_description = <<-EOT
+    BuildKit is NOT enforcing the configured build-cache share: the widest `Keep Bytes` in
+    `docker buildx inspect` differs from DOCKER_BUILDKIT_CACHE_BYTES in
+    infra/scripts/docker-storage-cap.sh. LOADED is not EFFECTIVE - BuildKit silently ignores
+    a GC key it does not recognise (bug 3057: BuildKit 0.12.6 ignores maxUsedSpace), and
+    daemon.json is read only at daemon start. CONFIRM: `bash infra/scripts/docker-storage-cap.sh
+    --check-gc-enforced` (1/0). REMEDIATE: `docker-storage-cap.sh --install`, then restart
+    Docker in a quiet window per the runbook (it takes Gerrit, review-bot and MCP down).
+    Published as rebar/host:docker_buildkit_gc_enforced, a 1/0 heartbeat on every probe
+    tick (-1 when unreadable). Runbook: infra/runbooks/review-bot-ops.md.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "docker_buildkit_gc_enforced"
+  statistic   = "Minimum"
+
+  # Section 2f publishes this heartbeat on every tick. Six missing or below-1 readings page;
+  # one healthy 1 clears ordinary scheduling gaps.
+  period              = 300
+  evaluation_periods  = 6
+  datapoints_to_alarm = 6
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+
+  # A heartbeat published on EVERY tick, so silence means the probe, timer or host is dead.
+  treat_missing_data = "breaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Ticket  = "007c"
   }
 }
 

@@ -167,6 +167,7 @@ ALARMED_HEARTBEATS = (
     "journal_cap_in_effect",
     "var_tmp_cleanup_active",
     "container_reaper_active",
+    "docker_buildkit_gc_enforced",
 )
 
 _ALARM_BLOCK = re.compile(

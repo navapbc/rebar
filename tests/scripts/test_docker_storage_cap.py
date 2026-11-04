@@ -769,3 +769,54 @@ def test_a_failed_cap_install_does_not_stop_the_stack_booting(tmp_path: Path) ->
     )
     assert "WARN" in result.stderr, result.stderr
     assert "UNBOUNDED" in result.stderr, result.stderr
+
+
+# --- --check-gc-enforced: the every-tick heartbeat behind docker_buildkit_gc_enforced -----------
+# Bug 007c-dabe-21a5-4e92: the read-back above runs only when someone runs --install, so the
+# 3057 state (cap written, BuildKit enforcing its own default) stayed invisible for weeks once
+# the cache alarm was itself red for other reasons. The probe needs the same comparison as a
+# side-effect-free question it can ask every tick.
+
+
+def _check(
+    tmp_path: Path, **bindir_kwargs: str
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    bindir, calls = _bindir(tmp_path, **bindir_kwargs)
+    daemon_json = tmp_path / "etc" / "daemon.json"
+    result = _run(tmp_path, ["--check-gc-enforced"], bindir=bindir, daemon_json=daemon_json)
+    return result, calls, daemon_json
+
+
+def test_check_gc_enforced_prints_1_when_buildkit_enforces_the_cap(tmp_path: Path) -> None:
+    result, _, _ = _check(tmp_path, buildkit_keep_bytes="5GiB")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "1"
+
+
+def test_check_gc_enforced_prints_0_on_the_live_host_shape(tmp_path: Path) -> None:
+    """Measured on rebar-gerrit 2026-11-03: BuildKit 0.12.6 enforcing 5.588GiB against 5 GiB."""
+    result, _, _ = _check(tmp_path, buildkit_version="0.12.6", buildkit_keep_bytes="5.588GiB")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0"
+
+
+def test_check_gc_enforced_compares_the_widest_rule_not_the_first(tmp_path: Path) -> None:
+    result, _, _ = _check(
+        tmp_path, buildkit_keep_bytes="5GiB", buildkit_small_rule_bytes="790.6MiB"
+    )
+    assert result.stdout.strip() == "1", result.stderr
+
+
+def test_check_gc_enforced_prints_nothing_when_the_policy_is_unreadable(tmp_path: Path) -> None:
+    """Unknown is not agreement and not disagreement: the probe maps silence to -1."""
+    result, _, _ = _check(tmp_path, buildkit_keep_bytes="")
+    assert result.returncode != 0
+    assert result.stdout.strip() == ""
+
+
+def test_check_gc_enforced_is_side_effect_free(tmp_path: Path) -> None:
+    result, calls, daemon_json = _check(tmp_path, buildkit_keep_bytes="5.588GiB")
+    assert result.returncode == 0, result.stderr
+    assert not daemon_json.exists(), "a read-only check must never write daemon.json"
+    logged = calls.read_text()
+    assert "systemctl" not in logged and "dockerd" not in logged, logged

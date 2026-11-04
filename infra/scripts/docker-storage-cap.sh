@@ -53,8 +53,9 @@
 #   docker-storage-cap.sh --print-env                          # budget + split, for other scripts
 #   docker-storage-cap.sh --print-json [--buildkit-version V]  # the merged daemon.json, no writes
 #   docker-storage-cap.sh --install                         # backup, validate, install, reload
+#   docker-storage-cap.sh --check-gc-enforced               # 1/0: BuildKit enforces the share?
 #
-# `--print-env` and `--print-json` are SIDE-EFFECT-FREE (the `compose-up.sh --print-volumes`
+# `--print-env`, `--print-json` and `--check-gc-enforced` are SIDE-EFFECT-FREE (the `compose-up.sh --print-volumes`
 # precedent) so the rendering can be tested without a daemon or a writable /etc.
 # ---------------------------------------------------------------------------
 set -uo pipefail
@@ -189,14 +190,16 @@ report_activation_state() {
 # smaller number than the catch-all rules, so reading the FIRST one would compare the cap
 # against a sub-policy and report a mismatch on a correctly configured host. The ceiling the
 # cache can actually reach is the LARGEST of them, so that is the one compared here.
-report_effective_gc_policy() {
+# Compare BuildKit's effective keep-bytes with the configured share. Sets GC_VERDICT to the
+# widest reported rule ("5.588GiB (6000000000B)") and returns 0 on a match within tolerance,
+# 1 on a mismatch, 2 when the policy is unreadable. Shared by --install's read-back and the
+# probe's every-tick --check-gc-enforced, so the two can never disagree (bug 007c-dabe-21a5-4e92).
+effective_gc_verdict() {
   local reported
+  GC_VERDICT=""
   reported="$(docker buildx inspect 2>/dev/null \
               | sed -n 's/^[[:space:]]*[Kk]eep [Bb]ytes:[[:space:]]*\(.*[^[:space:]]\)[[:space:]]*$/\1/p')"
-  if [ -z "$reported" ]; then
-    warn "could not read BuildKit's effective keep-bytes (\`docker buildx inspect\` reported no GC policy), so the ${schema} builder.gc policy is INSTALLED but UNVERIFIED: whether BuildKit is enforcing ${DOCKER_BUILDKIT_CACHE_BYTES}B is unknown"
-    return 0
-  fi
+  [ -n "$reported" ] || return 2
   local verdict status
   verdict="$(DSC_REPORTED="$reported" DSC_CAP="$DOCKER_BUILDKIT_CACHE_BYTES" \
              DSC_TOL="$DOCKER_GC_READBACK_TOLERANCE" python3 - <<'PY'
@@ -236,14 +239,24 @@ PY
 )"
   status=$?
   if [ "$status" -eq 2 ] || [ -z "$verdict" ]; then
-    warn "could not interpret BuildKit's effective keep-bytes from \`docker buildx inspect\`, so the ${schema} builder.gc policy is INSTALLED but UNVERIFIED: whether BuildKit is enforcing ${DOCKER_BUILDKIT_CACHE_BYTES}B is unknown"
+    return 2
+  fi
+  GC_VERDICT="$verdict"
+  return "$status"
+}
+
+report_effective_gc_policy() {
+  local status=0
+  effective_gc_verdict || status=$?
+  if [ "$status" -eq 2 ]; then
+    warn "could not read or interpret BuildKit's effective keep-bytes from \`docker buildx inspect\`, so the ${schema} builder.gc policy is INSTALLED but UNVERIFIED: whether BuildKit is enforcing ${DOCKER_BUILDKIT_CACHE_BYTES}B is unknown"
     return 0
   fi
   if [ "$status" -eq 0 ]; then
-    warn "BuildKit's effective keep-bytes is ${verdict}, which matches the configured ${DOCKER_BUILDKIT_CACHE_BYTES}B share; the ${schema} builder.gc policy IS being enforced"
+    warn "BuildKit's effective keep-bytes is ${GC_VERDICT}, which matches the configured ${DOCKER_BUILDKIT_CACHE_BYTES}B share; the ${schema} builder.gc policy IS being enforced"
     return 0
   fi
-  warn "WARNING — BuildKit's effective keep-bytes is ${verdict}, which does NOT match the configured ${DOCKER_BUILDKIT_CACHE_BYTES}B share. The ${schema} builder.gc policy is loaded but is not the policy in force — the most likely cause is a space key this BuildKit does not recognise, which it ignores silently. Check the BuildKit version against the ${DOCKER_MODERN_GC_BUILDKIT_MAJOR}.${DOCKER_MODERN_GC_BUILDKIT_MINOR} boundary before trusting the cap"
+  warn "WARNING — BuildKit's effective keep-bytes is ${GC_VERDICT}, which does NOT match the configured ${DOCKER_BUILDKIT_CACHE_BYTES}B share. The ${schema} builder.gc policy is loaded but is not the policy in force — the most likely cause is a space key this BuildKit does not recognise, which it ignores silently. Check the BuildKit version against the ${DOCKER_MODERN_GC_BUILDKIT_MAJOR}.${DOCKER_MODERN_GC_BUILDKIT_MINOR} boundary before trusting the cap"
   return 0
 }
 
@@ -361,7 +374,7 @@ mode=""
 buildkit_version=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --print-env|--print-json|--install) mode="$1" ;;
+    --print-env|--print-json|--install|--check-gc-enforced) mode="$1" ;;
     --buildkit-version) shift; buildkit_version="${1:-}" ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -378,6 +391,21 @@ if [ "$mode" = "--print-env" ]; then
   printf 'DOCKER_CONTAINER_WRITABLE_BYTES=%s\n' "$DOCKER_CONTAINER_WRITABLE_BYTES"
   printf 'DOCKER_IMAGE_SHARE_BYTES=%s\n' "$DOCKER_IMAGE_SHARE_BYTES"
   printf 'DOCKER_ROOT=%s\n' "$DOCKER_ROOT"
+  exit 0
+fi
+
+if [ "$mode" = "--check-gc-enforced" ]; then
+  # Side-effect-free, for observability.sh's every-tick docker_buildkit_gc_enforced heartbeat:
+  # `1` when BuildKit's effective keep-bytes matches the configured share, `0` when it does
+  # not, and NOTHING with a non-zero exit when the policy cannot be read, so the probe reports
+  # unknown rather than a fabricated answer. Never writes, validates, or restarts anything.
+  gc_status=0
+  effective_gc_verdict || gc_status=$?
+  case "$gc_status" in
+    0) printf '1\n' ;;
+    1) printf '0\n' ;;
+    *) exit 1 ;;
+  esac
   exit 0
 fi
 

@@ -60,8 +60,8 @@ _PUBLISHER_BUDGET_PER_DATAPOINT_SECONDS = 600
 
 # The tree had 30 alarms, 26 of them probe-published, when this guard was written. The floors
 # exist so a parser that silently matches NOTHING fails loudly instead of passing for free.
-_MIN_EXPECTED_ALARMS = 31
-_MIN_EXPECTED_PROBE_ALARMS = 27
+_MIN_EXPECTED_ALARMS = 32
+_MIN_EXPECTED_PROBE_ALARMS = 28
 # Two descriptions state an N-of-M window when this guard was written.
 _MIN_EXPECTED_WINDOW_CLAIMS = 2
 

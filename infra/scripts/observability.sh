@@ -618,6 +618,18 @@ if [ -n "$docker_total_bytes" ]; then
   fi
 fi
 
+# Whether BuildKit ENFORCES the configured share, published on EVERY tick (1/0/-1). The cache
+# percentage cannot tell an enforced cap filled to by design from an ignored one: on
+# rebar-gerrit both read ~100% (bug 007c-dabe-21a5-4e92). Bounded like the ledger read.
+docker_gc_enforced="$(heartbeat_value "$(clamped "$DOCKER_DF_TIMEOUT" bash "$DOCKER_CAP_SH" --check-gc-enforced 2>/dev/null)")"
+aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name docker_buildkit_gc_enforced --unit Count --value "$docker_gc_enforced" 2>/dev/null || true
+logger -t rebar-health "docker buildkit gc share=${DOCKER_BUILDKIT_CACHE_BYTES:-unset}B enforced=${docker_gc_enforced}"
+if [ "$docker_gc_enforced" -eq 0 ]; then
+  logger -t rebar-health \
+    "BuildKit is NOT enforcing the configured build-cache share — its effective keep-bytes differs (unrecognised GC key, or daemon.json never installed/reloaded); see infra/runbooks/review-bot-ops.md"
+fi
+
 docker_ledger=""
 docker_ledger="$(docker_ledger_bytes)" || docker_ledger=""
 docker_container_bytes=""

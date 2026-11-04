@@ -13,7 +13,7 @@ pytestmark = pytest.mark.unit
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TF_DIR = _REPO_ROOT / "infra" / "terraform"
 _ALARM_DESCRIPTION_BYTE_LIMIT = 1024
-_MIN_EXPECTED_ALARM_DESCRIPTIONS = 34
+_MIN_EXPECTED_ALARM_DESCRIPTIONS = 35
 
 _ALARM_RE = re.compile(
     r'resource\s+"aws_cloudwatch_metric_alarm"\s+"(?P<name>[^"]+)"\s*\{',
