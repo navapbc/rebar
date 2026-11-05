@@ -8,6 +8,8 @@ interval) and the two containers held two different "one compactor at a time" lo
 store. The simulation below gives each process its own ``.rebar`` for the same store, which is
 exactly what two containers see.
 
+The lock keeps its original name ``compact-worker.lock``; only its directory moved.
+
 No autouse fixtures. Every child is started through ``_subprocess_env.subprocess_env``
 and bounded by a ``communicate`` timeout, then killed and reaped on every path.
 """
@@ -155,7 +157,9 @@ def test_the_lock_and_stamp_live_in_the_trackers_git_dir(tmp_path: Path) -> None
     tracker = _git_store(tmp_path)
     git_dir = os.path.join(tracker, ".git")
 
-    assert os.path.dirname(compact_trigger._trigger_lock_path(tracker)) == git_dir
+    assert compact_trigger._trigger_lock_path(tracker) == os.path.join(
+        git_dir, "compact-worker.lock"
+    )
     assert os.path.dirname(compact_trigger._sweep_stamp_path(tracker)) == git_dir
 
 

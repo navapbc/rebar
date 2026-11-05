@@ -497,7 +497,7 @@ def test_the_trigger_sidecars_are_never_written_inside_an_ephemeral_worktree(
         assert os.listdir(os.path.join(os.path.dirname(wt), ".rebar")) == [], (
             "the trigger wrote sidecars into the worktree that spawned it"
         )
-        assert {"rebar-compact-sweep.stamp", "rebar-compact-worker.lock"} <= set(
+        assert {"rebar-compact-sweep.stamp", "compact-worker.lock"} <= set(
             os.listdir(canonical_git_dir)
         )
     finally:
