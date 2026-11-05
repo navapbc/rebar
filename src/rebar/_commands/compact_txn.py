@@ -123,6 +123,26 @@ def preresolve_unmapped_positions(
     return resolved
 
 
+def preresolve_positions(
+    ticket_dir: str, tracker: str, repo_root, position_commits: dict[str, str] | None
+) -> dict[str, str]:
+    """Every signed event's introducing commit for ``ticket_dir``, resolved for the fold BEFORE
+    it takes the store write lock.
+
+    ``None`` (no map: a single-ticket fold, or a sweep whose store-wide walk failed) builds the
+    ticket's own map here. Bug breezelike-travelsick-moray: on the production store the
+    store-wide walk outran its timeout, so the ledger built this map under the lock instead, and
+    that one walk held the lock 157-277 s per fold. Positions the map lacks are then resolved by
+    :func:`preresolve_unmapped_positions`, so the fold's ledger walks no history."""
+    from rebar.attest import authorship
+
+    if position_commits is None:
+        position_commits = authorship.build_ticket_position_commit_map(
+            ticket_dir, repo_root=repo_root
+        )
+    return preresolve_unmapped_positions(ticket_dir, tracker, repo_root, position_commits)
+
+
 def _signer_key(ev: dict) -> tuple[str, str]:
     """The inputs :func:`_identify_signer` depends on: the author id and the signature."""
     sig = ev.get("author_sig")
@@ -417,11 +437,12 @@ def _abort_fold(
     compact_recovery.discard(journal)
 
 
-#: The phases of one fold, in order, as named on its timing line. The first two run before
+#: The phases of one fold, in order, as named on its timing line. The first three run before
 #: the store write lock; ``lock_wait`` is the acquisition; ``held`` is the whole locked span.
 FOLD_PHASES: tuple[str, ...] = (
     "attribution",
     "signers",
+    "positions",
     "lock_wait",
     "recover",
     "parse",
@@ -550,7 +571,8 @@ def _compact_locked(
     (``finalize_event`` stamps attribution before ``write_and_push`` locks) and
     :func:`preresolve_unmapped_positions` follows for history walks (bug
     breezelike-travelsick-moray): the event attribution, whose cold resolution reduces every
-    ticket in the store, and each signed event's verifying key. Inside the lock, reads run
+    ticket in the store, each signed event's verifying key, and each signed event's introducing
+    commit (:func:`preresolve_positions`). Inside the lock, reads run
     with freshness sync suppressed, so the fold never fetches nor asks for the store lock it
     already holds (bug congruent-demurrable-insect). Every fold logs one timing line."""
     from rebar._commands import _seam
@@ -563,6 +585,10 @@ def _compact_locked(
             attribution = _seam.attribution_fields(repo_root)
         with timer.phase("signers"):
             signers = preresolve_signers(ticket_dir, repo_root)
+        with timer.phase("positions"):
+            position_commits = preresolve_positions(
+                ticket_dir, tracker, repo_root, position_commits
+            )
         try:
             with timer.phase("lock_wait"):
                 handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
@@ -596,7 +622,7 @@ def _compact_locked(
 class _FoldInputs(NamedTuple):
     """What the fold resolved before taking the lock."""
 
-    position_commits: dict[str, str] | None
+    position_commits: dict[str, str]
     signers: dict[tuple[str, str], str | None]
     attribution: dict
 

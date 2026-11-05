@@ -651,3 +651,68 @@ def test_a_map_free_ledger_never_carries_the_empty_string_marker(store: Path) ->
     for entry in _compact_txn._build_authorship_ledger(paths, str(repo)):
         sha = entry["position"]["commit_sha"]
         assert sha is None or len(sha) == 40, entry
+
+
+# ── a sweep map that times out must not move the per-ticket walk under the lock ─────────────
+# Bug breezelike-travelsick-moray: on the production store the store-wide walk took 427 s
+# against its 300 s timeout, so `_sweep_position_map` returned None and every fold built its
+# per-ticket map inside `_build_authorship_ledger`, under the store write lock (160 s measured
+# for one ticket there; the fold's `ledger` phase held the lock 157-277 s).
+
+
+def _time_out_the_sweep_map(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Make the store-wide walk raise TimeoutExpired, as it does in production; the real
+    builder then returns ``{}`` and the sweep falls back to ``None``."""
+    from rebar.attest import authorship
+
+    real_run = authorship.subprocess.run
+    timed_out: list[int] = []
+
+    def run(cmd, *a, **k):
+        if "--no-merges" in cmd and "*.json" in cmd:
+            timed_out.append(1)
+            raise subprocess.TimeoutExpired(cmd, 300)
+        return real_run(cmd, *a, **k)
+
+    monkeypatch.setattr(authorship.subprocess, "run", run)
+    return timed_out
+
+
+def test_a_timed_out_sweep_map_runs_no_history_walk_under_the_lock(
+    store: Path, monkeypatch: pytest.MonkeyPatch, walk_counts: dict[str, int]
+) -> None:
+    repo = store
+    tid = _signed_ticket(repo)
+    position, adding_sha = _add_event_in_a_normal_commit(repo, tid)
+    timed_out = _time_out_the_sweep_map(monkeypatch)
+    seen = _watch_walks_under_lock(monkeypatch, repo)
+
+    rc = _compact.compact_all_cli([], repo_root=str(repo))
+
+    assert rc == 0
+    assert timed_out, "ANCHOR: the store-wide walk must time out, as it does in production"
+    assert walk_counts["ticket_map"] >= 1, f"ANCHOR: the per-ticket walk must run: {walk_counts}"
+    assert not seen, (
+        "the per-ticket history walk ran while the store write lock was held, so every "
+        f"concurrent writer waits for it: {seen}"
+    )
+    assert _ledger_entry(repo, tid, position)["position"]["commit_sha"] == adding_sha, (
+        "resolving positions before the lock must still attribute the event to its commit"
+    )
+
+
+def test_the_single_ticket_fold_runs_no_history_walk_under_the_lock(
+    store: Path, monkeypatch: pytest.MonkeyPatch, walk_counts: dict[str, int]
+) -> None:
+    """`rebar store compact <id>` passes no map, so it hits the same in-lock walk."""
+    repo = store
+    tid = _signed_ticket(repo)
+    position, adding_sha = _add_event_in_a_normal_commit(repo, tid)
+    seen = _watch_walks_under_lock(monkeypatch, repo)
+
+    rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(repo))
+
+    assert rc == 0
+    assert walk_counts["ticket_map"] == 1, f"ANCHOR: one per-ticket walk: {walk_counts}"
+    assert not seen, f"a git-history walk ran while the store write lock was held: {seen}"
+    assert _ledger_entry(repo, tid, position)["position"]["commit_sha"] == adding_sha
