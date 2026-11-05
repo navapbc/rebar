@@ -457,8 +457,8 @@ Today:
   One worker at a time, arbitrated by a stamped advisory lock that reuses the store lock's v2
   ownership stamp and `lock_owner.stamped_file_is_stale`, so an orphaned lock is reclaimed
   rather than disabling the trigger forever. That lock, the last-sweep stamp and the worker log
-  (unless `compact.worker_log = "stderr"` sends the log to the spawner's stderr, as the on-box
-  MCP container does so the log reaches the journal and survives deploys)
+  (except that a sweep the MCP server's close starts logs to the server's stderr, so on the
+  box it reaches the journal and survives deploys)
   all live in the CANONICAL store's `.rebar/` — the tracker resolved through symlinks, as
   `_store.lock.canonical_tracker` requires — so every worktree view of one store shares one
   worker lock and one sweep clock instead of each keying its own. `compact.trigger` selects

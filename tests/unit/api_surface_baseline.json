@@ -1611,6 +1611,11 @@
           "repo_root",
           "KEYWORD_ONLY",
           "None"
+        ],
+        [
+          "_sweep_log",
+          "KEYWORD_ONLY",
+          "'file'"
         ]
       ],
       "return": "TransitionResult"

@@ -10,7 +10,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import IO
+from typing import IO, Literal
 
 from rebar._store.paths import StorePaths
 from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
@@ -27,6 +27,9 @@ _TRIGGER_LOCK_NAME = "compact-worker.lock"
 #: Records when a sweep last ran, so the trigger can fire on staleness alone.
 _SWEEP_STAMP_NAME = "rebar-compact-sweep.stamp"
 _TRIGGER_LOG = "logs/compact-worker.log"
+#: Where a detached sweep worker writes its log: the store's log file, or the spawning
+#: process's own stderr. The CALLER decides (see :func:`_open_worker_log`), never config.
+SweepLog = Literal["file", "stderr"]
 
 
 def _trigger_lock_path(tracker: str) -> str:
@@ -121,15 +124,16 @@ def release_trigger_lock(tracker: str, fd: int) -> None:
     release_stamped_lock(_trigger_lock_path(tracker), fd)
 
 
-def _open_worker_log(tracker: str, worker_log: str) -> int | IO[str]:
-    """The detached worker's stderr sink, chosen by ``compact.worker_log``.
+def _open_worker_log(tracker: str, sweep_log: SweepLog) -> int | IO[str]:
+    """The detached worker's stderr sink, chosen by the caller that triggered the sweep.
 
-    ``stderr`` hands over this process's own fd 2. The deployed MCP container sets it because
-    the store's ``.rebar/`` sits on the container's writable layer, which every blue-green
-    deploy deletes, while the server's stderr is the journald pipe read as
-    ``journalctl -t rebar-mcp`` (bug individual-sonorous-snake). ``file`` stays the default:
-    elsewhere fd 2 may be a terminal or a pipe a caller waits on for EOF."""
-    if worker_log == "stderr":
+    ``"stderr"`` hands over this process's own fd 2. The MCP server's close path passes it: the
+    server is long-lived and its stderr is the journald pipe read as ``journalctl -t
+    rebar-mcp``, which outlives the container, while the deployed store's ``.rebar/`` sits on
+    the container's writable layer, which every blue-green deploy deletes (bug
+    individual-sonorous-snake). ``"file"`` is every other caller's: a CLI's fd 2 may be a
+    terminal or a pipe a caller waits on for EOF, which a worker outliving it must not hold."""
+    if sweep_log == "stderr":
         return 2
     try:
         os.makedirs(os.path.dirname(_trigger_log_path(tracker)), exist_ok=True)
@@ -138,7 +142,7 @@ def _open_worker_log(tracker: str, worker_log: str) -> int | IO[str]:
         return subprocess.DEVNULL
 
 
-def _spawn_detached_sweep(tracker: str, worker_log: str = "file") -> None:
+def _spawn_detached_sweep(tracker: str, sweep_log: SweepLog = "file") -> None:
     """Detach a sweep child that outlives this command (POSIX), via the shared
     detached-rebar-child spawner (:func:`rebar._proc.spawn_detached`), which owns the
     PYTHONPATH bootstrap, the ``-c`` re-entry stub, the detach flags and the durable-cwd
@@ -147,7 +151,7 @@ def _spawn_detached_sweep(tracker: str, worker_log: str = "file") -> None:
     close that triggered it."""
     from rebar._proc import spawn_detached
 
-    log_fh = _open_worker_log(tracker, worker_log)
+    log_fh = _open_worker_log(tracker, sweep_log)
     try:
         spawn_detached(
             "rebar._commands.compact_trigger",
@@ -351,7 +355,9 @@ def run_sweep(tracker: str) -> None:
         release_trigger_lock(tracker, fd)
 
 
-def maybe_compact(tracker: str, ticket_id: str, *, repo_root=None) -> None:
+def maybe_compact(
+    tracker: str, ticket_id: str, *, repo_root=None, sweep_log: SweepLog = "file"
+) -> None:
     """The operation-linked trigger, called on the tail of a close.
 
     Fires when the ticket just written needs folding, OR when the last sweep is stale — the
@@ -359,8 +365,9 @@ def maybe_compact(tracker: str, ticket_id: str, *, repo_root=None) -> None:
     closed tickets happen not to be foldable would otherwise never fold the ones that are.
 
     NEVER raises and never blocks: every branch is guarded, and the default path hands the work
-    to a detached child. Windows is a v1 no-op, because the
-    store lock's ``fcntl`` import would crash a detached child there."""
+    to a detached child, whose log goes where *sweep_log* says (:func:`_open_worker_log`).
+    Windows is a v1 no-op, because the store lock's ``fcntl`` import would crash a detached
+    child there."""
     try:
         if sys.platform == "win32":  # pragma: no cover - POSIX CI
             return
@@ -389,6 +396,6 @@ def maybe_compact(tracker: str, ticket_id: str, *, repo_root=None) -> None:
         if probe is None:
             return
         release_trigger_lock(tracker, probe)
-        _spawn_detached_sweep(tracker, cfg.worker_log)
+        _spawn_detached_sweep(tracker, sweep_log)
     except Exception:
         logger.warning("compaction trigger failed; continuing", exc_info=True)

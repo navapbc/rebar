@@ -1209,20 +1209,33 @@ def test_docker_run_matches_compose_mcp_logging(mcp_box: dict[str, object]) -> N
 
 def test_mcp_compaction_worker_logs_to_the_journal(mcp_box: dict[str, object]) -> None:
     """The detached compaction worker's log must outlive the container (bug
-    individual-sonorous-snake). Its default file sits beside the tracker in
+    individual-sonorous-snake). The store's log file sits beside the tracker in
     `/var/gerrit/site/.rebar/`, on the container's writable layer, which the deploy's
-    `docker rm` deletes. `stderr` hands the worker the server's own stderr, which the
-    journald driver above carries as `journalctl -t rebar-mcp` across every release."""
-    env, _volumes = _parse_compose_mcp_env_and_volumes()
-    assert env.get("REBAR_COMPACT_WORKER_LOG") == "stderr", (
-        "the compose mcp service must set REBAR_COMPACT_WORKER_LOG=stderr so the sweep log "
-        f"reaches the journal (got {env.get('REBAR_COMPACT_WORKER_LOG')!r})"
+    `docker rm` deletes. Two links carry it past a replacement instead: the MCP close path
+    hands the worker the server's own stderr (the `transition_ticket` tool pins
+    `_sweep_log="stderr"`), and the replacement container's `docker run` sends that stderr to
+    the journald driver under the one tag every release shares (`journalctl -t rebar-mcp`).
+    No config key or env var is involved, so neither the compose service nor the run line
+    may carry the retired `REBAR_COMPACT_WORKER_LOG`."""
+    from rebar._mcp_tool_specs import TOOL_SPECS
+
+    spec = next(s for s in TOOL_SPECS if s.name == "transition_ticket")
+    assert spec.pins.get("_sweep_log") == "stderr", (
+        f"the MCP close must hand its sweep the server's stderr (pins={dict(spec.pins)!r})"
     )
+    driver, tag = _compose_mcp_logging()
+    assert driver == "journald", f"the server's stderr must reach the journal (got {driver!r})"
+    env, _volumes = _parse_compose_mcp_env_and_volumes()
+    assert "REBAR_COMPACT_WORKER_LOG" not in env, "the retired env var is back in compose"
     result = _run(mcp_box)
     run_line = _run_line(_commands_eventually(mcp_box, "run --name"))
     ctx = f"rc={result.returncode}\nrun_line={run_line}\n{result.stdout}\n{result.stderr}"
-    assert "-e REBAR_COMPACT_WORKER_LOG=stderr" in run_line, (
-        f"docker run must carry `-e REBAR_COMPACT_WORKER_LOG=stderr` (compose parity)\n{ctx}"
+    assert run_line, f"the mcp deploy must `docker run` a replacement container\n{ctx}"
+    assert f"--log-driver {driver}" in run_line and f"--log-opt tag={tag}" in run_line, (
+        f"the replacement container must log to the journal under tag {tag!r}\n{ctx}"
+    )
+    assert "REBAR_COMPACT_WORKER_LOG" not in run_line, (
+        f"docker run must not carry the retired REBAR_COMPACT_WORKER_LOG\n{ctx}"
     )
 
 

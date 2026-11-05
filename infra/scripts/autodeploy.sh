@@ -421,7 +421,6 @@ mcp_run_new() {
     -e "MCP_CODE_DIR=/var/gerrit/site/mcp-code" \
     -e "REBAR_ROOT=/var/gerrit/site/mcp-code" \
     -e REBAR_SYNC_PUSH=always \
-    -e REBAR_COMPACT_WORKER_LOG=stderr \
     -e REBAR_LLM_BEDROCK_REGION=us-east-1 \
     -e AWS_DEFAULT_REGION=us-east-1 \
     -p "127.0.0.1:${2}:8091" \

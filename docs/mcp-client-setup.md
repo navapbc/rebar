@@ -211,9 +211,10 @@ Verify from this repository: `claude mcp list` lists the project `rebar` server.
   - A kernel out-of-memory kill: `journalctl -k | grep 'Killed process .*rebar-mcp'`.
   - Memory samples per container: `journalctl -t rebar-health`.
   - The detached compaction sweep's log, including its per-fold timing lines, every release:
-    `journalctl -t rebar-mcp | grep rebar._commands.compact`. The container sets
-    `compact.worker_log = "stderr"` (`REBAR_COMPACT_WORKER_LOG`), so the sweep writes to the
-    server's journal rather than to `.rebar/logs/compact-worker.log`, which a deploy deletes.
+    `journalctl -t rebar-mcp | grep rebar._commands.compact`. A sweep that the server's
+    `transition_ticket` close starts inherits the server's stderr, so it writes to the journal
+    rather than to `.rebar/logs/compact-worker.log`, which a deploy deletes. A sweep started by
+    the `rebar` CLI on the box still writes that file.
 
   A locally run stdio server writes its log to stderr, which the MCP client captures.
 

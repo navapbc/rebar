@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from rebar import config
 from rebar._commands._seam import CommandError
@@ -21,6 +22,9 @@ from rebar._engine_support.output import OutputFormatError, error_envelope, pars
 from rebar._ids import resolve_ticket_id
 from rebar._mcp_errors import js_safe_dumps
 from rebar.reducer import reduce_ticket
+
+if TYPE_CHECKING:
+    from rebar._commands.compact_trigger import SweepLog
 
 _VALID_STATUSES = ("idea", "open", "in_progress", "closed", "blocked")
 
@@ -222,6 +226,7 @@ def transition_compute(
     repo_root=None,
     cascade: bool = True,
     _cascade_seen: frozenset[str] | None = None,
+    sweep_log: SweepLog = "file",
 ) -> dict:
     """Apply a transition to an already-resolved ticket and return its stable result mapping.
 
@@ -229,7 +234,9 @@ def transition_compute(
     advance eligible parents recursively before the child. ``cascade=False`` suppresses this
     for exact-state replay, and ``_cascade_seen`` is internal. ``force_reason=None`` means no
     bypass. Any string bypasses the applicable start or close gate and is audited.
-    ``close_reason`` instead records a reason-required administrative disposition."""
+    ``close_reason`` instead records a reason-required administrative disposition.
+    ``sweep_log`` is where a close-triggered compaction worker logs: the MCP server passes
+    ``"stderr"`` (its journal), every other caller keeps the store's log file."""
     tracker = str(config.tracker_dir(repo_root))
     # Resolve the code and configuration root through shared precedence instead of the
     # tracker path. A relocated store can lie outside the repository. Tracker-based
@@ -335,6 +342,7 @@ def transition_compute(
         close_class=close_class,
         caused_by=caused_by,
         ref=ref,
+        sweep_log=sweep_log,
     )
 
 

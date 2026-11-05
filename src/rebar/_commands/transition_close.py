@@ -16,7 +16,7 @@ import os
 import subprocess
 import time
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rebar import config
 from rebar._commands import (
@@ -33,6 +33,9 @@ from rebar._commands.close_precheck import _completion_precheck
 from rebar._commands.completion_bundle import verdict_manifest as _verdict_manifest
 from rebar.graph._unblock import batch_close_operations
 from rebar.types import PLAN_REVIEW_REVIEWED_TYPES
+
+if TYPE_CHECKING:
+    from rebar._commands.compact_trigger import SweepLog
 
 logger = logging.getLogger(__name__)
 
@@ -439,20 +442,20 @@ def _sign_completion_and_report(
 
 
 def _trigger_compaction(
-    target_status: str, tracker: str, ticket_id: str, repo_root_str: str
+    target_status: str, tracker: str, ticket_id: str, repo_root_str: str, sweep_log: SweepLog
 ) -> None:
     """Trigger operation-linked compaction after a close.
 
     The caller has released the store lock and completed its push. ``maybe_compact`` uses
     store-size-independent eligibility checks and normally delegates folding to a detached
     worker, so closing does not wait for the fold. This trigger keeps compaction available
-    without a scheduled sweep.
+    without a scheduled sweep. *sweep_log* is the caller's choice of where that worker logs.
     """
     if target_status != "closed":
         return
     from rebar._commands import compact_trigger
 
-    compact_trigger.maybe_compact(tracker, ticket_id, repo_root=repo_root_str)
+    compact_trigger.maybe_compact(tracker, ticket_id, repo_root=repo_root_str, sweep_log=sweep_log)
 
 
 def _refresh_close_material(tracker: str, current_status: str, force_close: str) -> None:
@@ -555,6 +558,7 @@ def close_ticket(
     close_class: str = "",
     caused_by: str = "",
     ref: str | None = None,
+    sweep_log: SweepLog = "file",
 ) -> dict:
     """Run the close tail and return ``{ticket_id, from, to, newly_unblocked, noop}``.
 
@@ -733,7 +737,7 @@ def close_ticket(
     # The next healthy operation/scheduled sweep can trigger compaction after delivery is
     # resolved; compaction is optional housekeeping, never part of close correctness.
     if target_status != "closed" or caused_by_safe:
-        _trigger_compaction(target_status, tracker, ticket_id, repo_root_str)
+        _trigger_compaction(target_status, tracker, ticket_id, repo_root_str, sweep_log)
 
     result: dict = {
         "ticket_id": ticket_id,

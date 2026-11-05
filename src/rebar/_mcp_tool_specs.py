@@ -682,6 +682,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         ``caused_by`` records the explicit culprit for a bug close. ``ref`` selects
         the committed tree used by completion verification; it defaults to HEAD.""",
         order=_TRANSITION_ORDER,
+        # The long-lived server's stderr is its journal, which outlives a deploy; a
+        # close-triggered compaction worker logs there (bug individual-sonorous-snake).
+        pins={"_sweep_log": "stderr"},
         pre=(warn_before("ticket_id"),),
         post=(with_push, attach_warning),
     ),

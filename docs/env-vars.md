@@ -47,7 +47,6 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_COMPACT_THRESHOLD` | `src/rebar/_config_sections.py (canonical env name of compact.threshold)` |  |
 | `REBAR_COMPACT_TRIGGER` | `src/rebar/_config_sections.py (canonical env name of compact.trigger)` |  |
 | `REBAR_COMPACT_TRIGGER_INTERVAL_S` | `src/rebar/_config_sections.py (canonical env name of compact.trigger_interval_s)` |  |
-| `REBAR_COMPACT_WORKER_LOG` | `src/rebar/_config_sections.py (canonical env name of compact.worker_log)` |  |
 | `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_CONFIG_UNKNOWN_KEYS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_CTAGS_BIN` | `src/rebar/grounding/resolve.py` |  |
@@ -227,7 +226,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_214 variables._
+_213 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

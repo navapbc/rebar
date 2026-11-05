@@ -537,22 +537,26 @@ def test_a_detached_sweep_child_is_handed_the_canonical_store_tracker(
 
 
 # ── where the detached worker's log goes (bug individual-sonorous-snake) ─────────────────────
-# The deployed MCP container keeps `.rebar/` beside its tracker on the container's writable
-# layer, so a file log there dies with every blue-green deploy. `compact.worker_log = "stderr"`
-# hands the worker the spawner's own stderr instead, which in the container is the journald
-# pipe that already carries `journalctl -t rebar-mcp`.
+# The CALLER decides, never config. The MCP server is long-lived and its stderr is the journald
+# pipe read as `journalctl -t rebar-mcp`, which outlives the container; the deployed store's
+# `.rebar/logs/` sits on the container's writable layer, which every blue-green deploy deletes.
+# So the MCP `transition_ticket` tool pins the private `_sweep_log="stderr"`, while the CLI (a
+# short-lived process whose fd 2 may be a terminal) keeps the store's log file.
 
 
-def _record_popen(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
-    """Capture the spawner's Popen kwargs without launching a child (patch `_proc`'s own
-    `subprocess` reference, as the canonical-tracker test above does)."""
+def _record_sweep_spawns(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Capture the Popen kwargs of each detached SWEEP child without launching it (patch
+    `_proc`'s own `subprocess` reference, as the canonical-tracker test above does). Other
+    detached children (a background push) are launched by the same spawner, so filter on the
+    sweep's entrypoint."""
     from rebar import _proc
 
     seen: list[dict[str, object]] = []
 
     def _fake_popen(argv: list[str], **kwargs: object) -> object:
-        seen.append(kwargs)
-        return object()
+        if any("run_detached_sweep" in str(a) for a in argv):
+            seen.append(kwargs)
+        return types.SimpleNamespace(pid=0)
 
     monkeypatch.setattr(
         _proc,
@@ -562,64 +566,99 @@ def _record_popen(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
     return seen
 
 
-def test_stderr_worker_log_hands_the_child_the_spawners_stderr(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _claimed_for_close(store: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """A claimed ticket whose close fires the trigger (the store never swept: stale)."""
+    from rebar._commands import gates as _gates
+
+    monkeypatch.setattr(_gates, "gate_enabled", lambda root, key, **k: False)
+    tid = _seed(store, "close fires the sweep", comments=0)
+    rebar.claim(tid, repo_root=str(store))
+    return tid, _tracker(store)
+
+
+def _mcp_transition_tool() -> object:
+    """The real MCP `transition_ticket` callable, registered against a fake server."""
+    import logging
+
+    from rebar import _mcp_writes
+
+    tools: dict[str, object] = {}
+
+    class _FakeMCP:
+        def tool(self, *_a: object, **_k: object):
+            def _decorate(fn):
+                tools[fn.__name__] = fn
+                return fn
+
+            return _decorate
+
+    class _FakeCtx:
+        logger = logging.getLogger("test")
+
+        @staticmethod
+        def readonly() -> bool:
+            return False
+
+        @staticmethod
+        def dump(obj: object) -> object:
+            return obj
+
+        @staticmethod
+        def allow_llm() -> bool:
+            return False
+
+    _mcp_writes.register_write_tools(_FakeMCP(), ctx=_FakeCtx())
+    return tools["transition_ticket"]
+
+
+def test_an_mcp_close_hands_the_sweep_the_servers_stderr(
+    store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    tracker = _canonical_store(tmp_path)
-    seen = _record_popen(monkeypatch)
+    tid, tracker = _claimed_for_close(store, monkeypatch)
+    seen = _record_sweep_spawns(monkeypatch)
 
-    compact_trigger._spawn_detached_sweep(tracker, "stderr")
+    _mcp_transition_tool()(tid, "in_progress", "closed")  # type: ignore[operator]
 
-    assert seen, "precondition: a child was spawned"
+    assert len(seen) == 1, f"the MCP close must spawn exactly one sweep, got {seen!r}"
     assert seen[0]["stderr"] == 2, f"the child must inherit fd 2, got {seen[0]['stderr']!r}"
     assert not os.path.exists(compact_trigger._trigger_log_path(tracker)), (
-        "stderr mode must not create the container-local worker log file"
+        "an MCP-spawned sweep must not create the store's worker log file"
     )
 
 
-def test_file_worker_log_stays_the_default_and_writes_the_store_log(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_cli_close_writes_the_sweep_to_the_store_log_file(
+    store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    tracker = _canonical_store(tmp_path)
-    seen = _record_popen(monkeypatch)
+    from rebar._commands import transition as _transition
 
-    compact_trigger._spawn_detached_sweep(tracker)
+    tid, tracker = _claimed_for_close(store, monkeypatch)
+    seen = _record_sweep_spawns(monkeypatch)
 
-    assert seen, "precondition: a child was spawned"
+    rc = _transition.transition_cli([tid, "in_progress", "closed"], repo_root=str(store))
+
+    assert rc == 0
+    assert len(seen) == 1, f"the CLI close must spawn exactly one sweep, got {seen!r}"
     sink = seen[0]["stderr"]
     try:
         assert getattr(sink, "name", None) == compact_trigger._trigger_log_path(tracker), (
-            f"the default child stderr must be the store's worker log, got {sink!r}"
+            f"a CLI-spawned sweep must write the store's worker log, got {sink!r}"
         )
     finally:
         if hasattr(sink, "close"):
             sink.close()
 
 
-def test_maybe_compact_passes_the_configured_worker_log(
-    store: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    calls: list[tuple[str, tuple[object, ...]]] = []
-    monkeypatch.setattr(
-        compact_trigger, "_spawn_detached_sweep", lambda t, *a: calls.append((t, a))
-    )
-    monkeypatch.setenv("REBAR_COMPACT_WORKER_LOG", "stderr")
-    tid = _seed(store, "stale sweep", comments=0)
-    tracker = _tracker(store)
+def test_the_sweep_log_destination_is_not_a_config_key() -> None:
+    """A bug fix may not add configuration: the destination is the caller's, not the operator's."""
+    import dataclasses
 
-    compact_trigger.maybe_compact(tracker, tid, repo_root=str(store))  # never swept: stale
+    from rebar._config_schema import _SECTIONS
+    from rebar.config import _canonical_env_name
 
-    assert calls == [(tracker, ("stderr",))], calls
+    keys = {f"{s}.{k}" for s, ks in _SECTIONS.items() for k in ks}
+    envs = {_canonical_env_name(s, k) for s, ks in _SECTIONS.items() for k in ks}
+    assert "compact.worker_log" not in keys
+    assert "REBAR_COMPACT_WORKER_LOG" not in envs
+    from rebar._config_schema import CompactConfig
 
-
-def test_worker_log_config_defaults_to_file_and_rejects_unknown_values(
-    store: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from rebar import config as _config
-
-    assert _config.compose_config(str(store)).compact.worker_log == "file"
-    monkeypatch.setenv("REBAR_COMPACT_WORKER_LOG", "stderr")
-    assert _config.compose_config(str(store)).compact.worker_log == "stderr"
-    monkeypatch.setenv("REBAR_COMPACT_WORKER_LOG", "journal")
-    with pytest.raises(_config.ConfigError):
-        _config.compose_config(str(store))
+    assert "worker_log" not in {f.name for f in dataclasses.fields(CompactConfig)}

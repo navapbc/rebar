@@ -203,20 +203,16 @@ compact.trigger          = "async"  # async | always | off (env REBAR_COMPACT_TR
                         # `rebar store compact --all` out of band. "always" runs that sweep INLINE instead
                         # (tests/CI, where a detached child would outlive the assertion);
                         # "off" disables it for operators who drive compaction themselves.
-                        # A v1 no-op on Windows.
+                        # A v1 no-op on Windows. The detached worker logs to the store's
+                        # .rebar/logs/compact-worker.log, except when the MCP server's close
+                        # triggered it: then it logs to the server's stderr (on the box, the
+                        # journal: `journalctl -t rebar-mcp`). Not configurable.
 compact.trigger_interval_s = 21600  # env REBAR_COMPACT_TRIGGER_INTERVAL_S
                         # How stale the last-sweep stamp may get before a close detaches a
                         # worker even when the ticket it just wrote needs no folding. Without
                         # this the floor has a hole: a store whose closed tickets happen never
                         # to be foldable would never fold the ones that are. Default 6 h,
                         # matching the scheduled sweep's cadence. 0 disables the staleness arm.
-compact.worker_log = "file"  # file | stderr (env REBAR_COMPACT_WORKER_LOG)
-                        # Where the detached worker writes its log. "file" appends to the
-                        # store's .rebar/logs/compact-worker.log. "stderr" hands the worker the
-                        # spawning process's own stderr — set by the on-box MCP container, whose
-                        # .rebar/ is deleted on every deploy while its stderr is the journal
-                        # (`journalctl -t rebar-mcp`). Keep "file" where stderr is a terminal or
-                        # a pipe a caller waits on: the detached worker would hold it open.
 reclaim.horizon_days = 30  # env REBAR_RECLAIM_HORIZON_DAYS
                         # ADR 0106's remote-anchored reclamation horizon. A collapse
                         # checkpoint, and any `.retired` tombstone keyed to its folding

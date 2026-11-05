@@ -56,7 +56,7 @@ or conversely if false positives prove noisy once an acting id is resolved.
 
 ## Configuration keys
 
-The 106 typed `section.field` keys with type, default, description, and lifecycle.
+The 105 typed `section.field` keys with type, default, description, and lifecycle.
 
 | Key | Type | Default | Description | Lifecycle |
 |-----|------|---------|-------------|-----------|
@@ -98,7 +98,6 @@ The 106 typed `section.field` keys with type, default, description, and lifecycl
 | `compact.COMPACTION_HORIZON_NS` | `int` | `1800000000000` | Keeps events newer than this nanosecond horizon outside compaction snapshots. | active |
 | `compact.trigger` | `str` | `'async'` | Selects asynchronous, inline, or disabled compaction after qualifying write operations. | active |
 | `compact.trigger_interval_s` | `int` | `21600` | Starts a compaction sweep when the prior sweep is older than this many seconds. | active |
-| `compact.worker_log` | `str` | `'file'` | Sends the detached compaction worker's log to the store's worker log file or to the spawning process's stderr. | active |
 | `reclaim.horizon_days` | `int` | `30` | Sets the remote-anchored reclamation horizon in days. | active |
 | `fixture_heal.interval_days` | `int` | `30` | Sets the scheduled fixture-mining heal loop interval in days. | active |
 | `sync.push` | `str` | `'always'` | Selects synchronous, asynchronous, or disabled ticket-store pushes after writes. | active |

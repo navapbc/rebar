@@ -238,10 +238,6 @@ services:
       # Push ticket events alongside review-bot artifact writes. The
       # event-sourced store merges concurrent writers.
       REBAR_SYNC_PUSH: "always"
-      # Send the detached compaction worker's log to this container's stderr, i.e. the
-      # journal (`journalctl -t rebar-mcp`). Its default file sits in /var/gerrit/site/.rebar,
-      # on the writable layer every blue-green deploy deletes.
-      REBAR_COMPACT_WORKER_LOG: "stderr"
       # Rebar's Bedrock region appears in signed provider provenance.
       # Botocore also needs AWS_DEFAULT_REGION. Credentials come from the
       # instance role. Keep both settings aligned with mcp_run_new.

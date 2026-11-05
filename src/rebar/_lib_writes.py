@@ -289,6 +289,7 @@ def transition(
     caused_by: str = "",
     ref: str | None = None,
     repo_root: str | os.PathLike[str] | None = None,
+    _sweep_log: Literal["file", "stderr"] = "file",
 ) -> TransitionResult:
     """Transition status with optimistic concurrency and configured gates.
 
@@ -300,6 +301,11 @@ def transition(
     signature. ``reason`` is only an eligible administrative close reason. Bug closes
     use ``close_class`` and optional ``caused_by``; ``ref`` selects the tree verified
     and signed by the close gate.
+
+    ``_sweep_log`` is INTERNAL (leading underscore, like ``_creation_channel``): where a
+    close-triggered compaction worker logs. A direct library call keeps the store's log file;
+    the MCP adapter pins ``"stderr"``, the long-lived server's journal, which outlives a
+    deploy that deletes the container's ``.rebar/`` (bug individual-sonorous-snake).
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -341,6 +347,7 @@ def transition(
             caused_by=caused_by,
             ref=ref,
             repo_root=repo_root,
+            sweep_log=_sweep_log,
         )
     except ConcurrencyMismatch as exc:
         raise ConcurrencyError(
