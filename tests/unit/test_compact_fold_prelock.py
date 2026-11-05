@@ -298,6 +298,7 @@ def test_no_fetch_or_nested_lock_request_while_the_fold_holds_the_lock(
 _PHASES = (
     "attribution",
     "signers",
+    "positions",
     "lock_wait",
     "recover",
     "parse",
