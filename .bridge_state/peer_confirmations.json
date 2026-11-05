@@ -2065,8 +2065,6 @@
       "target_id": "e3e0-2e7c-b280-4b4a"
     },
     "0b32-bc94-5ea1-482a|0d8f-f43e-c741-4cce|blocks": {
-      "confirmed_at": 1787409268788574692,
-      "confirmed_pass": "2026-08-22T14-32-48",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014028792214,
       "link_id": "47884",
@@ -2076,8 +2074,6 @@
       "target_id": "0d8f-f43e-c741-4cce"
     },
     "0b32-bc94-5ea1-482a|6001-b906-aac6-4fa4|relates_to": {
-      "confirmed_at": 1787409268788568834,
-      "confirmed_pass": "2026-08-22T14-32-48",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014028796531,
       "link_id": "44477",
@@ -2087,8 +2083,6 @@
       "target_id": "6001-b906-aac6-4fa4"
     },
     "0b32-bc94-5ea1-482a|7d1d-6b06-de2a-4836|blocks": {
-      "confirmed_at": 1787409268788571207,
-      "confirmed_pass": "2026-08-22T14-32-48",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014028793957,
       "link_id": "47882",
@@ -2098,8 +2092,6 @@
       "target_id": "7d1d-6b06-de2a-4836"
     },
     "0b32-bc94-5ea1-482a|e68d-b701-4dd9-47aa|blocks": {
-      "confirmed_at": 1787409268788573020,
-      "confirmed_pass": "2026-08-22T14-32-48",
       "direction": "snapshot",
       "first_confirmed_at": 1786807014028795038,
       "link_id": "47883",
