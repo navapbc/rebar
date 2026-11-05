@@ -125,33 +125,52 @@ resource "aws_iam_role_policy" "host_logs_ship" {
   policy = data.aws_iam_policy_document.host_logs_ship.json
 }
 
-# Shipping stopped. The journal carries ~190 entries per 5 minutes on a healthy host (2026-11-03
-# survey), and the 5-minute probe alone logs every tick, so a 15-minute empty window means the
-# agent, its config or the host is gone. AWS publishes IncomingLogEvents only when events
-# arrive, so silence is missing data, and missing data must page.
+# Shipping stopped. AWS publishes IncomingLogEvents only for minutes in which events arrive, so
+# a stopped agent produces MISSING datapoints, not zeros. A plain metric alarm then keeps
+# evaluating the last REAL datapoint for as long as it stays inside CloudWatch's evaluation
+# range: the first shape here (300 s x 3, missing = breaching) was measured live on 2026-11-04
+# paging 26 min 47 s after the agent stopped. FILL(m, 0) turns every empty minute into a real 0
+# (verified with get-metric-data over the stop window, including a window holding no real
+# datapoint at all), so the alarm pages after 10 zero minutes: about 12 minutes worst case.
+# The shipped sources logged at least one entry in every minute of a 14-day on-box journal
+# sample except one isolated empty minute, so 10 consecutive empty minutes do not happen on a
+# healthy host. treat_missing_data stays "breaching" as the backstop for an absent metric.
 resource "aws_cloudwatch_metric_alarm" "host_logs_not_arriving" {
   alarm_name        = "rebar-host-logs-not-arriving"
   alarm_description = <<-EOT
     The rebar Gerrit host has delivered no log events to CloudWatch Logs group
-    /rebar/gerrit-host for 3 of 3 five-minute periods. Either the host is down, or the
+    /rebar/gerrit-host for 10 of 10 one-minute periods. Either the host is down, or the
     CloudWatch agent stopped, lost its config or lost permission. Host logs are then
-    being kept ONLY on the box again. TRIAGE: `aws ssm describe-instance-associations-status`
-    for the cwagent install/configure associations, then on the host
-    `systemctl status amazon-cloudwatch-agent`. Runbook:
+    being kept ONLY on the box again. The hourly configure association restarts a
+    stopped agent, so this can clear on the hour by itself. TRIAGE:
+    `aws ssm describe-instance-associations-status` for the cwagent associations, then
+    `systemctl status amazon-cloudwatch-agent` on the host. Runbook:
     infra/runbooks/gerrit-host-wedged-ssm-lost.md.
   EOT
 
-  namespace   = "AWS/Logs"
-  metric_name = "IncomingLogEvents"
-  statistic   = "Sum"
-
-  dimensions = {
-    LogGroupName = aws_cloudwatch_log_group.gerrit_host.name
+  metric_query {
+    id          = "e1"
+    expression  = "FILL(m, 0)"
+    label       = "IncomingLogEvents, 0 where no events arrived"
+    return_data = true
   }
 
-  period              = 300
-  evaluation_periods  = 3
-  datapoints_to_alarm = 3
+  metric_query {
+    id          = "m"
+    return_data = false
+    metric {
+      namespace   = "AWS/Logs"
+      metric_name = "IncomingLogEvents"
+      period      = 60
+      stat        = "Sum"
+      dimensions = {
+        LogGroupName = aws_cloudwatch_log_group.gerrit_host.name
+      }
+    }
+  }
+
+  evaluation_periods  = 10
+  datapoints_to_alarm = 10
   threshold           = 1
   comparison_operator = "LessThanThreshold"
   treat_missing_data  = "breaching"

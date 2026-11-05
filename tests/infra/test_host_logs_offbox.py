@@ -183,14 +183,60 @@ def _alarm(label: str) -> str:
     return _block(_tf(), "aws_cloudwatch_metric_alarm", label)
 
 
+# AC5's bound: the alarm must page within 15 minutes of shipping stopping.
+_SHIPPING_STOPPED_BOUND_SECONDS = 900
+# CloudWatch evaluates an alarm about once a minute, and AWS/Logs publishes a minute's
+# IncomingLogEvents shortly after it closes; one extra minute covers both.
+_EVALUATION_SLACK_SECONDS = 60
+
+
+def _detection_seconds(period: int, evaluation_periods: int, filled: bool) -> int | None:
+    """Worst-case seconds from "shipping stopped" to ALARM, or ``None`` when it is unbounded.
+
+    Without ``FILL`` an empty period is a MISSING datapoint, and CloudWatch evaluates the most
+    recent REAL datapoints in its evaluation range (5 datapoints for 3 evaluation periods),
+    so the last healthy datapoint holds the alarm OK until it ages out of that range. The
+    live stop test on 2026-11-04 measured exactly that: 300 s x 3 paged 26 min 47 s after the
+    agent stopped. ``FILL(m, 0)`` makes every empty period a real 0, so the alarm sees N zeros
+    after at most one partial period plus N full ones.
+    """
+    if not filled:
+        return None
+    return period * (evaluation_periods + 1) + _EVALUATION_SLACK_SECONDS
+
+
+def _shipping_alarm_shape(body: str) -> tuple[int, int, bool]:
+    period = re.search(r"^[ \t]*period[ \t]*=[ \t]*(\d+)", body, re.MULTILINE)
+    evaluation = _attr(body, "evaluation_periods")
+    assert period and evaluation, "the alarm must state its period and evaluation_periods"
+    filled = re.search(r'expression\s*=\s*"FILL\(m, 0\)"', body) is not None
+    return int(period.group(1)), int(evaluation), filled
+
+
 def test_shipping_stopped_alarm_pages_on_silence() -> None:
     body = _alarm("host_logs_not_arriving")
-    assert _attr(body, "namespace") == '"AWS/Logs"'
-    assert _attr(body, "metric_name") == '"IncomingLogEvents"'
+    assert re.search(r'namespace\s*=\s*"AWS/Logs"', body)
+    assert re.search(r'metric_name\s*=\s*"IncomingLogEvents"', body)
     assert "LogGroupName = aws_cloudwatch_log_group.gerrit_host.name" in " ".join(body.split())
     assert _attr(body, "treat_missing_data") == '"breaching"'
     assert _attr(body, "datapoints_to_alarm") == _attr(body, "evaluation_periods")
     assert _attr(body, "alarm_actions") == "[aws_sns_topic.alerts.arn]"
+
+
+def test_shipping_stopped_alarm_pages_within_fifteen_minutes() -> None:
+    detection = _detection_seconds(*_shipping_alarm_shape(_alarm("host_logs_not_arriving")))
+    assert detection is not None, "the metric must be FILL(m, 0)-ed, or the alarm is unbounded"
+    assert detection <= _SHIPPING_STOPPED_BOUND_SECONDS, f"pages only after {detection}s"
+
+
+def test_seeded_unfilled_shape_that_paged_after_27_minutes_is_rejected() -> None:
+    # The first shape shipped for 9018-3385-ccfa-4568, measured live at 26 min 47 s.
+    assert _detection_seconds(300, 3, filled=False) is None
+
+
+def test_seeded_filled_but_slow_shape_is_rejected() -> None:
+    detection = _detection_seconds(300, 3, filled=True)
+    assert detection is not None and detection > _SHIPPING_STOPPED_BOUND_SECONDS
 
 
 def test_external_health_check_probes_gerrit_from_outside_the_host() -> None:
@@ -222,3 +268,11 @@ def test_runbook_captures_console_before_any_restart_and_names_the_log_group() -
     assert capture.start() < first_restart, "the capture must precede every restart command"
     assert _LOG_GROUP in text
     assert "aws logs tail" in text
+
+
+def test_runbook_warns_that_the_hourly_configure_run_restarts_a_stopped_agent() -> None:
+    text = " ".join(_RUNBOOK.read_text(encoding="utf-8").split())
+    assert "rebar-gerrit-cwagent-configure" in text
+    assert re.search(r"restarts? (a|the) stopped agent", text), (
+        "an operator stop test must know the hourly configure run restarts the agent"
+    )

@@ -178,9 +178,21 @@ The path from an alarm to a cause is: date the failure from the alarm (or from w
 above stop), then read the kernel and docker streams for the 30 minutes before it. Alongside the
 logs, use the run-up host metrics described above.
 
-Two alarms back this path. `rebar-host-logs-not-arriving` pages when the group receives nothing
-for 15 minutes, so a dead pipeline cannot pass for a working one. `rebar-gerrit-external-probe-down`
-is a Route 53 health check, the one Gerrit health signal that does not come from the host.
+The `/nginx` stream is normally empty. `nginx.service` writes to the journal only at startup
+(its config test), so the stream fills only when nginx fails to start. nginx's runtime errors are
+in `/nginx-error`, and systemd's start/reload/failure lines for nginx are in `/systemd`.
+
+Two alarms back this path. `rebar-host-logs-not-arriving` pages when the group receives no
+events for 10 straight minutes (about 12 minutes after shipping stops), so a dead pipeline
+cannot pass for a working one. `rebar-gerrit-external-probe-down` is a Route 53 health check,
+the one Gerrit health signal that does not come from the host.
+
+The hourly `rebar-gerrit-cwagent-configure` run (on the hour, UTC) restarts a stopped agent. That
+self-heals an agent that died or was stopped, within the hour. It also means
+`rebar-host-logs-not-arriving` can clear on the hour with no action taken. Treat an alarm that
+fired and then cleared on the hour as an agent stop to investigate, not as noise. To test the
+alarm by stopping the agent, stop it within a few minutes after the hour, so the alarm (about
+12 minutes) fires before the next configure run restarts it.
 
 If the logs stop and the host is healthy, check the 2 State Manager associations
 (`rebar-gerrit-cwagent-install`, `rebar-gerrit-cwagent-configure`). On a rebuilt host, they may
