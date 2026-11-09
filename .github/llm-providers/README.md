@@ -40,4 +40,6 @@ matrix's cost and cadence decision.
   MEASURED to invoke in account `896586841071` / `us-east-1` (`docs/llm-example-configs.md` §2).
 - **OpenAI** ids were verified against the repository's own `OPENAI_API_KEY` with a read-only
   `GET https://api.openai.com/v1/models` on 2026-08-03: `gpt-5.4`, `gpt-5.4-mini` and
-  `gpt-5.4-nano` are all present on that account.
+  `gpt-5.4-nano` are all present on that account. The frontier and scalar model moved to
+  `gpt-5.5` on 2026-11-09 (`docs/ci-provider-matrix.md` §"OpenAI arm model choice"); the arm's
+  first live run on `main` is what confirms that id on the account.
