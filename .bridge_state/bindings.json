@@ -1612,6 +1612,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:50:59Z"
     },
+    "0369-ba7f-d5ab-4ba9": {
+      "created_at": "2026-11-09T19:32:18Z",
+      "jira_id": "4598606",
+      "jira_key": "REB-7030",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T19:32:26Z"
+    },
     "037b-879e-fe13-47d2": {
       "baseline": {
         "assignee": {
@@ -22474,6 +22481,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-04T22:44:12Z"
+    },
+    "32ae-e4ae-b908-4e42": {
+      "created_at": "2026-11-09T19:32:26Z",
+      "jira_id": "4598607",
+      "jira_key": "REB-7031",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T19:32:33Z"
     },
     "32cc-1dbb-9ee6-45bc": {
       "created_at": "2026-08-15T14:55:54Z",
@@ -45879,6 +45893,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T01:21:04Z"
+    },
+    "6bb6-8c88-20ad-46a9": {
+      "created_at": "2026-11-09T19:32:35Z",
+      "jira_id": "4598608",
+      "jira_key": "REB-7032",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T19:32:43Z"
     },
     "6bda-9d58-8546-4638": {
       "baseline": {
@@ -116087,7 +116108,9 @@
     "1793914957835308001": "__rebar_unknown_comment_id__",
     "1793915444222141001": "__rebar_unknown_comment_id__",
     "1793915615449246001": "__rebar_unknown_comment_id__",
-    "1793934452745009001": "__rebar_unknown_comment_id__"
+    "1793934452745009001": "__rebar_unknown_comment_id__",
+    "1794248139029302001": "__rebar_unknown_comment_id__",
+    "1794249121240700001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -121566,6 +121589,9 @@
     "REB-7016": "9794-4336-5ed6-4561",
     "REB-702": "5f09-a6e0-d6e1-45b2",
     "REB-703": "80b3-6a4e-8a20-4090",
+    "REB-7030": "0369-ba7f-d5ab-4ba9",
+    "REB-7031": "32ae-e4ae-b908-4e42",
+    "REB-7032": "6bb6-8c88-20ad-46a9",
     "REB-704": "81c9-f5ad-7c54-4623",
     "REB-705": "8656-92dc-f6eb-4a8f",
     "REB-706": "9b38-c7a4-1abb-4323",
