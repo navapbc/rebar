@@ -54,7 +54,9 @@ runs:
         New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
         $archive = Join-Path $workRoot $asset
         $url = "https://github.com/astral-sh/uv/releases/download/$version/$asset"
-        Invoke-WebRequest -Uri $url -OutFile $archive
+        # GitHub's release download can answer 5xx to some requests while others succeed
+        # (bug sad-convective-bagworm); retry a bounded number of times, then verify the checksum.
+        Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRetryCount 5 -RetryIntervalSec 10
 
         $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actualHash -ne $expectedHash) {
