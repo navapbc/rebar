@@ -10,6 +10,22 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-09
+
+### Added
+
+- **Similar tickets are surfaced when you create one.** `rebar create`, `rebar idea` and the
+  library `create_ticket` / `idea` now return an advisory `similar_tickets` list, ranked by a
+  local full-text index kept under `.rebar/cache` (never committed). The ticket is still
+  created; the list exists so a likely duplicate can be linked with `duplicates` instead of
+  discovered later.
+- **Opt-in embedding tier for similar-ticket ranking.** Set `[llm] embedding_model` (and
+  optionally `similar_digest_model`) to rank by embeddings instead of the lexical index, and
+  run `rebar store build-vectors` to build the vectors. The build is explicit, incremental
+  and resumable; no other command calls a provider for it.
+- **Plan review groups duplicate blocking findings.** When several criteria flag the same
+  defect, the verdict reports it once.
+
 ### Changed
 
 - **BREAKING (pre-1.0): the 13 warn-class config/env tombstones are retired, and unknown
@@ -29,6 +45,26 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   same unknown-key policy as a core key, checked against a list kept in step with the
   readers by a test. Details in [docs/release-notes.md](docs/release-notes.md).
 
+- **BREAKING (pre-1.0): the canary's `github-api` heartbeat source is removed.** The
+  `status_source` workflow input, its `REBAR_CANARY_HEARTBEAT_SOURCE` environment variable,
+  and the `check-heartbeat --source` flag are gone; the canary reads canonical bridge status
+  unconditionally. The GitHub run-history witness is retained solely as the `NEVER_RUN`
+  bootstrap fallback ADR 0094 requires. Copied templates that pass `status_source` must drop
+  it.
+
+- **The bare id-list form of `activate` in `.rebar/criteria_routing.json` now warns once.**
+  It still works; the canonical form is the `{"<id>": ["plan_review"|"code_review"]}` mapping.
+
+- **A `depends_on` link may now point at a closed ticket**, like every other relation.
+
+- **A `[non-codebase]` tag in backticks is accepted**, and a tag placed anywhere other than
+  the start of the checkbox text is now reported by plan review and the close precheck
+  instead of silently counting as a codebase criterion.
+
+- **A clone that has never fetched, has no remote, or holds unpublished writes can review,
+  claim and close.** Only a clone that is behind or diverged from an already-fetched remote
+  is treated as stale.
+
 - **The test-only child-process hooks are no longer read by rebar.** `REBAR_HLC_NOW` and
   `REBAR_TEST_COMPACT_RENAME_BARRIER` moved out of `src/rebar` into test-owned child
   injection; nothing under `src/rebar` reads either name.
@@ -38,12 +74,37 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   the variables it could see as a literal read, so config overrides that `env_overrides()`
   builds at runtime are documented rather than silently absent.
 
-- **BREAKING (pre-1.0): the canary's `github-api` heartbeat source is removed.** The
-  `status_source` workflow input, its `REBAR_CANARY_HEARTBEAT_SOURCE` environment variable,
-  and the `check-heartbeat --source` flag are gone; the canary reads canonical bridge status
-  unconditionally. The GitHub run-history witness is retained solely as the `NEVER_RUN`
-  bootstrap fallback ADR 0094 requires. Copied templates that pass `status_source` must drop
-  it.
+### Fixed
+
+- **`rebar unlink` can remove links it previously could not**: a link stored under a short
+  id that resolves to the target, and a link whose target is not a resolvable ticket.
+- **A bug close with `--caused-by` now applies the same rules as `rebar link`.** An ambiguous
+  or unknown target is refused instead of being written as a raw string (which also removed
+  the bug's existing `caused_by` edges), and a target no commit references is refused.
+- **Closing over MCP no longer judges a stale copy of the ticket.** An unforced close syncs
+  the tickets clone first, so acceptance-criteria boxes ticked from another clone are seen.
+- **A completion close refuses up front when the verified tree lacks the landed work**,
+  naming the tree, instead of reporting the wrong tree's findings as unmet criteria.
+- **rebar refuses to write through a `cp -R` copy of the tracker.** Such a copy shares the
+  real repository's git directory, so writes moved the real tickets branch.
+- **The no-common-ancestor write guard checks the write's own repository.** With an explicit
+  repository root it read the ambient repository's remote instead, so a write to a tracker
+  diverged from `origin/tickets` could be committed and stranded.
+- **From a linked worktree, rebar reads that worktree's `rebar.toml`**, not the main
+  checkout's, for push policy and `init`.
+- **`git merge` / `reset` timeouts during tickets sync are reported as timeouts**, not as a
+  merge conflict that sent the operator to `rebar store fsck-recover`.
+- **`rebar store fsck` reports untracked event files and sync-status git timeouts as such**,
+  and snapshot reads no longer cache a failed `ls-tree`.
+- **Re-cloning no longer claims to void existing op-cert attestations.** The warning and the
+  `ENV_ID_MISMATCH` fsck line now match the verifier, which falls back to the key embedded in
+  the signature.
+- **Diagnostics always go to the current process stderr**, rather than a stream captured when
+  logging was first installed.
+- **The plan-review status schema no longer lists the unreachable `not-closed` verdict.**
+- **`make worktree` names a missing git remote** instead of surfacing git's raw "does not
+  appear to be a git repository", and the uv requirement is a floor (`>=0.12.7`) rather than
+  an exact pin, so newer uv releases install.
 
 ## [0.14.0] - 2026-10-30
 
@@ -1996,6 +2057,7 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
 [unreleased]: https://github.com/navapbc/rebar/compare/v0.14.0...HEAD
+[0.15.0]: https://github.com/navapbc/rebar/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/navapbc/rebar/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/navapbc/rebar/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/navapbc/rebar/compare/v0.12.0...v0.13.0
