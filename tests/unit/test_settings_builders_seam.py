@@ -276,3 +276,37 @@ def test_request_transport_limits_reach_model_and_provider_construction(monkeypa
     assert captured["model"].llm_retry_max_attempts == 1
     assert captured["provider"].timeout_s == 60
     assert captured["provider"].llm_retry_max_attempts == 1
+
+
+# ── §E explicit reasoning effort (epic pompous-vitriolic-macaw) ─────────────────────────
+
+
+def _effort_caps(effort: str | None) -> ModelCapabilities:
+    return ModelCapabilities(
+        native_structured_output=False,
+        prompt_cache_style="bedrock",
+        supports_thinking=True,
+        supports_temperature=False,
+        effort=effort,
+    )
+
+
+def test_a_pinned_effort_is_sent_on_both_provider_carriers():
+    """Direct Anthropic reads `anthropic_effort`; Bedrock reads `output_config` inside
+    `additionalModelRequestFields`. Both are set so a cross-provider fallback keeps the level."""
+    cfg = _cfg(temperature=0.0)
+    out = build_model_settings(
+        cfg, _req(cfg), _effort_caps("high"), _MODEL, None, model_override=None
+    )
+    assert out["anthropic_effort"] == "high"
+    assert out["bedrock_additional_model_requests_fields"] == {"output_config": {"effort": "high"}}
+    assert "temperature" not in out
+
+
+def test_no_effort_key_is_sent_when_the_model_pins_none():
+    cfg = _cfg()
+    out = build_model_settings(
+        cfg, _req(cfg), _effort_caps(None), _MODEL, None, model_override=None
+    )
+    assert "anthropic_effort" not in out
+    assert "bedrock_additional_model_requests_fields" not in out

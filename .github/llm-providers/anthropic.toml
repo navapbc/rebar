@@ -6,9 +6,9 @@
 # resolve `cfg.model`, which the class table cannot override; without the scalar, its bare default
 # infers Anthropic and could leak direct-Anthropic selection into another provider arm.
 [llm]
-model = "anthropic:claude-opus-4-8"
+model = "anthropic:claude-opus-5-5"
 
 [llm.model_classes]
-frontier = { model = "anthropic:claude-opus-4-8" }
-standard = { model = "anthropic:claude-sonnet-4-6" }
-trivial  = { model = "anthropic:claude-haiku-4-5" }
+frontier = { model = "anthropic:claude-opus-5-5" }
+standard = { model = "anthropic:claude-sonnet-5-5" }
+trivial  = { model = "anthropic:claude-haiku-5-5" }

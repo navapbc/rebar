@@ -72,7 +72,7 @@ def base_output_model() -> type:
         reason: str = Field(description="One-line justification for escalating to this overlay.")
 
     class CodeReviewBaseOutput(BaseModel):
-        analysis: str = Field(default="", description="Scratchpad — reason before emitting.")
+        analysis: str = Field(default="", description="Brief notes on the change.")
         findings: list[CodeFinding] = Field(default_factory=list)  # type: ignore[valid-type]
         recommend_overlays: list[OverlayRecommendation] = Field(
             default_factory=list,
@@ -90,7 +90,7 @@ def findings_model() -> type:
     CodeFinding = _code_finding_model()
 
     class CodeReviewFindings(BaseModel):
-        analysis: str = Field(default="", description="Scratchpad — reason before emitting.")
+        analysis: str = Field(default="", description="Brief notes on the change.")
         findings: list[CodeFinding] = Field(default_factory=list)  # type: ignore[valid-type]
         summary: str | None = Field(default=None, description="Optional short summary.")
 

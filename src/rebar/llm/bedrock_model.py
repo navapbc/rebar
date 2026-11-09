@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # The documented default Bedrock model id — an INFERENCE-PROFILE id (the `us.` prefix), never
 # a bare on-demand id, per the module docstring's MEASURED ValidationException. MEASURED to
 # cache (ticket 2932).
-DEFAULT_BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+DEFAULT_BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-5-5"
 
 
 def resolve_bedrock_region(

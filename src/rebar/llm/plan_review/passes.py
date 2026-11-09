@@ -69,7 +69,7 @@ def _pass1_model() -> type:
         )
 
     class P1Output(BaseModel):
-        analysis: str = Field(default="", description="Scratchpad — reason before emitting.")
+        analysis: str = Field(default="", description="Brief notes on the plan.")
         affirmations: list[str] = Field(
             default_factory=list,
             description="Criteria this chunk PASSES — affirm what already holds (not findings).",

@@ -12,6 +12,7 @@ import pytest
 from _repo_root import REPO_ROOT
 
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig
+from rebar.llm.model_classes import UNLOCATED_MODEL_WINDOW_TOKENS
 from rebar.llm.plan_review import (
     _verifier_cfg,
     attest,
@@ -55,7 +56,7 @@ def test_verifier_cfg_downgrades_to_sonnet_by_default() -> None:
     cfg = LLMConfig(model=DEFAULT_MODEL)
     resolved = _verifier_cfg(cfg).model
     assert (
-        resolved.endswith(VERIFIER_DEFAULT_MODEL) and VERIFIER_DEFAULT_MODEL == "claude-sonnet-4-6"
+        resolved.endswith(VERIFIER_DEFAULT_MODEL) and VERIFIER_DEFAULT_MODEL == "claude-sonnet-5-5"
     )
     assert resolved == f"anthropic:{VERIFIER_DEFAULT_MODEL}"
 
@@ -1388,12 +1389,12 @@ class _SeqRunner:
 def test_is_context_limit_error_and_ladder() -> None:
     assert sizing.is_context_limit_error(Exception("prompt is too long: 1.2M tokens"))
     assert not sizing.is_context_limit_error(Exception("connection reset"))
-    assert sizing.models_at_or_above("claude-haiku-4-5") == [
-        "claude-haiku-4-5",
-        "claude-sonnet-4-6",
-        "claude-opus-4-8",
+    assert sizing.models_at_or_above("claude-haiku-5-5") == [
+        "claude-haiku-5-5",
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
     ]
-    assert sizing.models_at_or_above("claude-opus-4-8") == ["claude-opus-4-8"]
+    assert sizing.models_at_or_above("claude-opus-5-5") == ["claude-opus-5-5"]
 
 
 def test_size_ladder_batch_falls_back_to_one_per_call() -> None:
@@ -1426,15 +1427,13 @@ def test_size_ladder_too_big_emits_blocking_failure_finding() -> None:
 
 
 def test_largest_window_uses_configured_model_window() -> None:
-    # A haiku-only deployment caps P8 at haiku's window, not the ladder's 1M top.
-    assert sizing.largest_window_tokens("claude-haiku-4-5") == 1_000_000  # escalates up
-    assert sizing.largest_window_tokens("claude-opus-4-8") == 1_000_000
+    # Every 5.5 rung declares 1M, so a located model's at-or-above maximum is 1M.
+    assert sizing.largest_window_tokens("claude-haiku-5-5") == 1_000_000
+    assert sizing.largest_window_tokens("claude-opus-5-5") == 1_000_000
     assert sizing.largest_window_tokens(None) == sizing.MODEL_LADDER[-1][1]
     # A model the ladder cannot LOCATE has no known window, so the honest answer is the
-    # conservative one — the ladder MINIMUM. Returning the maximum made P8 under-block.
-    assert sizing.largest_window_tokens("some-unknown-model") == min(
-        w for _, w in sizing.MODEL_LADDER
-    )
+    # conservative floor. Returning the maximum made P8 under-block (bug 48b3).
+    assert sizing.largest_window_tokens("some-unknown-model") == UNLOCATED_MODEL_WINDOW_TOKENS
 
 
 # An unrecognized primary cannot enter the Anthropic model ladder. Its start rung remains the
@@ -1467,11 +1466,10 @@ def test_unlocated_primary_start_rung_is_the_primary_itself() -> None:
     assert not any("claude-" in name for name in rungs)
 
 
-def test_unlocated_primary_window_is_the_ladder_minimum() -> None:
-    # Check the ladder minimum explicitly. Several rungs share the maximum window.
-    assert sizing.largest_window_tokens(_UNLOCATED_PRIMARY) == min(
-        w for _, w in sizing.MODEL_LADDER
-    )
+def test_unlocated_primary_window_is_the_conservative_floor() -> None:
+    # Every 5.5 rung shares the maximum window, so the floor is a named constant rather than
+    # the ladder minimum (which would now be 1M).
+    assert sizing.largest_window_tokens(_UNLOCATED_PRIMARY) == UNLOCATED_MODEL_WINDOW_TOKENS
     assert sizing.largest_window_tokens(_UNLOCATED_PRIMARY) < sizing.MODEL_LADDER[-1][1]
 
 
@@ -1488,7 +1486,7 @@ def test_size_ladder_unlocated_primary_never_leaves_the_operator_model() -> None
 
 def test_located_anthropic_primary_start_rung_is_unchanged() -> None:
     # Back-compat control: a primary the ladder CAN locate is untouched by the fix.
-    assert sizing.models_at_or_above("anthropic:claude-opus-4-8") == ["claude-opus-4-8"]
+    assert sizing.models_at_or_above("anthropic:claude-opus-5-5") == ["claude-opus-5-5"]
     assert sizing.models_at_or_above(None) == [n for n, _w in sizing.MODEL_LADDER]
 
 
@@ -1513,25 +1511,22 @@ def _rung_window(target: str) -> int | None:
 
 def test_escalation_rungs_drops_the_no_op_same_window_rung() -> None:
     # The opus rung is absent BY NAME from a sonnet escalation — the discriminating assertion.
-    assert sizing.escalation_rungs("claude-sonnet-4-6") == ["claude-sonnet-4-6"]
-    assert not any("opus" in rung for rung in sizing.escalation_rungs("claude-sonnet-4-6"))
+    assert sizing.escalation_rungs("claude-sonnet-5-5") == ["claude-sonnet-5-5"]
+    assert not any("opus" in rung for rung in sizing.escalation_rungs("claude-sonnet-5-5"))
     # ...while the at-or-above ACCESSOR is untouched: it still reports both rungs.
-    assert sizing.models_at_or_above("claude-sonnet-4-6") == [
-        "claude-sonnet-4-6",
-        "claude-opus-4-8",
+    assert sizing.models_at_or_above("claude-sonnet-5-5") == [
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
     ]
 
 
-def test_escalation_rungs_keeps_the_real_haiku_increase() -> None:
-    # AC4: haiku -> sonnet IS a real capacity increase (200K -> 1M) and must survive; only the
-    # sonnet -> opus no-op tail is dropped.
-    assert sizing.escalation_rungs("claude-haiku-4-5") == [
-        "claude-haiku-4-5",
-        "claude-sonnet-4-6",
-    ]
-    assert sizing.escalation_rungs(None) == ["claude-haiku-4-5", "claude-sonnet-4-6"]
+def test_escalation_rungs_has_no_increase_on_the_equal_window_5_5_ladder() -> None:
+    # Haiku 4.5 -> Sonnet 4.6 was a real capacity increase (200K -> 1M). Every 5.5 rung declares
+    # 1M, so no rung above Haiku 5.5 buys context and the no-op rule leaves only the primary.
+    assert sizing.escalation_rungs("claude-haiku-5-5") == ["claude-haiku-5-5"]
+    assert sizing.escalation_rungs(None) == ["claude-haiku-5-5"]
     # A single-rung start and the 48b3 unlocatable-primary path are unaffected.
-    assert sizing.escalation_rungs("claude-opus-4-8") == ["claude-opus-4-8"]
+    assert sizing.escalation_rungs("claude-opus-5-5") == ["claude-opus-5-5"]
     assert sizing.escalation_rungs(_UNLOCATED_PRIMARY) == [_UNLOCATED_PRIMARY]
 
 
@@ -1560,26 +1555,26 @@ def test_size_ladder_sonnet_primary_never_pays_for_the_no_op_opus_retry() -> Non
     # attempt and records the model each ran on. A sonnet primary makes exactly two calls — the
     # batch and one single-criterion retry, both on sonnet — and never a third on opus.
     runner = _ModelRecordingRunner()
-    cfg = replace(_fake_cfg(), model="claude-sonnet-4-6")
+    cfg = replace(_fake_cfg(), model="claude-sonnet-5-5")
     events: list = []
     out, _calls = sizing.pass1_with_ladder(runner, cfg, "plan", [{"id": "E2"}], False, events)
-    assert runner.models_seen == ["claude-sonnet-4-6", "claude-sonnet-4-6"]
+    assert runner.models_seen == ["claude-sonnet-5-5", "claude-sonnet-5-5"]
     assert not any("opus" in str(m) for m in runner.models_seen)
     # The genuine outcome is still reported — the criterion really does not fit.
     assert len(out) == 1 and out[0]["_too_big"] is True
 
 
-def test_size_ladder_haiku_primary_still_escalates_onto_sonnet() -> None:
-    # AC4 control, observed through the ladder rather than the returned list: the one real
-    # capacity increase is still attempted, and the no-op opus rung still is not.
+def test_size_ladder_haiku_primary_stays_on_haiku_when_no_rung_is_larger() -> None:
+    # Observed through the ladder rather than the returned list: with every 5.5 rung at 1M there
+    # is no capacity increase to buy, so a haiku primary makes the batch call and the
+    # single-criterion retry and never pays for a same-window sonnet or opus retry.
     runner = _ModelRecordingRunner()
-    cfg = replace(_fake_cfg(), model="claude-haiku-4-5")
+    cfg = replace(_fake_cfg(), model="claude-haiku-5-5")
     events: list = []
     out, _calls = sizing.pass1_with_ladder(runner, cfg, "plan", [{"id": "E2"}], False, events)
     assert runner.models_seen == [
-        "claude-haiku-4-5",  # the batch call
-        "claude-haiku-4-5",  # single-criterion retry at the primary
-        "claude-sonnet-4-6",  # the one real capacity increase — still attempted
+        "claude-haiku-5-5",  # the batch call
+        "claude-haiku-5-5",  # single-criterion retry at the primary
     ]
     # ...and the ladder still terminates on the honest outcome once the real rungs run out.
     # (No "escalated to" event: that is appended only when an escalated attempt SUCCEEDS, and

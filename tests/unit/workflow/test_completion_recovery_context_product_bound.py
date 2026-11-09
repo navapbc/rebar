@@ -20,8 +20,8 @@ from rebar.llm.workflow.executor import StepContext
 
 pytestmark = pytest.mark.unit
 
-_HAIKU = "claude-haiku-4-5"
-_SONNET = "claude-sonnet-4-6"
+_HAIKU = "claude-haiku-5-5"
+_SONNET = "claude-sonnet-5-5"
 _UNKNOWN = "openai:gpt-4o"
 
 # The live c9f7 shape that the flat 100,000 bound refuses forever.
@@ -39,18 +39,20 @@ def test_own_window_accessor_returns_the_matched_models_own_window() -> None:
     from rebar.llm.model_classes import own_window_tokens
     from rebar.llm.plan_review.sizing import largest_window_tokens
 
-    assert own_window_tokens(_HAIKU) == 200_000
+    # Every 5.5 rung has a 1M window, so a ladder model's own window and its escalation
+    # maximum coincide; the unlocated floor is where the two accessors' inputs still differ.
+    assert own_window_tokens(_HAIKU) == 1_000_000
     assert largest_window_tokens(_HAIKU) == 1_000_000
     assert own_window_tokens(_SONNET) == 1_000_000
 
 
-def test_own_window_accessor_falls_back_to_the_ladder_minimum_for_unknown_models() -> None:
-    """Unknown models inherit the smallest ladder window."""
-    from rebar.llm.model_classes import MODEL_WINDOW_LADDER, own_window_tokens
+def test_own_window_accessor_falls_back_to_the_unlocated_floor_for_unknown_models() -> None:
+    """Unknown models get the conservative 200K floor, not the 1M every 5.5 rung declares."""
+    from rebar.llm.model_classes import UNLOCATED_MODEL_WINDOW_TOKENS, own_window_tokens
 
-    ladder_min = min(window for _name, window in MODEL_WINDOW_LADDER)
-    assert own_window_tokens(_UNKNOWN) == ladder_min
-    assert own_window_tokens("") == ladder_min
+    assert UNLOCATED_MODEL_WINDOW_TOKENS == 200_000
+    assert own_window_tokens(_UNKNOWN) == UNLOCATED_MODEL_WINDOW_TOKENS
+    assert own_window_tokens("") == UNLOCATED_MODEL_WINDOW_TOKENS
 
 
 # --------------------------------------------------------------------------- #
@@ -59,13 +61,12 @@ def test_own_window_accessor_falls_back_to_the_ladder_minimum_for_unknown_models
 
 
 def test_physical_ceiling_is_window_derived_two_chars_per_token() -> None:
-    """AC: sonnet → 2,000,000 chars; haiku → 400,000 chars; unknown → ladder-min × 2."""
-    from rebar.llm.model_classes import MODEL_WINDOW_LADDER
+    """AC: sonnet and haiku 5.5 → 2,000,000 chars; unknown → the unlocated floor × 2."""
+    from rebar.llm.model_classes import UNLOCATED_MODEL_WINDOW_TOKENS
 
     assert _cr.physical_context_ceiling(_SONNET) == 2_000_000
-    assert _cr.physical_context_ceiling(_HAIKU) == 400_000
-    ladder_min = min(window for _name, window in MODEL_WINDOW_LADDER)
-    assert _cr.physical_context_ceiling(_UNKNOWN) == ladder_min * 2
+    assert _cr.physical_context_ceiling(_HAIKU) == 2_000_000
+    assert _cr.physical_context_ceiling(_UNKNOWN) == UNLOCATED_MODEL_WINDOW_TOKENS * 2
 
 
 # --------------------------------------------------------------------------- #
@@ -83,15 +84,16 @@ def test_c9f7_shape_proceeds_past_preflight_with_zero_runner_calls() -> None:
     _cc._validate_recovery_inputs(criteria, context, VERIFIER_DEFAULT_MODEL)
 
 
-def test_physical_ceiling_refuses_an_oversized_haiku_context() -> None:
-    """AC: with a haiku-rung model a context over 400,000 chars is refused with a
-    CompletionRecoveryError carrying {context_chars, context_char_limit}; the default
-    sonnet model admits a 400,000-char context (its ceiling is 2,000,000)."""
+def test_physical_ceiling_refuses_an_oversized_context_on_a_200k_window() -> None:
+    """AC: with a 200K-window model (an unlocated model gets the 200K floor; Haiku 4.5 held that
+    rung before 5.5) a context over 400,000 chars is refused with a CompletionRecoveryError
+    carrying {context_chars, context_char_limit}; the default sonnet model admits a
+    400,000-char context (its ceiling is 2,000,000)."""
     # One criterion so the economic product (400,001) stays far under 3,200,000 —
     # isolating the PHYSICAL ceiling as the sole cause of refusal.
     over = "x" * (400_000 + 1)
     with pytest.raises(CompletionRecoveryError) as caught:
-        _cc._validate_recovery_inputs(["c"], over, _HAIKU)
+        _cc._validate_recovery_inputs(["c"], over, _UNKNOWN)
     diag = caught.value.diagnostic
     assert diag["context_chars"] == 400_001
     assert diag["context_char_limit"] == 400_000

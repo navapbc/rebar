@@ -94,9 +94,9 @@ services:
       # aws bedrock list-inference-profiles, including their distinct suffixes.
       # The cutover test pins these IDs to the CI provider matrix. Update the
       # ModelId alarm in monitoring_eb6e.tf if any ID changes.
-      REBAR_LLM_FRONTIER_MODEL: "bedrock:us.anthropic.claude-opus-4-8"
-      REBAR_LLM_STANDARD_MODEL: "bedrock:us.anthropic.claude-sonnet-4-6"
-      REBAR_LLM_TRIVIAL_MODEL: "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0"
+      REBAR_LLM_FRONTIER_MODEL: "bedrock:us.anthropic.claude-opus-5-5"
+      REBAR_LLM_STANDARD_MODEL: "bedrock:us.anthropic.claude-sonnet-5-5"
+      REBAR_LLM_TRIVIAL_MODEL: "bedrock:us.anthropic.claude-haiku-5-5"
       # Record each LLM call's provider and tokens on the persistent review-bot
       # volume. This detects stray direct Anthropic calls while retaining its
       # credential for rollback. The JSONL sink has no rotation. Disk-pressure

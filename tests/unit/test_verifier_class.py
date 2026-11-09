@@ -10,7 +10,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-_STANDARD_TODAY = "claude-sonnet-4-6"
+_STANDARD_TODAY = "claude-sonnet-5-5"
 
 
 def _no_classes(monkeypatch):

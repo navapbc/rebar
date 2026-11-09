@@ -36,6 +36,9 @@ CACHE_MIN_PREFIX_TOKENS = 4096
 # read 2026-08-02. Bare model ids cover qualified and unqualified direct requests. Bedrock ids
 # use the fallback because Bedrock publishes separate limits and none are recorded here.
 _MODEL_CACHE_MIN_PREFIX_TOKENS: dict[str, int] = {
+    "claude-opus-5-5": 512,
+    "claude-sonnet-5-5": 512,
+    "claude-haiku-5-5": 512,
     "claude-opus-5": 512,
     "claude-fable-5": 512,
     "claude-mythos-5": 512,
@@ -103,6 +106,11 @@ class ModelCapabilities:
     # is the per-model measured replacement, set only by the capability-rows story for cells a
     # live measurement passed.
     native_output_with_thinking: bool = False
+    # The reasoning `effort` level rebar sends this model explicitly, or None to send none
+    # (epic pompous-vitriolic-macaw). Set only by the exact-id table below: the 5.5 generation
+    # defaults Opus and Haiku to `medium`, one level below the `high` that Opus 4.8 and Sonnet
+    # 4.6 ran at by default, so an unpinned upgrade would silently lower review depth.
+    effort: str | None = None
 
 
 def _supports_native_web_search(profile: Any) -> bool:
@@ -250,6 +258,18 @@ _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
     },
     # Bedrock Opus 4.7 and 4.8 reject structured output under thinking, so their missing rows
     # preserve the conservative family default.
+    #
+    # The 5.5 generation (measured 2026-11-09, direct and Bedrock us-east-1): `temperature=0` is
+    # rejected with a 400 on all three, so sampling is withdrawn; an explicit
+    # `output_config.effort` is accepted. Effort is pinned per model -- `high` for Opus and Sonnet
+    # (the API default the 4.x models ran at) and `medium` for Haiku (its own default; Haiku 4.5
+    # had no effort parameter). Native structured output stays unmeasured, so the family default
+    # (prompted output) holds.
+    **{
+        f"{prefix}claude-{family}-5-5": {"supports_temperature": False, "effort": effort}
+        for prefix in ("", "us.anthropic.", "global.anthropic.")
+        for family, effort in (("opus", "high"), ("sonnet", "high"), ("haiku", "medium"))
+    },
 }
 
 
@@ -274,6 +294,7 @@ def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapab
         "supports_temperature": True,
         "native_web_search": _supports_native_web_search(profile),
         "native_output_with_thinking": False,
+        "effort": None,
     }
     for predicate, overrides in _REBAR_OVERRIDES:
         if predicate(profile):
@@ -293,6 +314,7 @@ def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapab
         supports_temperature=bool(caps["supports_temperature"]),
         native_web_search=bool(caps["native_web_search"]),
         native_output_with_thinking=bool(caps["native_output_with_thinking"]),
+        effort=caps["effort"],
         # Derived from the RESOLVED style + id, never from an override table: the floor is a
         # published property of the model, not a rebar policy knob.
         cache_min_prefix_tokens=_cache_min_prefix_tokens(resolved_cache_style, model_id),
@@ -412,6 +434,7 @@ def capabilities_for(model_or_model_string: Any) -> ModelCapabilities:
             supports_temperature=bool(merged["supports_temperature"]),
             native_web_search=bool(merged["native_web_search"]),
             native_output_with_thinking=bool(merged["native_output_with_thinking"]),
+            effort=merged.get("effort"),
             cache_min_prefix_tokens=_cache_min_prefix_tokens(merged_cache_style, fallback_id),
         )
     return _CONSERVATIVE
