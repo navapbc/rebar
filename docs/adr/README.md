@@ -37,6 +37,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0072 — Convergent plan-edit re-review (full-run + deterministic rising floor)](0072-convergent-plan-edit-re-review.md)
 - [0078 — Plan-review proportionate scrutiny is keyed on container/leaf, not ticket type](0078-plan-review-container-leaf-scrutiny.md)
 - [0109 — Plan-review replay harness: tier selection, model parity, and the per-tier noise band](0109-plan-review-replay-harness.md)
+- [0123 — Selectable plan-review engine: the 4-pass pipeline or a single read-only agent](0123-selectable-plan-review-engine.md)
 
 ## Reconciler & Jira sync
 
