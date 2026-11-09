@@ -127,7 +127,8 @@ Same models, same token counts, so the delta is purely the provider.
 ³ **Estimated, not measured** — no OpenAI run exists yet. Same token volumes priced at
 `gpt-5.4` / `gpt-5.4-mini` / `gpt-5.4-nano` list, mapping frontier/standard/trivial. OpenAI bills
 no cache-*write* premium, which is most of why it lands lower. Replace this column with the arm's
-first real usage log.
+first real usage log. This estimate predates the 2026-11-09 move of frontier to `gpt-5.5` (see
+§"OpenAI arm model choice") and has not been repriced.
 
 **Per-trigger total for the full matrix: ~$4.90–$5.40**, against ~$2.00–$2.15 for the single arm it
 replaces.
@@ -162,6 +163,50 @@ the schedule. The obvious next step is a `workflow_dispatch` input narrowing the
 provider, deliberately **not** built yet: it needs a dynamic matrix (a planning job plus
 `fromJSON`) whose branching would itself be unverifiable YAML logic, which is a poor trade against
 a static, fully-asserted matrix until the spend justifies it.
+
+## OpenAI arm model choice
+
+**Decision (2026-11-09, bug `deceptive-banal-baboon`): the OpenAI arm's frontier and scalar
+model moved from `gpt-5.4` to `gpt-5.5`.** `standard` (`gpt-5.4-mini`) and `trivial`
+(`gpt-5.4-nano`) are unchanged.
+
+Why the arm moved off `gpt-5.4`: OpenAI started rejecting unchanged rebar requests on it with HTTP
+400 `invalid_prompt` ("flagged as potentially violating our usage policy"). The cause is on
+OpenAI's side, not in rebar:
+
+- The scheduled run on 2026-11-08 PST (`42572022074`) and the dispatch on 2026-11-09
+  (`42684304178`) each had 2 of 37 `plan-reviewer` calls rejected. In the 9 openai runs from
+  2026-09-07 to 2026-10-26 and in `41398914029` (2026-11-01), no call was rejected.
+- A loopback capture of every first-turn Pass-1 request the discovery canary sends (14 requests)
+  produced identical full-body hashes at `c43d9336262` (green), `0f409b946e4` and `872e7f6c3fd`
+  (both red). The request bytes, model, parameters, schema and tool list did not change.
+- The arm's usage-log artifacts show 3 of the 4 rejected calls with 0 completed requests. OpenAI
+  rejected the first, fixed request, so accumulated tool output does not explain them.
+- In the same dispatch run, `test_workflow_live` sent the same requests for the same fixture plan
+  and passed.
+- The openai job's 116 installed packages are identical between the green and red runs.
+
+rebar's response is correct and unchanged. A provider rejection is `CHANGE_INPUT`, which becomes
+`LLMInputRejectedError` and an `INDETERMINATE` verdict. No retry was added, because a retry would
+also hide real rejections.
+
+Why `gpt-5.5`: it is listed as active, and newer than `gpt-5.4`, on OpenAI's published model
+catalogue (`https://developers.openai.com/api/docs/models/all`, read 2026-11-09). The pinned
+`pydantic-ai-slim` 1.107.9 gives it the same OpenAI profile as `gpt-5.4`: a reasoning model with
+the same sampling, encrypted-reasoning and structured-output handling. That makes the request
+shape the only variable.
+
+Rejected alternatives:
+
+- The GPT-6 family (`gpt-6-astra`, `gpt-6.1-sol`, …). The pinned `pydantic-ai-slim` profiles them
+  as non-reasoning models, so rebar would send the wrong request shape. Recognition only arrives
+  in `pydantic-ai-slim` 2.x, a major upgrade outside the scope of a CI overlay change.
+- `gpt-5.6-*`. The pinned profile marks these models as always reasoning and unable to turn
+  reasoning off. Upstream's current profile disagrees, so the pinned handling is unverified.
+
+**If `gpt-5.5` is also rejected**, the fallback is to remove the openai arm from the matrix and
+record that here. A best-effort arm that fails on provider-side moderation of unchanged requests
+gives no regression signal about rebar.
 
 ## See also
 
