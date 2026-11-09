@@ -1,7 +1,7 @@
 # Standing eval specification for the code-review documentation overlay.
 # Repository fixtures provide the second source required by the evidence contract.
 prompt: code-review-docs
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

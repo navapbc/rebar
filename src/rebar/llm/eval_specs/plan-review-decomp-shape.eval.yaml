@@ -11,7 +11,7 @@
 # evals/plan-review-gate/runs/decomp_shape_sanity.json. Offline spec-shape validation
 # is in tests/unit/test_decomp_shape_criterion.py.
 prompt: plan-review-decomp-shape
-model: anthropic:claude-sonnet-4-6
+model: anthropic:claude-sonnet-5-5
 epochs: 1
 gate: at_least(1)
 coverage_threshold: 1.0

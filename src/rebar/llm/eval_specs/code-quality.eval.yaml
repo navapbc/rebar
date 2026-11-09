@@ -5,7 +5,7 @@
 prompt: code-quality
 # The model whose output is being evaluated (the generator). The llm-judge grader
 # below must be a DIFFERENT family (no self-grading).
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 # Release gate: at least 2 of the 3 epochs must pass the GATING (deterministic)
 # scorers. Never pass@k — that measures a single sample, not a release.

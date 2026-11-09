@@ -11,7 +11,7 @@
 # Run offline shape-check: `rebar prompt eval plan-review-g7`. A live model run needs the [agents]
 # extra + credentials (the gated, non-blocking semantic eval — see eval_specs/README.plan-review.md).
 prompt: plan-review-G7
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

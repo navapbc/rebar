@@ -10,7 +10,7 @@
 # evals/plan-review-gate/runs/ac_process_gate_sanity.json. Offline spec-shape
 # validation is in tests/unit/test_ac_process_gate_criterion.py.
 prompt: plan-review-ac-process-gate
-model: anthropic:claude-sonnet-4-6
+model: anthropic:claude-sonnet-5-5
 epochs: 1
 gate: at_least(1)
 coverage_threshold: 1.0

@@ -2,7 +2,7 @@
 # The gold set covers both ADR-0043 error directions, mixed evidence, and the deliberate
 # fail-open controls. Run with `rebar criteria eval evidence-kind --output json`.
 prompt: plan-review-evidence-kind
-model: bedrock:us.anthropic.claude-sonnet-4-6
+model: bedrock:us.anthropic.claude-sonnet-5-5
 epochs: 2
 gate: at_least(2)
 coverage_threshold: 1.0

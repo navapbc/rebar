@@ -5,7 +5,7 @@
 # honors the intent, OR descopes a requirement WITH a stated rationale → ISF must NOT
 # fire. Validate offline: `rebar prompt eval plan-review-isf-finder`.
 prompt: plan-review-isf-finder
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

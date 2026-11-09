@@ -4,7 +4,7 @@
 # kernel evidence findings; it is scored on FINDINGS presence, not a FAIL/BLOCK verdict.
 # Validate offline: `rebar prompt eval code-review-security`.
 prompt: code-review-security
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

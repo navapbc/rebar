@@ -6,7 +6,7 @@
 # INVERSE (sycophancy) axis: the verifier must not charitably PASS a real defect.
 # Validate offline: `rebar prompt eval plan-review-verifier`.
 prompt: plan-review-verifier
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

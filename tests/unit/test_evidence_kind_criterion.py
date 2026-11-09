@@ -150,7 +150,7 @@ def test_exact_tag_semantics_and_pass3_enrichment_remain_fail_safe() -> None:
 def test_frozen_multisample_eval_is_valid_and_pins_quality_thresholds() -> None:
     spec = _eval_spec()
     assert spec["prompt"] == PROMPT_ID
-    assert spec["model"] == "bedrock:us.anthropic.claude-sonnet-4-6"
+    assert spec["model"] == "bedrock:us.anthropic.claude-sonnet-5-5"
     assert spec["epochs"] >= 2
     assert spec["gate"] == f"at_least({spec['epochs']})"
     assert spec["coverage_threshold"] == 1.0
