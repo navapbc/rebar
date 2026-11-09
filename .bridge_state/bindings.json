@@ -1613,11 +1613,26 @@
       "updated_at": "2026-08-15T14:50:59Z"
     },
     "0369-ba7f-d5ab-4ba9": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\n`rebar store compact --help` lists `--threshold N` for the store-wide form (`[--all] [--threshold N] ...`, \"compact only above N events\"), but the `--all` path rejects it. Observed 2026-11-09 against the production MCP build 0f409b946e4:\n\n- `rebar store compact --all --dry-run --threshold 8` -> `Error: unknown option '--threshold'`.\n- The single-ticket form accepts only `--threshold=N` (`src/rebar/_commands/compact.py:46,92`).\n- `REBAR_COMPACT_THRESHOLD=8 rebar store compact --all --dry-run` works.\n\nAn operator following the help text can't scope a store-wide sweep's threshold.\n\n## Acceptance Criteria\n\n- [ ] `rebar store compact --all` accepts `--threshold N` and `--threshold=N` as its help states (or the help states what it accepts); a test pins help text and parser behaviour together.\n- [ ] The single-ticket form accepts both spellings too.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "store compact --help lists --threshold for --all, but --all rejects it"
+      },
       "created_at": "2026-11-09T19:32:18Z",
       "jira_id": "4598606",
       "jira_key": "REB-7030",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-09T19:32:26Z"
+    },
+    "0376-8839-dc75-4260": {
+      "created_at": "2026-11-09T20:32:31Z",
+      "jira_id": "4598627",
+      "jira_key": "REB-7046",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:32:38Z"
     },
     "037b-879e-fe13-47d2": {
       "baseline": {
@@ -8223,6 +8238,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-04T21:34:10Z"
+    },
+    "11f7-cf57-be02-4441": {
+      "created_at": "2026-11-09T20:32:39Z",
+      "jira_id": "4598628",
+      "jira_key": "REB-7047",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:32:43Z"
     },
     "1205-63b2-2c01-4e7f": {
       "baseline": {
@@ -15746,6 +15768,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:16Z"
     },
+    "2473-79b7-1048-4a71": {
+      "created_at": "2026-11-09T20:32:43Z",
+      "jira_id": "4598629",
+      "jira_key": "REB-7048",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:32:51Z"
+    },
     "247e-7729-fe70-414e": {
       "baseline": {
         "assignee": null,
@@ -17455,6 +17484,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:39Z"
+    },
+    "2886-3079-9b31-4838": {
+      "created_at": "2026-11-09T20:32:51Z",
+      "jira_id": "4598630",
+      "jira_key": "REB-7049",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:32:59Z"
     },
     "28a3-a62d-6345-44a0": {
       "baseline": {
@@ -22483,9 +22519,17 @@
       "updated_at": "2026-09-04T22:44:12Z"
     },
     "32ae-e4ae-b908-4e42": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe `external LLM (live openai)` arm of the scheduled `Live External Integration` run 42572022074 (2026-11-08 22:16 PST, head `0f409b946e4`) failed 2 of 18 executed tests:\n\n- `tests/external/test_review_discovery_live.py::test_live_plan_review_discovery_reaches_the_provider_and_stays_narrow` (`coverage.llm_ran` is False)\n- `tests/external/test_workflow_live.py::test_live_plan_review_workflow_engine_produces_real_verdict` (verdict `INDETERMINATE`)\n\nIn both, exactly one `[plan-reviewer] mode=agentic model=openai-responses:gpt-5.4` call was rejected by OpenAI with HTTP 400, `type: invalid_request_error`, `code: invalid_prompt`, message \"Invalid prompt: your prompt was flagged as potentially violating our usage policy\". In the discovery test the rejected request came right after the finder's 6th tool call (`list_directory`). The plan review then degraded to `INDETERMINATE`, which is rebar's intended fail-closed behaviour for a dead LLM path, so the tests failed as designed.\n\nThe previous scheduled run, 41398914029 (2026-11-01, head `c43d9336262`), ran the same arm with the same model and passed all 18 tests. 93 commits landed between the two heads, including plan-review changes (`overlap.py`, `det_closure.py`, `plan_review_fix_unit_grouping.md`, a 2-line wording change in `plan_review_evidence_kind.md`, and new `overlap` input in `workflow/gates/plan-review.yaml`). None of those diffs adds text that obviously resembles policy-violating content, and the `overlap` criterion is off by default.\n\nPublic reports describe `invalid_prompt` as a provider-side moderation decision that false-positives on benign prompts with gpt-5.x reasoning models, sometimes triggered by context accumulated across tool calls, and sometimes clearing without any prompt change (openai/codex#43058, openai/codex#46093, usestrix/strix#1162, OpenAI community thread 1339353).\n\nRoot cause not established. Unchecked: (1) whether the flag recurs on a rerun at current `main`; (2) which finder/criterion and which message content was flagged; (3) whether an OpenAI-side classifier change between 2026-11-02 and 2026-11-09 explains it rather than a rebar prompt change.\n\nReproduction blocker: the only OpenAI credential available on the operator host belongs to an account with no remaining API credit (every call returns 429 `insufficient_quota`), so the failing tests cannot be rerun locally. Reproduction needs the repository's `OPENAI_API_KEY` (CI only) or a funded local credential.\n\nFound while verifying `unkempt-amaranth-archerfish`.\n\n## Acceptance Criteria\n\n- [ ] [non-codebase] The flag is either shown not to recur (2 consecutive green openai arms on `main`, run ids recorded as a comment), or the flagged finder and the prompt content that triggers it are identified from a reproduction, recorded as a comment, and fixed by a change that lands through Gerrit.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Live openai arm: plan-reviewer call rejected by OpenAI as invalid_prompt (usage-policy flag), review degrades to INDETERMINATE"
+      },
       "created_at": "2026-11-09T19:32:26Z",
       "jira_id": "4598607",
       "jira_key": "REB-7031",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-09T19:32:33Z"
     },
@@ -33568,6 +33612,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:42Z"
     },
+    "4cc4-3b8b-e554-41ef": {
+      "created_at": "2026-11-09T20:33:00Z",
+      "jira_id": "4598631",
+      "jira_key": "REB-7050",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:33:10Z"
+    },
     "4cd5-77ec-4e18-43de": {
       "baseline": {
         "assignee": null,
@@ -35919,6 +35970,13 @@
       "peer_parent": "REB-1562",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:28Z"
+    },
+    "526b-ae76-a409-4aaf": {
+      "created_at": "2026-11-09T20:33:10Z",
+      "jira_id": "4598632",
+      "jira_key": "REB-7051",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:33:21Z"
     },
     "5274-5e95-7d84-4146": {
       "created_at": "2026-08-15T14:59:29Z",
@@ -45895,9 +45953,31 @@
       "updated_at": "2026-09-05T01:21:04Z"
     },
     "6bb6-8c88-20ad-46a9": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nThe local `.github/actions/setup-uv` composite action downloads the uv release with a single anonymous `Invoke-WebRequest` against `https://github.com/astral-sh/uv/releases/download/<version>/<asset>` and has no retry. When GitHub's release-download edge returns a transient 5xx, the step fails at once and every job that installs uv goes red before it tests anything. Every workflow uses this action, including the per-change `Verified` pipeline.\n\nObserved on the scheduled `Live External Integration` run 42572022074 (2026-11-08 22:16 PST, head `0f409b946e4`): 5 of the 9 setup-uv invocations failed within the same minute with `504 Gateway Time-out The server didn't respond in time.` at the `Invoke-WebRequest -Uri $url -OutFile $archive` line (langfuse, jira DC smoke, Pandoc ubuntu, Pandoc macos, live bedrock). In the same minute, 4 other jobs downloaded the identical uv 0.13.6 asset successfully (the openai arm logged `Successfully installed uv 0.13.6 from uv-x86_64-unknown-linux-gnu.tar.gz`, 1 second before the langfuse job's 504 on the same asset). GitHub's status feed records the incident \"Increased timeouts due to surge in anonymous users\" on 2026-11-09 (\"high rates of 504 errors for anonymous requests\"; \"Logged-in users and authenticated requests are unaffected\"), plus a related unauthenticated-timeout incident on 2026-11-08. The asset downloads with HTTP 200 now.\n\nThe uv version and checksums are not the cause: the 2026-11-02 scheduled run (head `c43d9336262`) already installed uv 0.13.6 through this action and every setup-uv step passed. Change 3291 (`e0ab18822c6`) changed how the action obtains the version string but not the URL, the asset, or the download line that failed.\n\nThe bedrock arm's second failure, `Summarize LLM token usage` (`No module named 'rebar'`), is a downstream effect of the same failure: that step runs under `if: always()` and the package was never installed because setup-uv failed.\n\nFound while verifying `unkempt-amaranth-archerfish`.\n\n## Approach\n\nGive the download a bounded retry using PowerShell's built-in `Invoke-WebRequest -MaximumRetryCount 5 -RetryIntervalSec 10`. PowerShell 7 retries the request when it receives a status from 400 to 599 (or 304), waits the interval between attempts, and writes `-OutFile` only for the successful response; the SHA-256 check that follows is unchanged, so a retried download is verified exactly as before. The worst case adds 50 seconds before a persistent failure surfaces, and a persistent error (for example a 404 for a wrong version) still fails the step with the final response.\n\nWhy this fits: the failure is a short-lived upstream 5xx on some requests (4 of 9 succeeded in the same minute), which a bounded retry absorbs. It adds no input, env var, config key, or feature flag, and needs no token. Sending the workflow token was considered and rejected: it would add an env var to the step, and a public report of the same incident shows authenticated `releases/download` requests still returning 504.\n\nPortability: the retry lives in the action's own PowerShell command, so it applies on every runner OS the action supports and adds no CI-only trigger.\n\n## Scope\n\n- `.github/actions/setup-uv/action.yml`: add `-MaximumRetryCount 5 -RetryIntervalSec 10` to the `Invoke-WebRequest` download line, with a one-line comment naming this failure.\n- `tests/unit/test_setup_uv_download_retry.py` (new): regression tests for the download command.\n\n## Testing\n\nWritten first and run against the unfixed tree to confirm they fail:\n- Happy path (structure): `test_setup_uv_download_retries_transient_failures` loads `action.yml` with `yaml.safe_load`, finds the step whose `run` script contains `Invoke-WebRequest`, and asserts the call carries `-MaximumRetryCount` of at least 3 and a `-RetryIntervalSec`. On `origin/main` it fails because the call has neither.\n- Behaviour, failure-then-success: `test_setup_uv_download_survives_two_504s` starts a local `http.server` on 127.0.0.1 that answers the first 2 requests with 504 and the third with a fixed payload, extracts the action's `Invoke-WebRequest` line verbatim, runs it under `pwsh` with `$url` pointing at the local server, and asserts the output file equals the payload and the server saw 3 requests. Skipped when `pwsh` is not on PATH (GitHub's ubuntu, macOS and Windows runners ship it, so CI runs it).\n- Edge, persistent failure: `test_setup_uv_download_fails_on_persistent_504` uses a server that always answers 504 with the retry interval overridden to 1 second in the extracted line, and asserts `pwsh` exits non-zero and no output file is written. Skipped without `pwsh`.\n- The existing `tests/unit/test_uv_pin_guard.py` and `python scripts/check_uv_pin.py` confirm the action still passes the uv pin gate.\n\nNo autouse fixtures and no new shared test helpers.\n\n## Acceptance Criteria\n\n- [ ] The `Invoke-WebRequest` download in `.github/actions/setup-uv/action.yml` carries `-MaximumRetryCount 5 -RetryIntervalSec 10`; verified by `pytest tests/unit/test_setup_uv_download_retry.py` passing, after the structural test was observed failing on the unfixed tree.\n- [ ] The uv pin gate accepts the tree: `python scripts/check_uv_pin.py` exits 0 and `pytest tests/unit/test_uv_pin_guard.py` passes.\n- [ ] `make lint` (with the worktree `.venv/bin` first on `PATH`) exits 0.\n- [ ] [non-codebase] The change lands through Gerrit at `LLM-Review +1` and `Verified +1`; the change number and merged SHA are recorded as a ticket comment.\n- [ ] [non-codebase] A `workflow_dispatch` run of `Live External Integration` on `main` after the merge shows every setup-uv step succeeding; the run id and per-job setup-uv outcomes are recorded as a ticket comment.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "setup-uv download fails the job on a transient GitHub release 504 (no retry)"
+      },
       "created_at": "2026-11-09T19:32:35Z",
       "jira_id": "4598608",
       "jira_key": "REB-7032",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-09T19:32:43Z"
     },
@@ -48917,6 +48997,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:34:30Z"
     },
+    "7341-7f22-b13a-442c": {
+      "created_at": "2026-11-09T20:33:22Z",
+      "jira_id": "4598633",
+      "jira_key": "REB-7052",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:33:27Z"
+    },
     "7341-c605-e265-4838": {
       "baseline": {
         "assignee": null,
@@ -50192,6 +50279,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T05:36:01Z"
+    },
+    "75af-1212-aa22-463f": {
+      "created_at": "2026-11-09T20:33:27Z",
+      "jira_id": "4598634",
+      "jira_key": "REB-7053",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:33:40Z"
     },
     "75cf-fad3-cf33-4792": {
       "baseline": {
@@ -54764,6 +54858,13 @@
       "peer_parent": "REB-782",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:57Z"
+    },
+    "81a1-0fc3-496d-4a00": {
+      "created_at": "2026-11-09T20:33:40Z",
+      "jira_id": "4598635",
+      "jira_key": "REB-7054",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:33:52Z"
     },
     "81a2-ec2a-e374-4d76": {
       "baseline": {
@@ -65161,7 +65262,7 @@
     "9794-4336-5ed6-4561": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\n\nPlan review (`rebar review-plan`) runs a 4-pass LLM pipeline (find, verify, decide, coach) under `src/rebar/llm/plan_review/`, after a deterministic Layer-1 floor (`det_*.py`, `floors.py`, `claimability.py`). Its verdict is BLOCK, PASS or INDETERMINATE, with `blocking` and `advisory` finding lists (`orchestrator.finalize_verdict`, `sidecar.py`). A non-blocking PASS signs a plan-review attestation that the claim gate accepts (`attest.py`, ADR 0049).\n\nThe plan-review bakeoff (`~/plan-review-bakeoff`) measured a no-scaffold control: one Opus agent given a single prompt (`harness/RAWO5_PROMPT.md`, arms `rawO5`/`rawO55`). It reviews the plan against a read-only checkout and returns JSON findings with severity `blocker | major | minor | trivial`. rebar can't run that simpler review today.\n\nThe project's models are a generation behind. `rebar.toml` `[llm]` and `[llm.model_classes]`, and `.github/llm-providers/bedrock.toml`, pin Opus 4.8, Sonnet 4.6 and Haiku 4.5. Bedrock in account 896586841071/us-east-1 now serves `us.anthropic.claude-opus-5-5`, `us.anthropic.claude-sonnet-5-5` and `us.anthropic.claude-haiku-5-5`.\n\n## Goal\n\n1. A configuration option selects the plan-review engine: the current 4-pass pipeline, or a single-agent agentic review on the latest Opus with a new prompt based on the bakeoff's raw control prompt.\n2. Both engines produce the same verdict contract: a blocking/non-blocking verdict plus a findings list, in the same `REVIEW_RESULT` shape, so the two are directly comparable.\n3. Upgrade every configured model to the latest model in its family.\n\n## Invariants (must hold for both engines)\n\n- **Same deterministic gate.** The Layer-1 floor runs first, unchanged, with identical results. If it blocks, or the ticket isn't claimable (`claimability.py`), the agentic engine makes no LLM call, exactly as today.\n- **Same certification.** A non-blocking agentic PASS mints the same plan-review attestation, accepted identically by the claim and close gates, `rebar review-plan --status`, `sign-review`, and pin-currency checks. The attestation records which engine produced it.\n- **Same surfaces.** CLI, library and MCP (`review_plan`, `review_plan_start` + `plan_review_status` / `gate_status`) behave the same under either engine, including de-dup, `GATE_CONGESTED` and the findings sidecar's `readable` signal.\n- **No bypass.** Switching engines can't turn a BLOCK into a PASS without a review: the attestation binds the plan material and the engine.\n\n## Approach\n\n1. **ADR first.** Record:\n   - the engine switch: key, values, default, precedence;\n   - the agentic engine's design: runtime, tools, read-only enforcement, budget and timeout;\n   - the severity-to-verdict mapping;\n   - the finding schema mapping onto today's sidecar;\n   - how the attestation records the engine;\n   - the model upgrade.\n2. **Model upgrade** (land first, on the current engine). Move `[llm] model` and the `frontier` / `standard` / `trivial` classes, with their Anthropic fallbacks, to Opus 5.5, Sonnet 5.5 and Haiku 5.5, in both `rebar.toml` and `.github/llm-providers/bedrock.toml`. Update `model_classes.MODEL_WINDOW_LADDER`, and the `sizing.py` family ladder if it needs it. Then audit every model call against the new models' API changes:\n   - forced `tool_choice` `any`/`tool` returns a 400 on Opus 5.5 and Sonnet 5.5. Check whether structured output relies on forced tool calls;\n   - thinking can't be disabled on Opus 5.5;\n   - `temperature`, `top_p` and `top_k` are rejected;\n   - assistant prefill is rejected;\n   - Opus 5.5's effort defaults to `medium`, so set it explicitly.\n\n   Re-run the existing provider-parity and prompt evals before and after the change.\n3. **Agentic engine.** One Opus 5.5 agent with a prompt adapted from `RAWO5_PROMPT.md`. It gets the ticket's plan material, read-only access to the checkout at the reviewed ref, and the project's review criteria (`rebar explain`) as context. It returns structured findings. It runs on rebar's existing LLM runtime and provider chain, so Bedrock-first with fallback still applies. That needs no CI-provider or subscription dependency, which satisfies `project.portability`.\n4. **Verdict adapter.** Map agentic findings onto the existing verdict and sidecar schema, so downstream readers need no change.\n5. **Comparison harness.** Run both engines on the same ticket and ref, and report verdict agreement and the finding overlap. Calibrate on rebar's own eval corpus (`evals/`), with no new dependency on the bakeoff repo.\n\n## Constraints\n\n- **The engine switch is a feature config key.** It needs a `mechanism-ok` marker naming a sunset ticket that stays open until one engine is retired. File that ticket under this epic.\n- **No other new config key.** A bug fix in this epic adds none.\n- **Size and complexity.** The 800-line cap and the complexity ratchet hold. Add the agentic engine as its own module beside `orchestrator.py`, not inside near-cap modules.\n- **No secrets or cost figures** in prompts, findings or tickets.\n\n## Acceptance Criteria\n\n- [ ] An ADR under `docs/adr/` records the engine switch, agentic design, severity-to-verdict mapping, finding schema mapping, engine provenance in the attestation, and the model upgrade.\n- [ ] `rebar.toml`, `.github/llm-providers/bedrock.toml` and `MODEL_WINDOW_LADDER` name Opus 5.5, Sonnet 5.5 and Haiku 5.5. The model-call audit is recorded, any incompatibility is fixed, and the provider-parity and prompt evals pass on the new models.\n- [ ] The config option selects either engine. Pinned by tests that the default engine and the alternate one each run.\n- [ ] Under the agentic engine, a plan that fails the Layer-1 floor, or isn't claimable, makes zero LLM calls and gets the same verdict and findings as the current engine. Pinned by tests that count LLM calls.\n- [ ] Both engines emit the same `REVIEW_RESULT` / verdict schema (BLOCK | PASS | INDETERMINATE, `blocking`, `advisory`). Pinned by schema tests on both.\n- [ ] A non-blocking agentic PASS signs an attestation that `claim`, the close gate, `review-plan --status` and `sign-review` accept, with the engine recorded. Pinned by tests.\n- [ ] The agentic engine can't write to the checkout or run commands. Pinned by a test.\n- [ ] The CLI, library and MCP async surfaces work under both engines. Pinned by tests.\n- [ ] The comparison harness runs both engines on the same tickets and reports verdict agreement and finding overlap. One run over the eval corpus is recorded in a ticket comment.\n- [ ] `make verify` exits 0.\n- [ ] [non-codebase] On the production MCP server, after deploy, one `review-plan` per engine completes on a live ticket. Verdict, engine and attestation are recorded in a ticket comment.",
+        "description": "## Context / Problem\n\nPlan review (`rebar review-plan`) runs a 4-pass LLM pipeline (find, verify, decide, coach) under `src/rebar/llm/plan_review/`, after a deterministic Layer-1 floor (`det_*.py`, `floors.py`, `claimability.py`). Its verdict is BLOCK, PASS or INDETERMINATE, with `blocking` and `advisory` finding lists (`orchestrator.finalize_verdict`, `sidecar.py`). A non-blocking PASS signs a plan-review attestation that the claim gate accepts (`attest.py`, ADR 0049).\n\nrebar has no simpler alternative: every review runs all 4 passes.\n\nThe project's models are a generation behind. `rebar.toml` `[llm]` and `[llm.model_classes]`, and `.github/llm-providers/bedrock.toml`, pin Opus 4.8, Sonnet 4.6 and Haiku 4.5. Bedrock in account 896586841071/us-east-1 now serves `us.anthropic.claude-opus-5-5`, `us.anthropic.claude-sonnet-5-5` and `us.anthropic.claude-haiku-5-5`.\n\n## Goal\n\n1. A configuration option selects the plan-review engine: the current 4-pass pipeline, or a single-agent agentic review on the latest Opus with a new review prompt. The prompt's starting text is the operator's existing raw review prompt (`~/plan-review-bakeoff/harness/RAWO5_PROMPT.md`), copied into rebar and adapted; rebar takes no dependency on that repo.\n2. Both engines produce the same verdict contract: a blocking/non-blocking verdict plus a findings list, in the same `REVIEW_RESULT` shape, so the two are directly comparable.\n3. Upgrade every configured model to the latest model in its family.\n\n## Invariants (must hold for both engines)\n\n- **Same deterministic gate.** The Layer-1 floor runs first, unchanged, with identical results. If it blocks, or the ticket isn't claimable (`claimability.py`), the agentic engine makes no LLM call, exactly as today.\n- **Same certification.** A non-blocking agentic PASS mints the same plan-review attestation, accepted identically by the claim and close gates, `rebar review-plan --status`, `sign-review`, and pin-currency checks. The attestation records which engine produced it.\n- **Same surfaces.** CLI, library and MCP (`review_plan`, `review_plan_start` + `plan_review_status` / `gate_status`) behave the same under either engine, including de-dup, `GATE_CONGESTED` and the findings sidecar's `readable` signal.\n- **No bypass.** Switching engines can't turn a BLOCK into a PASS without a review: the attestation binds the plan material and the engine.\n\n## Approach\n\n1. **ADR first.** Record:\n   - the engine switch: key, values, default, precedence;\n   - the agentic engine's design: runtime, tools, read-only enforcement, budget and timeout;\n   - the severity-to-verdict mapping (DECIDED 2026-11-09: only `blocker` blocks; `major`, `minor` and `trivial` are advisory);\n   - the finding schema mapping onto today's sidecar;\n   - how the attestation records the engine;\n   - the model upgrade.\n2. **Model upgrade** (land first, on the current engine). Move `[llm] model` and the `frontier` / `standard` / `trivial` classes, with their Anthropic fallbacks, to Opus 5.5, Sonnet 5.5 and Haiku 5.5, in both `rebar.toml` and `.github/llm-providers/bedrock.toml`. Update `model_classes.MODEL_WINDOW_LADDER`, and the `sizing.py` family ladder if it needs it. Then audit every model call against the new models' API changes:\n   - forced `tool_choice` `any`/`tool` returns a 400 on Opus 5.5 and Sonnet 5.5. Check whether structured output relies on forced tool calls;\n   - thinking can't be disabled on Opus 5.5;\n   - `temperature`, `top_p` and `top_k` are rejected;\n   - assistant prefill is rejected;\n   - Opus 5.5's effort defaults to `medium`, so set it explicitly.\n\n   Re-run the existing provider-parity and prompt evals before and after the change.\n3. **Agentic engine.** One Opus 5.5 agent with the new prompt, kept in rebar's prompt registry. It gets the ticket's plan material, read-only access to the checkout at the reviewed ref, and the project's review criteria (`rebar explain`) as context. It returns structured findings. It runs on rebar's existing LLM runtime and provider chain, so Bedrock-first with fallback still applies. That needs no CI-provider or subscription dependency, which satisfies `project.portability`.\n4. **Verdict adapter.** Map agentic findings onto the existing verdict and sidecar schema, so downstream readers need no change.\n5. **Comparison harness.** Run both engines on the same ticket and ref, and report verdict agreement and the finding overlap. Run it on rebar's own eval corpus (`evals/`).\n\n## Constraints\n\n- **The engine switch is a feature config key.** It needs a `mechanism-ok` marker naming a sunset ticket that stays open until one engine is retired. File that ticket under this epic.\n- **No other new config key.** A bug fix in this epic adds none.\n- **Size and complexity.** The 800-line cap and the complexity ratchet hold. Add the agentic engine as its own module beside `orchestrator.py`, not inside near-cap modules.\n- **No secrets or cost figures** in prompts, findings or tickets.\n\n## Acceptance Criteria\n\n- [ ] An ADR under `docs/adr/` records the engine switch, agentic design, severity-to-verdict mapping, finding schema mapping, engine provenance in the attestation, and the model upgrade.\n- [ ] `rebar.toml`, `.github/llm-providers/bedrock.toml` and `MODEL_WINDOW_LADDER` name Opus 5.5, Sonnet 5.5 and Haiku 5.5. The model-call audit is recorded, any incompatibility is fixed, and the provider-parity and prompt evals pass on the new models.\n- [ ] The config option selects either engine. Pinned by tests that the default engine and the alternate one each run.\n- [ ] Under the agentic engine, a plan that fails the Layer-1 floor, or isn't claimable, makes zero LLM calls and gets the same verdict and findings as the current engine. Pinned by tests that count LLM calls.\n- [ ] Both engines emit the same `REVIEW_RESULT` / verdict schema (BLOCK | PASS | INDETERMINATE, `blocking`, `advisory`). Pinned by schema tests on both.\n- [ ] A non-blocking agentic PASS signs an attestation that `claim`, the close gate, `review-plan --status` and `sign-review` accept, with the engine recorded. Pinned by tests.\n- [ ] The agentic engine can't write to the checkout or run commands. Pinned by a test.\n- [ ] The CLI, library and MCP async surfaces work under both engines. Pinned by tests.\n- [ ] The comparison harness runs both engines on the same tickets and reports verdict agreement and finding overlap. One run over the eval corpus is recorded in a ticket comment.\n- [ ] `make verify` exits 0.\n- [ ] [non-codebase] On the production MCP server, after deploy, one `review-plan` per engine completes on a live ticket. Verdict, engine and attestation are recorded in a ticket comment.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Selectable plan-review engine: current 4-pass pipeline or a single-agent Opus review, plus upgrade configured models to the latest family"
@@ -79184,6 +79285,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:45Z"
+    },
+    "b690-7231-22fe-49e4": {
+      "created_at": "2026-11-09T20:33:53Z",
+      "jira_id": "4598636",
+      "jira_key": "REB-7055",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:33:57Z"
     },
     "b690-f232-5bae-4b8b": {
       "baseline": {
@@ -99300,6 +99408,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T08:58:33Z"
     },
+    "e557-4f22-2246-431f": {
+      "created_at": "2026-11-09T20:33:57Z",
+      "jira_id": "4598637",
+      "jira_key": "REB-7056",
+      "state": "confirmed",
+      "updated_at": "2026-11-09T20:34:10Z"
+    },
     "e55c-20d8-c5de-4ac1": {
       "baseline": {
         "assignee": null,
@@ -116110,7 +116225,14 @@
     "1793915615449246001": "__rebar_unknown_comment_id__",
     "1793934452745009001": "__rebar_unknown_comment_id__",
     "1794248139029302001": "__rebar_unknown_comment_id__",
-    "1794249121240700001": "__rebar_unknown_comment_id__"
+    "1794249121240700001": "__rebar_unknown_comment_id__",
+    "1794252775130044001": "__rebar_unknown_comment_id__",
+    "1794254192256424001": "__rebar_unknown_comment_id__",
+    "1794254240200089001": "__rebar_unknown_comment_id__",
+    "1794254252351186001": "__rebar_unknown_comment_id__",
+    "1794254326423753001": "__rebar_unknown_comment_id__",
+    "1794255355131358001": "__rebar_unknown_comment_id__",
+    "1794255791094319001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -121593,7 +121715,18 @@
     "REB-7031": "32ae-e4ae-b908-4e42",
     "REB-7032": "6bb6-8c88-20ad-46a9",
     "REB-704": "81c9-f5ad-7c54-4623",
+    "REB-7046": "0376-8839-dc75-4260",
+    "REB-7047": "11f7-cf57-be02-4441",
+    "REB-7048": "2473-79b7-1048-4a71",
+    "REB-7049": "2886-3079-9b31-4838",
     "REB-705": "8656-92dc-f6eb-4a8f",
+    "REB-7050": "4cc4-3b8b-e554-41ef",
+    "REB-7051": "526b-ae76-a409-4aaf",
+    "REB-7052": "7341-7f22-b13a-442c",
+    "REB-7053": "75af-1212-aa22-463f",
+    "REB-7054": "81a1-0fc3-496d-4a00",
+    "REB-7055": "b690-7231-22fe-49e4",
+    "REB-7056": "e557-4f22-2246-431f",
     "REB-706": "9b38-c7a4-1abb-4323",
     "REB-707": "b955-82d0-e476-46da",
     "REB-708": "f112-6222-e236-4b09",
