@@ -67,6 +67,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0107 — Reconciler typed mutation payload: a discriminated union by `(direction, action)`](0107-reconciler-typed-mutation-payload-contract.md)
 - [0118 — Adaptive snapshot cadence by byte/replay cost](0118-adaptive-snapshot-cadence.md)
 - [0121 — Reconciler architecture: consolidated decision record](0121-reconciler-architecture-consolidated-record.md)
+- [0123 — Jira fix versions sync into rebar as a `releases` list](0123-jira-fix-versions-release-field.md)
 
 ## LLM framework
 
