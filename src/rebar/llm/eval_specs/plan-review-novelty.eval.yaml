@@ -5,7 +5,7 @@
 # N4 exercises a drifted-code case. Run `rebar prompt eval plan-review-novelty`;
 # a full eval needs the configured paid model.
 prompt: plan-review-novelty
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

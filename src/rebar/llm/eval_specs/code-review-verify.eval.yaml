@@ -6,7 +6,7 @@
 # balanced; either way the verifier must emit a graded answer set. Validate offline:
 # `rebar prompt eval code-review-verify`.
 prompt: code-review-verify
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8
