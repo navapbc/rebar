@@ -7,6 +7,7 @@ global_support = [
     ".github/workflows/test.yml",
     "pyproject.toml",
     "scripts/mutation_gate.py",
+    "scripts/mutation_sandbox.py",
     "tests/conftest.py",
     "uv.lock",
 ]

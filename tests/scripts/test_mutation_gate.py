@@ -186,6 +186,8 @@ def test_manifest_is_canonical_and_complete() -> None:
     assert all(shard.tests for shard in manifest.shards.values())
     assert all(shard.score_floor > 0 for shard in manifest.shards.values())
     assert "scripts/mutation_gate.py" in manifest.global_support
+    # The sandbox wraps every shard's test run, so changing it must exercise every shard.
+    assert "scripts/mutation_sandbox.py" in manifest.global_support
 
 
 def test_manifest_conftest_support_matches_selected_test_ancestry() -> None:
@@ -297,6 +299,7 @@ def test_manifest_conftest_support_matches_selected_test_ancestry() -> None:
             ".github/workflows/test.yml",
             "pyproject.toml",
             "scripts/mutation_gate.py",
+            "scripts/mutation_sandbox.py",
             "tests/conftest.py",
             "uv.lock",
         ),

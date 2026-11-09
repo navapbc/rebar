@@ -163,10 +163,15 @@ def build_seatbelt_profile(allow: Sequence[Path]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _bwrap_argv(argv: Sequence[str], allow: Sequence[Path]) -> list[str]:
-    """Read-only root, then re-bind each allow-list path writable."""
-    # ``--dev`` avoids exposing the host ``/dev`` as a writable bind mount.
-    out = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+def _bind_roots(allow: Sequence[Path]) -> list[Path]:
+    """Return the existing allow-list paths that are not inside another one.
+
+    Each ``--bind`` creates a mount point, and the kernel refuses to remove or rename a
+    mount point (EBUSY). Binding a path that an outer bind already makes writable adds
+    no access but leaves the child unable to delete it, which broke pytest's
+    ``--basetemp`` setup under ``(root, root/.mutation-pytest)`` (``f86a-c0ce``).
+    """
+    existing: list[Path] = []
     for path in allow:
         resolved = Path(path).resolve()
         # Missing bind sources stay read-only and produce an explicit warning.
@@ -177,7 +182,17 @@ def _bwrap_argv(argv: Sequence[str], allow: Sequence[Path]) -> list[str]:
                 resolved,
             )
             continue
-        out += ["--bind", str(resolved), str(resolved)]
+        existing.append(resolved)
+    unique = list(dict.fromkeys(existing))
+    return [path for path in unique if not any(other in path.parents for other in unique)]
+
+
+def _bwrap_argv(argv: Sequence[str], allow: Sequence[Path]) -> list[str]:
+    """Read-only root, then re-bind the outermost allow-list paths writable."""
+    # ``--dev`` avoids exposing the host ``/dev`` as a writable bind mount.
+    out = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+    for path in _bind_roots(allow):
+        out += ["--bind", str(path), str(path)]
     out.append("--")
     out.extend(argv)
     return out

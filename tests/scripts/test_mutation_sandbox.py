@@ -249,6 +249,48 @@ def test_the_diagnostic_rerun_allow_list_denies_writes_outside_it(tmp_path):
     )
 
 
+@live
+def test_the_child_can_delete_and_recreate_a_nested_basetemp(tmp_path):
+    """pytest's `--basetemp` setup must work under the gate's `(root, basetemp)` contract.
+
+    pytest deletes and recreates its basetemp before the first test. When bwrap bound
+    the nested basetemp as its own mount, that deletion failed with EBUSY and the
+    recreate with EEXIST, failing every shard's clean baseline (`f86a-c0ce`). The child
+    repeats pytest's sequence, then proves a write outside the allow-list is still
+    denied, so the fix cannot pass by widening the sandbox.
+    """
+    root = _inside(tmp_path, "root")
+    root.mkdir()
+    basetemp = root / ".mutation-pytest"
+    basetemp.mkdir()
+    (basetemp / "stale.txt").write_text("from a previous run", encoding="utf-8")
+    sentinel = basetemp / "live.txt"
+    target = _inside(tmp_path, "outside_the_repo.txt")
+    inner = (
+        "import os, pathlib, shutil;"
+        "base = pathlib.Path(os.environ['BASETEMP']);"
+        "shutil.rmtree(base);"
+        "base.mkdir();"
+        "pathlib.Path(os.environ['SENTINEL']).write_text(os.environ['MARK']);"
+        "pathlib.Path(os.environ['DENIED']).write_text('pwned')"
+    )
+    env = subprocess_env(
+        MARK=LIVENESS, BASETEMP=str(basetemp), SENTINEL=str(sentinel), DENIED=str(target)
+    )
+    argv = sb.wrap(
+        [sys.executable, "-c", inner],
+        allow=(root, basetemp),
+        profile_dir=tmp_path,
+        env=env,
+    )
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True, check=False)
+    _assert_child_ran(sentinel, proc)
+    assert not (basetemp / "stale.txt").exists(), f"basetemp was not recreated; {_why(proc)}"
+    assert not target.exists(), (
+        f"sandbox permitted a write outside the allow-list after the recreate; {_why(proc)}"
+    )
+
+
 # --- fail-closed + opt-out --------------------------------------------------------
 
 
@@ -630,6 +672,34 @@ def test_bwrap_skips_allow_paths_that_do_not_exist(tmp_path, monkeypatch):
     argv = sb.wrap(["/bin/true"], allow=[tmp_path, missing], profile_dir=tmp_path)
     assert str(tmp_path.resolve()) in argv
     assert str(missing.resolve()) not in argv
+
+
+def _bound_paths(argv: list[str]) -> list[str]:
+    """The writable bind sources in a bwrap argv, in order."""
+    return [argv[i + 1] for i, arg in enumerate(argv[: argv.index("--")]) if arg == "--bind"]
+
+
+def test_bwrap_does_not_bind_a_path_nested_in_another_bind(tmp_path):
+    """A nested bind is a mount point the child cannot delete, and adds no write access."""
+    root = tmp_path / "root"
+    basetemp = root / ".mutation-pytest"
+    basetemp.mkdir(parents=True)
+    argv = sb._bwrap_argv(["/bin/true"], (root, basetemp))
+    assert _bound_paths(argv) == [str(root.resolve())]
+    # Order must not matter: a nested entry listed first is still dropped.
+    argv = sb._bwrap_argv(["/bin/true"], (basetemp, root))
+    assert _bound_paths(argv) == [str(root.resolve())]
+
+
+def test_bwrap_binds_siblings_and_prefix_sharing_paths_separately(tmp_path):
+    """Nesting is by path component, so `/x/ab` is not inside `/x/a`."""
+    a = tmp_path / "a"
+    ab = tmp_path / "ab"
+    b = tmp_path / "b"
+    for path in (a, ab, b):
+        path.mkdir()
+    argv = sb._bwrap_argv(["/bin/true"], (a, ab, b, a))
+    assert _bound_paths(argv) == [str(a.resolve()), str(ab.resolve()), str(b.resolve())]
 
 
 def test_bwrap_uses_minimal_dev_not_a_writable_host_bind(tmp_path, monkeypatch):
