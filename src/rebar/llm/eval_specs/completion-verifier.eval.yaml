@@ -6,7 +6,7 @@
 # verifier reads the ticket + repo via tools, so each case is backed by injected
 # `ticket_context` + a fixture repo described in `note` (see the WS-EVAL solver task).
 prompt: completion-verifier
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

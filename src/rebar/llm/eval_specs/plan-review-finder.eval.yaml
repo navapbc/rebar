@@ -8,7 +8,7 @@
 # subset the llm-judge is aligned to (Cohen's kappa); the labels here are a best-effort
 # seed pending human adjudication — see eval_specs/README.plan-review.md.
 prompt: plan-review-finder
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

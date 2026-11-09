@@ -5,7 +5,7 @@
 # validate_eval_spec(strict=True). Live: the eval CI runs it through the solver; `spec` and
 # `epics` are injected, `note` guides any fixture repo state.
 prompt: spec-alignment
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8

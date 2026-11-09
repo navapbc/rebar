@@ -7,7 +7,7 @@
 # plan-review-container`` validates the spec offline. Path-scoped eval CI runs the model with
 # the ``agents`` extra and credentials.
 prompt: plan-review-container
-model: anthropic:claude-opus-4-8
+model: anthropic:claude-opus-5-5
 epochs: 3
 gate: at_least(2)
 coverage_threshold: 0.8
