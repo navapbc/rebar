@@ -388,3 +388,46 @@ def test_unknown_bedrock_claude_id_stays_prompted_under_thinking():
     assert caps.native_structured_output is False
     assert caps.native_output_with_thinking is False
     assert isinstance(structured.output_mode(_Verdict, caps, thinking=True), PromptedOutput)
+
+
+# ── the 5.5 generation (epic pompous-vitriolic-macaw) ─────────────────────────────────────
+# Measured 2026-11-09 on direct Anthropic and Bedrock us-east-1: `temperature=0` is a 400 on
+# Opus, Sonnet and Haiku 5.5, and an explicit `output_config.effort` is accepted.
+
+_FIVE_FIVE_EFFORT = {"opus": "high", "sonnet": "high", "haiku": "medium"}
+
+
+@pytest.mark.parametrize("prefix", ["", "us.anthropic.", "global.anthropic."])
+@pytest.mark.parametrize("family", sorted(_FIVE_FIVE_EFFORT))
+def test_five_five_ids_withdraw_temperature_and_pin_effort(prefix, family):
+    model_id = f"{prefix}claude-{family}-5-5"
+    caps = _caps(f"bedrock:{model_id}" if prefix else f"anthropic:{model_id}")
+    assert caps.supports_temperature is False, model_id
+    assert caps.effort == _FIVE_FIVE_EFFORT[family], model_id
+    # Native output is unmeasured for 5.5, so the Claude family default (prompted) holds.
+    assert caps.native_structured_output is False, model_id
+
+
+@pytest.mark.parametrize("family", sorted(_FIVE_FIVE_EFFORT))
+def test_five_five_direct_ids_use_the_512_token_cache_minimum(family):
+    caps = _caps(f"anthropic:claude-{family}-5-5")
+    assert caps.prompt_cache_style == "anthropic"
+    assert caps.cache_min_prefix_tokens == 512
+
+
+def test_an_unlisted_model_sends_no_effort_and_keeps_temperature():
+    """Negative control: an id with no exact-id row keeps the family default, so the effort
+    pin cannot leak onto a model nobody measured."""
+    caps = _caps("anthropic:claude-sonnet-4-5")
+    assert caps.effort is None
+    assert caps.supports_temperature is True
+
+
+def test_a_fallback_chain_carries_the_primary_effort():
+    """Effort follows the primary like the cache style: both provider-scoped carriers are sent,
+    so whichever leg serves reads its own."""
+    from rebar.llm.runner_support import _intersect_capabilities
+
+    bedrock = _caps("bedrock:us.anthropic.claude-opus-5-5")
+    direct = _caps("anthropic:claude-opus-5-5")
+    assert _intersect_capabilities([bedrock, direct]).effort == "high"

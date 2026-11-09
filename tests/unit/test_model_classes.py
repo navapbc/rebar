@@ -16,9 +16,9 @@ import pytest
 pytestmark = pytest.mark.unit
 
 # Today's values, which the defaults must reproduce EXACTLY so configuring nothing is a no-op.
-_FRONTIER_TODAY = "claude-opus-4-8"  # config.py DEFAULT_MODEL
-_STANDARD_TODAY = "claude-sonnet-4-6"  # config.py VERIFIER_DEFAULT_MODEL
-_TRIVIAL_TODAY = "claude-haiku-4-5"  # plan-review.yaml model_ladder entry rung
+_FRONTIER_TODAY = "claude-opus-5-5"  # config.py DEFAULT_MODEL
+_STANDARD_TODAY = "claude-sonnet-5-5"  # config.py VERIFIER_DEFAULT_MODEL
+_TRIVIAL_TODAY = "claude-haiku-5-5"  # plan-review.yaml model_ladder entry rung
 
 
 def _mc():

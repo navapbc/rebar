@@ -169,13 +169,14 @@ enforce_since = "f9f38d0c6c4255ae3a6ecd7858fe98813c46ee4f"
 # THE IDS ARE SINGLE-SOURCED from `.github/llm-providers/bedrock.toml` and pinned two-sided by
 # `tests/unit/test_project_default_provider.py`, so editing either file alone fails. Only
 # INFERENCE-PROFILE ids (the `us.`/`global.` prefix) are invokable, and their suffixes are NOT
-# uniform — haiku carries `-20251001-v1:0` where sonnet carries none. Take any new id VERBATIM
+# uniform across generations — Haiku 4.5's carried `-20251001-v1:0`, the 5.5 profiles carry
+# none (list-inference-profiles, us-east-1, 2026-11-09). Take any new id VERBATIM
 # from that overlay (itself taken from `aws bedrock list-inference-profiles --region <region>`).
 #
 # `[llm] model` IS SET AS WELL AS THE CLASSES, AND IT IS LOAD-BEARING, NOT REDUNDANT. `cfg.model`
 # is a SECOND resolution path the class table cannot reach: `rebar.llm.config` resolves it from
 # `REBAR_LLM_MODEL` / the `model` file key falling back to `DEFAULT_MODEL`, which is the bare
-# literal "claude-opus-4-8" and so infers provider `anthropic`. Any op that resolves `cfg.model`
+# literal "claude-opus-5-5" and so infers provider `anthropic`. Any op that resolves `cfg.model`
 # instead of naming a class — and several do — would therefore call direct Anthropic on every
 # local run. That is exactly the ambient-default provider leak MEASURED on a live matrix run and
 # closed for the CI overlays by [rebar:f124-f14a-fd62-4973]; setting only the class table would
@@ -203,7 +204,7 @@ enforce_since = "f9f38d0c6c4255ae3a6ecd7858fe98813c46ee4f"
 # deliberately does NOT fail over — "a credential error must not be masked by shopping for a
 # provider whose key happens to work" — so a chain can never paper over absent AWS credentials.
 [llm]
-model = "bedrock:us.anthropic.claude-opus-4-8"
+model = "bedrock:us.anthropic.claude-opus-5-5"
 # The region the pinned `us.*` inference profiles are served from (measured in account
 # 896586841071/us-east-1 — .github/llm-providers/bedrock.toml; external-integration.yml and
 # the compose/runbook defaults agree). Pinned beside the region-scoped model ids so a fresh
@@ -220,6 +221,6 @@ bedrock_region_name = "us-east-1"
 corpus_root = "evals"
 
 [llm.model_classes]
-frontier = { model = "bedrock:us.anthropic.claude-opus-4-8", fallback = [{ model = "anthropic:claude-opus-4-8" }] }
-standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6", fallback = [{ model = "anthropic:claude-sonnet-4-6" }] }
-trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }
+frontier = { model = "bedrock:us.anthropic.claude-opus-5-5", fallback = [{ model = "anthropic:claude-opus-5-5" }] }
+standard = { model = "bedrock:us.anthropic.claude-sonnet-5-5", fallback = [{ model = "anthropic:claude-sonnet-5-5" }] }
+trivial  = { model = "bedrock:us.anthropic.claude-haiku-5-5" }

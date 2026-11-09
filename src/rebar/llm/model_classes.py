@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 # The plan-review model_ladder's cheapest rung — today's implicit "trivial" choice.
 # Kept here (not in config.py, which has no headroom left) alongside its siblings.
-TRIVIAL_DEFAULT_MODEL = "claude-haiku-4-5"
+TRIVIAL_DEFAULT_MODEL = "claude-haiku-5-5"
 
 TRIVIAL_CLASS = "trivial"
 STANDARD_CLASS = "standard"
@@ -60,10 +60,36 @@ _DEFAULT_MODEL_BY_CLASS: dict[str, str] = {
 # plan-review escalation ladder and the completion verifier share one source of model
 # window knowledge). Bare Anthropic family names; substring-matched by accessors.
 MODEL_WINDOW_LADDER = (
+    ("claude-haiku-5-5", 1_000_000),
+    ("claude-sonnet-5-5", 1_000_000),
+    ("claude-opus-5-5", 1_000_000),
+)
+
+# The window assumed for a model the ladder cannot locate (bug 48b3). It was the ladder MINIMUM
+# while Haiku 4.5's 200K rung held the bottom; every 5.5 rung is 1M, so deriving it from the
+# ladder would silently quadruple the assumption for an unknown family. Under-admitting is loud
+# and recoverable, over-admitting fails mid-run, so the pre-5.5 conservative value is kept.
+UNLOCATED_MODEL_WINDOW_TOKENS = 200_000
+
+# Windows of the previous generation. They are NOT escalation rungs (escalation follows the
+# current ladder above), but a project may still pin one of these ids explicitly, and its real
+# window must not collapse to the unlocated floor: Sonnet 4.6 and Opus 4.8 have 1M windows, and
+# reading them as 200K refuses inputs those models accept.
+PRIOR_GENERATION_WINDOWS = (
     ("claude-haiku-4-5", 200_000),
     ("claude-sonnet-4-6", 1_000_000),
     ("claude-opus-4-8", 1_000_000),
 )
+
+
+def known_window_tokens(model: str | None) -> int | None:
+    """The declared window of ``model`` from the current ladder or the prior generation, by the
+    same substring match the ladder uses; ``None`` when neither table names it."""
+    if model:
+        for name, window in (*MODEL_WINDOW_LADDER, *PRIOR_GENERATION_WINDOWS):
+            if name in model:
+                return window
+    return None
 
 
 def own_window_tokens(model: str | None) -> int:
@@ -72,16 +98,12 @@ def own_window_tokens(model: str | None) -> int:
     Completion does not escalate models up the ladder (plan-review does), so it needs the
     matched model's own window, not `plan_review.sizing.largest_window_tokens`'s
     at-or-above maximum. Substring rung match, exactly like the ladder lookup. A model the
-    ladder cannot locate (or an absent model) → the ladder MINIMUM: under-admitting is loud
-    and recoverable, over-admitting fails mid-run (the conservative default from bug 48b3).
+    ladder cannot locate (or an absent model) → ``UNLOCATED_MODEL_WINDOW_TOKENS``:
+    under-admitting is loud and recoverable, over-admitting fails mid-run (the conservative
+    default from bug 48b3).
     """
-    ladder_min = min(window for _name, window in MODEL_WINDOW_LADDER)
-    if model:
-        for name, window in MODEL_WINDOW_LADDER:
-            if name in model:
-                return window
-        return ladder_min
-    return ladder_min
+    known = known_window_tokens(model)
+    return known if known is not None else UNLOCATED_MODEL_WINDOW_TOKENS
 
 
 @dataclass(frozen=True)

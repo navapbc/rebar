@@ -77,6 +77,10 @@ def _intersect_capabilities(per_candidate: list[ModelCapabilities]) -> ModelCapa
         # candidate is MEASURED to support it (story 18ae) — any candidate could answer, so a
         # mixed chain must fail closed to PromptedOutput rather than route native by luck.
         native_output_with_thinking=all(c.native_output_with_thinking for c in per_candidate),
+        # `effort` follows the PRIMARY, like `prompt_cache_style`: the settings builder emits it
+        # under BOTH provider-scoped keys, and each provider model reads only its own, so the
+        # serving candidate receives it whichever leg answers. Fallbacks are same-family rows.
+        effort=per_candidate[0].effort,
         supports_temperature=all(c.supports_temperature for c in per_candidate),
         # `all`, like every other field: web access is attached to the chain as a WHOLE, so the
         # record may only claim the provider-side route when EVERY candidate can serve it —

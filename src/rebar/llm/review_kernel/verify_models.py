@@ -127,8 +127,8 @@ def _build_verification_output(
             str,
             Field(
                 default="",
-                description="REASON FIRST: brief reasoning through this finding's sub-questions "
-                "(as an unproven claim) before the attributes/answers.",
+                description="Brief notes on this finding's sub-questions (treat it as an "
+                "unproven claim).",
             ),
         ),
         severity_attributes=(severity_cls, Field(default_factory=severity_cls)),

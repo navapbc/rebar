@@ -101,7 +101,7 @@ GOLD_EXPECTS = {"finding": "block", "fail": "block", "pass": "advisory"}
 #: model on both sides. Production uses both classes — frontier is the Pass-1 finder, standard is
 #: Pass-2 verify and Pass-4 coach — so certifying only one leaves the other unmeasured.
 CLASS_SLOTS: dict[str, tuple[str, str]] = {
-    "frontier": (DEFAULT_MODEL, "bedrock:us.anthropic.claude-opus-4-8"),
+    "frontier": (DEFAULT_MODEL, "bedrock:us.anthropic.claude-opus-5-5"),
     "standard": (VERIFIER_DEFAULT_MODEL, f"bedrock:{DEFAULT_BEDROCK_MODEL_ID}"),
 }
 

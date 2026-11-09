@@ -15,19 +15,20 @@ from typing import Any
 import pytest
 
 from rebar.llm.config import LLMConfig
+from rebar.llm.model_classes import UNLOCATED_MODEL_WINDOW_TOKENS
 from rebar.llm.plan_review import sizing
 from rebar.llm.workflow.runners import BatchRunRequest, BatchRunResult
 
 # The bare rungs of today's ladder — the strings that must survive byte-for-byte when no class
 # is configured, and that must NOT appear in the gate YAML any more.
-_TODAY_TRIVIAL = "claude-haiku-4-5"
-_TODAY_STANDARD = "claude-sonnet-4-6"
-_TODAY_FRONTIER = "claude-opus-4-8"
+_TODAY_TRIVIAL = "claude-haiku-5-5"
+_TODAY_STANDARD = "claude-sonnet-5-5"
+_TODAY_FRONTIER = "claude-opus-5-5"
 _TODAY_LADDER = [_TODAY_TRIVIAL, _TODAY_STANDARD, _TODAY_FRONTIER]
 
-_BEDROCK_TRIVIAL = "bedrock:us.anthropic.claude-haiku-4-5"
-_BEDROCK_STANDARD = "bedrock:us.anthropic.claude-sonnet-4-6"
-_BEDROCK_FRONTIER = "bedrock:us.anthropic.claude-opus-4-8"
+_BEDROCK_TRIVIAL = "bedrock:us.anthropic.claude-haiku-5-5"
+_BEDROCK_STANDARD = "bedrock:us.anthropic.claude-sonnet-5-5"
+_BEDROCK_FRONTIER = "bedrock:us.anthropic.claude-opus-5-5"
 
 _ENV_VARS = tuple(
     f"REBAR_LLM_{cls}_{field}"
@@ -63,9 +64,9 @@ def bedrock_classes(monkeypatch):
         monkeypatch,
         {
             "model_classes": {
-                "trivial": {"model": "us.anthropic.claude-haiku-4-5", "provider": "bedrock"},
-                "standard": {"model": "us.anthropic.claude-sonnet-4-6", "provider": "bedrock"},
-                "frontier": {"model": "us.anthropic.claude-opus-4-8", "provider": "bedrock"},
+                "trivial": {"model": "us.anthropic.claude-haiku-5-5", "provider": "bedrock"},
+                "standard": {"model": "us.anthropic.claude-sonnet-5-5", "provider": "bedrock"},
+                "frontier": {"model": "us.anthropic.claude-opus-5-5", "provider": "bedrock"},
             }
         },
     )
@@ -264,9 +265,9 @@ def test_models_at_or_above_escalation_order_is_unchanged(monkeypatch, configure
             monkeypatch,
             {
                 "model_classes": {
-                    "trivial": {"model": "us.anthropic.claude-haiku-4-5", "provider": "bedrock"},
-                    "standard": {"model": "us.anthropic.claude-sonnet-4-6", "provider": "bedrock"},
-                    "frontier": {"model": "us.anthropic.claude-opus-4-8", "provider": "bedrock"},
+                    "trivial": {"model": "us.anthropic.claude-haiku-5-5", "provider": "bedrock"},
+                    "standard": {"model": "us.anthropic.claude-sonnet-5-5", "provider": "bedrock"},
+                    "frontier": {"model": "us.anthropic.claude-opus-5-5", "provider": "bedrock"},
                 }
             },
         )
@@ -287,14 +288,14 @@ def test_model_ladder_table_stays_bare_names_and_windows() -> None:
     """AC: `sizing.MODEL_LADDER` is UNCHANGED (bare names + windows).
 
     Putting class names in the table breaks `largest_window_tokens`, whose lookup is a SUBSTRING
-    test: `"standard" in "bedrock:us.anthropic.claude-sonnet-4-6"` is False, so every lookup
+    test: `"standard" in "bedrock:us.anthropic.claude-sonnet-5-5"` is False, so every lookup
     would miss and fall through to the ladder maximum — silently changing P8's context budget
     with no error raised.
     """
     assert sizing.MODEL_LADDER == (
-        ("claude-haiku-4-5", 200_000),
-        ("claude-sonnet-4-6", 1_000_000),
-        ("claude-opus-4-8", 1_000_000),
+        ("claude-haiku-5-5", 1_000_000),
+        ("claude-sonnet-5-5", 1_000_000),
+        ("claude-opus-5-5", 1_000_000),
     )
 
 
@@ -302,11 +303,9 @@ def test_largest_window_tokens_still_matches_a_provider_qualified_id(bedrock_cla
     """The substring match must keep working for a provider-qualified id — pinned so it cannot
     silently start missing and returning the ladder maximum for every model."""
     assert sizing.largest_window_tokens(_BEDROCK_STANDARD) == 1_000_000
-    assert sizing.largest_window_tokens("bedrock:us.anthropic.claude-haiku-4-5") == 1_000_000
+    assert sizing.largest_window_tokens("bedrock:us.anthropic.claude-haiku-5-5") == 1_000_000
     assert sizing.largest_window_tokens(None) == sizing.MODEL_LADDER[-1][1]
-    assert sizing.largest_window_tokens("some-unknown-model") == min(
-        w for _, w in sizing.MODEL_LADDER
-    )
+    assert sizing.largest_window_tokens("some-unknown-model") == UNLOCATED_MODEL_WINDOW_TOKENS
 
 
 def test_config_py_does_not_import_model_classes_at_module_level() -> None:
@@ -466,10 +465,32 @@ def test_start_rung_location_for_a_foreign_family_is_explicit(no_classes) -> Non
     """A primary from a non-Anthropic model FAMILY matches no ladder rung. That is an explicit
     outcome, not a silent substitution: the ladder is the primary alone, so a retry re-runs on
     the operator's own model instead of DOWNGRADING onto a smaller Anthropic rung, and the window
-    is the ladder MINIMUM so the P8 size gate cannot under-block on an overstated budget."""
+    is the conservative unlocated floor so the P8 size gate cannot under-block on an overstated
+    budget."""
     assert sizing.models_at_or_above("bedrock:us.amazon.nova-pro-v1:0") == [
         "bedrock:us.amazon.nova-pro-v1:0"
     ]
-    assert sizing.largest_window_tokens("bedrock:us.amazon.nova-pro-v1:0") == min(
-        w for _, w in sizing.MODEL_LADDER
+    assert (
+        sizing.largest_window_tokens("bedrock:us.amazon.nova-pro-v1:0")
+        == UNLOCATED_MODEL_WINDOW_TOKENS
     )
+
+
+@pytest.mark.parametrize(
+    ("model", "window"),
+    [
+        ("bedrock:us.anthropic.claude-sonnet-4-6", 1_000_000),
+        ("bedrock:us.anthropic.claude-opus-4-8", 1_000_000),
+        ("anthropic:claude-haiku-4-5", 200_000),
+    ],
+)
+def test_an_explicitly_pinned_prior_generation_model_keeps_its_real_window(model, window) -> None:
+    """Regression (epic pompous-vitriolic-macaw): dropping the 4.x rows from the escalation ladder
+    made a still-configured Sonnet 4.6 read as the 200K unlocated floor, and a plan review's
+    verify step refused a ~80K-token input plus its 128K output reserve. A prior-generation id
+    keeps its declared window and stays on the operator's model (no cross-generation escalation)."""
+    from rebar.llm.model_classes import own_window_tokens
+
+    assert own_window_tokens(model) == window
+    assert sizing.largest_window_tokens(model) == window
+    assert sizing.models_at_or_above(model) == [model]

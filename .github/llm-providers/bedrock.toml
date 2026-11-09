@@ -12,9 +12,9 @@
 # this arm so direct Anthropic cannot masquerade as Bedrock; that isolation is matrix-specific,
 # while ordinary operation may retain the approved direct-Anthropic fallback.
 [llm]
-model = "bedrock:us.anthropic.claude-opus-4-8"
+model = "bedrock:us.anthropic.claude-opus-5-5"
 
 [llm.model_classes]
-frontier = { model = "bedrock:us.anthropic.claude-opus-4-8" }
-standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }
-trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }
+frontier = { model = "bedrock:us.anthropic.claude-opus-5-5" }
+standard = { model = "bedrock:us.anthropic.claude-sonnet-5-5" }
+trivial  = { model = "bedrock:us.anthropic.claude-haiku-5-5" }

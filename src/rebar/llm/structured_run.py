@@ -405,6 +405,16 @@ def build_model_settings(
     # Operator-configured request headers (story 26ae). All of the gating, resolution and
     # re-validation lives in the helper so this stays a single branch; `extra_headers` is a base
     # ModelSettings field, riding alongside the cache flags exactly like `max_tokens` above.
+    # Explicit reasoning effort (epic pompous-vitriolic-macaw): the 5.5 generation defaults Opus
+    # and Haiku to `medium`, so a pinned level is sent rather than inherited. Both provider-scoped
+    # carriers are set: `AnthropicModel` reads `anthropic_effort` into `output_config.effort`,
+    # and Bedrock's Converse model reads `additionalModelRequestFields`. Each ignores the other's
+    # key, so a fallback chain spanning both providers gets the level on whichever leg serves.
+    if caps.effort is not None:
+        model_settings["anthropic_effort"] = caps.effort
+        model_settings["bedrock_additional_model_requests_fields"] = {
+            "output_config": {"effort": caps.effort}
+        }
     extra_headers = extra_headers_for(cfg)
     if extra_headers is not None:
         model_settings["extra_headers"] = extra_headers

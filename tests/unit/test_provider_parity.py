@@ -711,22 +711,23 @@ def test_the_tool_set_offered_to_the_model_is_identical_across_providers(slot, m
         assert spec == b["tools"][name], f"{slot}: tool {name} differs across providers"
 
 
-def test_the_temperature_capability_difference_is_symmetric_and_explicit(monkeypatch) -> None:
-    """Temperature support is model-specific and symmetric across provider arms."""
+def test_the_temperature_withdrawal_is_symmetric_across_provider_arms(monkeypatch) -> None:
+    """Every 5.5 model rejects `temperature` (measured 2026-11-09 on both providers), so a
+    requested temperature is withdrawn on BOTH arms of BOTH slots, and nothing else differs."""
     sonnet_v1, sonnet_v2 = pp.CLASS_SLOTS["standard"]
     opus_v1, opus_v2 = pp.CLASS_SLOTS["frontier"]
     s1, s2 = _compare(sonnet_v1, sonnet_v2, monkeypatch, temperature=0.0)
     o1, o2 = _compare(opus_v1, opus_v2, monkeypatch, temperature=0.0)
-    # Temperature reaches both Sonnet provider arms.
-    assert s1["temperature"] == 0.0 and s2["temperature"] == 0.0
-    # Opus omits it on both arms, proving the difference is model-specific.
+    assert s1["temperature"] is None and s2["temperature"] is None
     assert o1["temperature"] is None and o2["temperature"] is None
     # No other normalized field changes.
+    assert [f for f in s1 if f != "model_id" and s1[f] != s2[f]] == []
     assert [f for f in o1 if f != "model_id" and o1[f] != o2[f]] == []
 
 
-def test_the_native_output_capability_is_measured_and_symmetric_for_sonnet(monkeypatch) -> None:
-    """Both Sonnet arms use native output; both Opus arms remain prompted."""
+def test_the_output_mode_is_symmetric_across_provider_arms(monkeypatch) -> None:
+    """Native output is unmeasured for the 5.5 generation, so both arms of both slots stay on
+    prompted output; the mode never differs by provider."""
     sonnet_v1, sonnet_v2 = pp.CLASS_SLOTS["standard"]
     opus_v1, opus_v2 = pp.CLASS_SLOTS["frontier"]
     raw_s1 = _capture(sonnet_v1, monkeypatch)["payload"]
@@ -738,16 +739,12 @@ def test_the_native_output_capability_is_measured_and_symmetric_for_sonnet(monke
     _, s2_dir = _drop_prompted_directive(s2["messages"])
     _, o1_dir = _drop_prompted_directive(o1["messages"])
     _, o2_dir = _drop_prompted_directive(o2["messages"])
-    # sonnet: both measured arms carry the schema out-of-band, with no prompted directive.
-    assert (s1_dir, s2_dir) == (False, False)
-    # opus: prompted on BOTH arms -- native was not enabled for it, so no asymmetry.
+    # Prompted on BOTH arms of BOTH slots: no 5.5 row enables native output.
+    assert (s1_dir, s2_dir) == (True, True)
     assert (o1_dir, o2_dir) == (True, True)
     assert s1["messages"] == s2["messages"] and s1["messages"]
-    # Neither arm merely DROPPED the schema: both carry it out-of-band in their provider envelope.
-    direct_schema = _anthropic_native_schema(raw_s1)
-    bedrock_schema = _bedrock_native_schema(raw_s2)
-    assert direct_schema and bedrock_schema
-    assert _schema_shape(direct_schema) == _schema_shape(bedrock_schema)
+    # Neither arm sends an out-of-band native schema while prompted.
+    assert not _anthropic_native_schema(raw_s1) and not _bedrock_native_schema(raw_s2)
 
 
 def test_the_enumerated_envelope_differences_are_the_only_ones_normalized() -> None:
@@ -828,3 +825,20 @@ def test_eligible_cases_threads_repo_root_so_client_specs_run(tmp_path: pathlib.
 
     specs = {item.spec for item in pp.eligible_cases(str(repo))}
     assert "client-only" in specs
+
+
+@pytest.mark.parametrize("slot", sorted(pp.CLASS_SLOTS))
+def test_the_pinned_effort_reaches_the_wire_on_both_provider_arms(slot, monkeypatch) -> None:
+    """The settings builder sets `anthropic_effort` and Bedrock's `additionalModelRequestFields`;
+    this proves pydantic-ai translates each into `output_config.effort` on its own wire format,
+    at the same level on both arms (5.5 defaults Opus to `medium`, so an unsent pin would
+    silently lower review depth)."""
+    v1_model, v2_model = pp.CLASS_SLOTS[slot]
+    direct = _capture(v1_model, monkeypatch)["payload"]
+    bedrock = _capture(v2_model, monkeypatch)["payload"]
+    direct_effort = (direct.get("output_config") or {}).get("effort")
+    bedrock_effort = (
+        (bedrock.get("additionalModelRequestFields") or {}).get("output_config") or {}
+    ).get("effort")
+    assert direct_effort == "high", direct.get("output_config")
+    assert bedrock_effort == "high", bedrock.get("additionalModelRequestFields")

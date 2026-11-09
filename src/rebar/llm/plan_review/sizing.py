@@ -25,6 +25,7 @@ from rebar.llm import failure
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.model_classes import MODEL_WINDOW_LADDER as MODEL_LADDER
+from rebar.llm.model_classes import UNLOCATED_MODEL_WINDOW_TOKENS, known_window_tokens
 from rebar.llm.review_kernel import verify as _verify
 from rebar.llm.runner import Runner
 
@@ -75,7 +76,8 @@ def largest_window_tokens(model: str | None) -> int:
             if name in model:
                 idx = [n for n, _ in MODEL_LADDER].index(name)
                 return max(w for _, w in MODEL_LADDER[idx:])
-        return min(w for _, w in MODEL_LADDER)
+        known = known_window_tokens(model)
+        return known if known is not None else UNLOCATED_MODEL_WINDOW_TOKENS
     return MODEL_LADDER[-1][1]
 
 

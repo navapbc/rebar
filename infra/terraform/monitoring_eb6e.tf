@@ -77,7 +77,7 @@ resource "aws_cloudwatch_metric_alarm" "bedrock_invoke_client_errors" {
     metric {
       namespace   = "AWS/Bedrock"
       metric_name = "InvocationClientErrors"
-      dimensions  = { ModelId = "us.anthropic.claude-opus-4-8" }
+      dimensions  = { ModelId = "us.anthropic.claude-opus-5-5" }
       period      = 900
       stat        = "Sum"
     }
@@ -88,7 +88,7 @@ resource "aws_cloudwatch_metric_alarm" "bedrock_invoke_client_errors" {
     metric {
       namespace   = "AWS/Bedrock"
       metric_name = "InvocationClientErrors"
-      dimensions  = { ModelId = "us.anthropic.claude-sonnet-4-6" }
+      dimensions  = { ModelId = "us.anthropic.claude-sonnet-5-5" }
       period      = 900
       stat        = "Sum"
     }
@@ -99,7 +99,7 @@ resource "aws_cloudwatch_metric_alarm" "bedrock_invoke_client_errors" {
     metric {
       namespace   = "AWS/Bedrock"
       metric_name = "InvocationClientErrors"
-      dimensions  = { ModelId = "us.anthropic.claude-haiku-4-5-20251001-v1:0" }
+      dimensions  = { ModelId = "us.anthropic.claude-haiku-5-5" }
       period      = 900
       stat        = "Sum"
     }
@@ -110,7 +110,7 @@ resource "aws_cloudwatch_metric_alarm" "bedrock_invoke_client_errors" {
     metric {
       namespace   = "AWS/Bedrock"
       metric_name = "Invocations"
-      dimensions  = { ModelId = "us.anthropic.claude-opus-4-8" }
+      dimensions  = { ModelId = "us.anthropic.claude-opus-5-5" }
       period      = 900
       stat        = "Sum"
     }
@@ -121,7 +121,7 @@ resource "aws_cloudwatch_metric_alarm" "bedrock_invoke_client_errors" {
     metric {
       namespace   = "AWS/Bedrock"
       metric_name = "Invocations"
-      dimensions  = { ModelId = "us.anthropic.claude-sonnet-4-6" }
+      dimensions  = { ModelId = "us.anthropic.claude-sonnet-5-5" }
       period      = 900
       stat        = "Sum"
     }
@@ -132,7 +132,7 @@ resource "aws_cloudwatch_metric_alarm" "bedrock_invoke_client_errors" {
     metric {
       namespace   = "AWS/Bedrock"
       metric_name = "Invocations"
-      dimensions  = { ModelId = "us.anthropic.claude-haiku-4-5-20251001-v1:0" }
+      dimensions  = { ModelId = "us.anthropic.claude-haiku-5-5" }
       period      = 900
       stat        = "Sum"
     }

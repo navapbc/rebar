@@ -58,13 +58,13 @@ from rebar.llm.config_readers import (  # noqa: F401  (re-export: monkeypatch.se
 )
 from rebar.llm.headers import resolve_headers
 
-DEFAULT_MODEL = "claude-opus-4-8"
+DEFAULT_MODEL = "claude-opus-5-5"
 # The decisive non-frontier model used by the gate VERIFIERS (plan-review Pass-2 verify and
 # the completion verifier) when the operator has NOT explicitly chosen a model (i.e.
 # cfg.model == DEFAULT_MODEL). A focused yes/no verification is a decisive, non-open-ended
 # judgement, so a cheaper/faster model is sufficient; an explicit operator model still wins.
 # Single source of truth — imported by both completion.py and plan_review (no duplication).
-VERIFIER_DEFAULT_MODEL = "claude-sonnet-4-6"
+VERIFIER_DEFAULT_MODEL = "claude-sonnet-5-5"
 
 
 # The active gate RUN config (epic veiny-trout-brink). The run boundary (`produce_*` in
