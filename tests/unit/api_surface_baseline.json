@@ -2477,6 +2477,7 @@
         "mode",
         "output_schema",
         "output_token_limit",
+        "read_only",
         "request_timeout_limit_s",
         "reviewers",
         "structured_retry_limit",
@@ -2580,6 +2581,11 @@
               "tool_step_limit",
               "POSITIONAL_OR_KEYWORD",
               "None"
+            ],
+            [
+              "read_only",
+              "POSITIONAL_OR_KEYWORD",
+              "False"
             ],
             [
               "web",

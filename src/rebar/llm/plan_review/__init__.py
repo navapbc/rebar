@@ -411,8 +411,8 @@ def _apply_review_floors(
 ) -> None:
     """The post-dispatch Pass-3 floors, consistency cross-checks and fix-unit grouping, in order.
 
-    Each may make its own LLM sub-call, so ``_run_plan_review`` skips this whole tail for a
-    non-pipeline engine's failed run (ADR 0123: an agentic run makes no pipeline LLM call)."""
+    Each judges pipeline findings and may make its own LLM sub-call, so ``_run_plan_review`` runs
+    this tail only under the pipeline engine (ADR 0123)."""
     # Pass-3 floors (rising / completion / drift — child cc5b, story 6533, bug 5e40), applied
     # BEFORE the sidecar emit so dropped findings land in the sidecar while the surfaced verdict is
     # narrowed. Each is gated + inert by default, so a normal review's verdict stays byte-identical.
@@ -617,10 +617,11 @@ def _run_plan_review(
     if drift is not None:
         verdict.setdefault("coverage", {})["drift"] = drift
 
-    # The pipeline review's post-dispatch tail. Under a non-pipeline engine a DET-passing review
-    # degrades to an unsigned INDETERMINATE (llm_unavailable) and must make NO pipeline LLM
-    # call; a floor short-circuit (passthrough) still gets the identical tail under both engines.
-    if engine == "pipeline" or not verdict.get("coverage", {}).get("llm_unavailable"):
+    # The pipeline review's post-dispatch tail (ADR 0123): its floors, cross-checks and fix-unit
+    # grouping each judge pipeline findings and may make their own LLM sub-call, so they run only
+    # under the pipeline engine — never on an agentic verdict (floor, interim, degraded or
+    # input-rejected). The REVIEW_RESULT sidecar below is emitted under both engines.
+    if engine == "pipeline":
         _apply_review_floors(
             ticket_id,
             verdict,

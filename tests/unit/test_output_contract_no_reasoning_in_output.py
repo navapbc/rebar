@@ -37,6 +37,7 @@ def _registered_contracts() -> dict:
     # Importing these modules runs their `register_contract` calls.
     for module in (
         "rebar.llm.code_review.contracts",
+        "rebar.llm.plan_review.agentic",
         "rebar.llm.plan_review.floors",
         "rebar.llm.plan_review.passes",
         "rebar.llm.plan_review.xcheck",

@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/plan_review_engine_route_output.schema.json",
   "title": "PlanReviewEngineRouteOutput",
-  "description": "OUTPUT of `plan_review_engine_route`: `run_pipeline` is true iff the DET floor passed (run_llm) AND the engine is `pipeline` — the single boolean the review branch reads.",
+  "description": "OUTPUT of `plan_review_engine_route`: `run_pipeline` is true iff the DET floor passed (run_llm) AND the engine is `pipeline`; `run_agentic` likewise for `agentic`. The review branches read them.",
   "type": "object",
   "properties": {
-    "run_pipeline": { "type": "boolean", "description": "True iff run_llm and engine == pipeline → run the four-pass pipeline review." }
+    "run_pipeline": { "type": "boolean", "description": "True iff run_llm and engine == pipeline → run the four-pass pipeline review." },
+    "run_agentic": { "type": "boolean", "description": "True iff run_llm and engine == agentic → run the agentic review." }
   },
-  "required": ["run_pipeline"],
+  "required": ["run_pipeline", "run_agentic"],
   "additionalProperties": false
 }

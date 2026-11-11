@@ -424,7 +424,45 @@ steps:
                 # from the call that ran. Every coach arm must preserve it.
                 provider_provenance: ${{ steps.verify.outputs.provider_provenance }}
     else:
-    - id: passthrough
-      uses: plan_review_passthrough
-      with:
-        verdict: ${{ steps.precheck.outputs.verdict }}
+    # The agentic engine (ADR 0123): ONE read-only agent on the frontier model CLASS (resolved
+    # through the operator's class table, like Pass-1's model_ladder). The passthrough below
+    # therefore only ever receives a floor verdict, never the `None` a DET-passing run carries.
+    - id: agentic_branch
+      branch:
+        when: ${{ steps.engine_route.outputs.run_agentic }}
+        then:
+        - id: agentic_inputs
+          uses: plan_review_agentic_inputs
+          with:
+            subject_plan: ${{ steps.precheck.outputs.subject_plan }}
+            prerequisites: ${{ steps.precheck.outputs.prerequisites }}
+        - id: agentic_review
+          needs:
+          - agentic_inputs
+          prompt: plan-review-agentic
+          mode: structured
+          output_schema: plan_review_agentic_findings
+          model: frontier
+          with:
+            plan: ${{ steps.agentic_inputs.outputs.plan }}
+            criteria: ${{ steps.agentic_inputs.outputs.criteria }}
+            output_budget: model_max
+            # ADR 0123 budget: steer to a final answer after 60 tool steps; iteration_limit
+            # 156 caps model requests at ceil(156/2) + the 2-request output-retry allowance = 80.
+            tool_step_limit: 60
+            iteration_limit: 156
+            # No comment_ticket (even in local mode) and no MCP toolsets.
+            read_only: true
+        - id: agentic_verdict
+          needs:
+          - agentic_review
+          uses: plan_review_agentic_verdict
+          with:
+            ticket_id: ${{ steps.precheck.outputs.canonical_id }}
+            ticket_type: ${{ steps.precheck.outputs.ticket_type }}
+            findings: ${{ steps.agentic_review.outputs.findings }}
+        else:
+        - id: passthrough
+          uses: plan_review_passthrough
+          with:
+            verdict: ${{ steps.precheck.outputs.verdict }}
