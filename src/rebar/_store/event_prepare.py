@@ -28,6 +28,7 @@ from rebar._store.canonical import canonical_bytes  # the single canonical seria
 from rebar.reducer._version import (  # single source of truth for the type names
     KEY_ADD,
     KEY_REVOKE,
+    RELEASE_DELTA,
     TAG_DELTA,
 )
 
@@ -54,6 +55,8 @@ EVENT_TYPES = frozenset(
         "COMMITS",
         # Tag add/remove deltas (epic P2.3).
         TAG_DELTA,
+        # Release add/remove deltas (ADR 0124).
+        RELEASE_DELTA,
         # Identity key lifecycle (epic gnu-whale-ichor / e165): signed add/revoke.
         KEY_ADD,
         KEY_REVOKE,
@@ -123,7 +126,7 @@ def _validate_event(event: dict[str, Any]) -> tuple[str, Any, Any]:
             f"Error: invalid event_type '{event_type}'. Must be one of: CREATE, STATUS, "
             "COMMENT, LINK, UNLINK, SNAPSHOT, SYNC, REVERT, EDIT, ARCHIVED, FILE_IMPACT, "
             f"VERIFY_COMMANDS, SIGNATURE, WORKFLOW_RUN, WORKFLOW_STEP, COMMITS, {TAG_DELTA}, "
-            f"{KEY_ADD}, {KEY_REVOKE}, "
+            f"{RELEASE_DELTA}, {KEY_ADD}, {KEY_REVOKE}, "
             "REVIEW_RESULT, COMPLETION_VERDICT, TICKET_DIGEST, ENQUEUE_ENRICH, CLAIM_ENRICH, "
             "DONE_ENRICH",
             1,

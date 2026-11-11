@@ -426,6 +426,29 @@ def process_commits(state: dict, _event: dict, data: dict) -> None:
         state["commits"] = merged
 
 
+def _fold_list_delta(state: dict, key: str, data: dict) -> None:
+    """Fold an add/remove delta into the string list ``state[key]``.
+
+    Removals apply before additions, so an addition wins when one name is in both lists.
+    Non-list bodies act as empty lists, non-string or empty names are skipped, and repeated
+    folds are idempotent.
+    """
+    added = data.get("added")
+    removed = data.get("removed")
+    if not isinstance(added, list):
+        added = []
+    if not isinstance(removed, list):
+        removed = []
+    values = list(state.get(key) or [])
+    remove_set = {v for v in removed if isinstance(v, str)}
+    if remove_set:
+        values = [v for v in values if v not in remove_set]
+    for v in added:
+        if isinstance(v, str) and v and v not in values:
+            values.append(v)
+    state[key] = values
+
+
 def process_tag_delta(state: dict, data: dict) -> None:
     """Apply tag removals before additions.
 
@@ -434,20 +457,12 @@ def process_tag_delta(state: dict, data: dict) -> None:
     within one event. Repeated folds are idempotent. Non-list deltas act as empty lists, and
     legacy ``EDIT.tags`` remains the base.
     """
-    added = data.get("added")
-    removed = data.get("removed")
-    if not isinstance(added, list):
-        added = []
-    if not isinstance(removed, list):
-        removed = []
-    tags = list(state.get("tags") or [])
-    remove_set = {t for t in removed if isinstance(t, str)}
-    if remove_set:
-        tags = [t for t in tags if t not in remove_set]
-    for t in added:
-        if isinstance(t, str) and t and t not in tags:
-            tags.append(t)
-    state["tags"] = tags
+    _fold_list_delta(state, "tags", data)
+
+
+def process_release_delta(state: dict, data: dict) -> None:
+    """Apply release-name removals before additions (ADR 0124), with ``TAG_DELTA``'s rules."""
+    _fold_list_delta(state, "releases", data)
 
 
 def process_archived(state: dict) -> None:

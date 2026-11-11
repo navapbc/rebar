@@ -38,7 +38,8 @@ from __future__ import annotations
 
 # Bump when the event wire format changes in a way other clones must be aware of.
 # Wire-format changelog: see docs/event-schema.md
-SCHEMA_VERSION = 5
+# 6: RELEASE_DELTA event (Jira fix versions as rebar releases, ADR 0124).
+SCHEMA_VERSION = 6
 
 # Types that appear on disk but are intentionally NOT in KNOWN_EVENT_TYPES because
 # they are handled OUTSIDE the main replay dispatch: the bridge-only ``SYNC`` and
@@ -75,6 +76,11 @@ def is_unknown_newer_type(event_type: str) -> bool:
 # (``_store.event_append.EVENT_TYPES``), and every emitter (leaf/composer/inbound),
 # so the literal cannot drift between them.
 TAG_DELTA = "TAG_DELTA"
+
+# The RELEASE_DELTA event type name (ADR 0124): release-name add/remove deltas folded
+# with TAG_DELTA's rules into ``releases``. Single source for the reducer dispatch,
+# the write-path allow-list, and every emitter.
+RELEASE_DELTA = "RELEASE_DELTA"
 
 # The KEY_ADD / KEY_REVOKE event type names (epic gnu-whale-ichor / e165) — a single
 # source of truth shared by the reducer dispatch (here, via KNOWN_EVENT_TYPES), the
@@ -114,6 +120,9 @@ KNOWN_EVENT_TYPES = frozenset(
         # Tag add/remove deltas (epic P2.3): replace whole-field EDIT.tags (LWW
         # clobber) so concurrent tag edits converge. Folded by process_tag_delta.
         TAG_DELTA,
+        # Release add/remove deltas (ADR 0124): Jira fix versions as rebar releases,
+        # folded by process_release_delta with TAG_DELTA's rules.
+        RELEASE_DELTA,
         # Identity key lifecycle (epic gnu-whale-ichor / e165): signed add/revoke folded
         # into an epoch-scoped keyring by process_key_event. Known (not forward-compat)
         # so compaction squashes them into a SNAPSHOT (the keyring/keyring_epoch are

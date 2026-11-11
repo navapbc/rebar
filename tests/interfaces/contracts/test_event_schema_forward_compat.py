@@ -109,6 +109,14 @@ def test_schema_version_and_known_types_declared() -> None:
     assert FUTURE_TYPE not in _version.KNOWN_EVENT_TYPES
 
 
+def test_release_delta_is_known_at_schema_version_6() -> None:
+    """ADR 0124: RELEASE_DELTA is a replayed event type introduced by schema version 6."""
+    _version = _load_version_module()
+    assert _version.RELEASE_DELTA == "RELEASE_DELTA"
+    assert _version.RELEASE_DELTA in _version.KNOWN_EVENT_TYPES
+    assert _version.SCHEMA_VERSION == 6
+
+
 # ── IGNORED: unknown event_type does not break replay ─────────────────────────
 def test_unknown_event_type_is_ignored_on_replay(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)

@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Additive or commutative orphan types allow a full-log rebuild. Order-sensitive
 # types require human triage. The sets cover every known non-CREATE, non-SNAPSHOT type.
 _AUTO_RECOVER_ORPHAN_TYPES = frozenset(
-    {"COMMENT", "LINK", "UNLINK", "TAG_DELTA", "COMMITS", "BRIDGE_ALERT", "REVERT"}
+    {"COMMENT", "LINK", "UNLINK", "TAG_DELTA", "RELEASE_DELTA", "COMMITS", "BRIDGE_ALERT", "REVERT"}
 )
 _HUMAN_TRIAGE_ORPHAN_TYPES = frozenset(
     {
