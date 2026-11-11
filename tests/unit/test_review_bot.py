@@ -964,12 +964,18 @@ def _reset_reconciler_stop_flag():
     reconcile.clear_stop()
 
 
-async def _await_probe(probe, *, cap=3.0, what="the probe"):
+async def _await_probe(probe, *, cap=20.0, what="the probe"):
     """Wait off-loop until a worker thread appends to ``probe``.
 
     One ``to_thread`` call avoids the ASYNC110 polling pattern. ``asyncio.Event``
     is unsuitable because the review and event-log probes run in worker threads
     that cannot safely set it.
+
+    ``cap`` is a hang-guard, not a budget: the wait returns as soon as the probe
+    fires, so a generous ceiling costs a passing run nothing. A 3 s ceiling
+    flaked on a loaded CI runner, where the startup work before a reconciler
+    review (SQLite setup, the cursor read, executor hops) outlasted it and the
+    failure misreported a slow start as a missing probe (alphabetic-reluctant-dore).
     """
 
     def _poll():
@@ -978,7 +984,7 @@ async def _await_probe(probe, *, cap=3.0, what="the probe"):
             time.sleep(0.01)
 
     await asyncio.to_thread(_poll)
-    assert probe, f"{what} never fired within {cap}s — the probe is not wired"
+    assert probe, f"{what} never fired within the {cap}s hang-guard"
 
 
 def _slow_review_probe(monkeypatch, seconds=0.3):
@@ -2494,10 +2500,10 @@ def _spy_drain_wait(monkeypatch):
     return calls
 
 
-async def _await_first_review(started, *, cap=3.0):
+async def _await_first_review(started):
     """Wait until the reconciler is genuinely INSIDE its review, so shutdown interrupts an
     in-flight review rather than racing the pass's setup."""
-    await _await_probe(started, cap=cap, what="the reconciler's review")
+    await _await_probe(started, what="the reconciler's review")
 
 
 @pytest.mark.real_reconcile_loop
@@ -2522,7 +2528,7 @@ def test_shutdown_drains_an_in_flight_reconciler_review(monkeypatch, tmp_path):
             await _await_first_review(started)
             # leaving the context = the shutdown uvicorn drives on SIGTERM
 
-    asyncio.run(asyncio.wait_for(_run(), timeout=20))
+    asyncio.run(asyncio.wait_for(_run(), timeout=60))
 
     assert len(started) == 1, started
     assert [v[0] for v in gerrit.votes] == ["rebar~main~Igap0"], (
@@ -2557,7 +2563,7 @@ def test_shutdown_does_not_let_the_reconciler_start_a_new_review(monkeypatch, tm
         async with appmod.lifespan(fake_app):
             await _await_first_review(started)
 
-    asyncio.run(asyncio.wait_for(_run(), timeout=20))
+    asyncio.run(asyncio.wait_for(_run(), timeout=60))
 
     assert len(gerrit.votes) == 1, (
         f"the in-flight review must be drained exactly once: votes={gerrit.votes}"
