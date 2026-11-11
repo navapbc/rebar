@@ -375,6 +375,10 @@ def build_agent_request(
     # guard at use time, so a step whose system prompt does not lead with it is byte-unchanged.
     shared_prefix = ctx.inputs.get("shared_prefix")
     cache_prefix = shared_prefix if isinstance(shared_prefix, str) and shared_prefix else None
+    # Agent budget + read-only surface as `with:` keys (the v3 step schema is closed; `with:` is
+    # its extension point). Absent ⇒ None/False ⇒ the request is byte-identical to before.
+    tool_step_limit = ctx.inputs.get("tool_step_limit")
+    iteration_limit = ctx.inputs.get("iteration_limit")
     return RunRequest(
         system_prompt=system_prompt,
         instructions=instructions,
@@ -387,6 +391,9 @@ def build_agent_request(
         execution_mode=em,
         cache_prefix=cache_prefix,
         extra_tools=extra_tools,
+        tool_step_limit=int(tool_step_limit) if tool_step_limit is not None else None,
+        iteration_limit=int(iteration_limit) if iteration_limit is not None else None,
+        read_only=bool(ctx.inputs.get("read_only")),
     )
 
 

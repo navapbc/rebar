@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_agentic_verdict_input.schema.json",
+  "title": "PlanReviewAgenticVerdictInput",
+  "description": "INPUT of `plan_review_agentic_verdict`: the agent's validated findings plus the reviewed ticket's identity.",
+  "type": "object",
+  "properties": {
+    "ticket_id": { "type": "string", "description": "The canonical id of the reviewed ticket." },
+    "ticket_type": { "type": "string", "description": "The reviewed ticket's type." },
+    "findings": { "type": "array", "items": { "type": "object" }, "description": "The agent's findings (the plan_review_agentic_findings contract)." }
+  },
+  "required": ["findings"],
+  "additionalProperties": false
+}

@@ -51,6 +51,7 @@ review_coach = importlib.import_module("rebar.llm.review_kernel.coach")
 # only exist for the engine if the modules holding them are imported. `workflow/steps.py`
 # deliberately imports only `workflow_ops` and stays unaware of plan-review's internal file
 # layout, so both imports belong here, not there.
+from . import agentic as _agentic  # noqa: E402,F401
 from . import decide_ops as _decide_ops  # noqa: E402
 from . import prerequisite_workflow_ops as _prerequisite_workflow_ops  # noqa: E402,F401
 
@@ -326,25 +327,23 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
     input_schema="plan_review_engine_route_input",
     output_schema="plan_review_engine_route_output",
     description=(
-        "Emit `run_pipeline` = the Layer-1 floor's `run_llm` AND engine == 'pipeline' (ADR 0123). "
-        "The v3 expression grammar takes single references only, so this deterministic step "
-        "folds the two into the ONE boolean the review branch reads. A floor short-circuit "
-        "(run_llm false) passes through under either engine; a DET-passing review under "
-        "'agentic' RAISES, so the run fails to an unsigned INDETERMINATE naming the engine."
+        "Emit `run_pipeline` = the Layer-1 floor's `run_llm` AND engine == 'pipeline', and "
+        "`run_agentic` = `run_llm` AND engine == 'agentic' (ADR 0123). The v3 expression grammar "
+        "takes single references only, so this deterministic step folds the floor result and the "
+        "engine into the booleans the review branches read. A floor short-circuit (run_llm "
+        "false) sets both false, so it passes through under either engine."
     ),
 )
 def plan_review_engine_route(ctx: StepContext) -> dict[str, Any]:
-    """run_pipeline = run_llm and engine == "pipeline"; raise for a DET-passing agentic run."""
+    """run_pipeline / run_agentic = run_llm and the matching engine."""
     run_llm = bool(ctx.inputs.get("run_llm"))
     engine = ctx.inputs.get("engine") or "pipeline"
     if engine not in ("pipeline", "agentic"):
         raise ValueError(f"plan-review engine {engine!r} is not one of ['agentic', 'pipeline']")
-    if run_llm and engine != "pipeline":
-        raise RuntimeError(
-            f"plan-review engine {engine!r} is not available yet; no review ran and nothing "
-            "was signed. Select engine 'pipeline' to review this ticket."
-        )
-    return {"run_pipeline": run_llm and engine == "pipeline"}
+    return {
+        "run_pipeline": run_llm and engine == "pipeline",
+        "run_agentic": run_llm and engine == "agentic",
+    }
 
 
 @register_step(

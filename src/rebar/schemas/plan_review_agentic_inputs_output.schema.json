@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_agentic_inputs_output.schema.json",
+  "title": "PlanReviewAgenticInputsOutput",
+  "description": "OUTPUT of `plan_review_agentic_inputs`: the rendered `plan` and `criteria` template variables of the plan-review-agentic prompt.",
+  "type": "object",
+  "properties": {
+    "plan": { "type": "string", "description": "The subject plan followed by its direct-prerequisite blocks." },
+    "criteria": { "type": "string", "description": "One `id — name` line per LLM-judged review criterion." }
+  },
+  "required": ["plan", "criteria"],
+  "additionalProperties": false
+}

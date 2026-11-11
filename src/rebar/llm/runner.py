@@ -100,6 +100,9 @@ class RunRequest:
     # Remove all tools after this pydantic-ai run step, leaving a final turn
     # that can summarize gathered evidence as text.
     tool_step_limit: int | None = None
+    # Read-only agent (ADR 0123): withhold `comment_ticket` even in local mode and attach no
+    # MCP toolsets, leaving only the read-only file, grounding and show_ticket tools.
+    read_only: bool = False
     # Web-search flag (bug ff64), set by the plan-review routing seam for a criterion whose
     # routing entry declares ``"web": true`` (T1 initially). Honored on EVERY provider and
     # model since bug 129e — the provider's native tool where the model's profile supports it,
@@ -375,7 +378,11 @@ class PydanticAIRunner:
             # write, so it is allowed there. `current_code_root()` is set only in attested mode.
             from rebar.llm.gate_context import current_code_root
 
-            allow_comment = (not _runner_support._readonly_gate()) and current_code_root() is None
+            allow_comment = (
+                not req.read_only
+                and not _runner_support._readonly_gate()
+                and current_code_root() is None
+            )
             # The rebar ticket tools read the PINNED ticket-store snapshot when set, else the
             # in-place checkout's store. The file tools stay on the code snapshot.
             # `grounding_tools` adds `resolve_symbol` (bug 406f) so the finder can CONFIRM a
@@ -391,7 +398,7 @@ class PydanticAIRunner:
             )
             if req.extra_tools:
                 tools = [*tools, *req.extra_tools]
-            toolsets = pai_tools.mcp_toolsets(cfg.mcp_servers)
+            toolsets = [] if req.read_only else pai_tools.mcp_toolsets(cfg.mcp_servers)
         resolved = _anthropic_model._pai_model(cfg)
         cfg = self._recover_slot_endpoint(cfg, resolved)
         # ProviderSession builds registered providers and owns their clients.

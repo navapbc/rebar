@@ -289,6 +289,8 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "plan_review_grounding",
         # ADR 0123: the engine switch's route op (run_pipeline boolean).
         "plan_review_engine_route",
+        # ADR 0123: the agentic engine's input-rendering op.
+        "plan_review_agentic_inputs",
         # epic b744 / WS3: the code-review gate's scripted ops (each an <op>_input + <op>_output
         # pair). assemble_diff (diff context), overlay_union (the escalation), merge_findings
         # (cluster), and the Pass-2/3/4 wiring (verify_inputs / decide / coach_inputs / coach).
@@ -323,6 +325,8 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
     # (not an <op>_output pair): only their INPUT contracts are authored here.
     "plan_review_coach_input",
     "plan_review_passthrough_input",
+    # ADR 0123: the agentic arm's terminal op, whose OUTPUT is plan_review_verdict.
+    "plan_review_agentic_verdict_input",
 }
 
 # The authoritative map of every structured (--output json / always-JSON) output

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_agentic_inputs_input.schema.json",
+  "title": "PlanReviewAgenticInputsInput",
+  "description": "INPUT of `plan_review_agentic_inputs`: the precheck's subject plan and the direct-prerequisite blocks from the same review generation.",
+  "type": "object",
+  "properties": {
+    "subject_plan": { "type": "string", "description": "The subject ticket's plan text." },
+    "prerequisites": { "type": "array", "items": { "type": "object" }, "description": "Direct-prerequisite blocks, each with canonical_id and rendered_text." }
+  },
+  "required": ["subject_plan"],
+  "additionalProperties": false
+}

@@ -54,6 +54,7 @@ class _CountingFake(FakeRunner):
     def __init__(self, *, block: bool) -> None:
         super().__init__()
         self.calls = 0
+        self.schemas: list[str | None] = []
         self.block = block
 
     def run(self, req) -> dict:  # type: ignore[override]
@@ -61,6 +62,7 @@ class _CountingFake(FakeRunner):
         from rebar.llm.review_kernel import decide as kdecide
 
         self.calls += 1
+        self.schemas.append(req.output_schema)
         schema = req.output_schema
         instructions = req.instructions or ""
         if req.mode == "text":
@@ -80,6 +82,8 @@ class _CountingFake(FakeRunner):
                     for i in idxs
                 ]
             }
+        elif schema == "plan_review_agentic_findings":
+            payload = {"findings": []}
         elif schema == "plan_review_coach":
             payload = {"notes": []}
         elif schema == "plan_review_findings" and self.block:
@@ -140,10 +144,14 @@ def _review(repo: Path, tid: str, runner, **kw):
 
 
 def _assert_agentic_indeterminate(verdict: dict, runner, calls_before: int) -> None:
+    """A DET-passing agentic review: exactly ONE agent call, no pipeline call, and (until the
+    verdict adapter lands) an unsigned INDETERMINATE carrying the agent's findings."""
     assert verdict["verdict"] == "INDETERMINATE"
     assert verdict["signature"]["signed"] is False
-    assert runner.calls == calls_before  # zero LLM calls
-    assert "agentic" in json.dumps(verdict.get("coverage", {}))
+    assert runner.calls == calls_before + 1
+    assert runner.schemas[calls_before:] == ["plan_review_agentic_findings"]
+    assert verdict["coverage"]["engine"] == "agentic"
+    assert [f["id"] for f in verdict["indeterminate"]] == ["agentic-adapter-pending"]
     assert verdict["coverage"].get("idempotent_skip") is not True
     assert verdict["coverage"].get("verdict_reuse") is not True
 
@@ -199,15 +207,17 @@ def _route(run_llm: bool, engine: str) -> dict:
     )
 
 
-def test_route_runs_pipeline_only_for_a_det_passing_pipeline_review() -> None:
-    assert _route(True, "pipeline") == {"run_pipeline": True}
-    assert _route(False, "pipeline") == {"run_pipeline": False}
-    assert _route(False, "agentic") == {"run_pipeline": False}
+def test_route_selects_one_arm_only_for_a_det_passing_review() -> None:
+    assert _route(True, "pipeline") == {"run_pipeline": True, "run_agentic": False}
+    assert _route(True, "agentic") == {"run_pipeline": False, "run_agentic": True}
+    assert _route(False, "pipeline") == {"run_pipeline": False, "run_agentic": False}
+    assert _route(False, "agentic") == {"run_pipeline": False, "run_agentic": False}
 
 
-def test_route_raises_naming_agentic_for_a_det_passing_review() -> None:
-    with pytest.raises(RuntimeError, match="agentic"):
-        _route(True, "agentic")
+def test_route_rejects_an_unknown_engine_and_defaults_an_empty_one() -> None:
+    with pytest.raises(ValueError, match="turbo"):
+        _route(True, "turbo")
+    assert _route(True, "") == {"run_pipeline": True, "run_agentic": False}
 
 
 # ── floor first: identical results, zero LLM calls ─────────────────────────────
@@ -267,7 +277,7 @@ def test_valid_pipeline_attestation_is_not_reused_under_agentic(repo: Path) -> N
     _assert_agentic_indeterminate(_review(repo, tid, runner, engine="agentic"), runner, 0)
     reused = _review(repo, tid, runner, engine="pipeline")
     assert reused["coverage"].get("idempotent_skip") is True
-    assert runner.calls == 0
+    assert runner.calls == 1  # only the agent's call; the pipeline reuse made none
 
 
 def test_stored_block_is_not_reused_under_agentic(repo: Path) -> None:
@@ -279,7 +289,7 @@ def test_stored_block_is_not_reused_under_agentic(repo: Path) -> None:
     reused = _review(repo, tid, runner, engine="pipeline")
     assert reused["coverage"].get("verdict_reuse") is True
     assert runner.calls == 0
-    # ... and under agentic it is not: no reused pipeline verdict, no LLM call.
+    # ... and under agentic it is not: the agent runs (one call), no reused pipeline verdict.
     _assert_agentic_indeterminate(_review(repo, tid, runner, engine="agentic"), runner, 0)
 
 
