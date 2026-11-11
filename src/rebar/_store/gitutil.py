@@ -22,6 +22,7 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping
 
+from rebar._proc import reap_process_group
 from rebar._store import git_outcome
 from rebar._store.git_locking import (  # noqa: F401  (compat re-export — see the docstring)
     _INDEX_LOCK_STALE_S,
@@ -195,6 +196,45 @@ def run_git(
     )
 
 
+# ``git fetch``, ``merge``, ``commit`` and other porcelain start a foreground
+# ``git maintenance run --auto`` before they exit. Under a rebar bound that child is
+# fatal: on a large store it is a full gc (605 s measured on the production clone), the
+# bound kills only the parent, and the orphaned gc keeps repacking OUTSIDE the write
+# lock until something hard-kills it and strands ``objects/maintenance.lock``, which git
+# never expires (bug nickelic-lazuline-gonolek). Every bounded child therefore runs with
+# implicit maintenance off; the store's only maintenance is the explicit, write-locked
+# ``event_commit_git.run_auto_maintenance`` step (ADR 0051). Environment entries, not
+# ``-c`` arguments, so ``args[0]`` stays the subcommand for every caller and test seam.
+_IMPLICIT_MAINTENANCE_OFF: tuple[tuple[str, str], ...] = (
+    ("maintenance.auto", "false"),
+    ("gc.auto", "0"),
+)
+
+
+def _without_implicit_maintenance(
+    env: Mapping[str, str] | None, args: tuple[str, ...]
+) -> Mapping[str, str] | None:
+    """Return *env* (or the inherited environment) with implicit maintenance disabled.
+
+    The settings are appended after any inherited ``GIT_CONFIG_*`` entries, which stay
+    intact and in order. A malformed inherited count is left for git to report. ``git
+    config`` never starts maintenance, and its reads must report the stored settings
+    (the ``gc-config`` ensure unit reads ``gc.auto``), so it gets *env* unchanged.
+    """
+    if args[:1] == ("config",):
+        return env
+    merged = dict(os.environ if env is None else env)
+    count_text = merged.get("GIT_CONFIG_COUNT", "0") or "0"
+    if not count_text.isdigit():
+        return merged
+    base = int(count_text)
+    for offset, (key, value) in enumerate(_IMPLICIT_MAINTENANCE_OFF):
+        merged[f"GIT_CONFIG_KEY_{base + offset}"] = key
+        merged[f"GIT_CONFIG_VALUE_{base + offset}"] = value
+    merged["GIT_CONFIG_COUNT"] = str(base + len(_IMPLICIT_MAINTENANCE_OFF))
+    return merged
+
+
 # raw-git-ok: locked store seam internal
 def run_git_bounded(
     cwd: str | os.PathLike[str] | None,
@@ -212,10 +252,55 @@ def run_git_bounded(
     """
     invoke = run_git if runner is None else runner
     try:
-        return invoke(cwd, *args, check=False, env=env, timeout=timeout)
+        return invoke(
+            cwd, *args, check=False, env=_without_implicit_maintenance(env, args), timeout=timeout
+        )
     except subprocess.TimeoutExpired:
-        argv = ["git", *args] if cwd is None else ["git", "-C", str(cwd), *args]
-        return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {timeout}s")
+        return _timed_out(cwd, args, timeout)
+
+
+def _timed_out(
+    cwd: str | os.PathLike[str] | None, args: tuple[str, ...], timeout: float
+) -> subprocess.CompletedProcess:
+    """The store's one synthetic timeout outcome: code ``124`` plus git_outcome's marker."""
+    argv = ["git", *args] if cwd is None else ["git", "-C", str(cwd), *args]
+    return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {timeout}s")
+
+
+# A timed-out process group gets SIGTERM first so git can delete its own lock files and
+# temp packs; SIGKILL cannot, and git never expires ``objects/maintenance.lock``.
+_REAP_GRACE_S = 5.0
+_REAP_DRAIN_S = 5.0
+
+
+# raw-git-ok: locked store seam internal
+def run_git_reaped(
+    cwd: str | os.PathLike[str], *args: str, timeout: float
+) -> subprocess.CompletedProcess:
+    """Run Git as its own process group; on timeout reap the whole group.
+
+    For long-running local work whose children must not outlive the caller's lock
+    (bug nickelic-lazuline-gonolek). Timeout returns :func:`run_git_bounded`'s code-``124``
+    result. Launch ``OSError`` propagates to the caller.
+    """
+    proc = subprocess.Popen(  # raw-git-ok: locked store seam internal
+        ["git", "-C", str(cwd), *args],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        env=_without_implicit_maintenance(None, args),
+        start_new_session=(os.name == "posix"),
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        reap_process_group(
+            proc, grace=_REAP_GRACE_S, drain=_REAP_DRAIN_S, label="git", logger=logger
+        )
+        return _timed_out(cwd, args, timeout)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
 
 
 # ``git_outcome`` owns transient HEAD-read, object-read, and object-write markers.

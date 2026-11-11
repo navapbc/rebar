@@ -23,6 +23,7 @@ from rebar._store.gitutil import (
     _with_index_lock_retry,
     _with_transient_fault_retry,
     run_git_bounded,
+    run_git_reaped,
 )
 
 _GIT_ADD_ATTEMPTS = 3
@@ -185,19 +186,36 @@ def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
         pass
 
 
+# git's incremental maintenance tasks (the ``maintenance.strategy=incremental`` set
+# minus network prefetch). None walks reachability, so cost tracks new objects, not
+# store size: on a copy of the 1.07M-object production store they took 0.35 s, and
+# 17.3 s when incremental-repack fired, where ``gc --auto`` took 133.9 s and a full
+# repack 605.6 s -- far past the bound below (bug nickelic-lazuline-gonolek).
+# ``--auto`` keeps git's per-task thresholds, so a quiet store pays only the checks.
+_MAINTENANCE_TASKS: tuple[str, ...] = (
+    "--task=commit-graph",
+    "--task=loose-objects",
+    "--task=incremental-repack",
+)
+
+
 # raw-git-ok: locked store seam internal
 def run_auto_maintenance(
     tracker: str | os.PathLike[str], *, timeout: float = _LOCAL_GIT_TIMEOUT
 ) -> subprocess.CompletedProcess | None:
-    """Run explicit best-effort Git auto-maintenance after commit (bd66).
+    """Run explicit best-effort Git maintenance after commit (bd66).
 
-    ``--auto`` preserves Git's threshold, while the longer local watchdog bounds a
-    possible store-wide repack outside the commit timeout. ADR 0051 requires the
-    caller to hold the write lock during this foreground step. A durable write does
-    not fail when maintenance fails or times out. Return the Git result, or ``None``
+    This is the store's only maintenance: every bounded Git child runs with implicit
+    maintenance off (``gitutil._without_implicit_maintenance``). ADR 0051 requires the
+    caller to hold the write lock, so the step is foreground and serialized. Git leads
+    its own process group; a timeout reaps the whole group, so no repack outlives the
+    lock and git releases its lock files. A durable write does not fail when maintenance
+    fails or times out. Return the Git result, with timeout as code ``124``, or ``None``
     when Git cannot launch.
     """
     try:
-        return run_git_bounded(tracker, "maintenance", "run", "--auto", timeout=timeout)
+        return run_git_reaped(
+            tracker, "maintenance", "run", "--auto", "--quiet", *_MAINTENANCE_TASKS, timeout=timeout
+        )
     except OSError:
         return None

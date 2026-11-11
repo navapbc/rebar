@@ -110,3 +110,45 @@ silent data corruption.
 **Follow-up.** If a store grows large enough that the foreground pause becomes disruptive
 (approaching the lock-budget ceiling), migrate to disable-auto-maintenance + serialized
 explicit gc on a controlled cadence (tracked on bug 88eb).
+
+## Amendment (2026-11-11) — incremental explicit maintenance; no implicit maintenance in bounded children
+
+**Bug:** `51e0-5038-bf00-4653` (`nickelic-lazuline-gonolek`).
+
+The production MCP tickets clone went from 2026-09-03 to 2026-11-11 with no maintenance
+(78,737 loose objects, 235 packs, history walks 4–8× slower). Three facts, measured on that
+clone (1.07M objects, 307k commits, git 2.47.3):
+
+- `git fetch` and `git merge` each start a foreground `git maintenance run --auto` before they
+  exit. bd66 suppressed it only on store commits, so sync and push-recovery fetches (30 s bound)
+  and merges (120 s bound) still started it. On this store that run is a full gc: a full repack
+  took 605.6 s and `gc --auto` with 7,000 loose objects took 133.9 s. The bound killed the parent
+  only, and the orphaned gc kept repacking **outside the write lock** (observed live: adopted by
+  the container's PID 1 while another process held the write lock).
+- A hard kill (container replacement) of such a run strands `objects/maintenance.lock`. Git never
+  expires that lock, and `git maintenance run --auto` then exits 0 without doing anything, so
+  rebar's explicit step became a silent no-op from 2026-09-03 on.
+- `gc` walks reachability (repack and prune), so its cost grows with the store and cannot fit the
+  explicit step's 120 s bound at this size.
+
+The decision changes three things. The foreground-under-the-write-lock rule above is unchanged.
+
+1. **Bounded git children never start implicit maintenance.** `gitutil.run_git_bounded` appends
+   `maintenance.auto=false` and `gc.auto=0` to the child's `GIT_CONFIG_*` environment. The
+   container's start-up `fetch` in `reviewbot-ensure-tickets.sh` passes the same settings. The
+   store's only maintenance is the explicit step below.
+2. **The explicit step runs git's incremental tasks**:
+   `git maintenance run --auto --quiet --task=commit-graph --task=loose-objects
+   --task=incremental-repack`. None of them walks reachability. On a copy of the production
+   store, they took 0.35 s, and 17.3 s when incremental-repack fired. `--auto` keeps git's
+   per-task thresholds. Unreachable objects are packed, not pruned. At this store's rate of
+   about 1,800 unreachable objects in 2.5 months, the extra disk use is negligible.
+3. **A timed-out step is reaped as a process group** (SIGTERM, then SIGKILL), so git deletes its
+   own lock and temporary packs, and no repack outlives the write lock.
+
+The remaining way to strand `maintenance.lock` is a hard kill that lands during the explicit
+step itself, which takes milliseconds when there is nothing to do. Recovering from that requires
+rebar to remove a git-owned lock. That is tracked separately as bug `saccharine-unwise-barnacle`
+(`3e48-86e5-45a7-4acd`). The broader SIGKILL-only timeout on other bounded git children is bug
+`idle-ammoniacal-axisdeer` (`4eed-2e15-d018-4bd6`). Epic `dynamic-curium-sponge` proposed this
+task set earlier.
