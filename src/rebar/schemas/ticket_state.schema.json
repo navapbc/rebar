@@ -19,6 +19,11 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "releases": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Release names (Jira fix versions), folded from RELEASE_DELTA events with TAG_DELTA's add/remove rules (ADR 0124). Absent on states compiled before schema version 6."
+    },
     "bridge_project": {
       "type": ["string", "null"],
       "description": "Tri-state Jira bridge target project key: null = absent/legacy (never declared), \"\" = explicit never-sync, \"REB\" (etc.) = sync target. Promote-only via edit once the ticket holds a binding."

@@ -28,7 +28,7 @@ def is_active_event(name: str) -> bool:
 
 # Event metadata does not reflect changed projections. Including this manual version in the
 # directory hash invalidates older caches. Increment it whenever projection semantics change.
-_REDUCER_CACHE_VERSION = 8  # 8: reopen clears close metadata (6df4-d3f0)
+_REDUCER_CACHE_VERSION = 9  # 9: releases field + RELEASE_DELTA fold (ADR 0124)
 
 
 def _load_json(path: str) -> dict | None:
