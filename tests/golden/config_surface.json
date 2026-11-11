@@ -97,6 +97,7 @@
     "verify.novelty_priority_floor",
     "verify.opcert_enforce_since",
     "verify.opcert_remote_url",
+    "verify.plan_review_engine",
     "verify.remediation_window_minutes",
     "verify.require_completion_verification_for_close",
     "verify.require_environment",

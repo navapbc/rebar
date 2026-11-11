@@ -321,6 +321,24 @@ def _canonical_env_name(sect: str, key: str) -> str:
     return _CANONICAL_ENV_NAMES.get((sect, key), f"REBAR_{sect.upper()}_{key.upper()}")
 
 
+# Config keys that deliberately take NO environment override (ADR 0123 decision on
+# verify.plan_review_engine): their auto-derived REBAR_<SECTION>_<KEY> is never read,
+# documented, or expected. The engine-switch sunset ticket removes the entry.
+_ENV_EXCLUDED_KEYS: frozenset[tuple[str, str]] = frozenset({("verify", "plan_review_engine")})
+
+
+def env_overridable_keys() -> list[tuple[str, str]]:
+    """Every ``(section, key)`` config pair that carries a canonical env override — each
+    :data:`_SECTIONS` pair except :data:`_ENV_EXCLUDED_KEYS`. The single enumeration every
+    canonical-env consumer (overrides, cache signature, env registry, golden) uses."""
+    return [
+        (sect, key)
+        for sect, keys in _SECTIONS.items()
+        for key in keys
+        if (sect, key) not in _ENV_EXCLUDED_KEYS
+    ]
+
+
 def env_overrides() -> dict:
     """Sparse mapping of canonical ``REBAR_<SECTION>_<KEY>`` env overrides.
 
@@ -328,11 +346,10 @@ def env_overrides() -> dict:
     Retired pre-1.0 aliases are no longer parsed, mapped, or warned here.
     """
     out: dict[str, dict] = {}
-    for sect, keys in _SECTIONS.items():
-        for key in keys:
-            name = _canonical_env_name(sect, key)
-            if name in os.environ:
-                out.setdefault(sect, {})[key] = os.environ[name]
+    for sect, key in env_overridable_keys():
+        name = _canonical_env_name(sect, key)
+        if name in os.environ:
+            out.setdefault(sect, {})[key] = os.environ[name]
     return out
 
 

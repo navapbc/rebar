@@ -21,6 +21,7 @@ import pytest
 
 from rebar import _deprecations as dep
 from rebar._config_schema import _SECTIONS
+from rebar._config_sources import env_overridable_keys
 from rebar.config import _canonical_env_name
 
 pytestmark = pytest.mark.unit
@@ -36,7 +37,7 @@ def _live_config_keys() -> set[str]:
 
 
 def _live_env_vars() -> set[str]:
-    return {_canonical_env_name(s, k) for s in _SECTIONS for k in _SECTIONS[s]}
+    return {_canonical_env_name(s, k) for s, k in env_overridable_keys()}
 
 
 def _tombstoned(kind: str) -> set[str]:

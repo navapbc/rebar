@@ -234,7 +234,7 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_config_resolvers.py:291` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:371` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:372` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:384` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:391` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:669` — `os.environ.get(<non-literal>)`

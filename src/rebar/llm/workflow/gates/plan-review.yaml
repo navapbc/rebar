@@ -37,6 +37,14 @@ inputs:
     type: boolean
     required: false
     default: false
+  engine:
+    description: >-
+      PLAN-REVIEW ENGINE (ADR 0123): `pipeline` (this four-pass review) or `agentic`. Always
+      supplied by the gate dispatcher (`pipeline` = the default). Read by `engine_route` only
+      AFTER the Layer-1 floor, so a floor block or exempt type passes through under both.
+    type: string
+    required: false
+    default: pipeline
   subject_plan:
     description: Subject plan from the same review generation as the relation preload.
     type: string
@@ -50,11 +58,22 @@ steps:
   uses: plan_review_precheck
   with:
     ticket_id: ${{ inputs.ticket_id }}
+# The expression grammar takes single references only, so a deterministic step folds the
+# floor's run_llm and the engine into ONE boolean. Under `agentic` with run_llm true it raises
+# (engine not yet available), so the run fails to an unsigned INDETERMINATE, never a passthrough.
+- id: engine_route
+  needs:
+  - precheck
+  uses: plan_review_engine_route
+  with:
+    run_llm: ${{ steps.precheck.outputs.run_llm }}
+    engine: ${{ inputs.engine }}
 - id: review
   needs:
   - precheck
+  - engine_route
   branch:
-    when: ${{ steps.precheck.outputs.run_llm }}
+    when: ${{ steps.engine_route.outputs.run_pipeline }}
     then:
     - id: assemble
       uses: plan_review_assemble_criteria

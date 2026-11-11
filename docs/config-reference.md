@@ -56,7 +56,7 @@ or conversely if false positives prove noisy once an acting id is resolved.
 
 ## Configuration keys
 
-The 105 typed `section.field` keys with type, default, description, and lifecycle.
+The 106 typed `section.field` keys with type, default, description, and lifecycle.
 
 | Key | Type | Default | Description | Lifecycle |
 |-----|------|---------|-------------|-----------|
@@ -65,6 +65,7 @@ The 105 typed `section.field` keys with type, default, description, and lifecycl
 | `verify.require_completion_verification_for_close` | `bool` | `False` | Requires a passing completion verification before a work ticket can close. | active — replaces removed key `verify.require_verdict_for_close` |
 | `verify.completion_pinned_ticket_view` | `bool` | `False` | Uses the experimental non-epic lazy ticket view and atomic completion-close bundle when sync.push is always. | active |
 | `verify.require_plan_review_for_close` | `bool` | `False` | Requires a current plan-review attestation when a work ticket closes. | active |
+| `verify.plan_review_engine` | `str` | `'pipeline'` | Selects the plan-review engine: pipeline (the four-pass review) or agentic. An explicit review argument overrides it; no environment variable reads it. | active |
 | `verify.require_plan_review_for_claim` | `bool` | `False` | Requires a current passing plan-review attestation before a work ticket can be claimed. | active |
 | `verify.suggest_duplicate_tickets` | `bool` | `False` | Warns at create time when another ticket with the same normalized title was created inside the recency window (rebar create duplicate_warning). | active |
 | `verify.require_ticket_for_commit` | `bool` | `False` | Requires each checked commit to reference a ticket that resolves in the store. | active |

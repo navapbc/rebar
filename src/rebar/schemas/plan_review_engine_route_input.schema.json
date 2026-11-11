@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_engine_route_input.schema.json",
+  "title": "PlanReviewEngineRouteInput",
+  "description": "INPUT of `plan_review_engine_route`: the Layer-1 floor's `run_llm` and the selected plan-review engine (ADR 0123).",
+  "type": "object",
+  "properties": {
+    "run_llm": { "type": "boolean", "description": "The precheck's run_llm: true when the DET floor passed and the LLM review should run." },
+    "engine": { "type": "string", "enum": ["pipeline", "agentic"], "description": "The resolved plan-review engine." }
+  },
+  "required": ["run_llm", "engine"],
+  "additionalProperties": false
+}

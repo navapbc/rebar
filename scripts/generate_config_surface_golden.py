@@ -46,12 +46,11 @@ def _payload() -> dict[str, Any]:
     """Structured golden payload with deterministically-sorted live inventories."""
     _load_registries()
     from rebar._config_schema import _SECTIONS
+    from rebar._config_sources import env_overridable_keys
     from rebar.config import _canonical_env_name
 
     config_keys = sorted(f"{section}.{key}" for section, keys in _SECTIONS.items() for key in keys)
-    env_names = sorted(
-        _canonical_env_name(section, key) for section, keys in _SECTIONS.items() for key in keys
-    )
+    env_names = sorted(_canonical_env_name(section, key) for section, key in env_overridable_keys())
     return {
         "_comment": _COMMENT,
         "config_keys": config_keys,

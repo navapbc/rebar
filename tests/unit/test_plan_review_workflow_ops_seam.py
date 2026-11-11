@@ -25,13 +25,14 @@ _PLAN_REVIEW_YAML = REPO_ROOT / "src" / "rebar" / "llm" / "workflow" / "gates" /
 # `.github/module-size-limit.txt`, enforced by the CI module-size gate and mirrored in-process by
 # test_module_size_contract.py, which reads that same file.
 
-# Eight ops registered by `workflow_ops` itself, plus the ninth registered through its side-effect
+# Nine ops registered by `workflow_ops` itself, plus the tenth registered through its side-effect
 # import of `prerequisite_workflow_ops` — the one a stray import cleanup would silently drop.
 _EXPECTED_OPS = {
     "plan_review_assemble_criteria",
     "plan_review_coach",
     "plan_review_coach_inputs",
     "plan_review_decide",
+    "plan_review_engine_route",
     "plan_review_grounding",
     "plan_review_passthrough",
     "plan_review_precheck",

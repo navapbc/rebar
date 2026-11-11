@@ -210,8 +210,15 @@ def review_plan(
     force: bool = False,
     retry: bool = False,
     overlap: bool = False,
+    engine: str | None = None,
 ) -> dict[str, Any]:
     """Run the plan-review gate on ``ticket_id`` and return a ``plan_review_verdict``.
+
+    ``engine`` selects the plan-review engine (ADR 0123): ``"pipeline"`` (the four-pass
+    review) or ``"agentic"``. An explicit value wins over ``[verify] plan_review_engine``,
+    which wins over the ``"pipeline"`` default; no environment variable reads it. A value
+    outside the two names raises :class:`~rebar.config.ConfigError` before any store read
+    or LLM call. The Layer-1 floor still runs first under either engine.
 
     ``overlap`` (a350) turns on store-derived overlap surfacing: the finder is additionally
     told which existing tickets have the most similar recorded plans, so a plan that redoes
@@ -254,6 +261,7 @@ def review_plan(
     from rebar.llm.gate_admission import gate_admission
     from rebar.llm.peak_rss import gate_peak_rss
 
+    resolved_engine = resolve_plan_review_engine(engine, repo_root)
     # Concurrency admission (ADR 0112 decision 5) is taken BEFORE resolve_gate_handle,
     # because materializing the snapshot is what spends the bytes the cap bounds. Wrapping
     # HERE rather than the MCP daemon and the CLI separately covers both call paths at one
@@ -281,10 +289,30 @@ def review_plan(
                 force=force,
                 retry=retry,
                 overlap=overlap,
+                engine=resolved_engine,
                 # Resolved source: stamped on the verdict only AFTER this returns (bug 5128).
                 source_mode=handle.source,
             )
         return gate_source.annotate_result(verdict, handle)
+
+
+PLAN_REVIEW_ENGINES = ("pipeline", "agentic")
+
+
+def resolve_plan_review_engine(engine: str | None, repo_root=None) -> str:
+    """Resolve the plan-review engine: explicit argument > config key > ``"pipeline"``.
+
+    An explicit value outside :data:`PLAN_REVIEW_ENGINES` raises ``ConfigError`` naming
+    it; an unknown CONFIGURED value already fails config load (``_as_choice``)."""
+    from rebar import config as _config
+
+    if engine is not None:
+        if engine not in PLAN_REVIEW_ENGINES:
+            raise _config.ConfigError(
+                f"plan-review engine: expected one of {list(PLAN_REVIEW_ENGINES)}, got {engine!r}"
+            )
+        return engine
+    return _config.compose_config(repo_root).verify.plan_review_engine
 
 
 def _finalize_signature(
@@ -378,6 +406,47 @@ def _stale_store_verdict(ticket_id: str, *, cfg, repo_root=None) -> dict[str, An
     )
 
 
+def _apply_review_floors(
+    ticket_id: str, verdict: dict[str, Any], remediation, drift, *, ctx, cfg, runner, repo_root
+) -> None:
+    """The post-dispatch Pass-3 floors, consistency cross-checks and fix-unit grouping, in order.
+
+    Each may make its own LLM sub-call, so ``_run_plan_review`` skips this whole tail for a
+    non-pipeline engine's failed run (ADR 0123: an agentic run makes no pipeline LLM call)."""
+    # Pass-3 floors (rising / completion / drift — child cc5b, story 6533, bug 5e40), applied
+    # BEFORE the sidecar emit so dropped findings land in the sidecar while the surfaced verdict is
+    # narrowed. Each is gated + inert by default, so a normal review's verdict stays byte-identical.
+    _maybe_apply_rising_floor(
+        ticket_id, verdict, remediation, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+    _maybe_apply_completion_floor(
+        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+
+    # Pass-3 DRIFT FLOOR (bug 5e40) — the code-drift-axis analogue, applied after the others and
+    # before the sidecar emit. Gated on a plan-UNCHANGED + code-DRIFTED re-review; inert otherwise.
+    drift_floor.maybe_apply(
+        ticket_id, verdict, drift, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+
+    # VALIDATION-ASSESSMENT cross-checks (bug 5e40) — two per-verdict CONSISTENCY drops (intra-
+    # verdict contradiction + comment-trail re-litigation) the axis floors do not cover. Applied
+    # before the sidecar emit; each gated inert (verdict byte-identical) by default, fail-safe.
+    from . import xcheck
+
+    xcheck.maybe_apply_contradiction(
+        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+    xcheck.maybe_apply_comment_trail(
+        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
+    )
+
+    # Blocking fix-unit grouping (story 5e64; one set-level LLM call since bug
+    # longish-ripe-snowyowl) — stamp-only and fail-open, after every drop so no group names a
+    # dropped finding, and before the emit so the stamps persist.
+    _group_blocking_fix_units(verdict, ctx=ctx, cfg=cfg, runner=runner)
+
+
 def _run_plan_review(
     ticket_id: str,
     *,
@@ -391,6 +460,7 @@ def _run_plan_review(
     retry: bool = False,
     source_mode: str | None = None,
     overlap: bool = False,
+    engine: str = "pipeline",
 ) -> dict[str, Any]:
     from . import claimability
 
@@ -469,14 +539,16 @@ def _run_plan_review(
     # Signing path only; `--force`/`--retry` bypass it.
     from . import cited_anchor, reuse
 
-    if sign and not force and not retry:
+    # The three shortcuts below reuse or re-sign a PIPELINE attestation/verdict, so they fire
+    # only under the pipeline engine (ADR 0123): agentic never returns a pipeline verdict.
+    if engine == "pipeline" and sign and not force and not retry:
         reused = reuse.idempotent_reuse(ticket_id, ctx, repo_root=repo_root)
         if reused is not None:
             return reused
     # BLOCK verdict-reuse (bug 7e77): a BLOCK never signs, so reuse the stored BLOCK verdict from
     # the latest sidecar when its material fingerprint AND review code sha still match (zero LLM,
     # no new sidecar). Not sign-gated; `--force`/`--retry` bypass it.
-    if not force and not retry:
+    if engine == "pipeline" and not force and not retry:
         block_reused = reuse.verdict_reuse(ticket_id, ctx, repo_root=repo_root)
         if block_reused is not None:
             return block_reused
@@ -486,7 +558,7 @@ def _run_plan_review(
     # code drifted (material + registry unchanged) and a cheap probe confirms the plan still
     # matches, refresh instead of a full re-review. Self-gated by ``if sign``; local never
     # refreshes (a refresh re-signs, local never signs — bug 5128).
-    if sign and source_mode != "local" and not retry:
+    if engine == "pipeline" and sign and source_mode != "local" and not retry:
         refreshed = orchestrator.drift_refresh(
             ctx,
             cfg,
@@ -527,6 +599,7 @@ def _run_plan_review(
         repo_root=repo_root,
         prerequisite_blocks=prerequisite_blocks,
         overlap=overlap,
+        engine=engine,
     )
 
     # Mid-run cancellation (story 2c89): the ticket's OWN material changed while the review ran —
@@ -544,38 +617,20 @@ def _run_plan_review(
     if drift is not None:
         verdict.setdefault("coverage", {})["drift"] = drift
 
-    # Pass-3 floors (rising / completion / drift — child cc5b, story 6533, bug 5e40), applied
-    # BEFORE the sidecar emit so dropped findings land in the sidecar while the surfaced verdict is
-    # narrowed. Each is gated + inert by default, so a normal review's verdict stays byte-identical.
-    _maybe_apply_rising_floor(
-        ticket_id, verdict, remediation, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
-    )
-    _maybe_apply_completion_floor(
-        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
-    )
-
-    # Pass-3 DRIFT FLOOR (bug 5e40) — the code-drift-axis analogue, applied after the others and
-    # before the sidecar emit. Gated on a plan-UNCHANGED + code-DRIFTED re-review; inert otherwise.
-    drift_floor.maybe_apply(
-        ticket_id, verdict, drift, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
-    )
-
-    # VALIDATION-ASSESSMENT cross-checks (bug 5e40) — two per-verdict CONSISTENCY drops (intra-
-    # verdict contradiction + comment-trail re-litigation) the axis floors do not cover. Applied
-    # before the sidecar emit; each gated inert (verdict byte-identical) by default, fail-safe.
-    from . import xcheck
-
-    xcheck.maybe_apply_contradiction(
-        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
-    )
-    xcheck.maybe_apply_comment_trail(
-        ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
-    )
-
-    # Blocking fix-unit grouping (story 5e64; one set-level LLM call since bug
-    # longish-ripe-snowyowl) — stamp-only and fail-open, after every drop so no group names a
-    # dropped finding, and before the emit so the stamps persist.
-    _group_blocking_fix_units(verdict, ctx=ctx, cfg=cfg, runner=runner)
+    # The pipeline review's post-dispatch tail. Under a non-pipeline engine a DET-passing review
+    # degrades to an unsigned INDETERMINATE (llm_unavailable) and must make NO pipeline LLM
+    # call; a floor short-circuit (passthrough) still gets the identical tail under both engines.
+    if engine == "pipeline" or not verdict.get("coverage", {}).get("llm_unavailable"):
+        _apply_review_floors(
+            ticket_id,
+            verdict,
+            remediation,
+            drift,
+            ctx=ctx,
+            cfg=cfg,
+            runner=runner,
+            repo_root=repo_root,
+        )
 
     _finalize_signature(
         verdict,

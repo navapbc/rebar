@@ -11,7 +11,8 @@ mirrored was retired in story B-RETIRE). The workflow shape (mirrors the B3 comp
 gate):
 
     plan_review_precheck (uses)            # DET floor P1-P11
-      └─ branch on `run_llm`:
+    plan_review_engine_route (uses)        # run_pipeline = run_llm and engine == pipeline
+      └─ branch on `run_pipeline`:
            then: plan_review_assemble_criteria (uses)   # route_criteria → inclusion booleans
                  → batch <plan-review-finder>           # Pass-1 (ProductionBatchRunner)
                  → verify  <prompt: plan-review-verifier># Pass-2 (one aggregate call)
@@ -318,6 +319,32 @@ def plan_review_grounding(ctx: StepContext) -> dict[str, Any]:
     # the per-call Terraform tool provider — can do. A single-turn verify cannot re-ground.
     grounded = grounded or any_terraform_evidence(findings)
     return {"code_grounded": bool(grounded)}
+
+
+@register_step(
+    "plan_review_engine_route",
+    input_schema="plan_review_engine_route_input",
+    output_schema="plan_review_engine_route_output",
+    description=(
+        "Emit `run_pipeline` = the Layer-1 floor's `run_llm` AND engine == 'pipeline' (ADR 0123). "
+        "The v3 expression grammar takes single references only, so this deterministic step "
+        "folds the two into the ONE boolean the review branch reads. A floor short-circuit "
+        "(run_llm false) passes through under either engine; a DET-passing review under "
+        "'agentic' RAISES, so the run fails to an unsigned INDETERMINATE naming the engine."
+    ),
+)
+def plan_review_engine_route(ctx: StepContext) -> dict[str, Any]:
+    """run_pipeline = run_llm and engine == "pipeline"; raise for a DET-passing agentic run."""
+    run_llm = bool(ctx.inputs.get("run_llm"))
+    engine = ctx.inputs.get("engine") or "pipeline"
+    if engine not in ("pipeline", "agentic"):
+        raise ValueError(f"plan-review engine {engine!r} is not one of ['agentic', 'pipeline']")
+    if run_llm and engine != "pipeline":
+        raise RuntimeError(
+            f"plan-review engine {engine!r} is not available yet; no review ran and nothing "
+            "was signed. Select engine 'pipeline' to review this ticket."
+        )
+    return {"run_pipeline": run_llm and engine == "pipeline"}
 
 
 @register_step(

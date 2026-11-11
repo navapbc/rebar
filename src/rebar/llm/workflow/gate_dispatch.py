@@ -73,6 +73,7 @@ def produce_plan_review_verdict(
     probe_criteria=None,
     prerequisite_blocks=None,
     overlap: bool = False,
+    engine: str = "pipeline",
 ) -> dict[str, Any]:
     """Produce a ``plan_review_verdict`` by running ``gates/plan-review.yaml`` in-memory.
 
@@ -87,7 +88,11 @@ def produce_plan_review_verdict(
 
     ``overlap`` (a350) is threaded the same way (``False`` = off) and gates the overlap
     criterion's FAN-IN inside the batch runner, so with it off the criterion reaches no
-    chunk and checkpoint identity is byte-identical to a review before the switch existed."""
+    chunk and checkpoint identity is byte-identical to a review before the switch existed.
+
+    ``engine`` (ADR 0123) is threaded the same way (``"pipeline"`` default, so the drift-refresh
+    probe and every existing caller are unchanged); the gate's ``engine_route`` step reads it
+    AFTER the Layer-1 floor."""
     import time
 
     from rebar.llm import review_kernel
@@ -189,6 +194,7 @@ def produce_plan_review_verdict(
                     "ticket_id": ctx.ticket_id,
                     "probe_criteria": list(probe_criteria or []),
                     "overlap": bool(overlap),
+                    "engine": engine,
                     "subject_plan": ctx.plan_text,
                     "prerequisites": list(prerequisite_blocks or []),
                 },
