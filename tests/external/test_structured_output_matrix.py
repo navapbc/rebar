@@ -36,30 +36,6 @@ _live_llm_ready = _live_llm.live_llm_ready()
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PROVIDERS_DIR = _REPO_ROOT / ".github" / "llm-providers"
 
-# The agentic prompt quotes a dependency object before the final verdict to reproduce the
-# first-object parser trap. The single-shot prompt is its control.
-
-_AGENTIC_TRANSCRIPT_PROMPT = (
-    "You are a completion verifier finishing an agentic review turn.\n\n"
-    "A dependency-lookup tool returned this record verbatim:\n"
-    '  {"relation": "depends_on", "target_id": "f2f3-9cb1-335b-4e31"}\n\n'
-    "Having read it, emit your FINAL CompletionVerdict for the ticket: a JSON object with "
-    "`verdict` (PASS or FAIL), a `findings` array, and a `summary` string. The acceptance "
-    "criteria are met, so return PASS."
-)
-
-_SINGLE_SHOT_PROMPT = (
-    "Return a CompletionVerdict for a ticket whose single acceptance criterion is demonstrably "
-    "met: a JSON object with `verdict` (PASS or FAIL), a `findings` array, and a `summary` "
-    "string. Return PASS."
-)
-
-#: ``(label, prompt)`` pairs — the two production-shaped prompts each cell/variant is measured on.
-PROMPTS: tuple[tuple[str, str], ...] = (
-    ("agentic_transcript", _AGENTIC_TRANSCRIPT_PROMPT),
-    ("single_shot", _SINGLE_SHOT_PROMPT),
-)
-
 #: The output-format directive the ``sentinel`` variant appends to the base prompt. Sourced
 #: from production so the live sweep exercises the real marker directive; the leading "\n\n"
 #: preserves spacing from the prompt.
@@ -105,7 +81,7 @@ def _live_reply(prompt: str, config) -> str:
     runner = PydanticAIRunner(config)
     runner.preflight()
     req = RunRequest(
-        system_prompt="You are a completion verifier that emits a single structured verdict.",
+        system_prompt=sm.SYSTEM_PROMPT,
         instructions=prompt,
         config=config,
         mode="text",
@@ -130,7 +106,7 @@ def test_structured_output_matrix(rebar_repo: Path, tmp_path: Path) -> None:
     # Refuse an over-budget sweep BEFORE constructing any network object — a pure integer check.
     cap = _max_calls_cap()
     sm.enforce_call_budget(
-        sm.planned_call_count(len(cells), len(sm.DIRECTIVE_VARIANTS), len(PROMPTS), _N_REPEATS),
+        sm.planned_call_count(len(cells), len(sm.DIRECTIVE_VARIANTS), len(sm.PROMPTS), _N_REPEATS),
         cap=cap,
     )
 
@@ -153,7 +129,7 @@ def test_structured_output_matrix(rebar_repo: Path, tmp_path: Path) -> None:
 
         for variant in sm.DIRECTIVE_VARIANTS:
             replies: list[str] = []
-            for prompt_label, prompt in PROMPTS:
+            for prompt_label, prompt in sm.PROMPTS:
                 sent = _apply_variant(prompt, variant)
                 for repeat in range(_N_REPEATS):
                     reply = _live_reply(sent, config)

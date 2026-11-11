@@ -191,3 +191,42 @@ def test_baseline_workflow_is_dispatch_only_with_a_budget_input_and_scoped_secre
     assert "matrix.provider == 'openai' && secrets.OPENAI_API_KEY" in text
     # The raw-reply + score bundle is uploaded as the operator-facing evidence.
     assert "upload-artifact" in text
+
+
+# Literals as measured against Bedrock Opus 5.5 (bug mustard-fungoid-grackle); written out here
+# rather than read from ``sm`` so a change to the shipped prompts is caught, not mirrored.
+_MEASURED_SYSTEM_PROMPT = "You are a completion verifier that emits a single structured verdict."
+_CRITERION = '"`add(a, b)` returns the sum of its arguments."'
+_EVIDENCE = "`tests/test_add.py::test_add_returns_sum` passed"
+_VERIFIED_TICKET = "7c41-0d2e-9a85-b613"
+
+
+def test_matrix_prompts_give_the_verifier_a_criterion_and_evidence() -> None:
+    """Each prompt carries the criterion and its evidence under the measured system prompt.
+
+    Opus 5.5 content-filters this system prompt when the request carries nothing to verify, so
+    neither prompt may drop the criterion or the evidence.
+    """
+    assert sm.SYSTEM_PROMPT == _MEASURED_SYSTEM_PROMPT
+    assert [label for label, _ in sm.PROMPTS] == ["agentic_transcript", "single_shot"]
+    for label, prompt in sm.PROMPTS:
+        assert _VERIFIED_TICKET in prompt, label
+        assert _CRITERION in prompt, label
+        assert _EVIDENCE in prompt, label
+        assert "(empty when every criterion is met)" in prompt, label
+
+
+def test_matrix_prompts_keep_the_parser_trap_and_its_control() -> None:
+    """The agentic prompt quotes exactly one object before the verdict request; the control none.
+
+    The quoted dependency names a different ticket from the one under verification, so a parser
+    that takes the first object reads the wrong record.
+    """
+    prompts = dict(sm.PROMPTS)
+    assert "{" not in prompts["single_shot"]
+
+    agentic = prompts["agentic_transcript"]
+    objects = [obj for _start, _end, obj in sm._object_spans(agentic)]
+    assert objects == [{"relation": "depends_on", "target_id": "f2f3-9cb1-335b-4e31"}]
+    assert agentic.index("{") < agentic.index("emit your FINAL")
+    assert objects[0]["target_id"] != _VERIFIED_TICKET
