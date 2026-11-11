@@ -695,6 +695,24 @@ mcp_self_heal_live_backend() {
   return 0
 }
 
+# The live MCP backend's attested-gate code workspace must stay refreshable. Its entrypoint
+# refuses a dirty checkout (recovering only a provably interrupted fast-forward), so a stuck
+# workspace silently pins gates to an old tree and config (reddish-drinkable-canvasback).
+# Report it every tick as AUTODEPLOY_ERROR, which the deploy_errors alarm already pages on.
+mcp_check_code_workspace() {
+  local name state
+  name="$(mcp_live_backend_name)"; [ -n "$name" ] || return 0
+  [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ] || return 0
+  state="$(docker exec "$name" sh -c 'd="$MCP_CODE_DIR"
+    [ -n "$d" ] && [ -e "$d/.git" ] || exit 0
+    [ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$d" status --porcelain 2>/dev/null)" ] || echo dirty' \
+    2>/dev/null)" || return 0
+  if [ "$state" = "dirty" ]; then
+    err mcp-code-workspace-stuck "live mcp backend $name: code workspace has uncommitted changes; its entrypoint refuses to refresh it, so gates read a stale tree and config (runbook review-bot-ops.md, MCP code workspace freshness)"
+  fi
+  return 0
+}
+
 # ── what changed? (computed in the mirror clone) ──────────────────────────────
 changed_range() { git -C "$MIRROR_DIR" diff --name-only "$1" "$2" -- $3 2>/dev/null | grep -q .; }
 changed() { changed_range "$DEPLOYED" "$TARGET" "$1"; }
@@ -743,6 +761,7 @@ if [ "$TARGET" = "$DEPLOYED" ] && [ "$mcp_deployed" = "$TARGET" ] && [ "$bot_dep
   rm -f "$DEFER_FILE"
   reclaim_under_pressure
   mcp_self_heal_live_backend || exit 1
+  mcp_check_code_workspace
   mcp_retire_sweep          # reap mcp containers that finished draining since the last flip
   check_declared_compose_services || exit 1
   log "up to date ($TARGET); no-op"

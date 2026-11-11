@@ -113,6 +113,11 @@ case "$1" in
     # reached via that backgrounded subshell, so FD 9 must be CLOSED here.
     if { true >&9; } 2>/dev/null; then echo "stop-fd9-leaked $nm" >> "$LOG"; fi
     set_state "$nm" exited; exit 0 ;;
+  exec)
+    # The live backend's code-workspace probe: a seeded marker file reports it dirty.
+    echo "exec ${*: -3:1}" >> "$LOG"
+    [ -f "$DS/code-workspace-dirty" ] && echo dirty
+    exit 0 ;;
   start)
     nm="$2"; echo "start $nm" >> "$LOG"
     [ -f "$DS/start-fails" ] && exit 1
@@ -2796,3 +2801,36 @@ def test_running_live_backend_is_still_not_reaped_or_stopped(mcp_box: dict[str, 
     assert not _markers(result, "AUTODEPLOY_ERROR"), (
         f"a healthy RUNNING live backend must emit no error marker\n{ctx}"
     )
+
+
+def test_no_op_tick_reports_a_stuck_mcp_code_workspace(mcp_box: dict[str, object]) -> None:
+    """A dirty live code workspace pages through deploy_errors (reddish-drinkable-canvasback).
+
+    The entrypoint refuses to refresh a dirty checkout, which once pinned production gates to a
+    13-day-old tree and its 4.x model config with nothing but a stderr line. The steady-state
+    tick must emit AUTODEPLOY_ERROR so the existing deploy_errors alarm pages."""
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(
+        mcp_box["dstate"],  # type: ignore[arg-type]
+        "rebar-mcp-live-8092",
+        8092,
+        in_flight=0,
+        state="running",
+        image=f"compose-mcp:{_TARGET}",
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    clean = _run(mcp_box)
+    (mcp_box["dstate"] / "code-workspace-dirty").write_text("1")  # type: ignore[operator]
+    dirty = _run(mcp_box)
+
+    stuck = [
+        m
+        for m in _markers(dirty, "AUTODEPLOY_ERROR")
+        if "mcp-code-workspace-stuck" in m and "rebar-mcp-live-8092" in m
+    ]
+    ctx = f"{dirty.stdout}\n{dirty.stderr}"
+    assert (clean.returncode, dirty.returncode) == (0, 0), ctx
+    assert "mcp-code-workspace-stuck" not in clean.stdout + clean.stderr
+    assert len(stuck) == 1, ctx

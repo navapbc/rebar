@@ -469,3 +469,71 @@ def test_refresh_emits_workspace_sha_and_distance_from_target(tmp_path: Path) ->
     assert f"code checkout at {remote_tip}; distance from origin/main: ahead 0, behind 0" in (
         result.stderr
     )
+
+
+def _interrupt_fast_forward(checkout: Path, target: str) -> None:
+    """Write ``target``'s tree to the index and working tree without moving HEAD.
+
+    This is the on-disk state a fast-forward leaves when it is killed between updating the
+    checkout and updating the ref (reddish-drinkable-canvasback: the container was OOM-killed
+    mid-refresh)."""
+    _git(checkout, "fetch", "origin", "main")
+    _git(checkout, "read-tree", "-u", "-m", "HEAD", target)
+
+
+def test_interrupted_fast_forward_is_recovered_then_refreshed(tmp_path: Path) -> None:
+    source, remote = _init_remote(tmp_path)
+    checkout = tmp_path / "code"
+    _clone(remote, checkout)
+    stuck_head = _head(checkout)
+    interrupted_target = _advance(source)
+    _interrupt_fast_forward(checkout, interrupted_target)
+    (source / "file.txt").write_text("three\n")
+    _git(source, "commit", "-am", "later")
+    _git(source, "push", "origin", "main")
+    remote_tip = _git(source, "rev-parse", "HEAD").stdout.strip()
+
+    result = _run_provision(checkout, remote, tmp_path)
+
+    assert (
+        _head(checkout),
+        _git(checkout, "status", "--porcelain").stdout,
+        f"HEAD {stuck_head} -> {interrupted_target}" in result.stderr,
+    ) == (remote_tip, "", True), result.stderr
+
+
+def test_staged_tree_matching_no_main_commit_is_refused_with_a_marker(tmp_path: Path) -> None:
+    source, remote = _init_remote(tmp_path)
+    checkout = tmp_path / "code"
+    _clone(remote, checkout)
+    (checkout / "file.txt").write_text("not on main\n")
+    _git(checkout, "add", "file.txt")
+    _advance(source)
+    before = _tree_snapshot(checkout)
+    before_head = _head(checkout)
+
+    result = _run_provision(checkout, remote, tmp_path)
+
+    assert (result.returncode, _tree_snapshot(checkout), _head(checkout)) == (
+        1,
+        before,
+        before_head,
+    )
+    assert 'MCP_CODE_WORKSPACE_ERROR {"reason": "dirty"' in result.stderr
+
+
+def test_untracked_file_blocks_recovery_of_an_interrupted_fast_forward(tmp_path: Path) -> None:
+    source, remote = _init_remote(tmp_path)
+    checkout = tmp_path / "code"
+    _clone(remote, checkout)
+    stuck_head = _head(checkout)
+    _interrupt_fast_forward(checkout, _advance(source))
+    (checkout / "stray.txt").write_text("unexplained\n")
+
+    result = _run_provision(checkout, remote, tmp_path)
+
+    assert (result.returncode, _head(checkout), (checkout / "stray.txt").exists()) == (
+        1,
+        stuck_head,
+        True,
+    )
