@@ -110,7 +110,7 @@
     "__version__": {
       "kind": "value",
       "type": "str",
-      "value": "'0.15.0'"
+      "value": "'0.15.1'"
     },
     "add_identity_key": {
       "kind": "callable",
