@@ -10,6 +10,46 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-11-11
+
+### Fixed
+
+- LLM calls no longer send sampling parameters (`temperature`, `top_p`, `top_k`)
+  to models that reject them. Sampling is now opt-in: it is sent only to models
+  measured to accept it (Claude 4.5/4.6, Amazon Nova Pro, Llama 4 Maverick,
+  Pixtral Large, DeepSeek R1), and every other model, including new ids, gets
+  none. This restores plan review and completion verification on Claude Opus 5,
+  Sonnet 5, the 5.5 models under every Bedrock inference-profile prefix, OpenAI
+  GPT-5.5 / GPT-6.1 and Moonshot Kimi K3.1, which previously failed with a 400.
+- A 400 that names a rejected sampling parameter is retried once without
+  sampling, and the model is remembered for the rest of the process. The
+  OpenAI/Kimi wording ("doesn't support the temperature field") is now
+  reported as a configuration error instead of a provider outage.
+
+- Store writes now run git's incremental maintenance (commit-graph, loose
+  objects, incremental repack) instead of a foreground `gc --auto`, and a
+  timed-out maintenance step reaps its whole process group so no repack
+  outlives the write lock or strands `objects/maintenance.lock`. Large stores
+  that had silently stopped being maintained are compacted again, and history
+  walks speed up accordingly.
+
+### Added
+
+- Ticket `releases` field, synced both ways with Jira fix versions (ADR 0124):
+  set and list releases from rebar, inbound and outbound Jira sync, and an
+  alert when a release names a Jira version that does not exist or is
+  archived. Adds the `RELEASE_DELTA` event (schema version 6); older clients
+  preserve and ignore it.
+- ADR 0123: selectable plan-review engine, and the `[verify] plan_review_engine`
+  setting (`pipeline`, the default, or `agentic`). An explicit per-call engine
+  argument overrides the setting. The `agentic` engine is not implemented yet:
+  a plan that clears the deterministic floors under it returns an unsigned
+  INDETERMINATE naming the engine, without any model call.
+
+### Changed
+
+- Configured default models move to the Claude 5.5 generation.
+
 ## [0.15.0] - 2026-11-09
 
 ### Added
@@ -2057,6 +2097,7 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
 [unreleased]: https://github.com/navapbc/rebar/compare/v0.14.0...HEAD
+[0.15.1]: https://github.com/navapbc/rebar/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/navapbc/rebar/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/navapbc/rebar/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/navapbc/rebar/compare/v0.13.0...v0.13.1
