@@ -229,8 +229,11 @@ be named:
 REBAR_MUTATION_ALLOW_UNSANDBOXED=1 python scripts/mutation_gate.py ...
 ```
 
-It logs a WARNING when set. **Understand the risk before using it** — a mutant that
-reaches a destructive code path can delete real files anywhere your user can write.
+It logs a WARNING when set, and the run's `summary.json` records `"sandbox": "unsandboxed"`
+so the evidence cannot pass for a sandboxed run. CI never sets it: the hosted mutation lane
+fails closed with `failure_class: sandbox-unavailable` when `bwrap` cannot start.
+**Understand the risk before using it** — a mutant that reaches a destructive code path can
+delete real files anywhere your user can write.
 Prefer installing `bwrap` (`apt install bubblewrap`) over setting this.
 
 ### The commit gate needs the dev tools on `PATH` (activate the venv before committing)

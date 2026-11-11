@@ -710,6 +710,9 @@ def run_gate(args: argparse.Namespace) -> int:
         for path in selection.unmatched_tests:
             print(f"::warning::unmatched mutation-test mapping: {path}")
         return 0
+    # Record the mechanism before any shard code runs so the evidence distinguishes a
+    # sandboxed pass from a waived one, and an unavailable sandbox fails with a summary.
+    summary["sandbox"] = _sandbox_mechanism()
     failed = False
     with tempfile.TemporaryDirectory(prefix="rebar-mutation-") as temp_name:
         temp = Path(temp_name)
@@ -747,6 +750,14 @@ def run_gate(args: argparse.Namespace) -> int:
         print(f"::warning::unmatched mutation-test mapping: {path}")
     print(json.dumps(summary, indent=2))
     return 1 if failed else 0
+
+
+def _sandbox_mechanism() -> str:
+    """Return the sandbox mechanism, or fail the run as runner infrastructure."""
+    try:
+        return mutation_sandbox.mechanism()
+    except mutation_sandbox.SandboxUnavailable as exc:
+        raise GateError("sandbox-unavailable", str(exc)) from exc
 
 
 def _status_counts(statuses: Mapping[str, str]) -> dict[str, int]:
