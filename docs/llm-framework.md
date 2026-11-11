@@ -329,7 +329,10 @@ error naming the package.
 `REBAR_LLM_TEMPERATURE` to send one. Whether a model accepts it is a resolved **capability**
 (`supports_temperature`), recorded in the signed provenance record, because some models reject the
 parameter outright — on Bedrock fatally, since only pydantic-ai's Anthropic path drops unsupported
-sampling settings for you. Structured output
+sampling settings for you. Sampling is **opt-in**: `temperature` is sent only to a model id listed
+in `rebar.llm.capabilities` as measured to accept it (Claude Opus 4.6, Sonnet 4.6, Haiku 4.5);
+every other model — including Claude 4.7 and later, OpenAI GPT-5.x and Kimi, which reject it with a
+400 — gets none, so the Pass-2 verifier's `temperature=0` pin is simply omitted there. Structured output
 uses pydantic-ai's reliability stack (`NativeOutput`/`PromptedOutput` +
 `json-repair` + bounded retry), which is provider-*portable*.
 

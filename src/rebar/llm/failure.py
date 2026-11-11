@@ -428,8 +428,24 @@ def degrade_cause_flags(error: object) -> dict:
 # rebar's existing failure-classification seam, not the Bedrock leaf — no provider-name branch
 # enters `runner.py` for this; `runner.run()` tries this FIRST in its broad except, falling
 # back to the existing classify_llm_failure/LLMUnavailableError path only when it returns None.
-_SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
-_REJECTION_WORDS: tuple[str, ...] = ("deprecated", "not supported", "unsupported")
+# Spellings as they appear in provider messages: Anthropic/Bedrock-Claude say `top_p`, OpenAI
+# and Kimi on Bedrock say `topP` (matched lower-cased).
+_SAMPLING_PARAMS: tuple[tuple[str, str], ...] = (
+    ("temperature", "temperature"),
+    ("top_p", "top_p"),
+    ("topp", "top_p"),
+    ("top_k", "top_k"),
+    ("topk", "top_k"),
+)
+# Claude: "`temperature` is deprecated for this model". OpenAI/Kimi: "This model doesn't support
+# the temperature field".
+_REJECTION_WORDS: tuple[str, ...] = (
+    "deprecated",
+    "not supported",
+    "unsupported",
+    "doesn't support",
+    "does not support",
+)
 
 
 def translate_sampling_parameter_rejection(
@@ -459,18 +475,17 @@ def translate_sampling_parameter_rejection(
         if not looks_like_rejection:
             continue
         low = text.lower()
-        named_param = next((p for p in _SAMPLING_PARAMS if p in low), None)
+        named_param = next((name for spelling, name in _SAMPLING_PARAMS if spelling in low), None)
         if named_param is None:
             continue
         if not any(word in low for word in _REJECTION_WORDS):
             continue
         return LLMConfigError(
             f"model {model_id!r} rejected the {named_param!r} sampling parameter: {text}. "
-            f"Fix by either (1) adding {model_id!r} to "
-            "rebar.llm.capabilities._MODEL_ID_CAPABILITY_OVERRIDES with "
-            f"{{'supports_{named_param}': False}} (if such a field exists — today only "
-            "'supports_temperature' is tracked), or (2) unsetting the corresponding "
-            f"config (e.g. REBAR_LLM_TEMPERATURE) so {named_param!r} is never sent."
+            "rebar sends sampling parameters only to models listed as accepting them, so "
+            f"fix by either (1) removing {model_id!r}'s 'supports_temperature' row from "
+            "rebar.llm.capabilities._MODEL_ID_CAPABILITY_OVERRIDES, or (2) unsetting the "
+            f"corresponding config (e.g. REBAR_LLM_TEMPERATURE) so {named_param!r} is never sent."
         )
     return None
 

@@ -68,8 +68,8 @@ def test_bedrock_claude_keeps_prompt_caching_and_prompted_output():
 
 
 def test_supports_temperature_is_withdrawn_only_for_the_measured_model():
-    """Decision C. `temperature` is fatal on some Bedrock models and fine on others, so a
-    blanket withdrawal would strip greedy Pass-2 determinism from the measured-good default.
+    """`temperature` is fatal on some Bedrock models and fine on others; the measured-good model
+    is on the opt-in list, so it keeps greedy Pass-2 determinism.
 
     This is the contrast case that proves the exact-id table DISCRIMINATES."""
     from rebar.llm.capabilities import capabilities_for
@@ -84,13 +84,43 @@ def test_supports_temperature_is_withdrawn_only_for_the_measured_model():
     )
 
 
-def test_supports_temperature_defaults_true_for_everything_else():
-    """The temperature denylist leaves unlisted models enabled. This example accepts
-    temperature, while Opus 4.8 is now listed on both provider paths."""
+def test_supports_temperature_is_opt_in_for_unlisted_models():
+    """Sampling is opt-in: a measured-accepting model keeps temperature, while an unlisted model
+    (including every newer Claude, OpenAI GPT-5.x and Kimi, which 400 on it) gets none."""
     from rebar.llm.capabilities import capabilities_for
 
     assert capabilities_for("anthropic:claude-sonnet-4-6").supports_temperature is True
-    assert capabilities_for("openai:gpt-4o").supports_temperature is True
+    for unlisted in (
+        "openai:gpt-4o",
+        "openai:gpt-5.5",
+        "anthropic:claude-opus-5",
+        "anthropic:claude-sonnet-5",
+        "anthropic:claude-sonnet-5-5",
+    ):
+        assert capabilities_for(unlisted).supports_temperature is False, unlisted
+
+
+def test_openai_and_kimi_sampling_rejections_are_translated():
+    """The OpenAI/Kimi wording ("doesn't support the temperature field", `topP`) is recognised
+    alongside Claude's "is deprecated" wording."""
+    from rebar.llm.failure import LLMConfigError, translate_sampling_parameter_rejection
+
+    for msg, param in (
+        (
+            "ValidationException: This model doesn't support the temperature field. "
+            "Remove temperature and try again.",
+            "temperature",
+        ),
+        (
+            "ValidationException: This model doesn't support the topP field. "
+            "Remove topP and try again.",
+            "top_p",
+        ),
+        ("ValidationException: `top_k` is deprecated for this model.", "top_k"),
+    ):
+        err = translate_sampling_parameter_rejection(Exception(msg), "gpt-5.5")
+        assert isinstance(err, LLMConfigError), msg
+        assert repr(param) in str(err), msg
 
 
 # ── §B held out from the implementer ────────────────────────────────────────────────────
@@ -168,9 +198,8 @@ def test_conservative_fallback_is_unchanged_when_no_model_id_is_available(caplog
 
     assert caps.native_structured_output is False
     assert caps.prompt_cache_style == "none"
-    assert caps.supports_temperature is True, (
-        "the conservative record must not withdraw temperature — that would silently disable "
-        "greedy determinism for every unknown model"
+    assert caps.supports_temperature is False, (
+        "the conservative record must not send sampling parameters — an unknown model may 400"
     )
     assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
 
