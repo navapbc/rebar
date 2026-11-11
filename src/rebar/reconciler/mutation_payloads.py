@@ -261,14 +261,16 @@ class InboundCreatePayload(_PayloadMapping):
         return cls(fields=remainder, status=status)
 
 
-_INBOUND_UPDATE_KEYS = frozenset({"local_id", "fields", "status", "labels", "comments", "links"})
+_INBOUND_UPDATE_KEYS = frozenset(
+    {"local_id", "fields", "status", "labels", "comments", "links", "releases"}
+)
 
 
 @dataclass(frozen=True)
 class InboundUpdatePayload(_PayloadMapping):
-    """``(inbound, update)`` — field/label/comment/link updates for a bound
-    local ticket. Mirrors ``run_differs.py``'s
-    ``{"local_id": ..., "fields": ..., "labels": ..., "comments": ..., "links": ...}``."""
+    """``(inbound, update)`` — field/label/comment/link/release updates for a bound
+    local ticket. Mirrors ``run_differs.py``'s ``{"local_id": ..., "fields": ...,
+    "labels": ..., "comments": ..., "links": ..., "releases": ...}``."""
 
     fields: Mapping[str, Any] = field(default_factory=dict)
     local_id: str | None = None
@@ -276,6 +278,7 @@ class InboundUpdatePayload(_PayloadMapping):
     labels: tuple[Mapping[str, Any], ...] = ()
     comments: tuple[Mapping[str, Any], ...] = ()
     links: tuple[Mapping[str, Any], ...] = ()
+    releases: tuple[Mapping[str, Any], ...] = ()
 
     def as_legacy_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -284,6 +287,7 @@ class InboundUpdatePayload(_PayloadMapping):
             "labels": [dict(entry) for entry in self.labels],
             "comments": [dict(c) for c in self.comments],
             "links": [dict(entry) for entry in self.links],
+            "releases": [dict(entry) for entry in self.releases],
         }
         if self.status is not None:
             out["status"] = self.status
@@ -301,6 +305,7 @@ class InboundUpdatePayload(_PayloadMapping):
             labels=_as_tuple_of_mappings(payload.get("labels")),
             comments=_as_tuple_of_mappings(payload.get("comments")),
             links=_as_tuple_of_mappings(payload.get("links")),
+            releases=_as_tuple_of_mappings(payload.get("releases")),
         )
 
 

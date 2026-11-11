@@ -319,74 +319,125 @@ def _inbound_update_write_status_event(fields, tracker_dir, local_id, written) -
         written.append(str(path))
 
 
+def _read_state_for_list_delta(mutation, tracker_dir, local_id, field_label: str) -> dict | None:
+    """Reduce the ticket for no-op suppression; None (with a warning) when unreadable.
+
+    On reducer failure or a missing ticket, warn and let the next pass retry instead of
+    assuming an empty list (bc8f guard).
+    """
+    try:
+        reducer_mod = _load_ticket_reducer()
+        current_state = reducer_mod.reduce_ticket(str(tracker_dir / local_id))
+    except Exception as _reducer_exc:  # noqa: BLE001 — see bc8f docstring
+        print(  # noqa: T201
+            f"[applier] WARN bc8f-guard: reducer raised while reading "
+            f"current {field_label} for {local_id} (target={mutation.target}); "
+            f"skipping {field_label} delta to avoid wiping local {field_label}. "
+            f"exc={type(_reducer_exc).__name__}: {_reducer_exc}",
+            file=sys.stderr,
+        )
+        return None
+    if current_state is None:
+        print(  # noqa: T201
+            f"[applier] WARN bc8f-guard: reducer returned None for "
+            f"{local_id} (ticket dir not yet materialized?); skipping "
+            f"{field_label} delta to avoid wiping local {field_label}. The next "
+            f"reconciler pass will retry.",
+            file=sys.stderr,
+        )
+    return current_state
+
+
+def _filter_list_delta(
+    entries: list, entry_key: str, current: list[str]
+) -> tuple[list[str], list[str]]:
+    """Keep adds of absent names and removes of present names; an add wins over a remove."""
+    added: list[str] = []
+    removed: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        action = entry.get("action")
+        name = entry.get(entry_key, "")
+        if not name or not isinstance(name, str):
+            continue
+        if action == "add" and name not in current and name not in added:
+            added.append(name)
+        elif action == "remove" and name in current and name not in removed:
+            removed.append(name)
+    # Dedup added∩removed (a contradictory inbound pass): add-wins, matching the
+    # reducer's intra-event contract — never emit a name in both lists.
+    return added, [n for n in removed if n not in added]
+
+
+def _apply_inbound_list_delta(
+    mutation,
+    payload,
+    tracker_dir,
+    local_id,
+    written,
+    *,
+    payload_key: str,
+    entry_key: str,
+    state_key: str,
+    event_type: str,
+) -> None:
+    """Write one convergent add/remove delta event for an inbound list field.
+
+    Reads current state only for NO-OP SUPPRESSION (add absent names, remove present
+    ones); the delta itself never replaces the whole list, so a concurrent local add
+    survives. ``source="inbound"`` marks Jira origin so it is not read as local intent.
+    """
+    entries = payload.get(payload_key) or []
+    if not isinstance(entries, list) or not entries:
+        return
+    current_state = _read_state_for_list_delta(mutation, tracker_dir, local_id, state_key)
+    if current_state is None:
+        return
+    current: list[str] = list(current_state.get(state_key, []) or [])
+    added, removed = _filter_list_delta(entries, entry_key, current)
+    if added or removed:
+        path = _write_event_file(
+            tracker_dir,
+            local_id,
+            event_type,
+            {"added": added, "removed": removed, "source": "inbound"},
+        )
+        written.append(str(path))
+
+
 def _inbound_update_apply_labels(mutation, payload, tracker_dir, local_id, written) -> None:
-    """Apply inbound label changes through TAG_DELTA."""
-    # Apply inbound add/remove labels as TAG_DELTA. Read current tags to
-    # suppress no-ops; a whole-field EDIT would replace concurrent local tags.
-    inbound_labels = payload.get("labels") or []
-    if isinstance(inbound_labels, list) and inbound_labels:
-        # Read current tags before filtering add/remove no-ops. On reducer
-        # failure, warn and retry next pass instead of assuming an empty set.
-        reducer_failed = False
-        current_state: dict | None = None
-        try:
-            reducer_mod = _load_ticket_reducer()
-            current_state = reducer_mod.reduce_ticket(str(tracker_dir / local_id))
-        except Exception as _reducer_exc:  # noqa: BLE001 — see bc8f docstring
-            reducer_failed = True
-            print(  # noqa: T201
-                f"[applier] WARN bc8f-guard: reducer raised while reading "
-                f"current tags for {local_id} (target={mutation.target}); "
-                f"skipping labels EDIT to avoid wiping local tags. "
-                f"exc={type(_reducer_exc).__name__}: {_reducer_exc}",
-                file=sys.stderr,
-            )
-        if not reducer_failed and current_state is None:
-            print(  # noqa: T201
-                f"[applier] WARN bc8f-guard: reducer returned None for "
-                f"{local_id} (ticket dir not yet materialized?); skipping "
-                f"labels EDIT to avoid wiping local tags. The next "
-                f"reconciler pass will retry.",
-                file=sys.stderr,
-            )
+    """Apply inbound label changes as a TAG_DELTA (P2.3: never a whole-field EDIT.tags)."""
+    from rebar.reducer._version import TAG_DELTA
 
-        if current_state is not None:
-            # P2.3: emit a convergent TAG_DELTA (add/remove) instead of a
-            # whole-field EDIT.tags — the last live whole-field tag writer is gone,
-            # so a Jira-side label change no longer clobbers a concurrent local add.
-            # We still read current tags for NO-OP SUPPRESSION (only add absent,
-            # only remove present); the delta itself can never wipe other tags.
-            from rebar.reducer._version import TAG_DELTA
+    _apply_inbound_list_delta(
+        mutation,
+        payload,
+        tracker_dir,
+        local_id,
+        written,
+        payload_key="labels",
+        entry_key="label",
+        state_key="tags",
+        event_type=TAG_DELTA,
+    )
 
-            current_tags: list[str] = list(current_state.get("tags", []) or [])
-            added: list[str] = []
-            removed: list[str] = []
-            for entry in inbound_labels:
-                if not isinstance(entry, dict):
-                    continue
-                action = entry.get("action")
-                label_name = entry.get("label", "")
-                if not label_name or not isinstance(label_name, str):
-                    continue
-                if action == "add" and label_name not in current_tags and label_name not in added:
-                    added.append(label_name)
-                elif (
-                    action == "remove" and label_name in current_tags and label_name not in removed
-                ):
-                    removed.append(label_name)
-            # Dedup added∩removed (a contradictory inbound pass): add-wins, matching
-            # the reducer's intra-event contract — never emit a label in both lists.
-            removed = [t for t in removed if t not in added]
-            if added or removed:
-                # Mark inbound origin so Jira-added tags are not treated as
-                # local user intent on a later remove.
-                path = _write_event_file(
-                    tracker_dir,
-                    local_id,
-                    TAG_DELTA,
-                    {"added": added, "removed": removed, "source": "inbound"},
-                )
-                written.append(str(path))
+
+def _inbound_update_apply_releases(mutation, payload, tracker_dir, local_id, written) -> None:
+    """Apply inbound Jira fixVersions changes as a RELEASE_DELTA (ADR 0124)."""
+    from rebar.reducer._version import RELEASE_DELTA
+
+    _apply_inbound_list_delta(
+        mutation,
+        payload,
+        tracker_dir,
+        local_id,
+        written,
+        payload_key="releases",
+        entry_key="release",
+        state_key="releases",
+        event_type=RELEASE_DELTA,
+    )
 
 
 def _inbound_update_apply_comments(payload, tracker_dir, local_id, written) -> None:

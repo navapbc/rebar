@@ -51,6 +51,7 @@ def test_done_cap_bounds_actual_transport_reads(client, monkeypatch):
         "summary",
         "description",
         "labels",
+        "fixVersions",
     ]
 
 

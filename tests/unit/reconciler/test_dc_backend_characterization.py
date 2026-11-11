@@ -448,3 +448,39 @@ def test_dc_identity_is_identity_label_tracks_parse():
 # write-only transport plumbing it fed (see test_jira_dc_config_settings.py).
 # The mutation-ledger entry below is kept as the historical record.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Jira fixVersions survive the DC search unwrap (ADR 0124, lovely-bipartisan-mullet).
+# The DC search passes no ``fields`` restriction, so the version objects arrive in
+# the issue's raw payload; nothing between pycontribs and the snapshot may drop them.
+# ---------------------------------------------------------------------------
+class _DcIssueWithRaw:
+    """Stands in for ``jira.Issue``: attribute access plus the parsed ``raw`` payload."""
+
+    def __init__(self, raw: dict) -> None:
+        self.raw = raw
+        self.key = raw["key"]
+
+
+class _DcSearchClient:
+    def __init__(self, issues: list[_DcIssueWithRaw]) -> None:
+        self._issues = issues
+
+    def search_issues(self, _jql: str, **_k: object) -> list[_DcIssueWithRaw]:
+        return list(self._issues)
+
+
+def test_dc_search_payload_keeps_fix_version_names():
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+
+    versions = [
+        {"self": "s1", "id": "1", "name": "2.4", "archived": False, "released": False},
+        {"self": "s2", "id": "2", "name": "2.5", "archived": False, "released": True},
+    ]
+    raw = {"key": "DC-1", "fields": {"summary": "T", "fixVersions": versions}}
+    transport = JiraDataCenterTransport(
+        client=_DcSearchClient([_DcIssueWithRaw(raw)]), project="DC"
+    )
+    (issue,) = transport.search_issues("project = DC")
+    assert [v["name"] for v in issue["fields"]["fixVersions"]] == ["2.4", "2.5"]

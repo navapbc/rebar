@@ -378,6 +378,8 @@ def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields,
                 # Cycle 3: inbound link adds — _apply_inbound_update writes
                 # each into rebar via the rebar.link library facade.
                 "links": getattr(im, "links", []),
+                # Jira fixVersions -> local releases (ADR 0124).
+                "releases": getattr(im, "releases", []),
             },
             provenance={
                 "source": "inbound_differ",

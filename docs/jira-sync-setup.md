@@ -327,6 +327,7 @@ What round-trips, and where Jira's data model bounds it.
 | Title, description, status, priority, assignee | ✓ | ✓ |
 | Comments | ✓ | ✓ |
 | Labels ↔ tags | ✓ | ✓ |
+| Fix versions ↔ releases (names only; ADR 0124) | not yet (outbound sync is the next story) | ✓ |
 | Issue links (`blocks`/`depends_on` ↔ Blocks, `relates_to` ↔ Relates) | ✓ | ✓ |
 | Parent — **only when the parent is an Epic** | ✓ | ✓ |
 | Parent — when the parent is a non-Epic (Story/Task/Bug) | **excluded** | n/a |

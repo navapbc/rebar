@@ -44,6 +44,7 @@ def test_contract_is_loadable_from_the_schemas_package() -> None:
         "comment",
         "issuelinks",
         "parent",
+        "fixVersions",
     } <= set(schema["properties"])
 
 

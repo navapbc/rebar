@@ -513,6 +513,7 @@ class JiraSnapshotEntry(TypedDict):
     labels: NotRequired[list[str]]
     issuetype: NotRequired[dict[str, Any] | str]
     comment: NotRequired[dict[str, Any]]
+    fixVersions: NotRequired[list[dict[str, Any]]]
     issuelinks: NotRequired[list[dict[str, Any]]]
     parent: NotRequired[dict[str, Any] | None]
 

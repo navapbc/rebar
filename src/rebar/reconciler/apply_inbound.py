@@ -29,6 +29,7 @@ from rebar.reconciler.apply_inbound_events import (
     _inbound_create_writeback_jira,
     _inbound_update_apply_comments,
     _inbound_update_apply_labels,
+    _inbound_update_apply_releases,
     _inbound_update_write_edit_event,
     _inbound_update_write_status_event,
 )
@@ -131,6 +132,7 @@ def _apply_inbound_update(mutation, *, repo_root=None, **_kwargs) -> ApplyResult
     _inbound_update_write_edit_event(fields, tracker_dir, local_id, written, repo_root)
     _inbound_update_write_status_event(fields, tracker_dir, local_id, written)
     _inbound_update_apply_labels(mutation, payload, tracker_dir, local_id, written)
+    _inbound_update_apply_releases(mutation, payload, tracker_dir, local_id, written)
     _inbound_update_apply_comments(payload, tracker_dir, local_id, written)
     links_applied = _inbound_update_apply_links(payload, local_id, repo_root)
 
