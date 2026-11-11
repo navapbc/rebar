@@ -28,6 +28,44 @@ LAYOUT_CLASSES: tuple[str, ...] = ("prose", "fenced", "multi_object", "quoted_js
 #: (a separate story) refines.
 DIRECTIVE_VARIANTS: tuple[str, ...] = ("current", "sentinel")
 
+#: The system prompt every matrix call sends. With it, Bedrock Opus 5.5 content-filters a verdict
+#: request that carries nothing to verify (bug mustard-fungoid-grackle), so both prompts below
+#: include the ticket's criterion and the evidence that meets it, as a production verifier's do.
+SYSTEM_PROMPT = "You are a completion verifier that emits a single structured verdict."
+
+_TICKET_EVIDENCE = (
+    'Ticket 7c41-0d2e-9a85-b613 has one acceptance criterion: "`add(a, b)` returns the sum of '
+    'its arguments." Evidence: `tests/test_add.py::test_add_returns_sum` passed (1 passed in '
+    "0.01s), and `src/calc.py` defines `def add(a, b): return a + b`.\n\n"
+)
+
+# "Empty when every criterion is met" keeps a PASS from carrying per-criterion findings that lack
+# the contract's required `detail` and so fail validation for a reason unrelated to layout.
+_VERDICT_SHAPE = (
+    "a JSON object with `verdict` (PASS or FAIL), a `findings` array (empty when every "
+    "criterion is met), and a `summary` string."
+)
+
+#: Quotes a dependency object before the final verdict to reproduce the first-object parser trap.
+AGENTIC_TRANSCRIPT_PROMPT = (
+    "You are a completion verifier finishing an agentic review turn.\n\n"
+    + _TICKET_EVIDENCE
+    + "A dependency-lookup tool returned this record verbatim:\n"
+    '  {"relation": "depends_on", "target_id": "f2f3-9cb1-335b-4e31"}\n\n'
+    "Having read it, emit your FINAL CompletionVerdict for the ticket: " + _VERDICT_SHAPE
+)
+
+#: The control for the agentic prompt: the same request with no quoted object.
+SINGLE_SHOT_PROMPT = (
+    _TICKET_EVIDENCE + "Return a CompletionVerdict for this ticket: " + _VERDICT_SHAPE
+)
+
+#: ``(label, prompt)`` pairs — the two production-shaped prompts each cell/variant is measured on.
+PROMPTS: tuple[tuple[str, str], ...] = (
+    ("agentic_transcript", AGENTIC_TRANSCRIPT_PROMPT),
+    ("single_shot", SINGLE_SHOT_PROMPT),
+)
+
 #: Default per-run ceiling on the number of live model calls the harness may make. A hard cap on
 #: spend, enforced BEFORE any network object is constructed (see :func:`enforce_call_budget`).
 DEFAULT_CALL_BUDGET: int = 300
