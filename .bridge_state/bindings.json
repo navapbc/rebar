@@ -29202,9 +29202,17 @@
       "updated_at": "2026-08-18T03:44:26Z"
     },
     "422a-8867-4b6d-4900": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\n\n`tests/scripts/bridge/test_bridge_fsck_keyset_prev.py::test_store_snapshot_survives_git_maintenance_but_still_catches_mutation` failed once in a full `make verify` (2026-11-11 00:20-00:50 PST, worktree fixver-epic at commit 4d21c744977, which does not touch bridge fsck). Line 254 `lock.unlink()` raised `FileNotFoundError` for `<tmp>/churn/.tickets-tracker/.git/objects/maintenance.lock`: the test wrote the file, `_store_snapshot` ran, and the file was gone before the test removed it. The same test passed 6 of 6 times run alone right afterwards. The earlier bug `chewed-illicit-blacklemur` (closed) described a race between this test and git auto-maintenance on macOS.\n\n## Hypotheses (unproven)\n\n- A git process started inside the test fixture (auto-maintenance or gc) runs in the background and removes `objects/maintenance.lock` when it finishes.\n- The earlier fix narrowed the race but did not remove it; host load under `make verify` (4 xdist workers) widens it.\n\n## Acceptance Criteria\n\n- [ ] A deterministic reproduction (for example, holding the background git process or forcing auto-maintenance in the fixture) shows the cause.\n- [ ] The test no longer depends on timing: the fixture disables git auto-maintenance/gc for its repos, or the test uses a lock path no git process deletes.\n- [ ] The test passes 200 consecutive runs under `pytest -n 4` load.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Recurrence: bridge fsck maintenance-lock test still races git maintenance under make verify"
+      },
       "created_at": "2026-11-11T09:33:02Z",
       "jira_id": "4598885",
       "jira_key": "REB-7107",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-11T09:33:06Z"
     },
@@ -117001,7 +117009,9 @@
     "1794381323979350830": "__rebar_unknown_comment_id__",
     "1794383349382675673": "__rebar_unknown_comment_id__",
     "1794385262139730964": "__rebar_unknown_comment_id__",
-    "1794389296392345166": "__rebar_unknown_comment_id__"
+    "1794389296392345166": "__rebar_unknown_comment_id__",
+    "1794392407367924078": "__rebar_unknown_comment_id__",
+    "1794392806567274951": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
