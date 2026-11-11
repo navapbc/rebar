@@ -34,6 +34,7 @@ FIELD_CLASSES: dict[str, str] = {
     "description": "additive",
     "comments": "additive",
     "labels": "set",
+    "releases": "set",
     "watchers": "set",
     "links": "set",
 }

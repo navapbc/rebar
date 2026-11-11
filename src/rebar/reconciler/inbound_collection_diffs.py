@@ -212,3 +212,33 @@ def _diff_labels_inbound(
     for label in sorted(local_tags - jira_labels):
         mutations.append({"action": "remove", "label": label})
     return mutations
+
+
+def _jira_release_names(fix_versions: list[Any]) -> set[str]:
+    """Names of Jira version objects; non-dicts and missing/non-string names are skipped."""
+    return {
+        v["name"]
+        for v in fix_versions
+        if isinstance(v, dict) and isinstance(v.get("name"), str) and v["name"]
+    }
+
+
+def _diff_releases_inbound(
+    jira_fields: dict[str, Any], local_ticket: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Compare Jira ``fixVersions`` names to local ``releases`` (ADR 0124).
+
+    An absent or non-list ``fixVersions`` was not observed, so it yields no mutations rather
+    than removing every local release (the G1 rule of ``_diff_link_removals_inbound``).
+    """
+    fix_versions = jira_fields.get("fixVersions")
+    if not isinstance(fix_versions, list):
+        return []
+    jira_releases = _jira_release_names(fix_versions)
+    local_releases = {r for r in local_ticket.get("releases") or [] if isinstance(r, str)}
+    mutations: list[dict[str, Any]] = []
+    for name in sorted(jira_releases - local_releases):
+        mutations.append({"action": "add", "release": name})
+    for name in sorted(local_releases - jira_releases):
+        mutations.append({"action": "remove", "release": name})
+    return mutations

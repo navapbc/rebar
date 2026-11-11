@@ -17,6 +17,7 @@ from rebar.reconciler.inbound_collection_diffs import (  # noqa: F401
     _diff_labels_inbound,
     _diff_link_removals_inbound,
     _diff_links_inbound,
+    _diff_releases_inbound,
     _load_link_direction,
 )
 
@@ -68,6 +69,8 @@ class InboundMutation:
     comments: list[dict[str, Any]] = dataclass_field(default_factory=list)
     labels: list[dict[str, Any]] = dataclass_field(default_factory=list)
     links: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    # Jira fixVersions -> local releases (ADR 0124): {action, release} records.
+    releases: list[dict[str, Any]] = dataclass_field(default_factory=list)
 
 
 def _diff_jira_vs_local(
@@ -179,6 +182,39 @@ _OUTBOUND_TO_INBOUND_FIELD: dict[str, str] = {
 }
 
 
+def _index_collection_actions(entry: dict[str, Any], records: Any, key: str) -> None:
+    """Index outbound ``{action, <key>}`` records into ``entry["<key>_adds"/"<key>_removes"]``."""
+    for record in records or []:
+        action = record.get("action") if isinstance(record, dict) else None
+        name = record.get(key) if isinstance(record, dict) else None
+        if not name:
+            continue
+        if action == "add":
+            entry[f"{key}_adds"].add(name)
+        elif action == "remove":
+            entry[f"{key}_removes"].add(name)
+
+
+def _suppress_collection_echoes(
+    mutations: list[dict[str, Any]], adds: set[str], removes: set[str], key: str
+) -> tuple[list[dict[str, Any]], int]:
+    """Drop inbound ``{action, <key>}`` records that oppose a same-pass outbound action.
+
+    An inbound ADD is dropped when outbound REMOVES the same name, and an inbound REMOVE when
+    outbound ADDS it, so the local change wins. Returns the kept records and the drop count.
+    """
+    kept: list[dict[str, Any]] = []
+    dropped = 0
+    for record in mutations:
+        action = record.get("action")
+        name = record.get(key)
+        if (action == "add" and name in removes) or (action == "remove" and name in adds):
+            dropped += 1
+            continue
+        kept.append(record)
+    return kept, dropped
+
+
 def _build_outbound_context(
     outbound_mutations: list[Any] | None,
 ) -> dict[str, dict[str, Any]]:
@@ -198,6 +234,8 @@ def _build_outbound_context(
             {
                 "label_adds": set(),
                 "label_removes": set(),
+                "release_adds": set(),
+                "release_removes": set(),
                 "fields": set(),
                 "link_add_keys": set(),
                 "link_remove_keys": set(),
@@ -215,15 +253,8 @@ def _build_outbound_context(
                 # suppress the inbound link ADD that would re-reflect the still-present Jira
                 # link this pass — remove-wins, so local wins and the unlink converges.
                 entry["link_remove_keys"].add(to_key)
-        for lm in getattr(om, "labels", []) or []:
-            action = lm.get("action") if isinstance(lm, dict) else None
-            label = lm.get("label") if isinstance(lm, dict) else None
-            if not label:
-                continue
-            if action == "add":
-                entry["label_adds"].add(label)
-            elif action == "remove":
-                entry["label_removes"].add(label)
+        _index_collection_actions(entry, getattr(om, "labels", []), "label")
+        _index_collection_actions(entry, getattr(om, "releases", []), "release")
         for field_name in (getattr(om, "fields", {}) or {}).keys():
             # Store inbound field names so parent and title updates suppress stale
             # same-pass Jira echoes.
@@ -287,6 +318,7 @@ def compute_inbound_mutations(
             outbound_mapper=outbound_mapper,
         )
         label_mutations = _diff_labels_inbound(jira_fields, local_ticket)
+        release_mutations = _diff_releases_inbound(jira_fields, local_ticket)
         comment_mutations = _diff_comments_inbound(jira_fields, local_ticket)
         link_mutations = _diff_links_inbound(
             jira_fields, local_ticket, binding_store, local_tickets_by_id
@@ -305,21 +337,16 @@ def compute_inbound_mutations(
                 pre_field_count = len(changed)
                 changed = {k: v for k, v in changed.items() if k not in ob_entry["fields"]}
                 suppression_count += pre_field_count - len(changed)
-            # Labels: drop inbound ADD when outbound REMOVES the same label,
-            # and inbound REMOVE when outbound ADDS the same label.
-            if label_mutations:
-                filtered_labels: list[dict[str, Any]] = []
-                for lm in label_mutations:
-                    action = lm.get("action")
-                    label = lm.get("label")
-                    if action == "add" and label in ob_entry["label_removes"]:
-                        suppression_count += 1
-                        continue
-                    if action == "remove" and label in ob_entry["label_adds"]:
-                        suppression_count += 1
-                        continue
-                    filtered_labels.append(lm)
-                label_mutations = filtered_labels
+            # Labels and releases: drop an inbound ADD when outbound REMOVES the same
+            # name, and an inbound REMOVE when outbound ADDS it.
+            label_mutations, dropped = _suppress_collection_echoes(
+                label_mutations, ob_entry["label_adds"], ob_entry["label_removes"], "label"
+            )
+            suppression_count += dropped
+            release_mutations, dropped = _suppress_collection_echoes(
+                release_mutations, ob_entry["release_adds"], ob_entry["release_removes"], "release"
+            )
+            suppression_count += dropped
             # Map each local target ID to its Jira key before action-aware same-pass
             # link suppression. A conflicting outbound action takes precedence.
             if link_mutations and (ob_entry["link_add_keys"] or ob_entry["link_remove_keys"]):
@@ -350,7 +377,7 @@ def compute_inbound_mutations(
                     filtered_links.append(lk)
                 link_mutations = filtered_links
 
-        if changed or label_mutations or comment_mutations or link_mutations:
+        if changed or label_mutations or comment_mutations or link_mutations or release_mutations:
             mutations.append(
                 InboundMutation(
                     jira_key=jira_key,
@@ -360,6 +387,7 @@ def compute_inbound_mutations(
                     labels=label_mutations,
                     comments=comment_mutations,
                     links=link_mutations,
+                    releases=release_mutations,
                 )
             )
 

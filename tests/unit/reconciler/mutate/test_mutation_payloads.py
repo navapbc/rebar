@@ -127,14 +127,46 @@ def test_inbound_update_round_trips_run_differs_shape():
         "labels": [],
         "comments": [],
         "links": [],
+        "releases": [],
     }
     typed = mp.build_typed_payload("inbound", "update", legacy)
     assert isinstance(typed, mp.InboundUpdatePayload)
     assert typed.as_legacy_dict() == legacy
 
 
+def test_inbound_update_round_trips_releases():
+    legacy = {
+        "local_id": "abc123",
+        "fields": {},
+        "labels": [],
+        "comments": [],
+        "links": [],
+        "releases": [{"action": "add", "release": "2.4"}, {"action": "remove", "release": "2.3"}],
+    }
+    typed = mp.build_typed_payload("inbound", "update", legacy)
+    assert typed.releases == (
+        {"action": "add", "release": "2.4"},
+        {"action": "remove", "release": "2.3"},
+    )
+    assert typed.as_legacy_dict() == legacy
+
+
+def test_inbound_update_without_releases_emits_an_empty_list():
+    """A pre-feature payload with no ``releases`` key still projects one (always emitted)."""
+    legacy = {"local_id": "abc123", "fields": {}, "labels": [], "comments": [], "links": []}
+    typed = mp.build_typed_payload("inbound", "update", legacy)
+    assert typed.as_legacy_dict() == {**legacy, "releases": []}
+
+
 def test_inbound_update_local_id_may_be_none():
-    legacy = {"local_id": None, "fields": {}, "labels": [], "comments": [], "links": []}
+    legacy = {
+        "local_id": None,
+        "fields": {},
+        "labels": [],
+        "comments": [],
+        "links": [],
+        "releases": [],
+    }
     typed = mp.build_typed_payload("inbound", "update", legacy)
     assert typed.as_legacy_dict() == legacy
 

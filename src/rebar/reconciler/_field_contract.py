@@ -117,6 +117,18 @@ FIELD_CONTRACT: dict[str, FieldSymmetry] = {
             "inbound applier's dedup (apply_inbound_records)."
         ),
     ),
+    "releases": FieldSymmetry(
+        name="releases",
+        symmetry=ADD_WINS,
+        conflict_class="set",
+        outbound_name="fixVersions",
+        codec="Jira fixVersions[].name ↔ local 'releases'",
+        notes=(
+            "ADR 0124: names only, TAG_DELTA's fold rules. A release in both added and "
+            "removed within one pass stays ADDED "
+            "(rebar.reducer._processors.process_release_delta)."
+        ),
+    ),
     "watchers": FieldSymmetry(
         name="watchers",
         symmetry=ADD_WINS,

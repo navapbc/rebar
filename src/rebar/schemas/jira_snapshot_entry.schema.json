@@ -109,6 +109,18 @@
       },
       "description": "The NESTED comment field — bug 0ee6's seam. Comments live under `comment.comments`, NOT under a flat top-level `comments` key, which the top-level `not` clause forbids outright so a producer regressing to the flat shape fails validation. A horizon-trimmed issue carries the same shape with an EMPTY `comments` list."
     },
+    "fixVersions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Jira fix versions (ADR 0124), read by the inbound releases differ as each entry's `name`. ABSENT means the field was not fetched, so no release removal is inferred (as with `issuelinks`)."
+    },
     "issuelinks": {
       "type": "array",
       "items": {

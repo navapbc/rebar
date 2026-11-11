@@ -247,6 +247,8 @@ def _iter_search_issues(post: Callable[[str, Any], Any], jql: str) -> Iterator[d
             "summary",
             "description",
             "labels",
+            # Jira fix versions -> rebar releases (ADR 0124).
+            "fixVersions",
         ],
     }
     for page in _iter_cursor_pages(checked_post, "/rest/api/3/search/jql", body):

@@ -21,7 +21,7 @@ _conflict_resolver = importlib.import_module("rebar.reconciler.conflict_resolver
 _inbound_differ = importlib.import_module("rebar.reconciler.inbound_differ")
 
 from rebar.reducer._managed_refs import should_propagate_removal  # noqa: E402
-from rebar.reducer._processors import process_tag_delta  # noqa: E402
+from rebar.reducer._processors import process_release_delta, process_tag_delta  # noqa: E402
 
 FIELD_CONTRACT = _contract.FIELD_CONTRACT
 
@@ -79,6 +79,9 @@ def test_core_field_classes_pinned() -> None:
         "archived",
     }
     assert FIELD_CONTRACT["labels"].symmetry == c.ADD_WINS
+    assert FIELD_CONTRACT["releases"].symmetry == c.ADD_WINS
+    assert FIELD_CONTRACT["releases"].conflict_class == "set"
+    assert FIELD_CONTRACT["releases"].outbound_name == "fixVersions"
     assert FIELD_CONTRACT["links"].symmetry == c.ONE_WAY_GATED
     assert FIELD_CONTRACT["parent"].symmetry == c.ONE_WAY_GATED
     for gated in ("links", "parent"):
@@ -169,6 +172,13 @@ def test_add_wins_plain_remove_still_removes() -> None:
     state: dict = {"tags": ["y"]}
     process_tag_delta(state, {"added": [], "removed": ["y"]})
     assert "y" not in state["tags"]
+
+
+def test_add_wins_release_in_both_added_and_removed_stays_added() -> None:
+    """add_wins(releases): RELEASE_DELTA keeps TAG_DELTA's intra-event contract (ADR 0124)."""
+    state: dict = {"releases": []}
+    process_release_delta(state, {"added": ["2.4"], "removed": ["2.4"]})
+    assert state["releases"] == ["2.4"]
 
 
 # ---------------------------------------------------------------------------
