@@ -1,9 +1,17 @@
 {
   "bindings": {
     "000e-eac6-9720-4a76": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nDiscovered from bug tapestried-oversize-blackfly (rebar sent `temperature` to Bedrock models that reject it). That bug makes sampling opt-in from a code-resident, measured allowlist (`_SAMPLING_ACCEPTING_MODEL_IDS` in `src/rebar/llm/capabilities.py`). An operator who runs a model rebar has not measured can neither enable sampling for a model that accepts it nor withhold it from one rebar wrongly lists, without a rebar release. The operator report asked for \"operator-declared capabilities in config\" (suggestion 2). Repo policy forbids adding a config key in a bug fix, so it is filed here.\n\n## Evidence (from the bug)\n\nMeasured 2026-11-11 on Bedrock Converse us-west-2: Claude Opus 4.7+, Opus 5, Sonnet 5, and the 5.5 family reject `temperature` 0/0.7 and `top_p` but accept `temperature=1.0`; OpenAI GPT-5.5/GPT-6.1 Sol and Moonshot Kimi K3.1 reject all temperature and topP values; Claude 4.5/4.6, Nova Pro, Llama 4 Maverick, Pixtral Large and DeepSeek R1 accept all. New ids arrive faster than releases.\n\n## Approach (to be designed)\n\nA `[llm.model_capabilities.\"<model id>\"]` table (or equivalent) in `rebar.toml` whose rows override the measured table per exact id, at least `supports_temperature`; recorded in verdict provenance as operator-declared. Needs a `# mechanism-ok: config_key` marker naming this story.\n\n## Acceptance Criteria\n\n- [ ] An operator can declare that a model accepts or rejects sampling in config, and the runner honours it (unit test on the Bedrock converse request).\n- [ ] The declaration is visible in signed provenance.\n- [ ] `docs/config.md` documents the key.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Let operators declare per-model sampling capabilities in config"
+      },
       "created_at": "2026-11-11T19:31:47Z",
       "jira_id": "4598899",
       "jira_key": "REB-7108",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-11T19:31:51Z"
     },
@@ -17663,10 +17671,24 @@
     },
     "2886-3079-9b31-4838": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nThe epic needs one option selecting the plan-review engine (pipeline or agentic) so both can run on one ticket. `src/rebar/llm/workflow/gates/plan-review.yaml` has no selection point today.\n\n## Approach\n\n**Key.** Add the key ADR 0123 records, `[verify] plan_review_engine`, values `\"pipeline\"` and `\"agentic\"`, default `\"pipeline\"`. Declare it in `src/rebar/_config_schema.py` beside `require_plan_review_for_close` (line 71) as `plan_review_engine: str = _documented(\"pipeline\", ...)`, and validate it in `src/rebar/_config_sections.py`'s `_SECTIONS[\"verify\"]` with the existing `_as_choice(v, k, {\"pipeline\", \"agentic\"})` (pattern at line 95), so an unknown configured value is a config error at load time. `# mechanism-ok: config_key verify.plan_review_engine \u2014 bossy-impish-hoiho` sits directly above that `_SECTIONS` entry (the detector reads only that line and the one above, `scripts/_mechanism_delta/markers.py:76-83`), as at line 92.\n\n**No env var.** ADR 0123 forbids one, but every `_SECTIONS` key gets `REBAR_<SECTION>_<KEY>` automatically. `_config_sources.py` adds `_ENV_EXCLUDED_KEYS = frozenset({(\"verify\", \"plan_review_engine\")})` and helper `env_overridable_keys()` (each `_SECTIONS` pair not in it). Every canonical-env enumeration switches to it: `env_overrides` (`_config_sources.py:331`), the config cache signature (`config.py:381`), `scripts/gen_env_registry.py:409`, `scripts/generate_config_surface_golden.py:49-53`, and the derived-set tests `tests/unit/test_gen_env_registry.py:302` and `tests/unit/test_config_surface_golden.py:39`. So `REBAR_VERIFY_PLAN_REVIEW_ENGINE` is never read, documented or expected; the sunset ticket removes the entry.\n\n**Resolution.** `review_plan` (`src/rebar/llm/plan_review/__init__.py:199`) gains a keyword `engine: str | None = None`. Precedence per the ADR: an explicit argument, else the config key, else `\"pipeline\"`. An explicit value outside the two names raises `ConfigError` naming it before any store read or LLM call. CLI/MCP flags belong to the surfaces ticket.\n\n**Dispatch.** `review_plan` passes the resolved value to `_run_plan_review` (call at `__init__.py:273`, which gains an `engine` keyword). `gate_dispatch.produce_plan_review_verdict` (`gate_dispatch.py:66`) gains `engine: str = \"pipeline\"`, mirroring `overlap: bool = False` (line 75), always placed in the `run_workflow` inputs (line 191); `_run_plan_review` passes it at line 522. Existing callers and tests keep the default.\n\n**Pipeline-only shortcuts.** Three steps in `_run_plan_review` return before dispatch and are pipeline-attestation based: `reuse.idempotent_reuse` (line 473), `reuse.verdict_reuse` (line 480) and `orchestrator.drift_refresh` (line 490, whose probe calls `produce_plan_review_verdict` at `orchestrator.py:499` and re-signs). Each existing `if` gains `engine == \"pipeline\" and`, so under `\"agentic\"` none can return a reused or re-signed pipeline verdict or make a pipeline LLM call. Boolean operands add no McCabe branch (`_run_plan_review` stays 17, ceiling 19).\n\n**Workflow selection.** The v3 expression grammar accepts only single references (`lint_expr.py`; no `==`/`&&`), so a deterministic step computes it, like `grounding` \u2192 `code_grounded`:\n\n- `plan-review.yaml` declares input `engine` (string, default `\"pipeline\"`).\n- New top-level step `engine_route` (`needs: [precheck]`) uses new scripted op `plan_review_engine_route` in `src/rebar/llm/plan_review/workflow_ops.py`, inputs `run_llm: ${{ steps.precheck.outputs.run_llm }}` and `engine: ${{ inputs.engine }}`. It emits one boolean, `run_pipeline = run_llm and engine == \"pipeline\"`.\n- The `review` branch (line 56) changes its condition from `steps.precheck.outputs.run_llm` to `${{ steps.engine_route.outputs.run_pipeline }}` and gains `engine_route` in `needs`. Its `then` arm and its `else` passthrough arm are unchanged.\n\n**Floor first, no silent passthrough.** Not-claimable tickets fast-fail at `__init__.py:398-400`; a floor block or exempt type sets `run_llm` false, so the passthrough emits the precheck verdict under both values, byte-identical, no LLM call. With `run_llm` true and `\"agentic\"`, `plan_review_engine_route` raises naming the value (engine not yet available); the failed run takes the existing failed-run path to an unsigned INDETERMINATE carrying that error, never a passthrough verdict. The agentic-engine ticket replaces the raise with its arm.\n\n## Scope\n\n- rebar.toml (`[verify] plan_review_engine = \"pipeline\"`, commented)\n- src/rebar/_config_schema.py (field)\n- src/rebar/_config_sections.py (validation + marker)\n- src/rebar/_config_sources.py (`_ENV_EXCLUDED_KEYS`, `env_overridable_keys`)\n- src/rebar/config.py (cache signature loop)\n- scripts/gen_env_registry.py, scripts/generate_config_surface_golden.py, tests/unit/test_gen_env_registry.py, tests/unit/test_config_surface_golden.py (use the helper)\n- src/rebar/llm/plan_review/__init__.py (engine argument, resolution, shortcut guards)\n- src/rebar/llm/workflow/gate_dispatch.py (`engine` keyword; 778 lines, adds under 10)\n- src/rebar/llm/workflow/gates/plan-review.yaml (input, `engine_route`, condition)\n- src/rebar/llm/plan_review/workflow_ops.py (`plan_review_engine_route` op)\n- src/rebar/schemas/plan_review_engine_route_input.schema.json (new)\n- src/rebar/schemas/plan_review_engine_route_output.schema.json (new)\n- src/rebar/schemas/__init__.py (register beside `plan_review_grounding`, line 289)\n- tests/unit/test_plan_review_workflow_ops_seam.py (`_EXPECTED_OPS` gains the new op)\n- docs/config.md (narrative entry for the key)\n- docs/config-reference.md, docs/env-vars.md, tests/golden/config_surface.json (regenerated)\n- tests/unit/test_plan_review_engine_switch.py (new)\n\n## Testing\n\n- Happy path: no key or `\"pipeline\"` runs the pipeline; explicit `engine=\"pipeline\"` beats a configured `\"agentic\"`; `produce_plan_review_verdict` defaults the input to `\"pipeline\"`.\n- Shortcuts: with a valid pipeline attestation, with a stored matching BLOCK, and with a code-drift-only stale attestation, `engine=\"agentic\"` (`sign=True`) still returns the unsigned INDETERMINATE with zero LLM calls; under `\"pipeline\"` each shortcut still fires.\n- Route op: `run_pipeline` true only for `run_llm=true, engine=\"pipeline\"`; false when `run_llm=false` under both; raises naming the value for `run_llm=true, engine=\"agentic\"`.\n- Env: `REBAR_VERIFY_PLAN_REVIEW_ENGINE=agentic` exported, no key: engine stays `\"pipeline\"`; env-vars doc and golden omit the name.\n- Failure/edge: unknown configured value \u2192 load error naming it; unknown argument \u2192 `ConfigError`, zero LLM calls; floor-blocked and not-claimable tickets: zero LLM calls under both values (`FakeRunner`, `runner.py:194`, call counts), identical verdict and findings; DET-passing under `\"agentic\"` \u2192 unsigned INDETERMINATE naming the engine, never the passthrough verdict.\n- The gate workflow lints clean.\n\n## Acceptance Criteria\n\n- [ ] `[verify] plan_review_engine` is read with default `\"pipeline\"`, explicit-argument precedence, no environment override, and an error on unknown configured or explicit values; pinned by `tests/unit/test_plan_review_engine_switch.py`.\n- [ ] Floor-blocked and not-claimable reviews make zero LLM calls and return identical results under both values, and a DET-passing review under `\"agentic\"` returns an unsigned INDETERMINATE naming the engine with zero LLM calls, including when a valid, BLOCK-reusable or drift-stale pipeline attestation exists; pinned by call-counting tests in the same file.\n- [ ] `produce_plan_review_verdict` defaults `engine` to `\"pipeline\"`, so the drift-refresh probe and existing callers are unchanged; pinned by a test asserting the workflow input.\n- [ ] `docs/config-reference.md`, `docs/env-vars.md` and `tests/golden/config_surface.json` are regenerated and their drift checks pass.\n- [ ] `python scripts/check_mechanism_delta.py --check` exits 0 with the marker naming the open sunset ticket.\n- [ ] `make verify` exits 0.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Plan-review engine switch: [verify] plan_review_engine, dispatched after the Layer-1 floor"
       },
       "created_at": "2026-11-09T20:32:51Z",
@@ -19228,9 +19250,17 @@
       "updated_at": "2026-08-15T14:54:59Z"
     },
     "2bc8-3758-a4b9-47f0": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nDiscovered from bug tapestried-oversize-blackfly: rebar 0.14.0/0.15.0 shipped a capability table that presumed unmeasured models accept `temperature`, and plan review 400'd on Claude Sonnet 5.5 for the reporter. The capability table is only as good as its last measurement. The operator report (suggestion 5) asks for a pre-release probe of the model list.\n\n## Evidence\n\n`src/rebar/llm/evals/provider_parity.py:555-565` already probes a Bedrock id bare and with `temperature=0`. The bug's scratch probe (Converse, maxTokens 16, bare / temperature 0 / temperature 1.0 / topP 0.9) classified 17 ids across Anthropic, OpenAI, Moonshot, Amazon, Meta, Mistral and DeepSeek in under 2 minutes.\n\n## Approach (to be designed)\n\nExtend the parity probe to run every model id named in `rebar.toml`, `.github/llm-providers/*.toml` and the capability tables against Bedrock before a release (a `docs/releasing.md` step, runnable locally, portable \u2014 not CI-only), and fail when a probed result disagrees with `capabilities_for`.\n\n## Acceptance Criteria\n\n- [ ] A documented command probes every configured/listed model id and reports disagreements with the capability table (exit non-zero on disagreement).\n- [ ] `docs/releasing.md` lists it as a pre-release step.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Pre-release probe of configured models' sampling-parameter acceptance"
+      },
       "created_at": "2026-11-11T19:31:53Z",
       "jira_id": "4598900",
       "jira_key": "REB-7109",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-11T19:31:57Z"
     },
@@ -27601,6 +27631,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:23:02Z"
     },
+    "3e48-86e5-45a7-4acd": {
+      "created_at": "2026-11-11T21:07:15Z",
+      "jira_id": "4598903",
+      "jira_key": "REB-7112",
+      "state": "confirmed",
+      "updated_at": "2026-11-11T21:07:20Z"
+    },
     "3e4b-c9f5-490b-4531": {
       "baseline": {
         "assignee": null,
@@ -34869,6 +34906,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:56Z"
     },
+    "4eed-2e15-d018-4bd6": {
+      "created_at": "2026-11-11T21:07:20Z",
+      "jira_id": "4598904",
+      "jira_key": "REB-7113",
+      "state": "confirmed",
+      "updated_at": "2026-11-11T21:07:25Z"
+    },
     "4ef2-fe69-8e6b-4d1c": {
       "baseline": {
         "assignee": null,
@@ -36003,10 +36047,24 @@
     },
     "51e0-5038-bf00-4653": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation (read-only, production MCP host i-00880b2c7f13527c5, 2026-11-05)\n\nThe production MCP tickets clone (`/var/gerrit/site/mcp-tickets`, container label `rebar.service=mcp`) has received no git object maintenance since early September:\n\n- `git count-objects -v`: 74,605 loose objects (8.63 GiB loose), 235 packs (2.16 GiB), 306,528 commits.\n- `.git/objects/info/commit-graph` dated 2026-08-31; `objects/info/packs` dated 2026-09-02.\n- Local operator checkout of the same history: 6 packs, 333 MiB loose, current commit-graph chain.\n\nHistory walks there are much slower than on a clone of the same history:\n\n| walk (same command as rebar.attest.authorship_resolution) | production (shared clone in the container) | operator clone |\n|---|---|---|\n| store-wide `build_position_commit_map` (`-- '*.json'`) | 427.5 s | 111 s (bug breezelike-travelsick-moray, 2026-11-03 comment) |\n| per-ticket map, 26a0-0104-9b63-4500 | 160.8 s | 19.1 s |\n| per-ticket map, fb16-a8b0-c2b7-449a | 266.1 s | not measured |\n\nThe store-wide walk exceeds its 300 s timeout in production, so the compaction sweep's shared position map is always `None` there and every fold falls back to a per-ticket walk. Bug breezelike-travelsick-moray moves that walk outside the store write lock; it does not make the walk faster, so a production sweep still spends minutes per ticket before each fold.\n\nStore commits run with automatic maintenance disabled (`_AUTOMAINT_OFF` in compact.py and the commit seam), and `gc.autodetach=false`, `maintenance.autodetach=false` are set on the clone. Unverified: which component, if any, is meant to repack or rewrite the commit-graph on the production clone, and whether the 2 vCPU host or the 3.6 GiB container memory cap also contribute.\n\n## Expected\n\nThe production tickets clone's object store stays packed with a current commit-graph, so path-limited history walks cost about what they cost on a fresh clone, and the store-wide position walk finishes inside its timeout.\n\n## Acceptance Criteria\n- [ ] The mechanism that should keep the production tickets clone packed (or its absence) is identified with evidence.\n- [ ] After the fix, production `git count-objects -v` shows loose objects bounded and the commit-graph current, measured read-only via SSM.\n- [ ] The store-wide position walk completes inside its 300 s timeout in production, measured on a shared clone in the container.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Production MCP tickets clone gets no git maintenance; history walks 4-8x slower and the sweep position map times out"
       },
       "created_at": "2026-11-05T18:34:08Z",
@@ -46079,10 +46137,24 @@
     },
     "6b02-067c-9dbb-47e7": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observed (read-only over SSM, 2026-11-10 ~17:35 PST, host i-00880b2c7f13527c5)\n\n- Live MCP container `rebar-mcp-06b3b1a52303-8093` (image built at 06b3b1a5230, up ~23 h, healthy). Its env sets `REBAR_ROOT=MCP_CODE_DIR=/var/gerrit/site/mcp-code`, so the server reads `rebar.toml` from that workspace, not from the image's `/app`.\n- Workspace HEAD = `3835269d792` (2026-10-28 13:48 PDT). Its `origin/main` was fetched to `06b3b1a5230`; GitHub main is now `91182f96362`.\n- Running `LLMConfig.from_env()` + `resolve_model_string` inside the container resolves: default model `bedrock:us.anthropic.claude-opus-4-8`; `frontier` \u2192 opus-4-8, `standard` \u2192 sonnet-4-6, `trivial` \u2192 haiku-4-5. main's `rebar.toml` (after 3340 / `06b3b1a5230`) names the 5.5 models. **Production plan review is not running on the 5.5 models.**\n- `git status --porcelain` shows 27 staged entries. The index equals the tree of `e2ed08b343a` exactly (`git diff --cached --quiet e2ed08b343a` \u2192 0), the working tree equals the index, there are 0 untracked files, and `e2ed08b343a^` = `3835269d792`. Index mtime 2026-10-28 17:47:28 PDT; last reflog entry is the 14:14 PDT fast-forward to `3835269d792`.\n- The entrypoint's `refresh_code_locked` refuses a dirty tree, so every restart since logs `mcp: dirty code checkout \u2014 refusing refresh` (first journal hit 2026-10-29 17:16 PDT). The refusal is stderr-only; nothing alerted.\n\n## Hypotheses (unproven)\n\nThe state matches a fast-forward to `e2ed08b343a` that wrote index and working tree but never moved HEAD (process killed between the two). The killer is unidentified: the rebar-mcp journal has no entries in that window; autodeploy ran its 2-minute MCP reconcile throughout.\n\n## Impact\n\nEvery production gate that resolves config through this workspace uses the pre-3340 config: 4.x models, and any config key added after 2026-10-28. The 5.5 upgrade (and the Opus 5.5 refusal fix verification) is not live.\n\n## Acceptance criteria\n\n- [ ] The production workspace is repaired by an operator-approved write and reports `0 0` against origin/main (runbook review-bot-ops.md \"MCP code workspace freshness\"); a fresh in-container resolution shows frontier/standard/trivial on the 5.5 ids.\n- [ ] The interrupted-fast-forward state (clean against a descendant commit of HEAD that is an ancestor of origin/main) is either recovered safely by the entrypoint or surfaced loudly (alarm/health), with a test reproducing the stuck state.\n- [ ] Root cause of the interruption identified or the evidence searched recorded.\n\nNo config key, env var or flag in the fix.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Production MCP code workspace stuck at 3835269d792 after an interrupted fast-forward, so plan review still resolves 4.x models"
       },
       "created_at": "2026-11-11T02:31:33Z",
@@ -49436,6 +49508,13 @@
       "peer_parent": "REB-3792",
       "state": "confirmed",
       "updated_at": "2026-08-28T12:17:34Z"
+    },
+    "7350-7ab5-de03-408b": {
+      "created_at": "2026-11-11T21:07:25Z",
+      "jira_id": "4598905",
+      "jira_key": "REB-7114",
+      "state": "confirmed",
+      "updated_at": "2026-11-11T21:07:29Z"
     },
     "7359-5254-f634-48a3": {
       "baseline": {
@@ -56122,9 +56201,17 @@
       "updated_at": "2026-09-04T01:09:37Z"
     },
     "831a-3a31-a74d-4765": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nDiscovered from bug tapestried-oversize-blackfly. The verifier paths pin `temperature=0` for determinism (`src/rebar/llm/completion.py:396`, `src/rebar/llm/plan_review/floors.py:90,264`, `workflow/gates/plan-review.yaml` `temperature: 0`). On Claude \u22654.7, Opus/Sonnet 5, the 5.5 family, OpenAI GPT-5.5/6.1 and Kimi K3.1 that pin is now withheld (measured rejections, 2026-11-11, Bedrock us-west-2), so those passes run at provider-default sampling. Anthropic's 5.5 migration guides say to drop temperature/top_p/top_k and steer with prompting and `output_config.effort`. Today effort is only a per-model constant in `_MODEL_ID_CAPABILITY_OVERRIDES` (`capabilities.py`, 5.5 rows: opus/sonnet `high`, haiku `medium`), sent via `anthropic_effort` and Bedrock `additionalModelRequestFields.output_config.effort` (`structured_run.py:409-417`). The operator report (suggestion 4) asks for a provider-neutral reasoning-effort surface to replace the temperature pin. A bug fix may not add config, so it is filed here.\n\n## Approach (to be designed)\n\nA per-pass/per-class `effort` setting mapped per provider (Anthropic `output_config.effort`, OpenAI `reasoning_effort`, Bedrock additionalModelRequestFields), with a measured determinism comparison against the old greedy pin on the plan-review replay evals.\n\n## Acceptance Criteria\n\n- [ ] Verifier passes can request an effort level that reaches each provider's wire field (unit tests per provider request shape).\n- [ ] A replay-eval comparison of verdict stability with effort vs the old temperature pin is recorded on the ticket.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Expose a provider-neutral reasoning-effort setting for verifier passes"
+      },
       "created_at": "2026-11-11T19:32:00Z",
       "jira_id": "4598901",
       "jira_key": "REB-7110",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-11T19:32:03Z"
     },
@@ -57173,9 +57260,31 @@
       "updated_at": "2026-09-05T09:33:23Z"
     },
     "8501-0e78-cbac-4b03": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nOperator report: rebar sends sampling parameters that newer models reject, so plan review fails with a 400 on those models. rebar decides per model whether to send `temperature` from `ModelCapabilities.supports_temperature` (`src/rebar/llm/capabilities.py:85`), which **defaults to True**; only exact ids listed in `_MODEL_ID_CAPABILITY_OVERRIDES` (`capabilities.py:230-275`: Opus 4.7/4.8 and the 5.5 family under the `\"\"`, `us.anthropic.`, `global.anthropic.` prefixes) withhold it. `structured_run.build_model_settings` (`structured_run.py:400-404`) sends `temperature` whenever one is configured and the capability is True. Temperature is configured on every verifier path: the completion verifier pins `temperature=0.0` (`completion.py:396-397`), plan-review floors pin it (`plan_review/floors.py:90,264`), and workflow steps carry `temperature: 0` (`workflow/gates/plan-review.yaml:210,316`, `code-review.yaml:184`, applied by `workflow/runs.py:223-225`). rebar never sends `top_p`/`top_k` (no config surface reaches `model_settings`).\n\n## Observation\n\nMeasured 2026-11-11 on Bedrock Converse, us-west-2 (`AWS_PROFILE=frontier-bedrock`), maxTokens 16, the report's table holds for every id probed:\n- `us.anthropic.claude-{opus-4-7,opus-5,sonnet-5,sonnet-5-5,opus-5-5,haiku-5-5}`: bare accepted; `temperature=0` rejected \"`temperature` is deprecated for this model.\"; `temperature=1.0` accepted; `topP=0.9` rejected \"`top_p` is deprecated for this model.\"\n- `us.openai.gpt-5.5`, `us.openai.gpt-6.1-sol`, `us.moonshotai.kimi-k3.1`: bare accepted; temperature 0 and 1.0 rejected \"This model doesn't support the temperature field. Remove temperature and try again.\"; topP rejected \"This model doesn't support the topP field. Remove topP and try again.\"\n- Accept everything: `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-4-5-20251001-v1:0`, `us.anthropic.claude-opus-4-5-20251101-v1:0`, `us.amazon.nova-pro-v1:0`, `us.meta.llama4-maverick-17b-instruct-v1:0`, `us.mistral.pixtral-large-2502-v1:0`, `us.deepseek.r1-v1:0`.\n\nWhat origin/main b878c4be768 hands boto3 `converse` through `PydanticAIRunner.run()` with `temperature=0.0` (scratch repro, intercepting Bedrock client): `inferenceConfig` contains `temperature: 0.0` for `us.anthropic.claude-opus-5`, `us.anthropic.claude-sonnet-5`, `global.anthropic.claude-sonnet-5`, `anthropic.claude-sonnet-5-5`, `eu.anthropic.claude-sonnet-5-5`, `apac.anthropic.claude-opus-5-5`, `us.openai.gpt-5.5`, `us.openai.gpt-6.1-sol`, `us.moonshotai.kimi-k3.1`; it is absent only for the listed `us.`/`global.` 5.5 and 4.7/4.8 ids. So `us.anthropic.claude-sonnet-5-5` (the configured standard class, `rebar.toml:225`) already works on main (change 3340); every unlisted rejecting id still 400s.\n\nSecond defect: `failure.translate_sampling_parameter_rejection` (`failure.py:435-476`) requires a rejection word in `(\"deprecated\",\"not supported\",\"unsupported\")` and a param name in `(\"temperature\",\"top_p\",\"top_k\")`. The OpenAI/Kimi wording (\"doesn't support\", \"topP\") matches neither, so those 400s fall through to the generic `LLMUnavailableError` (verified: a `ModelHTTPError(400)` with the OpenAI body returns None).\n\n## Hypotheses\n\nRoot cause: sampling is opt-out (default True plus a deny-list), so every model not yet measured is presumed to accept; the deny-list cannot keep up with new ids, prefixes (`anthropic.`, `eu.`, `apac.`) and vendors. The translator's phrase list was written from the Claude wording only.\n\n## Approach\n\nUnconditional behaviour; no new config key, env var or feature flag.\n1. Opt-in sampling: `ModelCapabilities.supports_temperature` defaults False; a new exact-id `_SAMPLING_ACCEPTING_MODEL_IDS` frozenset in `capabilities.py` (set membership, per the no-prefix-matching guard in `tests/unit/test_bedrock_provider.py:115`) lists only the measured-accepting ids above under their `\"\"`/`us.`/`global.` profiles plus direct-Anthropic `claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5[-20251001]`, `claude-opus-4-5`. Both the profile path and the string fallback path of `capabilities_for` use it. Every other model, including any future Claude \u22654.7 id, gets no `temperature`. The now-redundant `supports_temperature: False` rows are removed; the 5.5 effort rows stay. Verifier pins stay as the requested value and are withheld by the capability.\n2. Translator matches both message forms (`doesn't support`/`does not support`; `topP`/`topK`) and names the opt-in remedy.\n3. One-shot retry: when a run that sent a sampling parameter fails with a matching 400, `runner.run()` records the resolved model in a module-level set in `runner_support.py`, logs one WARNING, and re-runs once; capabilities for a recorded model have `supports_temperature` cleared for the process lifetime. A second matching failure raises the existing `LLMConfigError`. No lock/env/config (nothing the mechanism ratchet counts). `run()` stays \u2264 its complexity ceiling 24 by extracting the withheld-temperature log block into a helper.\n4. Docs: `docs/llm-framework.md:328-332` describes opt-in.\n\nOut of scope (filed as separate tickets): operator-declared capabilities in config, a provider-neutral reasoning-effort surface, a pre-release model-list probe.\n\n## Scope\n\n`src/rebar/llm/capabilities.py`, `src/rebar/llm/failure.py`, `src/rebar/llm/runner.py`, `src/rebar/llm/runner_support.py`, `src/rebar/llm/completion.py` (comment), `docs/llm-framework.md`, new `tests/unit/test_sampling_opt_in.py`, and updated expectations in `tests/unit/test_bedrock_provider.py`, `tests/unit/test_llm_capabilities.py`.\n\n## Testing\n\n`tests/unit/test_sampling_opt_in.py` drives `PydanticAIRunner.run()` with `temperature=0.0` through the real `BedrockConverseModel` with an intercepting boto client (pattern: `tests/unit/test_agentic_message_cache.py:186-212`): every rejecting id above (plus `anthropic.`/`eu.`/`apac.` 5.5 and an unknown `us.anthropic.claude-opus-6`) yields no `temperature`/`topP` in `inferenceConfig`; each accepting id still sends `temperature: 0.0`. Failure path: a client whose first `converse` raises a `ClientError` ValidationException with each message form, then succeeds, yields one retry whose request has no `temperature`, and a later run for the same model sends none; a client that rejects twice surfaces `LLMConfigError`; an unrelated 400 is not retried.\n\n## Acceptance Criteria\n\n- [ ] RED first: `test_sampling_opt_in.py` fails on origin/main because `inferenceConfig` carries `temperature` for `us.anthropic.claude-opus-5`, `us.anthropic.claude-sonnet-5`, `us.openai.gpt-5.5`, `us.moonshotai.kimi-k3.1` (output recorded in a ticket comment), then passes after the fix.\n- [ ] For every rejecting/unknown id in Testing, the converse request has no `temperature`, `topP` or `topK` (asserted by the parametrized test).\n- [ ] Each measured-accepting id still sends `temperature: 0.0` (parametrized positive control).\n- [ ] Both rejection message forms (Claude \"deprecated\", OpenAI/Kimi \"doesn't support \u2026 topP\") are translated to `LLMConfigError` and trigger exactly one retry without sampling, remembered for that model; an unrelated 400 is neither translated nor retried (unit tests).\n- [ ] `env -u JIRA_URL -u JIRA_USER -u JIRA_API_TOKEN make verify` passes; `python scripts/check_mechanism_delta.py --check` and `python scripts/check_complexity_baseline.py --check` exit 0.\n- [ ] Live Bedrock probe (us-west-2) of the fixed runner request for `us.anthropic.claude-sonnet-5-5`, `us.anthropic.claude-opus-5`, `us.openai.gpt-5.5` and `us.moonshotai.kimi-k3.1` returns a response (no 400); results posted as a ticket comment.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "rebar sends temperature to Bedrock models that reject it (Opus/Sonnet 5, OpenAI, Kimi, non-us 5.5 ids)"
+      },
       "created_at": "2026-11-11T19:32:05Z",
       "jira_id": "4598902",
       "jira_key": "REB-7111",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-11T19:32:09Z"
     },
@@ -117063,7 +117172,11 @@
     "1794423738741250869": "__rebar_unknown_comment_id__",
     "1794424582842104151": "__rebar_unknown_comment_id__",
     "1794424730523381767": "__rebar_unknown_comment_id__",
-    "1794424856091970297": "__rebar_unknown_comment_id__"
+    "1794424856091970297": "__rebar_unknown_comment_id__",
+    "1794425728874975963": "__rebar_unknown_comment_id__",
+    "1794426200826552855": "__rebar_unknown_comment_id__",
+    "1794427330654771105": "__rebar_unknown_comment_id__",
+    "1794427787575306413": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -122594,6 +122707,9 @@
     "REB-711": "8ed5-9c7d-cb86-42c8",
     "REB-7110": "831a-3a31-a74d-4765",
     "REB-7111": "8501-0e78-cbac-4b03",
+    "REB-7112": "3e48-86e5-45a7-4acd",
+    "REB-7113": "4eed-2e15-d018-4bd6",
+    "REB-7114": "7350-7ab5-de03-408b",
     "REB-712": "f193-223f-eb36-4061",
     "REB-713": "ace2-f784-4b19-4f22",
     "REB-714": "jira-reb-714",
