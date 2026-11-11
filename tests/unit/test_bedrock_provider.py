@@ -84,13 +84,14 @@ def test_supports_temperature_is_withdrawn_only_for_the_measured_model():
     )
 
 
-def test_supports_temperature_defaults_true_for_everything_else():
-    """The temperature denylist leaves unlisted models enabled. This example accepts
-    temperature, while Opus 4.8 is now listed on both provider paths."""
+def test_supports_temperature_is_opt_in_for_everything_else():
+    """Sampling is opt-in (bug tapestried-oversize-blackfly): a measured-accepting id keeps it on
+    both resolution paths, and an unmeasured model gets none."""
     from rebar.llm.capabilities import capabilities_for
 
     assert capabilities_for("anthropic:claude-sonnet-4-6").supports_temperature is True
-    assert capabilities_for("openai:gpt-4o").supports_temperature is True
+    assert capabilities_for(f"bedrock:{_TEMP_OK}").supports_temperature is True
+    assert capabilities_for("openai:gpt-4o").supports_temperature is False
 
 
 # ── §B held out from the implementer ────────────────────────────────────────────────────
@@ -168,9 +169,9 @@ def test_conservative_fallback_is_unchanged_when_no_model_id_is_available(caplog
 
     assert caps.native_structured_output is False
     assert caps.prompt_cache_style == "none"
-    assert caps.supports_temperature is True, (
-        "the conservative record must not withdraw temperature — that would silently disable "
-        "greedy determinism for every unknown model"
+    assert caps.supports_temperature is False, (
+        "an unidentified model must not be sent sampling parameters — newer models reject them "
+        "with a 400 (bug tapestried-oversize-blackfly)"
     )
     assert len([r for r in caplog.records if r.levelno >= logging.WARNING]) == 1
 
@@ -412,7 +413,7 @@ def test_translation_names_both_remedies_not_just_the_problem():
     )
     assert err is not None
     message = str(err)
-    assert "_MODEL_ID_CAPABILITY_OVERRIDES" in message, "remedy 1: the override table"
+    assert "_SAMPLING_ACCEPTING_MODEL_IDS" in message, "remedy 1: the accepting-id table"
     assert "TEMPERATURE" in message.upper(), "remedy 2: unset the temperature config"
 
 

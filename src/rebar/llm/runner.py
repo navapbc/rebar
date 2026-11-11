@@ -420,7 +420,9 @@ class PydanticAIRunner:
             elif provider_session.supports(_provider_name):
                 from pydantic_ai.models import infer_model
 
-                model = infer_model(resolved, provider_factory=provider_session.provider_factory)
+                model = _runner_support.with_sampling_retry(
+                    infer_model(resolved, provider_factory=provider_session.provider_factory)
+                )
             elif provider_session.is_resolvable(_provider_name):
                 model = resolved
             else:
@@ -495,8 +497,8 @@ class PydanticAIRunner:
             model_settings = _structured_run.build_model_settings(
                 cfg, req, caps, resolved, cache_settings, model_override=self._model_override
             )
-            # Sampling-temperature withdrawal (story S3/2932: e.g. `us.anthropic.claude-opus-4-7`
-            # 400s "temperature is deprecated for this model") is decided PURELY inside
+            # Sampling-temperature withdrawal (opt-in, bug tapestried-oversize-blackfly: only a
+            # model measured to accept it is sent one) is decided PURELY inside
             # ``_structured_run.build_model_settings`` (no logging there — see its docstring and
             # ``_TEMPERATURE_WITHDRAWN_LOGGED`` below). The once-per-model dedup INFO log for that
             # withdrawal stays HERE, the only place allowed to mutate the dedup set.
@@ -507,7 +509,7 @@ class PydanticAIRunner:
                 if resolved not in _TEMPERATURE_WITHDRAWN_LOGGED:
                     _TEMPERATURE_WITHDRAWN_LOGGED.add(resolved)
                     logger.info(
-                        "llm: omitting temperature for model=%s — measured to reject it "
+                        "llm: omitting temperature for model=%s — not measured to accept it "
                         "(capabilities.supports_temperature is False)",
                         resolved,
                     )

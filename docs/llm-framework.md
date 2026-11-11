@@ -326,10 +326,15 @@ servers, `pydantic-ai-slim[google]` for Gemini) — a missing one raises a clear
 error naming the package.
 
 `temperature` is **unset by default**, so the provider's own default applies; set
-`REBAR_LLM_TEMPERATURE` to send one. Whether a model accepts it is a resolved **capability**
-(`supports_temperature`), recorded in the signed provenance record, because some models reject the
-parameter outright — on Bedrock fatally, since only pydantic-ai's Anthropic path drops unsupported
-sampling settings for you. Structured output
+`REBAR_LLM_TEMPERATURE` to request one (the verifier passes request `0`). Sampling is
+**opt-in per model**: a requested value is sent only to a model id in
+`rebar.llm.capabilities._SAMPLING_ACCEPTING_MODEL_IDS`, the models measured to accept it (Claude
+4.5/4.6, Nova Pro, Llama 4 Maverick, Pixtral Large, DeepSeek R1). Every other model — Claude Opus
+4.7 and later, Opus/Sonnet 5, the 5.5 family, OpenAI GPT-5.5+, Kimi K3, and any id not yet
+measured — runs at its provider's default, because those models answer a sampling parameter with a
+400. The resolved **capability** (`supports_temperature`) is recorded in the signed provenance
+record. If a listed model starts rejecting a sampling parameter, rebar retries that request once
+without `temperature`/`top_p`/`top_k` and sends none to that model for the rest of the process. Structured output
 uses pydantic-ai's reliability stack (`NativeOutput`/`PromptedOutput` +
 `json-repair` + bounded retry), which is provider-*portable*.
 

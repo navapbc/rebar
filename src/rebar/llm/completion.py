@@ -392,7 +392,8 @@ def _verify_completion_inner(
     # greedy pin; an explicit operator REBAR_LLM_TEMPERATURE (cfg.temperature not None) still wins,
     # exactly like the model / step-floor tuning above. This is a variance MITIGATION, not the root
     # fix — the prompt guidance (search by ticket-id/exact-symbols, not regex/semantic phrases)
-    # addresses the mechanism directly.
+    # addresses the mechanism directly. The pin is a REQUEST: it is sent only to a model measured
+    # to accept sampling (`capabilities.supports_sampling`, bug tapestried-oversize-blackfly).
     if cfg.temperature is None:
         cfg = replace(cfg, temperature=0.0)
     # Resolve the ticket type once (one local read; no network). graph default depends on

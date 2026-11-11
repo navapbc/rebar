@@ -485,10 +485,11 @@ def build_fallback_model(
         session.model_for(candidate, endpoint=endpoint)
         for candidate, endpoint in zip(candidates, endpoints, strict=True)
     ]
+    from rebar.llm.runner_support import with_sampling_retry
     from rebar.llm.tracing import wrap_candidate
 
     models = [
-        wrap_candidate(m, i, candidate)
+        wrap_candidate(with_sampling_retry(m), i, candidate)
         for i, (m, candidate) in enumerate(zip(models, candidates, strict=True))
     ]
     # `wrap_candidate` (above) tags every NON-PRIMARY leg's failures (order >= 1) so

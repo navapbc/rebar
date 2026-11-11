@@ -415,12 +415,13 @@ def test_five_five_direct_ids_use_the_512_token_cache_minimum(family):
     assert caps.cache_min_prefix_tokens == 512
 
 
-def test_an_unlisted_model_sends_no_effort_and_keeps_temperature():
+def test_an_unlisted_model_sends_no_effort_and_no_temperature():
     """Negative control: an id with no exact-id row keeps the family default, so the effort
-    pin cannot leak onto a model nobody measured."""
+    pin cannot leak onto a model nobody measured — and sampling is opt-in, so an unmeasured
+    model is sent no temperature either (bug tapestried-oversize-blackfly)."""
     caps = _caps("anthropic:claude-sonnet-4-5")
     assert caps.effort is None
-    assert caps.supports_temperature is True
+    assert caps.supports_temperature is False
 
 
 def test_a_fallback_chain_carries_the_primary_effort():

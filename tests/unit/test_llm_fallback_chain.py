@@ -243,7 +243,10 @@ def test_a_class_without_fallback_builds_an_unwrapped_model(seam, monkeypatch):
 
     model = seam["captured"]["model"]
     assert not isinstance(model, FallbackModel)
-    assert type(model).__name__ == "AnthropicModel"
+    # The one-shot sampling retry (bug tapestried-oversize-blackfly) wraps a model that may be
+    # sent sampling; it re-raises every other failure unchanged, so the error surface holds.
+    assert type(model).__name__ == "SamplingRetryModel"
+    assert type(model.wrapped).__name__ == "AnthropicModel"
 
 
 def test_a_class_with_fallback_builds_a_chain_whose_default_is_the_primary(seam, monkeypatch):

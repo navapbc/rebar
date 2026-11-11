@@ -159,6 +159,10 @@ def test_run_builds_its_anthropic_model_through_the_provider_seam(seam):
 
     model = seam["captured"].get("model")
     assert model is not None, "run() never handed a model to its Agent"
+    # A model that may be sent sampling arrives inside the transparent one-shot sampling retry
+    # (bug tapestried-oversize-blackfly); the provider-built model is what it wraps.
+    assert type(model).__name__ == "SamplingRetryModel"
+    model = model.wrapped
     assert type(model).__name__ == "AnthropicModel"
     # Retry is owned by the transport, never the SDK.
     assert model.client.max_retries == 0

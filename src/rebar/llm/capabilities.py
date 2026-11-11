@@ -76,12 +76,13 @@ class ModelCapabilities:
     native_structured_output: bool
     prompt_cache_style: str  # "none" | "anthropic" | "bedrock"
     supports_thinking: bool
-    # Whether `temperature` may be sent to this model (story S3/2932). Defaults True — the
-    # denylist below withdraws it only for the EXACT ids MEASURED to 400 on it, so an unlisted
-    # model keeps sending temperature and fails LOUDLY if it turns out to be affected, rather
-    # than silently losing Pass-2 greedy determinism for every model as a blanket withdrawal
-    # would.
-    supports_temperature: bool = True
+    # Whether a sampling parameter (`temperature`) may be sent to this model. Opt-in (bug
+    # tapestried-oversize-blackfly): True only for an id in `_SAMPLING_ACCEPTING_MODEL_IDS`,
+    # which lists models MEASURED to accept it. New model generations reject it (Claude 4.7+,
+    # Opus/Sonnet 5, OpenAI GPT-5.5+, Kimi K3), so presuming acceptance turned every new id
+    # into a 400 until someone measured it; an unmeasured model now runs at its provider's
+    # default sampling instead.
+    supports_temperature: bool = False
     # The minimum MARKED-PREFIX size that can cache on this model (bug e3cd). Carried on the
     # capability record alongside `prompt_cache_style` because it is the same kind of fact —
     # per-model, read off the resolved model, never guessed from a provider-name string — and
@@ -225,9 +226,8 @@ _REBAR_OVERRIDES: tuple[tuple[Any, dict[str, Any]], ...] = (
 
 
 # Exact model-id overrides record measured exceptions after family defaults. Exact matching
-# prevents an unmeasured model from inheriting a capability. Opus 4.7 and 4.8 omit the tunable
-# temperature parameter because Bedrock rejects nondefault values while direct Anthropic drops
-# them. Regional and global Bedrock ids require separate entries.
+# prevents an unmeasured model from inheriting a capability. Regional and global Bedrock ids
+# require separate entries. Sampling is not recorded here: see `_SAMPLING_ACCEPTING_MODEL_IDS`.
 _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
     # Direct Sonnet 4.6 accepted native JSON schema output with and without thinking. Bare ids
     # also cover provider-qualified direct requests. Unmeasured Claude ids retain the family
@@ -236,14 +236,6 @@ _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
         "native_structured_output": True,
         "native_output_with_thinking": True,
     },
-    # The direct Anthropic adapter drops Opus 4.8 temperature settings. Recording that fact here
-    # avoids both its warning and a false claim that verifier decoding is pinned.
-    "claude-opus-4-8": {"supports_temperature": False},
-    "claude-opus-4-7": {"supports_temperature": False},
-    "us.anthropic.claude-opus-4-8": {"supports_temperature": False},
-    "global.anthropic.claude-opus-4-8": {"supports_temperature": False},
-    "us.anthropic.claude-opus-4-7": {"supports_temperature": False},
-    "global.anthropic.claude-opus-4-7": {"supports_temperature": False},
     # Bedrock measurements showed native JSON schema output works under extended thinking for
     # Sonnet 4.6 and Haiku 4.5. Client-side validation remains required because Bedrock strips
     # numeric bounds from the schema.
@@ -260,17 +252,69 @@ _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
     # preserve the conservative family default.
     #
     # The 5.5 generation (measured 2026-11-09, direct and Bedrock us-east-1): `temperature=0` is
-    # rejected with a 400 on all three, so sampling is withdrawn; an explicit
-    # `output_config.effort` is accepted. Effort is pinned per model -- `high` for Opus and Sonnet
-    # (the API default the 4.x models ran at) and `medium` for Haiku (its own default; Haiku 4.5
-    # had no effort parameter). Native structured output stays unmeasured, so the family default
-    # (prompted output) holds.
+    # rejected with a 400 on all three, so they are absent from `_SAMPLING_ACCEPTING_MODEL_IDS`;
+    # an explicit `output_config.effort` is accepted. Effort is pinned per model -- `high` for
+    # Opus and Sonnet (the API default the 4.x models ran at) and `medium` for Haiku (its own
+    # default; Haiku 4.5 had no effort parameter). Native structured output stays unmeasured,
+    # so the family default (prompted output) holds.
     **{
-        f"{prefix}claude-{family}-5-5": {"supports_temperature": False, "effort": effort}
+        f"{prefix}claude-{family}-5-5": {"effort": effort}
         for prefix in ("", "us.anthropic.", "global.anthropic.")
         for family, effort in (("opus", "high"), ("sonnet", "high"), ("haiku", "medium"))
     },
 }
+
+
+# Sampling is OPT-IN (bug tapestried-oversize-blackfly): rebar sends `temperature` only to an
+# exact id in this set, every member MEASURED to accept `temperature` 0 and 1.0 and `topP` 0.9
+# (Bedrock Converse us-west-2, 2026-11-11, each bare-profile `us.` id; the `global.` and
+# foundation ids name the same model). The same probe measured rejections on Claude Opus 4.7,
+# 4.8, 5, 5.5, Sonnet 5, 5.5, Haiku 5.5 (temperature 0 and top_p), OpenAI GPT-5.5 and GPT-6.1
+# Sol and Moonshot Kimi K3.1 (every temperature and topP) -- so those, and any id nobody has
+# measured, are absent and run at their provider's default sampling. The direct-Anthropic ids
+# are the same Claude 4.5/4.6 models served by the Messages API.
+_SAMPLING_ACCEPTING_MODEL_IDS: frozenset[str] = frozenset(
+    {
+        *(
+            f"{prefix}{model}"
+            for prefix in ("", "us.", "global.")
+            for model in (
+                "anthropic.claude-opus-4-6-v1",
+                "anthropic.claude-sonnet-4-6",
+                "anthropic.claude-haiku-4-5-20251001-v1:0",
+                "anthropic.claude-opus-4-5-20251101-v1:0",
+                "amazon.nova-pro-v1:0",
+                "meta.llama4-maverick-17b-instruct-v1:0",
+                "mistral.pixtral-large-2502-v1:0",
+                "deepseek.r1-v1:0",
+            )
+        ),
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+        "claude-haiku-4-5-20251001",
+        "claude-opus-4-5",
+        "claude-opus-4-5-20251101",
+    }
+)
+
+# Models that answered a request carrying a sampling parameter with a 400 naming it during THIS
+# process (filled by `runner_support.SamplingRetryModel`). An accepting model that a provider
+# later deprecates stops receiving sampling after one rejection rather than failing every call
+# until the table above is edited. Process-lifetime by design: nothing is persisted.
+_SAMPLING_REJECTED_AT_RUNTIME: set[str] = set()
+
+
+def supports_sampling(model_id: str | None) -> bool:
+    """Whether rebar may send sampling parameters to ``model_id`` (bare id, no provider)."""
+    return (
+        model_id in _SAMPLING_ACCEPTING_MODEL_IDS and model_id not in _SAMPLING_REJECTED_AT_RUNTIME
+    )
+
+
+def record_sampling_rejected(model_id: str) -> None:
+    """Remember for the process lifetime that ``model_id`` rejected a sampling parameter."""
+    _SAMPLING_REJECTED_AT_RUNTIME.add(model_id)
 
 
 def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapabilities:
@@ -291,7 +335,7 @@ def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapab
         "native_structured_output": native_structured_output,
         "prompt_cache_style": prompt_cache_style,
         "supports_thinking": supports_thinking,
-        "supports_temperature": True,
+        "supports_temperature": supports_sampling(model_id),
         "native_web_search": _supports_native_web_search(profile),
         "native_output_with_thinking": False,
         "effort": None,
@@ -416,16 +460,16 @@ def capabilities_for(model_or_model_string: Any) -> ModelCapabilities:
     # built provider, so this is defence in depth rather than a live bug fix.
     fallback_id = _model_id_of(model_or_model_string)
     id_overrides = _MODEL_ID_CAPABILITY_OVERRIDES.get(fallback_id) if fallback_id else None
-    if id_overrides:
+    if id_overrides or supports_sampling(fallback_id):
         merged: dict[str, Any] = {
             "native_structured_output": _CONSERVATIVE.native_structured_output,
             "prompt_cache_style": _CONSERVATIVE.prompt_cache_style,
             "supports_thinking": _CONSERVATIVE.supports_thinking,
-            "supports_temperature": _CONSERVATIVE.supports_temperature,
+            "supports_temperature": supports_sampling(fallback_id),
             "native_web_search": _CONSERVATIVE.native_web_search,
             "native_output_with_thinking": _CONSERVATIVE.native_output_with_thinking,
         }
-        merged.update(id_overrides)
+        merged.update(id_overrides or {})
         merged_cache_style = str(merged["prompt_cache_style"])
         return ModelCapabilities(
             native_structured_output=bool(merged["native_structured_output"]),

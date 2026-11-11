@@ -421,58 +421,75 @@ def degrade_cause_flags(error: object) -> dict:
 
 
 # ── Sampling-parameter rejection translation (story S3/2932) ────────────────────
-# The `_MODEL_ID_CAPABILITY_OVERRIDES` denylist in capabilities.py will drift as AWS
-# deprecates sampling params on more models than the ones rebar has MEASURED. An unlisted-but-
-# affected model must fail LOUDLY and ACTIONABLY (name the model, the parameter, both
-# remedies) rather than as an opaque provider outage classified LLMUnavailableError. This is
-# rebar's existing failure-classification seam, not the Bedrock leaf — no provider-name branch
-# enters `runner.py` for this; `runner.run()` tries this FIRST in its broad except, falling
-# back to the existing classify_llm_failure/LLMUnavailableError path only when it returns None.
-_SAMPLING_PARAMS: tuple[str, ...] = ("temperature", "top_p", "top_k")
-_REJECTION_WORDS: tuple[str, ...] = ("deprecated", "not supported", "unsupported")
+# Sampling is opt-in (`capabilities._SAMPLING_ACCEPTING_MODEL_IDS`, bug
+# tapestried-oversize-blackfly), so a rejection reaching here means a model MEASURED to accept a
+# sampling parameter has stopped accepting it. `runner_support.SamplingRetryModel` retries such a
+# request once without sampling; if it still fails it must fail LOUDLY and ACTIONABLY (name the
+# model, the parameter, the remedy) rather than as an opaque provider outage classified
+# LLMUnavailableError. Two provider wordings are measured on Bedrock Converse: Claude's
+# "`temperature` is deprecated for this model." (same for `top_p`/`top_k`) and OpenAI/Kimi's
+# "This model doesn't support the temperature field." (same for `topP`). The names are matched
+# lower-cased, so `topP`/`topK` arrive as `topp`/`topk`.
+_SAMPLING_PARAM_NAMES: tuple[tuple[str, str], ...] = (
+    ("temperature", "temperature"),
+    ("top_p", "top_p"),
+    ("topp", "top_p"),
+    ("top_k", "top_k"),
+    ("topk", "top_k"),
+)
+_REJECTION_WORDS: tuple[str, ...] = (
+    "deprecated",
+    "not supported",
+    "unsupported",
+    "doesn't support",
+    "does not support",
+)
 
 
-def translate_sampling_parameter_rejection(
-    exc: BaseException, model_id: str
-) -> LLMConfigError | None:
-    """Return an :class:`LLMConfigError` if ``exc`` looks like a provider rejecting a sampling
-    parameter (e.g. Bedrock's "temperature is deprecated for this model"), else ``None``.
+def sampling_parameter_rejected(exc: BaseException) -> str | None:
+    """The sampling parameter ``exc`` says the provider rejected, else ``None``.
 
     ALL THREE conjuncts are required, checked on ``exc`` or its ``__cause__`` (a provider SDK
     error is often wrapped):
 
     1. looks like a client rejection: ``status_code == 400`` OR ``"ValidationException"`` in
        ``str(exc)``;
-    2. names a sampling parameter rebar can send: ``temperature``, ``top_p``, or ``top_k``;
-    3. carries a rejection word: ``deprecated``, ``not supported``, or ``unsupported``.
+    2. names a sampling parameter: ``temperature``, ``top_p``/``topP``, or ``top_k``/``topK``;
+    3. carries a rejection word: ``deprecated``, ``not supported``, ``unsupported``,
+       ``doesn't support`` or ``does not support``.
 
     All three are required so an UNRELATED 400 (a malformed request, a bad model id) is not
-    swallowed by this translation and keeps its existing ``LLMUnavailableError``
-    classification — only a genuine sampling-parameter rejection is redirected here.
+    mistaken for one and keeps its existing ``LLMUnavailableError`` classification.
     """
     for candidate in (exc, getattr(exc, "__cause__", None)):
         if candidate is None:
             continue
         status_code = getattr(candidate, "status_code", None)
         text = str(candidate)
-        looks_like_rejection = status_code == 400 or "ValidationException" in text
-        if not looks_like_rejection:
+        if not (status_code == 400 or "ValidationException" in text):
             continue
         low = text.lower()
-        named_param = next((p for p in _SAMPLING_PARAMS if p in low), None)
-        if named_param is None:
-            continue
-        if not any(word in low for word in _REJECTION_WORDS):
-            continue
-        return LLMConfigError(
-            f"model {model_id!r} rejected the {named_param!r} sampling parameter: {text}. "
-            f"Fix by either (1) adding {model_id!r} to "
-            "rebar.llm.capabilities._MODEL_ID_CAPABILITY_OVERRIDES with "
-            f"{{'supports_{named_param}': False}} (if such a field exists — today only "
-            "'supports_temperature' is tracked), or (2) unsetting the corresponding "
-            f"config (e.g. REBAR_LLM_TEMPERATURE) so {named_param!r} is never sent."
-        )
+        named = next((name for token, name in _SAMPLING_PARAM_NAMES if token in low), None)
+        if named is not None and any(word in low for word in _REJECTION_WORDS):
+            return named
     return None
+
+
+def translate_sampling_parameter_rejection(
+    exc: BaseException, model_id: str
+) -> LLMConfigError | None:
+    """Return an :class:`LLMConfigError` if ``exc`` is a provider rejecting a sampling parameter
+    (see :func:`sampling_parameter_rejected`), else ``None``."""
+    named_param = sampling_parameter_rejected(exc)
+    if named_param is None:
+        return None
+    return LLMConfigError(
+        f"model {model_id!r} rejected the {named_param!r} sampling parameter: {exc}. "
+        "Fix by either (1) removing the model's id from "
+        "rebar.llm.capabilities._SAMPLING_ACCEPTING_MODEL_IDS so sampling is never sent to it, "
+        f"or (2) unsetting the configured value (e.g. REBAR_LLM_TEMPERATURE) so {named_param!r} "
+        "is not requested."
+    )
 
 
 # Translate permanent native grammar/schema rejection to UnretryableOutputError
