@@ -94,12 +94,18 @@ mutation begins. The driver uses manifest-generated configuration, Python 3.12, 
 in the authoritative manifest.
 
 The driver writes `mutation-results/summary.json` with counts, fingerprints, failures, and
-advisories. Available raw artifacts contain clean-test and `mutmut` raw result output, survivor
-diffs, and diagnostic output. Artifact upload uses `if: always()` and is attempted when a shard
+advisories. Its top-level `sandbox` field names the mechanism that contained the run:
+`bwrap`, `seatbelt`, or `unsandboxed` when the operator waiver was set. CI sets no waiver, so
+a hosted shard where `bwrap` cannot start fails before running shard code, with
+`failure_class: sandbox-unavailable`. That failure is runner infrastructure, not a mutation
+finding: fix the runner image, not the change, and do not add the waiver to the workflow.
+Available raw artifacts contain clean-test and `mutmut` raw result output, survivor diffs, and
+diagnostic output. Artifact upload uses `if: always()` and is attempted when a shard
 matrix job runs, even when its driver step fails. This does not guarantee an artifact: evidence
 can be absent after a hard timeout, cancellation, selector failure, empty selection, or any
 termination before matrix creation. Current mutation evidence runs on the GitHub-hosted
-`ubuntu-latest` environment; Windows and macOS support is not established by these artifacts.
+`ubuntu-26.04` image, where `bwrap` can create its namespace; Windows and macOS support is not
+established by these artifacts.
 
 ## False positives and nondeterminism
 

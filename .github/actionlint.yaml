@@ -1,0 +1,6 @@
+# actionlint 1.7.12 (the latest release) predates the GitHub-hosted ubuntu-26.04 label,
+# which went GA on 2026-09-17 (rhysd/actionlint#682). Declaring it here keeps the label
+# check on for every other runner name. Delete this file once a pinned actionlint knows it.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

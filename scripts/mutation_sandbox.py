@@ -37,6 +37,8 @@ _PROBE_MARKER = "seatbelt-probe-ran"
 
 SEATBELT = "seatbelt"
 BWRAP = "bwrap"
+#: Mechanism label recorded when the operator waiver runs mutations without a sandbox.
+UNSANDBOXED = "unsandboxed"
 
 
 class SandboxUnavailable(RuntimeError):
@@ -198,6 +200,30 @@ def _bwrap_argv(argv: Sequence[str], allow: Sequence[Path]) -> list[str]:
     return out
 
 
+def mechanism(env: Mapping[str, str] | None = None) -> str:
+    """Return the mechanism that will contain mutation subprocesses.
+
+    This is a working probed mechanism, or :data:`UNSANDBOXED` when only the named
+    operator waiver permits the run. Raise :class:`SandboxUnavailable` otherwise.
+    """
+    found = probe()
+    if found is not None:
+        return found
+    # Ambient CI state never waives isolation. Only the named operator setting does.
+    if opt_out_enabled(env):
+        logger.warning(
+            "%s is set: running mutation tests UNSANDBOXED. A mutation that reaches "
+            "a destructive code path can delete files outside the scratch tree.",
+            ALLOW_UNSANDBOXED_ENV,
+        )
+        return UNSANDBOXED
+    raise SandboxUnavailable(
+        "no OS sandbox available (need `sandbox-exec` on macOS or `bwrap` on Linux); "
+        f"refusing to run mutation tests unsandboxed. Set {ALLOW_UNSANDBOXED_ENV}=1 "
+        "to override, accepting that a destructive mutant can delete real files."
+    )
+
+
 def wrap(
     argv: Sequence[str],
     *,
@@ -206,22 +232,10 @@ def wrap(
     env: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Wrap ``argv`` or raise unless the explicit unsandboxed waiver is set."""
-    mechanism = probe()
-    if mechanism is None:
-        # Ambient CI state never waives isolation. Only the named operator setting does.
-        if opt_out_enabled(env):
-            logger.warning(
-                "%s is set: running mutation tests UNSANDBOXED. A mutation that reaches "
-                "a destructive code path can delete files outside the scratch tree.",
-                ALLOW_UNSANDBOXED_ENV,
-            )
-            return list(argv)
-        raise SandboxUnavailable(
-            "no OS sandbox available (need `sandbox-exec` on macOS or `bwrap` on Linux); "
-            f"refusing to run mutation tests unsandboxed. Set {ALLOW_UNSANDBOXED_ENV}=1 "
-            "to override, accepting that a destructive mutant can delete real files."
-        )
-    if mechanism == SEATBELT:
+    selected = mechanism(env)
+    if selected == UNSANDBOXED:
+        return list(argv)
+    if selected == SEATBELT:
         profile_dir.mkdir(parents=True, exist_ok=True)
         profile = profile_dir / "mutation-sandbox.sb"
         profile.write_text(build_seatbelt_profile(allow), encoding="utf-8")

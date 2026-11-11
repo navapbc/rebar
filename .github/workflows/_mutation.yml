@@ -89,9 +89,8 @@ jobs:
         uses: ./.github/actions/setup-uv
         with:
           enable-cache: true
-      # Install bubblewrap for Linux mutation subprocesses. Hosted Ubuntu denies
-      # unprivileged CLONE_NEWUSER, so the functional probe finds no sandbox.
-      # This Linux-only lane declares its unsandboxed exception below.
+      # Install bubblewrap for Linux mutation subprocesses. The mutation gate fails
+      # closed (failure_class sandbox-unavailable) when bwrap cannot start.
       - name: Install bubblewrap (Linux mutation sandbox)
         run: |
           sudo apt-get update
@@ -124,7 +123,8 @@ jobs:
     name: bounded mutation gate
     needs: selector
     if: needs.selector.outputs.has-shards == 'true'
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-26.04 starts bwrap; ubuntu-24.04 denied its user namespace.
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -184,9 +184,8 @@ jobs:
         uses: ./.github/actions/setup-uv
         with:
           enable-cache: true
-      # Install bubblewrap for Linux mutation subprocesses. Hosted Ubuntu denies
-      # unprivileged CLONE_NEWUSER, so the functional probe finds no sandbox.
-      # This Linux-only lane declares its unsandboxed exception below.
+      # Install bubblewrap for Linux mutation subprocesses. The mutation gate fails
+      # closed (failure_class sandbox-unavailable) when bwrap cannot start.
       - name: Install bubblewrap (Linux mutation sandbox)
         run: |
           sudo apt-get update
@@ -194,13 +193,11 @@ jobs:
           bwrap --version
       - name: Install the pinned development environment
         run: uv sync --locked --extra dev
-      # Hosted Ubuntu runs this shard without a working namespace sandbox.
-      # Declare the exception here instead of inheriting ambient CI. The disposable
-      # runner is discarded after the job. Workstations still require a sandbox.
+      # Mutated code runs only inside bwrap. No unsandboxed waiver is set, so a runner
+      # where bwrap cannot start fails the shard; fix the runner, never add a waiver.
       - name: Run mutation shard
         env:
           MATRIX_SHARD: ${{ matrix.shard }}
-          REBAR_MUTATION_ALLOW_UNSANDBOXED: "1"
         run: |
           # predates-gate-ok: transitively guarded — this job runs only when the selector set
           # has-shards=true, and the selector's own `-f scripts/mutation_gate.py` guard forces

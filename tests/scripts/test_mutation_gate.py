@@ -490,6 +490,7 @@ def test_advisory_mode_runs_only_head_mutation_evidence(
         )
 
     monkeypatch.setattr(gate, "execute_shard", execute_shard)
+    monkeypatch.setattr(gate.mutation_sandbox, "probe", lambda: "bwrap")
     args = argparse.Namespace(
         repo=tmp_path,
         output_dir=tmp_path / "artifacts",
@@ -506,12 +507,14 @@ def test_advisory_mode_runs_only_head_mutation_evidence(
 
     assert (
         evidence_requests,
+        summary["sandbox"],
         shard_summary.get("base_collected"),
         shard_summary["base_counts"],
         shard_summary["removed_units"],
         shard_summary["added_units"],
     ) == (
         [("archive", "head-ref"), ("execute", "head")],
+        "bwrap",
         False,
         None,
         [],
@@ -541,6 +544,7 @@ def test_ratchet_serializes_new_no_tests_advisory_without_failing(
         return _run(gate, statuses, hashes={"pkg.demo_f": label})
 
     monkeypatch.setattr(gate, "execute_shard", execute_shard)
+    monkeypatch.setattr(gate.mutation_sandbox, "probe", lambda: "seatbelt")
     args = argparse.Namespace(
         repo=tmp_path,
         output_dir=tmp_path / "artifacts",
@@ -557,6 +561,7 @@ def test_ratchet_serializes_new_no_tests_advisory_without_failing(
 
     assert (
         evidence_requests,
+        summary["sandbox"],
         summary["outcome"],
         shard_summary["failures"],
         shard_summary["advisories"],
@@ -567,6 +572,7 @@ def test_ratchet_serializes_new_no_tests_advisory_without_failing(
             ("execute", "base"),
             ("execute", "head"),
         ],
+        "seatbelt",
         "success",
         [],
         [
@@ -578,6 +584,82 @@ def test_ratchet_serializes_new_no_tests_advisory_without_failing(
             )
         ],
     )
+
+
+def _sandbox_cli_case(
+    gate, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[list[str], list[str], Path]:
+    """Stage a one-shard ``run`` invocation with no working sandbox mechanism."""
+    shard = _shard(gate)
+    manifest = gate.Manifest(shards={shard.name: shard}, global_support=())
+    executed: list[str] = []
+    monkeypatch.setattr(gate, "load_manifest", lambda path: manifest)
+    monkeypatch.setattr(gate, "changed_paths", lambda repo, base, head: {shard.source})
+    monkeypatch.setattr(gate, "_extract_ref", lambda repo, ref, destination: None)
+
+    def execute_shard(root, selected_shard, artifact_dir, label):
+        executed.append(label)
+        return _run(gate, {"pkg.demo_f__mutmut_1": "killed"}, hashes={"pkg.demo_f": label})
+
+    monkeypatch.setattr(gate, "execute_shard", execute_shard)
+    monkeypatch.setattr(gate.mutation_sandbox, "probe", lambda: None)
+    output = tmp_path / "artifacts"
+    argv = ["run", "--repo", str(tmp_path), "--output-dir", str(output), "--shard", shard.name]
+    return argv, executed, output
+
+
+def test_unavailable_sandbox_fails_closed_with_a_summary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without a sandbox or the waiver, no shard code runs and the summary says why."""
+    gate = _load()
+    argv, executed, output = _sandbox_cli_case(gate, monkeypatch, tmp_path)
+    monkeypatch.delenv(gate.mutation_sandbox.ALLOW_UNSANDBOXED_ENV, raising=False)
+
+    exit_code = gate.main(argv)
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+
+    assert (exit_code, executed, summary["outcome"], summary["failure_class"]) == (
+        1,
+        [],
+        "failure",
+        "sandbox-unavailable",
+    )
+    assert "bwrap" in summary["detail"], summary["detail"]
+
+
+def test_waived_run_is_labelled_unsandboxed_in_the_summary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The operator waiver stays possible locally, but its evidence names itself."""
+    gate = _load()
+    argv, executed, output = _sandbox_cli_case(gate, monkeypatch, tmp_path)
+    monkeypatch.setenv(gate.mutation_sandbox.ALLOW_UNSANDBOXED_ENV, "1")
+
+    exit_code = gate.main(argv)
+    summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+
+    assert (exit_code, executed, summary["sandbox"]) == (0, ["head"], "unsandboxed")
+
+
+_MUTATION_WORKFLOWS = ("_mutation.yml", "mutation.yml", "test.yml", "gerrit-verify.yaml")
+
+
+@pytest.mark.parametrize("workflow", _MUTATION_WORKFLOWS)
+def test_mutation_workflows_never_set_the_unsandboxed_waiver(workflow: str) -> None:
+    """CI must fail closed; a raw-text check covers every env scope and $GITHUB_ENV."""
+    text = (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+    assert "REBAR_MUTATION_ALLOW_UNSANDBOXED" not in text
+
+
+def test_mutation_shard_job_runs_on_the_image_that_starts_bwrap() -> None:
+    """A floating label could land on an image where bwrap cannot create a namespace."""
+    import yaml
+
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "_mutation.yml").read_text(encoding="utf-8")
+    )
+    assert workflow["jobs"]["mutation"]["runs-on"] == "ubuntu-26.04"
 
 
 def test_advisory_mode_reports_mutation_quality_without_blocking() -> None:

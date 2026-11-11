@@ -327,6 +327,22 @@ def test_opt_out_is_off_for_falsey_values(tmp_path, monkeypatch):
             )
 
 
+def test_mechanism_reports_the_probed_sandbox(monkeypatch):
+    monkeypatch.setattr(sb, "probe", lambda: sb.BWRAP)
+    assert sb.mechanism({sb.ALLOW_UNSANDBOXED_ENV: "1"}) == sb.BWRAP
+
+
+def test_mechanism_labels_the_waiver_unsandboxed(monkeypatch):
+    monkeypatch.setattr(sb, "probe", lambda: None)
+    assert sb.mechanism({sb.ALLOW_UNSANDBOXED_ENV: "1"}) == sb.UNSANDBOXED == "unsandboxed"
+
+
+def test_mechanism_raises_without_a_sandbox_or_the_waiver(monkeypatch):
+    monkeypatch.setattr(sb, "probe", lambda: None)
+    with pytest.raises(sb.SandboxUnavailable, match="bwrap"):
+        sb.mechanism({})
+
+
 # --- mechanism selection ----------------------------------------------------------
 
 
