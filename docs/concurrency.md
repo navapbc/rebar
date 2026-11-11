@@ -828,9 +828,9 @@ rebar no longer needs `gc.auto=0` to protect the reflog.
 > `gc.autoDetach=true` — chosen precisely so gc "never serializes a foreground write" —
 > was therefore the bug, not the fix. The `gc-config` ensure unit now keeps auto-gc
 > ENABLED but forces it **FOREGROUND** (`--unset gc.auto` + `gc.autoDetach=false` +
-> `maintenance.autoDetach=false`): a triggered repack runs synchronously inside the
-> lock-holding `git commit`, i.e. **serialized under the write lock**, so no writer
-> races it. It reclaims loose/pack growth on its own, at the cost of an occasional
+> `maintenance.autoDetach=false`). rebar never lets git start it implicitly (bounded git
+> children carry `maintenance.auto=false`); the only maintenance is the explicit post-write
+> step, **serialized under the write lock**, so no writer races it. It reclaims loose/pack growth on its own, at the cost of an occasional
 > brief global write pause when it fires (see Scale-up posture; ADR 0051). The two
 union merges can in principle conflict only on the **shared mutable root files**
 (`.bridge_state/bindings.json`, the `.reconciler-*` lock/gate files), which the
@@ -839,17 +839,11 @@ caches the reconciler rebuilds, never ticket events; `merge=union` would line-un
 JSON into invalid JSON). UUID-named ticket-event files never collide. A genuine
 conflict still aborts → keeps local → hints `fsck` (never a hard read failure).
 
-**Scale-up posture.** Auto-gc's default cadence (`gc.auto`, ~6700 loose objects)
-suffices for normal stores. Because the repack now runs **foreground under the write
-lock** (ADR 0051), each firing is a brief GLOBAL write pause for that store — measured
-~0.16 s at 2k objects, ~2 s at 10k, growing with total store size. It fires roughly
-every ~1,700 commits; reads are never paused. The scaling ceiling is the 60 s
-write-lock budget: a store nearing ~300k+ objects (where a single foreground repack
-could approach that budget) should migrate to **disabled auto-maintenance +
-`git maintenance run --task=gc` serialized under the write lock out of band** (the
-git-upstream / GitLab-Gitaly pattern; the ADR 0051 escape hatch). Git's own ~30-day
-unreachable-reflog window remains a free backstop — but rebar no longer *depends* on it
-for correctness.
+**Scale-up posture.** The explicit step runs only git's incremental tasks (`commit-graph`,
+`loose-objects`, `incremental-repack`), which never walk reachability: 0.35–17.3 s on the
+1.07M-object production store, where `gc --auto` took 134 s. A timed-out step is reaped as a
+process group, SIGTERM first, so git releases `objects/maintenance.lock` (ADR 0051 amendment,
+bug 51e0-5038).
 
 ### Fetch coordination — the Git common-directory lock
 

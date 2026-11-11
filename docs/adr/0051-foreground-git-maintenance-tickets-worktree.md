@@ -110,3 +110,15 @@ silent data corruption.
 **Follow-up.** If a store grows large enough that the foreground pause becomes disruptive
 (approaching the lock-budget ceiling), migrate to disable-auto-maintenance + serialized
 explicit gc on a controlled cadence (tracked on bug 88eb).
+
+## Amendment (2026-11-11) — bug 51e0-5038 (`nickelic-lazuline-gonolek`)
+
+On the 1.07M-object production clone, the `maintenance run --auto` that `git fetch`/`merge`
+start is a full gc (605.6 s); rebar's bounds orphaned it outside the write lock, and a hard kill
+stranded `objects/maintenance.lock`, which git never expires and which silently disables
+`maintenance run --auto`. So: bounded git children (and the container start-up fetch) carry
+`maintenance.auto=false`/`gc.auto=0`; the explicit step runs only the incremental tasks
+`commit-graph`, `loose-objects`, `incremental-repack` (0.35–17.3 s vs 133.9 s for `gc --auto`);
+and a timed-out step is reaped as a process group, SIGTERM first. Follow-ups:
+`saccharine-unwise-barnacle` (stale-lock recovery), `idle-ammoniacal-axisdeer` (group reaping
+for the other bounded calls).

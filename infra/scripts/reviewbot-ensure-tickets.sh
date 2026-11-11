@@ -40,7 +40,10 @@ git config --global user.name "$NAME"
 # remote commit fetched here, after proving it had no local-only history.
 LOCAL_HEAD="$(git -C "$DIR" rev-parse --verify "HEAD^{commit}" 2>/dev/null || true)"
 PRIOR_REMOTE="$(git -C "$DIR" rev-parse --verify "refs/remotes/origin/tickets^{commit}" 2>/dev/null || true)"
-if ! git -C "$DIR" fetch --quiet origin "+refs/heads/tickets:refs/remotes/origin/tickets"; then
+# Implicit auto-maintenance stays off: on a large store it is a full gc, outside rebar's
+# write lock, while a draining peer container may still be writing (ADR 0051).
+if ! git -C "$DIR" -c maintenance.auto=false -c gc.auto=0 \
+	fetch --quiet origin "+refs/heads/tickets:refs/remotes/origin/tickets"; then
 	echo "reviewbot-ensure-tickets: tickets fetch failed; remote unavailable and convergence deferred; preserving local HEAD ${LOCAL_HEAD:-unreadable}" >&2
 else
 	PINNED_REMOTE="$(git -C "$DIR" rev-parse --verify "refs/remotes/origin/tickets^{commit}" 2>/dev/null || true)"

@@ -22,7 +22,7 @@ from _git_upkeep import _trace_events
 
 import rebar
 from rebar._commands._seam import tracker_dir
-from rebar._store import event_commit_git
+from rebar._store import event_commit_git, gitutil
 
 pytestmark = pytest.mark.unit
 
@@ -212,6 +212,8 @@ def test_the_trace_check_detects_maintenance_inside_a_commit(
     ``maintenance run --auto`` (and the repack below it) as a child of the commit."""
     tracker = _cross_the_maintenance_threshold(repo)
     monkeypatch.setattr(event_commit_git, "_AUTOMAINT_OFF", ())
+    # Bounded git children also carry the suppression in their environment (bug 51e0-5038).
+    monkeypatch.setattr(gitutil, "_IMPLICIT_MAINTENANCE_OFF", ())
 
     trace = tmp_path / "trace.json"
     commits, offenders = _create_two_tickets_traced(repo, monkeypatch, trace)

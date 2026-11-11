@@ -14,6 +14,7 @@ normal and recovery paths.
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 
@@ -23,9 +24,11 @@ from rebar._store.gitutil import (
     _with_index_lock_retry,
     _with_transient_fault_retry,
     run_git_bounded,
+    run_git_reaped,
 )
 
 _GIT_ADD_ATTEMPTS = 3
+_log = logging.getLogger(__name__)
 
 
 # Shared ``gitutil`` index-lock recovery serves event, claim, and transition
@@ -185,19 +188,38 @@ def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
         pass
 
 
+# Incremental tasks never walk reachability: 0.35-17.3 s on the 1.07M-object prod store,
+# where gc --auto took 134 s (bug 51e0-5038).
+_MAINTENANCE_TASKS: tuple[str, ...] = (
+    "--task=commit-graph",
+    "--task=loose-objects",
+    "--task=incremental-repack",
+)
+
+
 # raw-git-ok: locked store seam internal
 def run_auto_maintenance(
     tracker: str | os.PathLike[str], *, timeout: float = _LOCAL_GIT_TIMEOUT
 ) -> subprocess.CompletedProcess | None:
-    """Run explicit best-effort Git auto-maintenance after commit (bd66).
+    """Run explicit best-effort Git maintenance after commit (bd66).
 
-    ``--auto`` preserves Git's threshold, while the longer local watchdog bounds a
-    possible store-wide repack outside the commit timeout. ADR 0051 requires the
-    caller to hold the write lock during this foreground step. A durable write does
-    not fail when maintenance fails or times out. Return the Git result, or ``None``
-    when Git cannot launch.
+    The store's only maintenance: bounded Git children run with implicit maintenance off.
+    The caller holds the write lock (ADR 0051); a timed-out group is reaped. A failure is
+    logged, never raised. Return the Git result (timeout is ``124``), or ``None`` when Git
+    cannot launch.
     """
     try:
-        return run_git_bounded(tracker, "maintenance", "run", "--auto", timeout=timeout)
-    except OSError:
+        result = run_git_reaped(
+            tracker, "maintenance", "run", "--auto", "--quiet", *_MAINTENANCE_TASKS, timeout=timeout
+        )
+    except OSError as exc:
+        _log.warning("git maintenance could not start in %s: %s", tracker, exc)
         return None
+    if result.returncode != 0:
+        _log.warning(
+            "git maintenance failed in %s: rc=%s %s",
+            tracker,
+            result.returncode,
+            (result.stderr or "").strip()[-300:],
+        )
+    return result
