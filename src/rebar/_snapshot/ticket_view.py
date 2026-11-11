@@ -374,6 +374,7 @@ class PinnedTicketView:
             tag_filter=has_tag,
             priority_filter=query.priority,
             without_tag_filter=query.without_tag,
+            release_filter=query.release,
         )
         if query.exclude_deleted:
             states = [state for state in states if state.get("status") != "deleted"]

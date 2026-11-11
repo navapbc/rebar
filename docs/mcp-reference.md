@@ -30,7 +30,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `get_workflow_result` | Read a workflow run's outputs via replay -> {run_id, status, terminal_step, terminal_output, outputs, error}. The terminal step's output is the run result. |
 | `get_workflow_status` | Read a workflow run's current status via replay (no execution) -> {run_id, ticket_id, workflow_name, status, terminal_step, error, steps}. |
 | `grounding_info` | The STATIC code-grounding oracle integration contract (epic 8f6c): the closed dimension-ID vocabulary + version, the reference kinds, the closed abstain-reason enum (+ outcome/job/tier vocabularies), and the available backends with their detected availability/version. A fast, deterministic, repo-independent discovery surface (no repo is scanned). Takes no args. |
-| `list_tickets` | List tickets with optional lifecycle, hierarchy, tag, and readiness filters. |
+| `list_tickets` | List tickets with optional lifecycle, hierarchy, tag, release, and readiness filters. ``release`` takes comma-separated names (OR), matches a ticket's own ``releases`` exactly, and does not inherit from parents. |
 | `next_batch` | Next parallel batch of unblocked tickets under an epic's hierarchy. |
 | `plan_review_status` | Report plan-certificate currency using the exact claim-gate check. |
 | `quality_check` | Check ticket dispatch readiness ({verdict, line_count, keyword_count, ac_items, file_impact, reason, passed}). |

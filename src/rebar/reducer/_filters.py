@@ -48,6 +48,15 @@ def _match_tag(state: dict, op: str, value: PredicateValue) -> bool:
     return value in tags
 
 
+def _match_release(state: dict, op: str, value: PredicateValue) -> bool:
+    """``release`` membership over the ticket's OWN ``releases`` (ADR 0124 decision 10:
+    no parent inheritance): ANY of the set for ``in``, exact member for ``eq``."""
+    releases = state.get("releases") or []
+    if op == "in":
+        return isinstance(value, AbstractSet) and any(v in releases for v in value)
+    return value in releases
+
+
 def _priority_in_range(pv: int, bounds: tuple[str | None, str | None]) -> bool:
     """``lo <= pv <= hi`` with either bound ``None`` meaning open-ended."""
     lo, hi = bounds
@@ -118,6 +127,8 @@ def match_predicate(state: dict, field: str, op: str, value: PredicateValue) -> 
     """
     if field == "tag":
         return _match_tag(state, op, value)
+    if field == "release":
+        return _match_release(state, op, value)
     if field == "priority":
         return _match_priority(state, op, value)
     return _match_string_field(state, field, op, value)
@@ -132,6 +143,7 @@ def apply_ticket_filters(
     tag_filter: str = "",
     priority_filter: str = "",
     without_tag_filter: str = "",
+    release_filter: str = "",
 ) -> list:
     """Return ``results`` narrowed by the supplied filters.
 
@@ -159,4 +171,7 @@ def apply_ticket_filters(
     if without_tag_filter:
         without_values = {s.strip() for s in without_tag_filter.split(",") if s.strip()}
         results = [t for t in results if not match_predicate(t, "tag", "in", without_values)]
+    if release_filter:
+        release_values = {s.strip() for s in release_filter.split(",") if s.strip()}
+        results = [t for t in results if match_predicate(t, "release", "in", release_values)]
     return results

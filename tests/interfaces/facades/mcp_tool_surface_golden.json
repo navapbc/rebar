@@ -775,9 +775,24 @@
    "readOnlyHint": false,
    "title": null
   },
-  "description": "Edit ticket fields (title/priority/assignee/description/ticket_type).\n\n        Tags mutate via convergent deltas: add_tags / remove_tags add/remove,\n        or set_tags replaces the whole set (compiled to a delta; add-wins, so a\n        concurrent remote add is never silently clobbered). set_tags is mutually\n        exclusive with add_tags/remove_tags.\n\n        bridge_project is promote-only \u2014 it may be set on an unbound ticket but is\n        rejected once the ticket already holds a binding (\"\" marks never-sync); repos\n        replaces the associated repositories and is freely editable. Both are\n        present-only: leave them None to edit neither. Unlike the library edit_ticket\n        (a **fields passthrough), this tool's signature is enumerated, so these two are\n        forwarded explicitly to keep the MCP edit surface at parity with CLI/library.\n\n        description_warning is non-null when the new description exceeds the plan-review\n        admission cap while the claim gate is on: the edit still succeeded, but claiming\n        the ticket will need a review that refuses it until the description is shorter.\n        ",
+  "description": "Edit ticket fields (title/priority/assignee/description/ticket_type).\n\n        Tags mutate via convergent deltas: add_tags / remove_tags add/remove,\n        or set_tags replaces the whole set (compiled to a delta; add-wins, so a\n        concurrent remote add is never silently clobbered). set_tags is mutually\n        exclusive with add_tags/remove_tags. Releases (Jira fix-version names, ADR 0124)\n        mutate the same way via add_releases / remove_releases / set_releases.\n\n        bridge_project is promote-only \u2014 it may be set on an unbound ticket but is\n        rejected once the ticket already holds a binding (\"\" marks never-sync); repos\n        replaces the associated repositories and is freely editable. Both are\n        present-only: leave them None to edit neither. Unlike the library edit_ticket\n        (a **fields passthrough), this tool's signature is enumerated, so these two are\n        forwarded explicitly to keep the MCP edit surface at parity with CLI/library.\n\n        description_warning is non-null when the new description exceeds the plan-review\n        admission cap while the claim gate is on: the edit still succeeded, but claiming\n        the ticket will need a review that refuses it until the description is shorter.\n        ",
   "inputSchema": {
    "properties": {
+    "add_releases": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Add Releases"
+    },
     "add_tags": {
      "anyOf": [
       {
@@ -841,6 +856,21 @@
      "default": null,
      "title": "Priority"
     },
+    "remove_releases": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Remove Releases"
+    },
     "remove_tags": {
      "anyOf": [
       {
@@ -870,6 +900,21 @@
      ],
      "default": null,
      "title": "Repos"
+    },
+    "set_releases": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "string"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Set Releases"
     },
     "set_tags": {
      "anyOf": [
@@ -1166,7 +1211,7 @@
    "readOnlyHint": true,
    "title": null
   },
-  "description": "List tickets with optional lifecycle, hierarchy, tag, and readiness filters.\n\n        Archived exclusion already hides deleted tombstones; ``exclude_deleted`` matters\n        with ``include_archived=True``. Rows carry ``children_count`` and can require a\n        minimum. The default omits bodies and signature material; ``full=True`` restores\n        complete state, while ``show_ticket`` remains the single-ticket alternative.\n        Oversize results fail with structured ``response_too_large`` details and narrowing\n        filters; they are never truncated or dropped by the transport.\n        ",
+  "description": "List tickets with optional lifecycle, hierarchy, tag, release, and readiness\n        filters. ``release`` takes comma-separated names (OR), matches a ticket's own\n        ``releases`` exactly, and does not inherit from parents.\n\n        Archived exclusion already hides deleted tombstones; ``exclude_deleted`` matters\n        with ``include_archived=True``. Rows carry ``children_count`` and can require a\n        minimum. The default omits bodies and signature material; ``full=True`` restores\n        complete state, while ``show_ticket`` remains the single-ticket alternative.\n        Oversize results fail with structured ``response_too_large`` details and narrowing\n        filters; they are never truncated or dropped by the transport.\n        ",
   "inputSchema": {
    "properties": {
     "blocking_state": {
@@ -1236,6 +1281,18 @@
      ],
      "default": null,
      "title": "Priority"
+    },
+    "release": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Release"
     },
     "sort": {
      "anyOf": [

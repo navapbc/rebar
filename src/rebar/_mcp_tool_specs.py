@@ -63,6 +63,9 @@ _EDIT_FIELDS: dict[str, Param] = {
     "add_tags": Param(annotation=list[str] | None, default=None),
     "remove_tags": Param(annotation=list[str] | None, default=None),
     "set_tags": Param(annotation=list[str] | None, default=None),
+    "add_releases": Param(annotation=list[str] | None, default=None),
+    "remove_releases": Param(annotation=list[str] | None, default=None),
+    "set_releases": Param(annotation=list[str] | None, default=None),
     "bridge_project": Param(annotation=str | None, default=None),
     "repos": Param(annotation=list[str] | None, default=None),
 }
@@ -347,7 +350,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         Tags mutate via convergent deltas: add_tags / remove_tags add/remove,
         or set_tags replaces the whole set (compiled to a delta; add-wins, so a
         concurrent remote add is never silently clobbered). set_tags is mutually
-        exclusive with add_tags/remove_tags.
+        exclusive with add_tags/remove_tags. Releases (Jira fix-version names, ADR 0124)
+        mutate the same way via add_releases / remove_releases / set_releases.
 
         bridge_project is promote-only — it may be set on an unbound ticket but is
         rejected once the ticket already holds a binding ("" marks never-sync); repos
@@ -366,8 +370,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         divergence=(
             "The library is `edit_ticket(ticket_id, *, repo_root=None, **fields)` "
             "(src/rebar/_lib_mutations.py); a **fields passthrough cannot be expressed as a "
-            "JSON tool schema, so the tool ENUMERATES the eleven editable fields and forwards"
-            " them explicitly. The tool's own docstring documents this "
+            "JSON tool schema, so the tool ENUMERATES the editable fields in `_EDIT_FIELDS` "
+            "and forwards them explicitly. The tool's own docstring documents this "
             '(src/rebar/_mcp_writes.py: "Unlike the library edit_ticket (a **fields '
             "passthrough), this tool's signature is enumerated\"). The enumerated set is the "
             "divergence to watch: a new editable library field must be added here too."
@@ -443,7 +447,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         library="list_tickets",
         registrar="read",
         annotation="READ_ONLY",
-        description="""List tickets with optional lifecycle, hierarchy, tag, and readiness filters.
+        description="""List tickets with optional lifecycle, hierarchy, tag, release, and readiness
+        filters. ``release`` takes comma-separated names (OR), matches a ticket's own
+        ``releases`` exactly, and does not inherit from parents.
 
         Archived exclusion already hides deleted tombstones; ``exclude_deleted`` matters
         with ``include_archived=True``. Rows carry ``children_count`` and can require a

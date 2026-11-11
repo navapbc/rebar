@@ -164,6 +164,9 @@ def build_edit(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument("--add-tag", help="add a tag")
     parser.add_argument("--remove-tag", help="remove a tag")
     parser.add_argument("--set-tags", help="set the full tag set (add-wins)")
+    parser.add_argument("--add-release", help="add a release (Jira fix version name)")
+    parser.add_argument("--remove-release", help="remove a release")
+    parser.add_argument("--set-releases", help="set the full release set (add-wins)")
     parser.add_argument("--review", action="store_true", help="emit the review payload")
     parser.add_argument("ticket_id", nargs="?", help="the ticket to edit")
     parser.epilog = "--review: preview payload, not atomic; see review-plan --status."

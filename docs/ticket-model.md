@@ -313,6 +313,25 @@ The convergent delta is carried by the `TAG_DELTA` event — its body, the add-w
 rule, and the forward-compatibility rollout note (older clones preserve-and-ignore an
 unknown event type) are documented in [event-schema.md](event-schema.md).
 
+## Releases (Jira fix versions)
+
+`releases` is a list of release names on each ticket (ADR 0124). It changes through
+convergent `RELEASE_DELTA` add/remove events with the same rules as tags: removals apply
+before additions, an add wins when one event names a release in both lists, and a repeat
+changes nothing.
+
+- Set it with `rebar edit <id> --add-release 2.4`, `--remove-release 2.4`, or
+  `--set-releases 2.4,2.5` (add-wins against the current list; `--set-releases ""`
+  clears). The library and MCP `edit_ticket` take `add_releases` / `remove_releases` /
+  `set_releases`.
+- Find a release's tickets with `rebar list --release 2.4` (comma-separated for OR), the
+  library `list_tickets(release=...)`, or the MCP `list_tickets` `release` parameter.
+- Names match exactly and are case-sensitive. A ticket's releases are its own: an epic in a
+  release does not put its children in it. A name containing a comma cannot be given
+  through these comma-separated flags.
+- A bound ticket's releases sync both ways with the Jira issue's Fix versions; see
+  `docs/jira-sync-setup.md`.
+
 ## File-impact scope
 
 `file_impact` records the repository files a ticket expects to change for conflict-aware

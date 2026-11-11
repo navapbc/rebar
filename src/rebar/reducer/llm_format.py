@@ -20,6 +20,7 @@ Key mapping:
   claim_remote_session → rsn
   description → desc
   tags        → tg
+  releases    → rl
   comments    → cm  (sub-keys: body→b, author→au; timestamp omitted)
   deps        → dp  (sub-keys: target_id→tid, relation→r; link_uuid omitted)
   conflicts   → cf
@@ -47,6 +48,7 @@ KEY_MAP = {
     "alias": "a",
     "description": "desc",
     "tags": "tg",
+    "releases": "rl",
     "comments": "cm",
     "deps": "dp",
     "conflicts": "cf",

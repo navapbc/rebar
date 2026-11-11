@@ -474,6 +474,7 @@ def list_states(
         "tag_filter": has_tag,
         "priority_filter": priority,
         "without_tag_filter": without_tag,
+        "release_filter": query.release,
     }
     counts_children = min_children is not None or with_children_count
     in_loop_keep = _list_row_keep(filters, keep)

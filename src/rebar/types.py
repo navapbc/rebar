@@ -237,6 +237,7 @@ class TicketStateLLM(TypedDict):
     cm: NotRequired[list[Any]]
     dp: NotRequired[list[Any]]
     tg: NotRequired[list[Any]]
+    rl: NotRequired[list[str]]
     ch: NotRequired[list[Any]]
     ibl: NotRequired[list[Any]]
 

@@ -107,6 +107,7 @@ _LIST_VALUE_OPTS = frozenset(
         "--has-tag",
         "--priority",
         "--without-tag",
+        "--release",
         "--min-children",
         "--limit",
     }
@@ -279,7 +280,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     usage = (
         "Usage: ticket list [--output llm] [--include-archived] [--exclude-deleted] "
         "[--type=<type>[,<type>...]] [--status=<status>] [--priority=<n>] [--parent=<id>] "
-        "[--has-tag=<tag>] [--without-tag=<tag>] [--min-children=<n>] "
+        "[--has-tag=<tag>] [--without-tag=<tag>] [--release=<name>] [--min-children=<n>] "
         "[--unblocked|--blocked] [--with-children-count] [--full] "
         "[--sort=<priority|created|updated|id|status>] (prefix '-' for descending) "
         "[--limit=<n>] (applied after --sort)"
@@ -309,6 +310,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "--has-tag=",
         "--priority=",
         "--without-tag=",
+        "--release=",
         "--min-children=",
         "--limit=",
     )
@@ -321,7 +323,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         return _reject_unknown_option(
             arg,
             "Valid filters: --type --status --priority --parent --has-tag "
-            "--without-tag --min-children --unblocked --blocked --with-children-count "
+            "--without-tag --release --min-children --unblocked --blocked --with-children-count "
             "--full --sort --limit --include-archived --exclude-deleted --output llm",
         )
     from rebar._cli._parsers.core.reads import build_list
@@ -337,6 +339,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "has_tag": ns.has_tag or "",
         "priority": ns.priority or "",
         "without_tag": ns.without_tag or "",
+        "release": ns.release or "",
         "min_children": None,
         "blocking_state": blocking_state,
         "with_children_count": ns.with_children_count,

@@ -211,6 +211,11 @@
           "without_tag_filter",
           "KEYWORD_ONLY",
           "''"
+        ],
+        [
+          "release_filter",
+          "KEYWORD_ONLY",
+          "''"
         ]
       ],
       "return": "list"
@@ -1135,6 +1140,11 @@
           "full",
           "KEYWORD_ONLY",
           "True"
+        ],
+        [
+          "release",
+          "KEYWORD_ONLY",
+          "None"
         ],
         [
           "repo_root",

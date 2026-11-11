@@ -5,6 +5,7 @@ parser. composer re-exports its entry points for existing callers."""
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 
 from rebar._commands._seam import (
     CommandError,
@@ -77,41 +78,72 @@ def _enforce_promote_only(out: dict, resolved: str, tracker) -> None:
         )
 
 
-def _apply_tag_deltas(
+def _apply_list_deltas(
     resolved: str,
     tracker,
     repo_root,
-    has_set: bool,
-    set_list: list[str],
-    add_list: list[str],
-    remove_list: list[str],
+    spec: _ListOp,
 ) -> None:
-    """Compile the observed-vs-requested tag delta and append a TAG_DELTA event (P2.3).
+    """Compile an observed-vs-requested list delta and append its event.
 
+    Used for tags (``TAG_DELTA``, P2.3) and releases (``RELEASE_DELTA``, ADR 0124).
     Split out of :func:`composer.edit_core` (at its locked complexity ceiling).
-    ``has_set`` selects the wholesale-set compilation (add-wins: add what's missing,
-    remove observed tags not in the target set) vs the add/remove no-op suppression (only
-    add what's absent, only remove what's present). Appends nothing when the compiled
-    delta is empty.
+    A set compiles add-wins against the observed list (add what is missing, remove
+    observed names not in the target); add/remove suppress no-ops (only add what is
+    absent, only remove what is present). Appends nothing when the delta is empty.
     """
     from rebar.reducer import reduce_ticket
-    from rebar.reducer._version import TAG_DELTA
 
-    observed = list((reduce_ticket(str(tracker / resolved)) or {}).get("tags") or [])
-    if has_set:
-        added = [t for t in set_list if t not in observed]
-        removed = [t for t in observed if t not in set_list]
+    observed = list((reduce_ticket(str(tracker / resolved)) or {}).get(spec.state_key) or [])
+    if spec.has_set:
+        added = [t for t in spec.set_list if t not in observed]
+        removed = [t for t in observed if t not in spec.set_list]
     else:
-        added = [t for t in add_list if t not in observed]
-        removed = [t for t in remove_list if t in observed]
+        added = [t for t in spec.add_list if t not in observed]
+        removed = [t for t in spec.remove_list if t in observed]
     if added or removed:
         append_event(
             resolved,
-            TAG_DELTA,
+            spec.event_type,
             {"added": added, "removed": removed},
             tracker,
             repo_root=repo_root,
         )
+
+
+@dataclass(frozen=True)
+class _ListOp:
+    """One parsed list-delta request (tags or releases) for :func:`edit_core`."""
+
+    state_key: str
+    event_type: str
+    add_list: list[str]
+    remove_list: list[str]
+    set_list: list[str]
+    has_set: bool
+
+    @property
+    def active(self) -> bool:
+        return self.has_set or bool(self.add_list) or bool(self.remove_list)
+
+
+def _parse_list_op(kind: str, state_key: str, event_type: str, add, remove, set_) -> _ListOp:
+    """Parse and validate one field's add/remove/set request (``kind`` names the flags
+    in errors: ``tag``/``tags`` or ``release``/``releases``)."""
+    add_list = _parse_tag_list(add, validate=True)
+    remove_list = _parse_tag_list(remove, validate=False)
+    has_set = set_ is not None
+    set_list = _parse_tag_list(set_, validate=True) if has_set else []
+    if has_set and (add_list or remove_list):
+        raise CommandError(
+            f"Error: --set-{kind}s cannot be combined with --add-{kind}/--remove-{kind}"
+        )
+    overlap = [t for t in add_list if t in remove_list]
+    if overlap:
+        raise CommandError(
+            f"Error: {kind}(s) {overlap} given to both --add-{kind} and --remove-{kind}"
+        )
+    return _ListOp(state_key, event_type, add_list, remove_list, set_list, has_set)
 
 
 def _edit_description_warning(
@@ -201,10 +233,19 @@ _EDIT_FIELDS = (
 _EDIT_USAGE = (
     "Usage: ticket edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] "
     "[--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] "
-    "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--review]"
+    "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] "
+    "[--add-release=r1,r2] [--remove-release=r1,r2] [--set-releases=r1,r2] [--review]"
 )
 
-_TAG_FLAGS = ("add-tag", "remove-tag", "set-tags")
+# List-delta flags -> (list field, operation). Tags (P2.3) and releases (ADR 0124).
+_LIST_FLAGS = {
+    "add-tag": ("tag", "add"),
+    "remove-tag": ("tag", "remove"),
+    "set-tags": ("tag", "set"),
+    "add-release": ("release", "add"),
+    "remove-release": ("release", "remove"),
+    "set-releases": ("release", "set"),
+}
 
 # Dashed CLI spellings mapped to their `_EDIT_FIELDS` state-field name (story cef7).
 _EDIT_FLAG_ALIASES = {"bridge-project": "bridge_project"}
@@ -266,13 +307,17 @@ def edit_core(
     tag_add=None,
     tag_remove=None,
     tag_set=None,
+    release_add=None,
+    release_remove=None,
+    release_set=None,
     repo_root=None,
 ) -> str | None:
-    """Validate edits and append EDIT plus any compiled TAG_DELTA.
-    Reject unknown or invalid fields and parent cycles. Tag set becomes an
-    add-wins delta against observed tags. Return an advisory description-cap
+    """Validate edits and append EDIT plus any compiled TAG_DELTA / RELEASE_DELTA.
+    Reject unknown or invalid fields and parent cycles. A tag or release set becomes
+    an add-wins delta against the observed list. Return an advisory description-cap
     warning after a successful oversized description edit, otherwise None."""
     from rebar.reducer import reduce_ticket
+    from rebar.reducer._version import RELEASE_DELTA, TAG_DELTA
 
     tracker = tracker_dir(repo_root)
     fields = dict(fields)
@@ -281,18 +326,15 @@ def edit_core(
         if name not in _EDIT_FIELDS:
             raise CommandError(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}")
 
-    add_list = _parse_tag_list(tag_add, validate=True)
-    remove_list = _parse_tag_list(tag_remove, validate=False)
-    has_set = tag_set is not None
-    set_list = _parse_tag_list(tag_set, validate=True) if has_set else []
-    if has_set and (add_list or remove_list):
-        raise CommandError("Error: --set-tags cannot be combined with --add-tag/--remove-tag")
-    overlap = [t for t in add_list if t in remove_list]
-    if overlap:
-        raise CommandError(f"Error: tag(s) {overlap} given to both --add-tag and --remove-tag")
-    has_tag_op = has_set or bool(add_list) or bool(remove_list)
+    list_ops = [
+        _parse_list_op("tag", "tags", TAG_DELTA, tag_add, tag_remove, tag_set),
+        _parse_list_op(
+            "release", "releases", RELEASE_DELTA, release_add, release_remove, release_set
+        ),
+    ]
+    list_ops = [op for op in list_ops if op.active]
 
-    if not fields and not has_tag_op:
+    if not fields and not list_ops:
         raise CommandError("Error: at least one --field=value pair is required")
     if not (tracker / ".env-id").is_file():
         raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
@@ -310,8 +352,8 @@ def edit_core(
         append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
         warning = _edit_description_warning(out, resolved, tracker, reduce_ticket, repo_root)
 
-    if has_tag_op:
-        _apply_tag_deltas(resolved, tracker, repo_root, has_set, set_list, add_list, remove_list)
+    for op in list_ops:
+        _apply_list_deltas(resolved, tracker, repo_root, op)
 
     return warning
 
@@ -337,7 +379,8 @@ def _edit_govern(ticket_id: str) -> int | None:
 
 def edit_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``edit``: parse ticket_id + --field pairs +
-    tag-delta flags (--add-tag / --remove-tag / --set-tags)."""
+    list-delta flags (--add-tag / --remove-tag / --set-tags and the release
+    equivalents --add-release / --remove-release / --set-releases)."""
     if len(argv) < 2:
         print(_EDIT_USAGE, file=sys.stderr)
         return 1
@@ -348,23 +391,15 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     review = "--review" in rest
     rest = [a for a in rest if a != "--review"]
     fields: dict = {}
-    tag_add: list[str] = []
-    tag_remove: list[str] = []
-    tag_set: list[str] | None = None
+    # (field, op) -> accumulated values; a set op starts empty, so `--set-tags=""` clears.
+    list_args: dict[tuple[str, str], list[str]] = {}
     # Field NAMES this invocation set, in parse order (never values) — the
     # confirmation line's payload (ticket 6bda-9d58-8546-4638).
     set_names: list[str] = []
 
-    def _accept_tag(name: str, val: str) -> None:
-        nonlocal tag_set
-        items = [t for t in val.split(",")]
+    def _accept_list(name: str, val: str) -> None:
         set_names.append(name)
-        if name == "add-tag":
-            tag_add.extend(items)
-        elif name == "remove-tag":
-            tag_remove.extend(items)
-        else:  # set-tags
-            tag_set = (tag_set or []) + items
+        list_args.setdefault(_LIST_FLAGS[name], []).extend(val.split(","))
 
     i, n = 0, len(rest)
     while i < n:
@@ -387,8 +422,8 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         # `_EDIT_FIELDS`) is `bridge_project`; accept the dashed spelling as an alias.
         name = _EDIT_FLAG_ALIASES.get(name, name)
 
-        if name in _TAG_FLAGS:
-            _accept_tag(name, val)
+        if name in _LIST_FLAGS:
+            _accept_list(name, val)
         elif name == "tags":
             print(
                 "Error: --tags is no longer an edit field. Use --set-tags=t1,t2 to "
@@ -414,9 +449,12 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         edit_warning = edit_core(
             ticket_id,
             fields,
-            tag_add=tag_add or None,
-            tag_remove=tag_remove or None,
-            tag_set=tag_set,
+            tag_add=list_args.get(("tag", "add")),
+            tag_remove=list_args.get(("tag", "remove")),
+            tag_set=list_args.get(("tag", "set")),
+            release_add=list_args.get(("release", "add")),
+            release_remove=list_args.get(("release", "remove")),
+            release_set=list_args.get(("release", "set")),
             repo_root=repo_root,
         )
     except CommandError as exc:

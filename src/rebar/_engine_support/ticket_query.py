@@ -43,6 +43,8 @@ class TicketQuery:
     parent: str = ""
     has_tag: str = ""
     without_tag: str = ""
+    # Release name(s), comma-separated OR; the ticket's own releases only (ADR 0124).
+    release: str = ""
     include_archived: bool = False
     exclude_deleted: bool = False
     min_children: int | None = None
@@ -61,6 +63,7 @@ class TicketQuery:
         parent: str | None = None,
         has_tag: str | None = None,
         without_tag: str | None = None,
+        release: str | None = None,
         include_archived: bool = False,
         exclude_deleted: bool = False,
         min_children: int | None = None,
@@ -78,6 +81,7 @@ class TicketQuery:
             parent=parent or "",
             has_tag=has_tag or "",
             without_tag=without_tag or "",
+            release=release or "",
             include_archived=include_archived,
             exclude_deleted=exclude_deleted,
             min_children=min_children,

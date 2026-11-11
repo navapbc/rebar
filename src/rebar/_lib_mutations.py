@@ -153,6 +153,8 @@ def edit_ticket(
 ) -> str | None:
     """Edit ticket fields: title, priority, assignee, ticket_type, description.
 
+    Releases (ADR 0124): ``add_releases``/``remove_releases``/``set_releases`` work the
+    same way through RELEASE_DELTA.
     Tags (P2.3): use ``add_tags``/``remove_tags``/``set_tags`` (lists or CSV) to
     mutate via convergent TAG_DELTA deltas. (The ``tags=`` set-alias was removed
     pre-1.0 — DE7; it is now rejected as an unknown field.) Returns the save-time
@@ -161,6 +163,10 @@ def edit_ticket(
     tag_add = fields.pop("add_tags", None)
     tag_remove = fields.pop("remove_tags", None)
     tag_set = fields.pop("set_tags", None)
+    # Releases (ADR 0124): the same add/remove/set deltas, compiled to RELEASE_DELTA.
+    release_add = fields.pop("add_releases", None)
+    release_remove = fields.pop("remove_releases", None)
+    release_set = fields.pop("set_releases", None)
     normalized = {}
     for key, value in fields.items():
         if value is None:
@@ -181,6 +187,9 @@ def edit_ticket(
         tag_add=tag_add,
         tag_remove=tag_remove,
         tag_set=tag_set,
+        release_add=release_add,
+        release_remove=release_remove,
+        release_set=release_set,
     )
     return _warn_description_cap(warning)
 

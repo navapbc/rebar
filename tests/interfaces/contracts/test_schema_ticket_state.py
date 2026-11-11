@@ -81,3 +81,16 @@ def test_mcp_show_ticket_advertises_output_schema(rebar_repo: Path) -> None:
     required = set(_schema()["required"])
     missing = required - advertised
     assert not missing, f"MCP outputSchema is missing canonical required fields: {missing}"
+
+
+def test_releases_conform_to_schema(rebar_repo: Path) -> None:
+    """ADR 0124: a ticket with releases still validates, and ``releases`` is a list of
+    strings in the canonical schema."""
+    import rebar
+
+    tid = rebar.create_ticket("task", "Release conformance ticket", repo_root=str(rebar_repo))
+    rebar.edit_ticket(tid, add_releases=["2.4", "2.5"], repo_root=str(rebar_repo))
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["releases"] == ["2.4", "2.5"]
+    _validate(state)
+    assert _schema()["properties"]["releases"]["items"] == {"type": "string"}

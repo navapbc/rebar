@@ -1,7 +1,7 @@
 Usage: rebar list [--output {json,llm}] [--include-archived] [--exclude-deleted]
                   [--full] [--with-children-count] [--unblocked] [--blocked]
                   [--type TYPE] [--status STATUS] [--priority PRIORITY]
-                  [--parent PARENT] [--has-tag HAS_TAG]
+                  [--parent PARENT] [--has-tag HAS_TAG] [--release RELEASE]
                   [--without-tag WITHOUT_TAG] [--min-children MIN_CHILDREN]
                   [--sort <priority|created|updated|id|status>] [--limit N]
 
@@ -22,6 +22,8 @@ options:
   --priority PRIORITY   filter by priority 0-4 (comma-separated for OR)
   --parent PARENT       filter to direct children of <id>
   --has-tag HAS_TAG     filter to tickets having <tag> (comma-separated for OR)
+  --release RELEASE     filter to tickets in release <name> (comma-separated for
+                        OR)
   --without-tag WITHOUT_TAG
                         exclude tickets having any of <tag> (comma-separated)
   --min-children MIN_CHILDREN

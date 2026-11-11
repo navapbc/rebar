@@ -99,7 +99,7 @@ options:
 Usage: rebar list [--output {json,llm}] [--include-archived] [--exclude-deleted]
                   [--full] [--with-children-count] [--unblocked] [--blocked]
                   [--type TYPE] [--status STATUS] [--priority PRIORITY]
-                  [--parent PARENT] [--has-tag HAS_TAG]
+                  [--parent PARENT] [--has-tag HAS_TAG] [--release RELEASE]
                   [--without-tag WITHOUT_TAG] [--min-children MIN_CHILDREN]
                   [--sort <priority|created|updated|id|status>] [--limit N]
 
@@ -120,6 +120,8 @@ options:
   --priority PRIORITY   filter by priority 0-4 (comma-separated for OR)
   --parent PARENT       filter to direct children of <id>
   --has-tag HAS_TAG     filter to tickets having <tag> (comma-separated for OR)
+  --release RELEASE     filter to tickets in release <name> (comma-separated for
+                        OR)
   --without-tag WITHOUT_TAG
                         exclude tickets having any of <tag> (comma-separated)
   --min-children MIN_CHILDREN
@@ -509,7 +511,9 @@ Usage: rebar edit [--title TITLE] [--priority PRIORITY] [--assignee ASSIGNEE]
                   [--ticket_type TICKET_TYPE] [--description DESCRIPTION]
                   [--parent PARENT] [--bridge-project BRIDGE_PROJECT]
                   [--add-tag ADD_TAG] [--remove-tag REMOVE_TAG]
-                  [--set-tags SET_TAGS] [--review]
+                  [--set-tags SET_TAGS] [--add-release ADD_RELEASE]
+                  [--remove-release REMOVE_RELEASE]
+                  [--set-releases SET_RELEASES] [--review]
                   [ticket_id]
 
 Edit ticket fields (--title, --priority, --assignee, --ticket_type,
@@ -533,6 +537,12 @@ options:
   --remove-tag REMOVE_TAG
                         remove a tag
   --set-tags SET_TAGS   set the full tag set (add-wins)
+  --add-release ADD_RELEASE
+                        add a release (Jira fix version name)
+  --remove-release REMOVE_RELEASE
+                        remove a release
+  --set-releases SET_RELEASES
+                        set the full release set (add-wins)
   --review              emit the review payload
 
 --review: preview payload, not atomic; see review-plan --status.

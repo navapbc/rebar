@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/ticket_state_llm.schema.json",
   "title": "TicketStateLLM",
-  "description": "Token-minified ticket state with shortened keys, emitted by `show`/`list`/`ready` under `--output llm` (one minified JSON object; list/ready emit one per line / NDJSON). Produced by ticket_reducer.llm_format.to_llm. Null/empty fields are stripped, so most keys are optional. Key map: ticket_id→id, ticket_type→t, title→ttl, status→st, author→au, priority→pr, alias→a, assignee→asn, claimed_session→csn, claim_harness→chn, claim_remote_session→rsn, parent_id→pid, description→desc, comments→cm, deps→dp, tags→tg, children→ch, inbound_links→ibl.",
+  "description": "Token-minified ticket state with shortened keys, emitted by `show`/`list`/`ready` under `--output llm` (one minified JSON object; list/ready emit one per line / NDJSON). Produced by ticket_reducer.llm_format.to_llm. Null/empty fields are stripped, so most keys are optional. Key map: ticket_id→id, ticket_type→t, title→ttl, status→st, author→au, priority→pr, alias→a, assignee→asn, claimed_session→csn, claim_harness→chn, claim_remote_session→rsn, parent_id→pid, description→desc, comments→cm, deps→dp, tags→tg, releases→rl, children→ch, inbound_links→ibl.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id", "t", "ttl", "st"],
@@ -23,6 +23,7 @@
     "cm": { "type": "array", "description": "comments (sub-keys b=body, au=author)" },
     "dp": { "type": "array", "description": "deps (sub-keys tid=target_id, r=relation)" },
     "tg": { "type": "array", "description": "tags" },
+    "rl": { "type": "array", "items": { "type": "string" }, "description": "releases (Jira fix versions, ADR 0124)" },
     "ch": { "type": "array", "description": "children" },
     "ibl": { "type": "array", "description": "inbound_links (sub-keys f=from_id, r=relation)" }
   }

@@ -71,6 +71,9 @@ def build_list(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument("--parent", help="filter to direct children of <id>")
     parser.add_argument("--has-tag", help="filter to tickets having <tag> (comma-separated for OR)")
     parser.add_argument(
+        "--release", help="filter to tickets in release <name> (comma-separated for OR)"
+    )
+    parser.add_argument(
         "--without-tag", help="exclude tickets having any of <tag> (comma-separated)"
     )
     parser.add_argument("--min-children", help="only tickets with at least N children")

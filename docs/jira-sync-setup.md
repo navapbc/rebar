@@ -332,6 +332,8 @@ What round-trips, and where Jira's data model bounds it.
 | Parent — **only when the parent is an Epic** | ✓ | ✓ |
 | Parent — when the parent is a non-Epic (Story/Task/Bug) | **excluded** | n/a |
 
+**Fix versions — setting a release from rebar.** `rebar edit REB-12 --add-release 2.4` (or the library/MCP `add_releases`) records the release on the ticket; the next reconcile pass adds the matching Jira version to the bound issue. `rebar list --release 2.4` lists the release's tickets.
+
 **Fix versions — pending live verification (ADR 0124; checked by `plucky-jetblack-parrot`).** The bridge writes fix versions one at a time with Jira's `update` add/remove verbs and never creates a version, so a release name must already exist as a version in the Jira project. The project may also need *Fix versions* on its edit screen. It only removes a Jira version that rebar itself once set, so versions added in Jira are never stripped.
 
 **Fix versions — missing or archived versions.** Versions are created by people in the Jira

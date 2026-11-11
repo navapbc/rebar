@@ -144,6 +144,7 @@ def list_tickets(
     with_children_count: bool = False,
     sort: str | None = None,
     full: bool = True,
+    release: str | None = None,
     repo_root: str | os.PathLike[str] | None = None,
 ) -> list[TicketState]:
     """List tickets as a list of dicts, with optional filters.
@@ -153,7 +154,9 @@ def list_tickets(
     tombstones via archived-exclusion; ``exclude_deleted`` only changes results
     when combined with ``include_archived=True``. ``min_children`` keeps tickets
     with ≥ N direct children and ``blocking_state`` ("unblocked"/"blocked") filters
-    by readiness. ``with_children_count`` adds a ``children_count`` field (opt-in).
+    by readiness. ``release`` keeps tickets whose OWN ``releases`` contain any of
+    the comma-separated names (exact match, no parent inheritance; ADR 0124).
+    ``with_children_count`` adds a ``children_count`` field (opt-in).
     ``sort`` orders the result by ``priority|created|updated|id|status`` (prefix
     ``-`` for descending; unset values sort last); the default keeps store order.
     ``full`` (default ``True``) emits the bulky ``description``/``comments`` fields;
@@ -175,6 +178,7 @@ def list_tickets(
         parent=parent,
         has_tag=has_tag,
         without_tag=without_tag,
+        release=release,
         include_archived=include_archived,
         exclude_deleted=exclude_deleted,
         min_children=min_children,
