@@ -695,6 +695,35 @@ mcp_self_heal_live_backend() {
   return 0
 }
 
+# The live MCP backend's attested-gate code workspace must stay refreshable. Its entrypoint
+# refuses a dirty, diverged or unreachable checkout (recovering only a provably interrupted
+# fast-forward), so a stuck workspace silently pins gates to an old tree and config
+# (reddish-drinkable-canvasback). The container's entrypoint refreshed the workspace after its
+# image commit reached main, so a healthy HEAD contains that commit. Report anything else every
+# tick as AUTODEPLOY_ERROR, which the deploy_errors alarm (2 of 4 15-minute periods) pages on; a
+# single tick that races a refresh in progress does not page.
+MCP_CODE_PROBE='d="$MCP_CODE_DIR"; sha="$1"
+[ -n "$d" ] && [ -e "$d/.git" ] || { echo absent; exit 0; }
+s="$(GIT_OPTIONAL_LOCKS=0 git -C "$d" status --porcelain 2>/dev/null)" || { echo unreadable; exit 0; }
+[ -z "$s" ] || { echo dirty; exit 0; }
+git -C "$d" merge-base --is-ancestor "$sha" HEAD 2>/dev/null || { echo behind; exit 0; }
+echo current'
+
+mcp_check_code_workspace() {
+  local name image sha state
+  name="$(mcp_live_backend_name)"; [ -n "$name" ] || return 0
+  [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ] || return 0
+  image="$(docker inspect -f '{{.Config.Image}}' "$name" 2>/dev/null)"
+  sha="${image##*:}"
+  case "$sha" in *[!0-9a-f]*|"") log "mcp code workspace: live image $image has no release sha; not checked"; return 0 ;; esac
+  state="$(docker exec "$name" sh -c "$MCP_CODE_PROBE" probe "$sha" 2>/dev/null)" || state="exec-failed"
+  case "$state" in
+    current|absent) return 0 ;;
+  esac
+  err mcp-code-workspace-stuck "live mcp backend $name: code workspace state '${state:-unknown}' (expected to contain $sha); its entrypoint refuses to refresh it, so gates read a stale tree and config (runbook review-bot-ops.md, MCP code workspace freshness)"
+  return 0
+}
+
 # ── what changed? (computed in the mirror clone) ──────────────────────────────
 changed_range() { git -C "$MIRROR_DIR" diff --name-only "$1" "$2" -- $3 2>/dev/null | grep -q .; }
 changed() { changed_range "$DEPLOYED" "$TARGET" "$1"; }
@@ -743,6 +772,7 @@ if [ "$TARGET" = "$DEPLOYED" ] && [ "$mcp_deployed" = "$TARGET" ] && [ "$bot_dep
   rm -f "$DEFER_FILE"
   reclaim_under_pressure
   mcp_self_heal_live_backend || exit 1
+  mcp_check_code_workspace
   mcp_retire_sweep          # reap mcp containers that finished draining since the last flip
   check_declared_compose_services || exit 1
   log "up to date ($TARGET); no-op"

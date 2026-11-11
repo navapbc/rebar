@@ -77,8 +77,17 @@ The MCP server has its own persistent code checkout at `/var/gerrit/site/mcp-cod
 The MCP container entrypoint refreshes that checkout on the MCP server's own lifecycle:
 while holding the checkout lock it refuses a dirty tree, fetches `origin main`, and
 fast-forwards to `origin/main`. Missing or unresolvable checkouts are still re-cloned.
-Dirty, diverged, or unreachable workspaces fail loud and are left untouched rather than
-reset under a gate that may be reading them.
+Dirty, diverged, or unreachable workspaces are left untouched rather than reset under a gate
+that may be reading them; each refusal logs an `MCP_CODE_WORKSPACE_ERROR {...}` marker. One dirty
+state is recovered automatically: a fast-forward killed between writing the checkout and moving
+the ref (observed when the container was OOM-killed mid-refresh) leaves an index and working tree
+that exactly equal a later `origin/main` commit with nothing unstaged or untracked. The entrypoint
+then moves the ref onto that commit by compare-and-swap and continues the refresh (against the
+last fetched `origin/main` when the remote is unreachable). Every steady-state autodeploy tick
+checks the live backend's workspace: if it is dirty, unreadable, or its HEAD does not contain the
+commit the live image was built from, the tick emits `AUTODEPLOY_ERROR mcp-code-workspace-stuck`
+naming the state, which pages through `rebar-autodeploy-errors` (2 of 4 15-minute periods, so a
+tick that races a refresh in progress does not page).
 
 Check drift from the host with:
 
