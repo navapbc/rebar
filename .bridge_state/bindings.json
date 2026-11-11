@@ -25798,10 +25798,24 @@
     },
     "3a2b-a8db-d642-44ab": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nEpic `inferior-seaborgium-aruanas` needs a `releases` field in compiled state before any sync or surface can use it; today there is none (`src/rebar/reducer/_state.py:28-89`). ADR 0124 fixes the design: Jira version names carried by a new `RELEASE_DELTA` event with `TAG_DELTA`'s fold rules, and `SCHEMA_VERSION` 6.\n\n## Approach\n\n1. **Event type.** In `src/rebar/reducer/_version.py`, add a single-source constant `RELEASE_DELTA = \"RELEASE_DELTA\"` beside `TAG_DELTA` (line 77), add it to `KNOWN_EVENT_TYPES` (lines 88-123), and bump `SCHEMA_VERSION` from 5 to 6 (line 41), with a comment naming ADR 0124.\n2. **Fold.** In `src/rebar/reducer/_processors.py`, add `process_release_delta(state, data)` next to `process_tag_delta` (lines 429-449). Same rules on `state[\"releases\"]`: non-list bodies act as empty, non-string or empty names are skipped, removals first, then additions, idempotent. Extract `process_tag_delta`'s body into `_fold_list_delta(state, key, data)` and call it from both; `test_reducer_tag_delta.py` guards the extraction.\n3. **Dispatch.** Register `RELEASE_DELTA: lambda c: process_release_delta(c.state, c.data)` in the replay dispatch table in `src/rebar/reducer/_replay.py` (beside line 109).\n4. **Default.** Add `\"releases\": []` to `make_initial_state` (`src/rebar/reducer/_state.py`), right after `\"tags\"`.\n5. **Write path.** Add `RELEASE_DELTA` to `EVENT_TYPES` in `src/rebar/_store/event_prepare.py` (the allow-list at lines 33-60) and to the allowed-types message (line 125), so the store accepts the event. Add `\"RELEASE_DELTA\"` to `_AUTO_RECOVER_ORPHAN_TYPES` in `src/rebar/_commands/fsck_repair.py:37-39`, beside `TAG_DELTA`.\n6. **Reducer cache.** Bump `_REDUCER_CACHE_VERSION` in `src/rebar/reducer/_cache.py:31` from 8 to 9 (`# 9: releases field + RELEASE_DELTA fold (ADR 0124)`). The cache key is that version plus event file stats (`_cache.py:128`), and lines 29-30 require an increment when projection semantics change; otherwise old-binary caches come back without `releases`.\n7. **Snapshot.** No change: compaction stores the reduced state (`src/rebar/_commands/compact_txn.py:688-705`) and `process_snapshot` restores every key (`_processors.py:464-468`); a pre-feature snapshot keeps the `[]` default.\n8. **Schema.** Add an optional `releases` property (array of strings, description naming ADR 0124) to `src/rebar/schemas/ticket_state.schema.json`, not `required`. Regenerate `src/rebar/types.py` with `python -m rebar.schemas.gen_types`.\n9. **Docs.** In `docs/event-schema.md`, add a `RELEASE_DELTA` row to the replayed-event table (beside the `TAG_DELTA` row at line 46), and record v6 in the \"Schema version & forward compatibility\" history: a new event body type, so older clones preserve and ignore it, and the reconcile host is upgraded first.\n\nNo writer of `RELEASE_DELTA` exists after this change except tests; the inbound, outbound and surface children add writers.\n\n## Scope\n\n- `src/rebar/reducer/_version.py` (constant, known types, schema version)\n- `src/rebar/reducer/_processors.py` (shared list-delta fold, `process_release_delta`)\n- `src/rebar/reducer/_replay.py` (dispatch)\n- `src/rebar/reducer/_state.py` (default)\n- `src/rebar/reducer/_cache.py` (cache version 9)\n- `src/rebar/_store/event_prepare.py` (write allow-list)\n- `src/rebar/_commands/fsck_repair.py` (append-only type set)\n- `src/rebar/schemas/ticket_state.schema.json`, `src/rebar/types.py` (generated)\n- `docs/event-schema.md`\n- `tests/scripts/reducer/test_reducer_release_delta.py` (new)\n- `tests/interfaces/contracts/test_event_schema_forward_compat.py` (extend)\n- `tests/interfaces/store/test_release_delta_store.py` (new: store append, compaction, stale cache)\n\n## Testing\n\nNew `tests/scripts/reducer/test_reducer_release_delta.py`, in the style of `test_reducer_tag_delta.py`:\n- happy path: `{\"added\": [\"2.4\"]}` then `{\"added\": [\"2.5\"], \"removed\": [\"2.4\"]}` reduces to `[\"2.5\"]`;\n- add beats remove in one event: `{\"added\": [\"2.4\"], \"removed\": [\"2.4\"]}` yields `[\"2.4\"]`;\n- idempotent: the same `{\"added\": [\"2.4\"]}` delta written twice (two events) yields `[\"2.4\"]`, and a remove of an absent name changes nothing;\n- two concurrent adds from different clones both survive;\n- malformed bodies (`added: \"2.4\"`, `added: [1, \"\"]`) leave `[]` without raising;\n- no `RELEASE_DELTA` events yields `releases == []`, and a `RELEASE_DELTA` leaves `tags` unchanged;\n- a pre-feature `SNAPSHOT` (no `releases` key) followed by a `RELEASE_DELTA` yields the delta's names;\n- a reducer with `RELEASE_DELTA` masked out of `KNOWN_EVENT_TYPES` ignores it without error (as `test_downgraded_clone_preserves_and_ignores` does for tags).\n\nNew `tests/interfaces/store/test_release_delta_store.py`, in the style of `tests/interfaces/store/test_workflow_run_state.py`:\n- `_seam.append_event(tid, \"RELEASE_DELTA\", {...})` succeeds through the store write path and `rebar.show_ticket` returns the names;\n- `rebar store compact <tid> --threshold=0` writes a `SNAPSHOT` whose `compiled_state.releases` holds the names, and a later `show_ticket` returns the same list;\n- stale cache: forge a `.cache.json` keyed with `_REDUCER_CACHE_VERSION = 8` holding a state without `releases` for a ticket that has a `RELEASE_DELTA` (as `tests/unit/test_reducer_status.py:129-150` does for version 7), then `reduce_ticket` returns the delta's names.\n\nExtend `tests/interfaces/contracts/test_event_schema_forward_compat.py`: `RELEASE_DELTA` is in `KNOWN_EVENT_TYPES` and `SCHEMA_VERSION == 6`. Existing guards: that file's `test_known_event_types_equals_the_reducer_dispatch_table` pins dispatch, and `tests/interfaces/store/test_fsck_snapshot_checks.py:122` (fsck sets cover every known type but CREATE/SNAPSHOT) pins the fsck edit.\n\n## Acceptance Criteria\n\n- [ ] `make_initial_state()[\"releases\"] == []`; pinned by the no-event reducer test.\n- [ ] A `RELEASE_DELTA` applies removals before additions, with an add winning when one name is in both lists; pinned by the happy-path and add-wins tests.\n- [ ] Repeating a `RELEASE_DELTA` changes nothing; pinned by the idempotency test.\n- [ ] A `RELEASE_DELTA` never changes `tags`; pinned by the no-leak test.\n- [ ] `SNAPSHOT` compaction preserves `releases`; pinned by the store compaction test.\n- [ ] A pre-feature snapshot replays to `[]` and then accepts later deltas; pinned by the pre-feature snapshot test.\n- [ ] The store accepts a `RELEASE_DELTA` append; pinned by the store append test.\n- [ ] A reducer cache written under version 8 is recomputed, so `releases` appears; pinned by the stale-cache test.\n- [ ] `RELEASE_DELTA` is in `KNOWN_EVENT_TYPES` and `SCHEMA_VERSION == 6`; pinned by the forward-compat contract test.\n- [ ] `RELEASE_DELTA` is in fsck's auto-recover orphan set; pinned by `tests/interfaces/store/test_fsck_snapshot_checks.py`.\n- [ ] A reducer without `RELEASE_DELTA` in its known types ignores the event; pinned by the masked-reducer test.\n- [ ] `tests/scripts/reducer/test_reducer_tag_delta.py` passes unchanged.\n- [ ] `python -m rebar.schemas.gen_types --check` exits 0.\n- [ ] `docs/event-schema.md` has a `RELEASE_DELTA` row and a v6 history entry.\n- [ ] `env -u JIRA_URL -u JIRA_USER -u JIRA_API_TOKEN make verify` exits 0 on the commit pushed for review.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Store releases in compiled ticket state via a RELEASE_DELTA event"
       },
       "created_at": "2026-11-09T21:31:09Z",
@@ -45978,6 +45992,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-26T02:54:55Z"
     },
+    "6b02-067c-9dbb-47e7": {
+      "created_at": "2026-11-11T02:31:33Z",
+      "jira_id": "4598868",
+      "jira_key": "REB-7090",
+      "state": "confirmed",
+      "updated_at": "2026-11-11T02:31:37Z"
+    },
     "6b06-57ce-9791-4ee1": {
       "baseline": {
         "assignee": {
@@ -64774,6 +64795,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-31T01:12:58Z"
+    },
+    "95bd-beb1-8c3f-465f": {
+      "created_at": "2026-11-11T02:31:38Z",
+      "jira_id": "4598869",
+      "jira_key": "REB-7091",
+      "state": "confirmed",
+      "updated_at": "2026-11-11T02:31:41Z"
     },
     "95c1-f6eb-0fa9-402e": {
       "baseline": {
@@ -108789,6 +108817,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-21T08:38:55Z"
     },
+    "f98b-20cf-36c5-4ba7": {
+      "created_at": "2026-11-11T02:31:44Z",
+      "jira_id": "4598870",
+      "jira_key": "REB-7092",
+      "state": "confirmed",
+      "updated_at": "2026-11-11T02:31:47Z"
+    },
     "f9aa-6981-a0cb-43b6": {
       "baseline": {
         "assignee": null,
@@ -116779,7 +116814,18 @@
     "1794282807178012001": "__rebar_unknown_comment_id__",
     "1794282818531019001": "__rebar_unknown_comment_id__",
     "1794282846308247001": "__rebar_unknown_comment_id__",
-    "1794282859008277001": "__rebar_unknown_comment_id__"
+    "1794282859008277001": "__rebar_unknown_comment_id__",
+    "1794360927310708297": "__rebar_unknown_comment_id__",
+    "1794361483426818623": "__rebar_unknown_comment_id__",
+    "1794361563145948740": "__rebar_unknown_comment_id__",
+    "1794361898752526011": "__rebar_unknown_comment_id__",
+    "1794361919847774885": "__rebar_unknown_comment_id__",
+    "1794361924577408063": "__rebar_unknown_comment_id__",
+    "1794362913257664542": "__rebar_unknown_comment_id__",
+    "1794363207240340968": "__rebar_unknown_comment_id__",
+    "1794363635648306319": "__rebar_unknown_comment_id__",
+    "1794363688699780194": "__rebar_unknown_comment_id__",
+    "1794364034508268750": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -122298,6 +122344,9 @@
     "REB-7076": "ac3b-c6cd-8076-4a98",
     "REB-708": "f112-6222-e236-4b09",
     "REB-709": "7e0c-e76a-75c5-420d",
+    "REB-7090": "6b02-067c-9dbb-47e7",
+    "REB-7091": "95bd-beb1-8c3f-465f",
+    "REB-7092": "f98b-20cf-36c5-4ba7",
     "REB-71": "30ee-5ba7-6d6a-45b5",
     "REB-710": "4563-d974-5166-419b",
     "REB-711": "8ed5-9c7d-cb86-42c8",
