@@ -334,6 +334,15 @@ What round-trips, and where Jira's data model bounds it.
 
 **Fix versions — pending live verification (ADR 0124; checked by `plucky-jetblack-parrot`).** The bridge writes fix versions one at a time with Jira's `update` add/remove verbs and never creates a version, so a release name must already exist as a version in the Jira project. The project may also need *Fix versions* on its edit screen. It only removes a Jira version that rebar itself once set, so versions added in Jira are never stripped.
 
+**Fix versions — missing or archived versions.** Versions are created by people in the Jira
+project, never by the bridge. Each pass reads the versions of every project whose bound
+tickets hold releases. A release naming a version the project lacks, or one that is archived,
+is not sent to Jira; it stays on the rebar ticket, and the ticket gets one unresolved
+`BRIDGE_ALERT` with reason `release-version-missing:<name>` or
+`release-version-archived:<name>`. The bridge retries every pass: once the version exists
+(or is un-archived), that pass writes it to the issue and resolves the alert. If a project's
+version list cannot be read, the pass neither raises nor resolves these alerts.
+
 **Deleting or archiving a bound ticket closes its Jira issue, then unbinds it.** The bridge
 moves the issue to the project's mapped status for `deleted` or `archived` (`Done` by default)
 and retires the binding once the issue shows that status, so a later reopen in Jira is left

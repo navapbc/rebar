@@ -205,6 +205,19 @@ class _IssuesMixin(_TransportBase):
         """Remove ONE fix version by name, leaving every other version intact."""
         self._update_fix_versions("remove_fix_version", remote_id, {"remove": {"name": name}})
 
+    def get_project_versions(self, project_key: str) -> list[dict[str, Any]]:
+        """READ every version of ``project_key`` via pycontribs ``project_versions``
+        (ADR 0124), reduced to ``{"name", "archived"}``."""
+        versions = _call_logged(
+            "get_project_versions", project_key, lambda: self._client.project_versions(project_key)
+        )
+        out: list[dict[str, Any]] = []
+        for version in versions or []:
+            raw = _unwrap(version)
+            if isinstance(raw, dict):
+                out.append({"name": raw.get("name"), "archived": bool(raw.get("archived"))})
+        return out
+
     def _update_fix_versions(self, member: str, remote_id: str, item: dict[str, Any]) -> None:
         issue = _call_logged(member, remote_id, lambda: self._client.issue(remote_id))
         _call_logged(member, remote_id, lambda: issue.update(update={"fixVersions": [item]}))

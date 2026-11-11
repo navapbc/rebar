@@ -304,11 +304,18 @@ def _compute_outbound_update_mutation(
         link_map=_effective_link_map_for(ticket, mapping, repo_root, cache=effective_cache),
     )
     # ADR 0124: per-item fixVersions edits, intent-gated like labels.
-    release_mutations = release_mutations_for(
-        ticket, jira_fields, local_id, config.local_release_intent
+    release_mutations, withheld = release_mutations_for(
+        ticket, jira_fields, local_id, jira_key, config
     )
 
-    if fields or comment_mutations or label_mutations or link_mutations or release_mutations:
+    if (
+        fields
+        or comment_mutations
+        or label_mutations
+        or link_mutations
+        or release_mutations
+        or withheld
+    ):
         # Log changed field names, never values, to expose non-converging
         # updates without leaking content. Non-field updates skip the list.
         print(  # noqa: T201
@@ -330,5 +337,6 @@ def _compute_outbound_update_mutation(
                 labels=label_mutations,
                 links=link_mutations,
                 releases=release_mutations,
+                withheld_releases=withheld,
             )
         )

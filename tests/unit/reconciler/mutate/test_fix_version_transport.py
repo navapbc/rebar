@@ -213,3 +213,56 @@ def test_all_release_writes_failing_trips_the_silent_noop_canary(tmp_path: Any) 
     assert outcome.get("releases_applied") == 0
     assert outcome.get("silent_noop") == ["releases"]
     assert (outcome.get("error") or "").startswith("silent-noop:")
+
+
+# ── Version reads (ADR 0124: availability for missing/archived withholding) ───
+
+
+class _JsonResp(_Resp):
+    def __init__(self, body: Any) -> None:
+        self._body = json.dumps(body).encode()
+
+    def read(self) -> bytes:
+        return self._body
+
+
+def test_cloud_reads_project_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[urllib.request.Request] = []
+
+    def _fake_urlopen(req: urllib.request.Request, *_a: Any, **_k: Any) -> _JsonResp:
+        seen.append(req)
+        return _JsonResp(
+            [
+                {"self": "s", "id": "1", "name": "2.4", "archived": False, "released": False},
+                {"self": "s", "id": "2", "name": "1.0", "archived": True, "released": True},
+            ]
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    got = _cloud_client().get_project_versions("REB")
+    (req,) = seen
+    assert req.get_method() == "GET"
+    assert req.full_url == "https://example.atlassian.net/rest/api/3/project/REB/versions"
+    assert got == [{"name": "2.4", "archived": False}, {"name": "1.0", "archived": True}]
+
+
+class _LibVersion:
+    def __init__(self, raw: dict) -> None:
+        self.raw = raw
+
+
+def test_dc_reads_project_versions() -> None:
+    from rebar.reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
+
+    class _Client:
+        def __init__(self) -> None:
+            self.asked: list[str] = []
+
+        def project_versions(self, key: str) -> list[_LibVersion]:
+            self.asked.append(key)
+            return [_LibVersion({"name": "2.4", "archived": False, "id": "1"})]
+
+    client = _Client()
+    transport = JiraDataCenterTransport(client=client, project="REB")
+    assert transport.get_project_versions("REB") == [{"name": "2.4", "archived": False}]
+    assert client.asked == ["REB"]

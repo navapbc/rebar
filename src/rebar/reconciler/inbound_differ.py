@@ -255,6 +255,9 @@ def _build_outbound_context(
                 entry["link_remove_keys"].add(to_key)
         _index_collection_actions(entry, getattr(om, "labels", []), "label")
         _index_collection_actions(entry, getattr(om, "releases", []), "release")
+        # A withheld release (its Jira version is missing/archived) stays local: treat
+        # it as an outbound add so the inbound REMOVE of the same name is suppressed.
+        entry["release_adds"].update(getattr(om, "withheld_releases", []) or [])
         for field_name in (getattr(om, "fields", {}) or {}).keys():
             # Store inbound field names so parent and title updates suppress stale
             # same-pass Jira echoes.

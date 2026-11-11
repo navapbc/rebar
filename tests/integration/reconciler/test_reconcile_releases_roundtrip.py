@@ -61,7 +61,7 @@ def run_pass(request, reconciler_modules, git_repo, monkeypatch):
     run_differs_mod = importlib.import_module("rebar.reconciler.run_differs")
     counter = {"n": 0}
 
-    def _run(state: _FakeJiraState) -> dict:
+    def _run(state: _FakeJiraState, target_mode: Any = None) -> dict:
         client = _RebClient(state)
         monkeypatch.setattr(fetcher, "_load_acli", lambda: client)
         monkeypatch.setattr(applier, "_load_acli", lambda: client)
@@ -70,12 +70,16 @@ def run_pass(request, reconciler_modules, git_repo, monkeypatch):
             run_differs_mod, "_load_reconcile_backend", lambda: _backend(request.param, client)
         )
         counter["n"] += 1
-        return reconcile.reconcile_once(f"rel-{counter['n']}", repo_root=git_repo)
+        return reconcile.reconcile_once(
+            f"rel-{counter['n']}", repo_root=git_repo, target_mode=target_mode
+        )
 
     return _run
 
 
-def _seed(state: _FakeJiraState) -> None:
+def _seed(state: _FakeJiraState, versions: tuple[str, ...] = ("2.4", "3.0", "jira-only")) -> None:
+    # Versions are people-created in the Jira project (ADR 0124); the bridge only names them.
+    state.project_versions = {"REB": [{"name": v, "archived": False} for v in versions]}
     state.seed(
         "REB-1",
         summary="Ship the release",
@@ -201,3 +205,96 @@ def test_new_issue_gets_its_release_on_the_pass_after_create(run_pass, git_repo)
     state.write_calls.clear()
     run_pass(state)  # the bound-update diff now adds the release
     assert _fix_version_writes(state) == [f"add_fix_version({key},2.4)"]
+
+
+# ── Missing / archived versions (ADR 0124 decisions 8, 9) ────────────────────
+
+
+def _open_release_alerts(repo_root: Path) -> list[str]:
+    import rebar
+
+    alerts = rebar.show_ticket(_LOCAL, repo_root=str(repo_root))["bridge_alerts"]
+    return sorted(
+        a["reason"]
+        for a in alerts
+        if not a.get("resolved") and a["reason"].startswith("release-version-")
+    )
+
+
+def _alert_events(repo_root: Path) -> int:
+    return len(list((_tracker(repo_root) / _LOCAL).glob("*-BRIDGE_ALERT.json")))
+
+
+def test_missing_version_is_withheld_alerted_and_written_once_it_exists(run_pass, git_repo) -> None:
+    state = _FakeJiraState()
+    _seed(state, versions=())
+    run_pass(state)
+    run_pass(state)
+    state.write_calls.clear()
+    _local_release_delta(git_repo, {"added": ["2.4"], "removed": []})
+
+    run_pass(state)  # pass 1: version missing -> withheld, kept, one alert
+    assert _fix_version_writes(state) == []
+    assert _releases(git_repo) == ["2.4"]
+    assert _open_release_alerts(git_repo) == ["release-version-missing:2.4"]
+
+    events = _alert_events(git_repo)
+    state.write_calls.clear()
+    run_pass(state)  # pass 2: steady state writes nothing
+    assert state.write_calls == []
+    assert _alert_events(git_repo) == events
+    assert _releases(git_repo) == ["2.4"]
+
+    state.project_versions["REB"].append({"name": "2.4", "archived": False})
+    run_pass(state)  # pass 3: version exists -> add goes out, alert resolved
+    assert _fix_version_writes(state) == ["add_fix_version(REB-1,2.4)"]
+    assert _open_release_alerts(git_repo) == []
+
+    state.write_calls.clear()
+    events = _alert_events(git_repo)
+    run_pass(state)  # pass 4: nothing
+    assert state.write_calls == []
+    assert _alert_events(git_repo) == events
+
+
+def test_archived_version_is_withheld_with_the_archived_alert(run_pass, git_repo) -> None:
+    state = _FakeJiraState()
+    _seed(state, versions=())
+    state.project_versions["REB"] = [{"name": "1.0", "archived": True}]
+    run_pass(state)
+    run_pass(state)
+    _local_release_delta(git_repo, {"added": ["1.0"], "removed": []})
+    state.write_calls.clear()
+    run_pass(state)
+    assert _fix_version_writes(state) == []
+    assert _open_release_alerts(git_repo) == ["release-version-archived:1.0"]
+
+
+def test_failed_version_read_writes_and_resolves_no_alert(run_pass, git_repo) -> None:
+    state = _FakeJiraState()
+    _seed(state, versions=())
+    run_pass(state)
+    run_pass(state)
+    _local_release_delta(git_repo, {"added": ["2.4"], "removed": []})
+    run_pass(state)
+    assert _open_release_alerts(git_repo) == ["release-version-missing:2.4"]
+
+    del state.project_versions["REB"]  # the fake now raises: availability unknown
+    events = _alert_events(git_repo)
+    run_pass(state)
+    assert _alert_events(git_repo) == events
+    assert _open_release_alerts(git_repo) == ["release-version-missing:2.4"]
+
+
+def test_preview_pass_writes_no_alert(run_pass, git_repo) -> None:
+    from rebar.reconciler.mode import Mode
+
+    state = _FakeJiraState()
+    _seed(state, versions=())
+    run_pass(state)
+    run_pass(state)
+    _local_release_delta(git_repo, {"added": ["2.4"], "removed": []})
+    events = _alert_events(git_repo)
+    run_pass(state, target_mode=Mode.DRY_RUN)
+    assert _alert_events(git_repo) == events
+    assert _open_release_alerts(git_repo) == []

@@ -118,6 +118,7 @@ _REQUIRED_TRANSPORT_MEMBERS = (
     "remove_label",
     "add_fix_version",
     "remove_fix_version",
+    "get_project_versions",
     "get_issue_property",
     "set_issue_property",
     "set_entity_property",
@@ -228,6 +229,10 @@ class TicketTransport(Protocol, metaclass=_TransportPortMeta):
 
     def remove_fix_version(self, remote_id: str, name: str) -> None:
         """Remove ONE fix version by name, leaving the issue's other versions intact."""
+        ...
+
+    def get_project_versions(self, project_key: str) -> list[dict[str, Any]]:
+        """READ the project's versions as ``{"name": str, "archived": bool}`` dicts."""
         ...
 
     def get_issue_property(self, remote_id: str, property_key: str) -> Any:

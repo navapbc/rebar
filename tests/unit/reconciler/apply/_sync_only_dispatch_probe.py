@@ -112,6 +112,13 @@ class _FakeClient:
         versions = self._s.issues.get(key, {}).get("fixVersions", [])
         versions[:] = [v for v in versions if v.get("name") != name]
 
+    def get_project_versions(self, project_key: str) -> list[dict]:
+        # Reads are not write_calls; versions are people-created (ADR 0124).
+        versions = getattr(self._s, "project_versions", {}).get(project_key)
+        if versions is None:
+            raise RuntimeError(f"no versions seeded for {project_key}")
+        return [dict(v) for v in versions]
+
     def add_comment(self, key: str, _body: str) -> dict:
         self._s.write_calls.append(f"add_comment({key})")
         return {"id": "fake-comment"}

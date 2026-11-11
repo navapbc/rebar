@@ -332,6 +332,8 @@ _NON_MUTATING = {
     "get_issue_links": "READ (REST GET issuelinks)",
     "get_issue_link_types": "READ (link-type catalogue)",
     "get_issue_property": "READ (REST GET property)",
+    "get_project_versions": "READ (REST GET project versions, ADR 0124)",
+    "_version_entry": "pure parse helper (Jira Version -> name/archived)",
     "get_entity_property": "READ (alias of get_issue_property)",
     "_direct_rest_get": "READ leg (GET); mutating callers are classified by their write leg",
     "_direct_rest_post_json": "READ leg (POST search) used by get_parent_map",

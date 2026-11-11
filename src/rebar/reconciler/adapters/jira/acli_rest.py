@@ -196,6 +196,17 @@ class AcliRestMixin:
                 matched.append(acct)
         return matched[0] if len(matched) == 1 else None
 
+    def get_project_versions(self, project_key: str) -> list[dict[str, Any]]:
+        """READ every version of ``project_key`` (ADR 0124) as ``{"name", "archived"}``.
+
+        ``GET /rest/api/3/project/{key}/versions`` is documented as unpaginated. A
+        non-2xx answer raises ``HTTPError``; a non-list body raises ``ValueError``.
+        """
+        body = self._direct_rest_get(f"/rest/api/3/project/{project_key}/versions")
+        if not isinstance(body, list):
+            raise ValueError(f"project versions for {project_key!r} is not a list")
+        return [_version_entry(v) for v in body if isinstance(v, dict)]
+
     def _direct_rest_get(self, path: str) -> Any:
         """GET JSON data from a Jira REST path using stored credentials.
 
@@ -545,3 +556,8 @@ class AcliRestMixin:
         else:
             body = {"fields": {"parent": None}}
         self._direct_rest_put_raw(f"/rest/api/3/issue/{jira_key}", body)
+
+
+def _version_entry(version: dict[str, Any]) -> dict[str, Any]:
+    """Reduce a Jira ``Version`` object to the two fields the release sync reads."""
+    return {"name": version.get("name"), "archived": bool(version.get("archived"))}

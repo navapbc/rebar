@@ -30,6 +30,7 @@ _REQUIRED = [
     "remove_label",
     "add_fix_version",
     "remove_fix_version",
+    "get_project_versions",
     "set_entity_property",
     "set_issue_property",
     "set_parent",

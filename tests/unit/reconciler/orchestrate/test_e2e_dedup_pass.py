@@ -109,6 +109,9 @@ class FakeAcliClient:
     def remove_fix_version(self, key, name):
         return None
 
+    def get_project_versions(self, project_key):
+        return []
+
     def add_comment(self, key: str, body: str) -> dict:
         return {"id": "stub-comment"}
 

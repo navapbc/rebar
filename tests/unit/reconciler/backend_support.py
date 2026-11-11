@@ -95,6 +95,10 @@ class FakeTransport:
     def remove_fix_version(self, remote_id, name):
         self.calls.append(("remove_fix_version", (remote_id, name)))
 
+    def get_project_versions(self, project_key):
+        self.calls.append(("get_project_versions", (project_key,)))
+        return []
+
     def get_issue_property(self, remote_id: str, property_key: str) -> Any:
         self.calls.append(("get_issue_property", (remote_id, property_key)))
         return self.store.get(remote_id, {}).get(property_key)

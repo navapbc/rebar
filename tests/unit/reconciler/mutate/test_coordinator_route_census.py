@@ -86,6 +86,10 @@ class _ProtocolFake:
     def remove_fix_version(self, remote_id, name):
         self.calls.append(("remove_fix_version", (remote_id, name)))
 
+    def get_project_versions(self, project_key):
+        self.calls.append(("get_project_versions", (project_key,)))
+        return []
+
     def set_entity_property(self, key, name, value):
         self.calls.append(("set_entity_property", (key, name)))
 

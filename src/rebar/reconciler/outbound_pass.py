@@ -16,6 +16,7 @@ from typing import Any
 # directly instead of raw dicts. mutation_payloads.py carries no cross-reload
 # class-identity requirement (it never references MutationDirection/
 # MutationAction), so an ordinary package import is safe here.
+from rebar.reconciler import release_alerts
 from rebar.reconciler.mutation_payloads import (
     OutboundCreatePayload,
     OutboundDeletePayload,
@@ -28,6 +29,12 @@ def _load(_name: str, relpath: str):
     return importlib.import_module(
         "rebar.reconciler." + relpath.removesuffix(".py").replace("/", ".")
     )
+
+
+def _has_dispatchable_update(om: Any) -> bool:
+    """True when an outbound update carries anything to write to Jira (a mutation that
+    only withholds releases exists solely to keep them local for the inbound diff)."""
+    return bool(om.fields or om.comments or om.labels or getattr(om, "links", []) or om.releases)
 
 
 def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any]:
@@ -94,6 +101,13 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     local_release_intent = local_label_intent_mod.compute_release_intent_map(
         bound_local_ids, tracker_dir
     )
+    # ADR 0124: read each relevant project's versions once, so a release naming a
+    # missing/archived version is withheld (and alerted) instead of 400-ing every pass.
+    release_availability = release_alerts.read_release_availability(
+        outbound_diff_client,
+        release_alerts.projects_needing_availability(local_tickets, binding_store.get_jira_key),
+    )
+    release_withheld_sink: dict[str, Any] = {}
 
     # Share alive absent-key GET fields with inbound diff; omit 404/transport
     # failures. Collect conflict and excluded-field drops for deduped alerts.
@@ -113,6 +127,8 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
             excluded_statuses={"archived", "deleted"},
             local_label_intent=local_label_intent,
             local_release_intent=local_release_intent,
+            release_availability=release_availability,
+            release_withheld_sink=release_withheld_sink,
             client=outbound_diff_client,
             pass_id=pass_id,
             prev_snapshot=prev_snapshot,
@@ -131,6 +147,13 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     from rebar.reconciler.run_differs import _emit_outbound_field_alerts
 
     _emit_outbound_field_alerts(conflict_sink, dropped_field_sink, repo_root, pass_id)
+    # Nothing to plan without a known-availability ticket; a preview writes no events.
+    if release_withheld_sink and ctx.persist:
+        release_alerts.write_release_alerts(
+            release_withheld_sink,
+            {t.get("ticket_id", t.get("id", "")): t for t in local_tickets},
+            tracker_dir,
+        )
     sync_logger.log(
         "outbound_differ_complete",
         count=len(outbound_raw),
@@ -162,6 +185,8 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
                 provenance={"source": "outbound_differ", "local_id": om.local_id},
             )
         elif om.action == "update":
+            if not _has_dispatchable_update(om):
+                continue  # only withheld releases: kept local, nothing to send to Jira
             typed = mut_mod.Mutation(
                 direction=mut_mod.MutationDirection.outbound,
                 action=mut_mod.MutationAction.update,

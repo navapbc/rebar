@@ -158,6 +158,9 @@ class OutboundMutation:
     links: list[dict[str, Any]] = dataclass_field(default_factory=list)
     # Jira fixVersions edits (ADR 0124): {action, release} records; update only.
     releases: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    # Release names withheld from Jira (missing/archived version, ADR 0124): never
+    # dispatched; they make the same-pass inbound diff keep the name locally.
+    withheld_releases: list[str] = dataclass_field(default_factory=list)
     requires_create: tuple[str, ...] = ()
 
 
@@ -187,6 +190,10 @@ class OutboundDiffConfig:
     local_label_intent: dict[str, set[str]] | None = None
     # Ever-seen release names per bound ticket; gates fixVersions edits (ADR 0124).
     local_release_intent: dict[str, set[str]] | None = None
+    # project -> {version name: available|archived}; a project absent is unknown.
+    release_availability: dict[str, dict[str, str]] | None = None
+    # local_id -> (jira_key, withheld records), filled by the builder for alerts.
+    release_withheld_sink: dict[str, Any] | None = None
     client: Any = None
     pass_id: str = ""
     prev_snapshot: dict[str, Any] | None = None
