@@ -294,11 +294,10 @@ def test_every_canonical_env_name_is_documented():
     Both sides are derived, never counted: the canonical set moves whenever a
     config key is added or retired, so a literal total would be a standing lie.
     """
-    from rebar._config_schema import _SECTIONS
-    from rebar._config_sources import _canonical_env_name
+    from rebar._config_sources import _canonical_env_name, env_overridable_keys
 
     doc = (REPO_ROOT / "docs" / "env-vars.md").read_text(encoding="utf-8")
     rows = set(re.findall(r"^\| `([A-Z0-9_]+)` \|", doc, re.M))
-    canonical = {_canonical_env_name(sect, key) for sect, keys in _SECTIONS.items() for key in keys}
+    canonical = {_canonical_env_name(sect, key) for sect, key in env_overridable_keys()}
     assert canonical, "the section registry yielded no canonical names"
     assert not (canonical - rows), f"undocumented canonical overrides: {sorted(canonical - rows)}"

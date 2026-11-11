@@ -43,6 +43,7 @@ from rebar._config_sources import (
     _canonical_env_name,
     _read_toml_table,
     _strict_unknown_keys,
+    env_overridable_keys,
     env_overrides,
     repo_root,
     tracker_dir_override,
@@ -378,10 +379,9 @@ def _env_signature() -> tuple:
     ]
     # Canonical env overrides (per-key nice names where they differ from the
     # auto-derived REBAR_<SECTION>_<KEY>).
-    for sect, keys in _SECTIONS.items():
-        for key in keys:
-            n = _canonical_env_name(sect, key)
-            sig.append((n, os.environ.get(n)))
+    for sect, key in env_overridable_keys():
+        n = _canonical_env_name(sect, key)
+        sig.append((n, os.environ.get(n)))
     # Every tombstoned (REMOVED) env var — a retired var appearing mid-process must
     # invalidate the cache so the top-of-load_config tombstone scan re-fires.
     from rebar._deprecations import tombstones

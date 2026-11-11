@@ -153,6 +153,13 @@ verify.auto_resume_max             = 2       # bounded auto-resume for the compl
                                              # count, remaining unmet) rides the close output and the
                                              # durable COMPLETION_VERDICT sidecar record.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
+verify.plan_review_engine = "pipeline"       # plan-review engine (ADR 0123): "pipeline" (the
+                                             # four-pass review) or "agentic". An explicit review
+                                             # argument overrides it. Deliberately NO env var
+                                             # (REBAR_VERIFY_PLAN_REVIEW_ENGINE is never read). The
+                                             # Layer-1 floor runs first under both; "agentic" is not
+                                             # available yet, so a DET-passing review under it is an
+                                             # unsigned INDETERMINATE. Unknown values fail config load.
 verify.suggest_duplicate_tickets   = false   # ADVISORY create-time duplicate advice (tickets
                                              # eac3, 80a5). Two probes, one setting. Exact: a
                                              # create whose normalized title matches another

@@ -287,6 +287,8 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
         "plan_review_decide",
         # epic B / story B5: the dynamic-verify grounding op (code_grounded boolean).
         "plan_review_grounding",
+        # ADR 0123: the engine switch's route op (run_pipeline boolean).
+        "plan_review_engine_route",
         # epic b744 / WS3: the code-review gate's scripted ops (each an <op>_input + <op>_output
         # pair). assemble_diff (diff context), overlay_union (the escalation), merge_findings
         # (cluster), and the Pass-2/3/4 wiring (verify_inputs / decide / coach_inputs / coach).

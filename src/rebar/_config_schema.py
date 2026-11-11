@@ -72,6 +72,11 @@ class VerifyConfig:
         False,
         "Requires a current plan-review attestation when a work ticket closes.",
     )
+    plan_review_engine: str = _documented(
+        "pipeline",
+        "Selects the plan-review engine: pipeline (the four-pass review) or agentic. "
+        "An explicit review argument overrides it; no environment variable reads it.",
+    )
     # read-via: _commands/gates.py string key
     require_plan_review_for_claim: bool = _documented(
         False,

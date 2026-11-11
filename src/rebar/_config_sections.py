@@ -54,6 +54,8 @@ _SECTIONS: dict[str, dict] = {
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "completion_pinned_ticket_view": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_close": lambda v, k: _as_bool(v, k),
+        # mechanism-ok: config_key verify.plan_review_engine — bossy-impish-hoiho
+        "plan_review_engine": lambda v, k: _as_choice(v, k, {"pipeline", "agentic"}),
         "require_plan_review_for_claim": lambda v, k: _as_bool(v, k),
         "suggest_duplicate_tickets": lambda v, k: _as_bool(v, k),
         "require_ticket_for_commit": lambda v, k: _as_bool(v, k),

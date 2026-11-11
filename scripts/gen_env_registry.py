@@ -405,14 +405,12 @@ def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
         reads.setdefault(alias_name, set()).add("src/rebar/_deprecations.py (deprecation registry)")
     # Every config key carries a settable canonical override, read at runtime through
     # _canonical_env_name rather than under a literal key, so the scan cannot see them.
-    from rebar._config_schema import _SECTIONS
-    from rebar._config_sources import _canonical_env_name
+    from rebar._config_sources import _canonical_env_name, env_overridable_keys
 
-    for sect, keys in _SECTIONS.items():
-        for key in keys:
-            reads.setdefault(_canonical_env_name(sect, key), set()).add(
-                f"src/rebar/_config_sections.py (canonical env name of {sect}.{key})"
-            )
+    for sect, key in env_overridable_keys():
+        reads.setdefault(_canonical_env_name(sect, key), set()).add(
+            f"src/rebar/_config_sections.py (canonical env name of {sect}.{key})"
+        )
     # REBAR_MCP_DEDUP and friends live in MCP_ENV_VARS, not in _SECTIONS.
     from rebar.mcp_server import MCP_ENV_VARS
 
