@@ -231,21 +231,53 @@ refresh_code() {
   with_dir_lock "$code_dir" "code checkout" refresh_code_locked
 }
 
+# Emit one record-anchored marker line per refusal so the host journal can count it.
+code_workspace_marker() {
+  printf 'MCP_CODE_WORKSPACE_ERROR {"reason": "%s", "dir": "%s"}\n' "$1" "${MCP_CODE_DIR}" >&2
+}
+
+# A fast-forward killed between writing the tree and moving HEAD (observed: the container was
+# OOM-killed mid-refresh) leaves a "dirty" checkout whose index and working tree are exactly a
+# later origin/main commit. Recover only that provable state: no unstaged or untracked change,
+# and the index tree equals a commit on the HEAD..origin/main ancestry path. The ref moves by
+# compare-and-swap onto the tree already on disk, so no file is rewritten or discarded.
+recover_interrupted_fast_forward() {
+  dir="${MCP_CODE_DIR}"
+  git -C "$dir" diff --quiet || return 1
+  [ -z "$(git -C "$dir" ls-files --others --exclude-standard)" ] || return 1
+  # A failed fetch still leaves the last fetched origin/main to recover against; the refresh
+  # below then reports the remote as unreachable.
+  git -C "$dir" fetch origin main || true
+  old_head="$(git -C "$dir" rev-parse --verify HEAD)" || return 1
+  index_tree="$(git -C "$dir" write-tree 2>/dev/null)" || return 1
+  target="$(git -C "$dir" log --ancestry-path --format='%H %T' "${old_head}..origin/main" |
+    awk -v tree="$index_tree" '$2 == tree { print $1; exit }')"
+  [ -n "$target" ] || return 1
+  git -C "$dir" update-ref -m "mcp: recover interrupted fast-forward" HEAD "$target" "$old_head" ||
+    return 1
+  [ -z "$(git -C "$dir" status --porcelain)" ] || return 1
+  echo "mcp: recovered interrupted fast-forward: HEAD ${old_head} -> ${target}" >&2
+}
+
 refresh_code_locked() {
   if ! code_repo_present; then
     return 1
   fi
-  if [ -n "$(git -C "${MCP_CODE_DIR}" status --porcelain)" ]; then
+  if [ -n "$(git -C "${MCP_CODE_DIR}" status --porcelain)" ] &&
+    ! recover_interrupted_fast_forward; then
     echo "mcp: dirty code checkout — refusing to refresh" >&2
+    code_workspace_marker dirty
     return 1
   fi
   if ! git -C "${MCP_CODE_DIR}" fetch origin main; then
     echo "mcp: code checkout origin/main unreachable — refusing to refresh" >&2
+    code_workspace_marker unreachable
     return 1
   fi
   emit_code_workspace_state
   if ! git -C "${MCP_CODE_DIR}" merge --ff-only origin/main; then
     echo "mcp: diverged code checkout — refusing to refresh" >&2
+    code_workspace_marker diverged
     return 1
   fi
   emit_code_workspace_state

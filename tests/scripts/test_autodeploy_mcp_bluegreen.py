@@ -113,6 +113,15 @@ case "$1" in
     # reached via that backgrounded subshell, so FD 9 must be CLOSED here.
     if { true >&9; } 2>/dev/null; then echo "stop-fd9-leaked $nm" >> "$LOG"; fi
     set_state "$nm" exited; exit 0 ;;
+  exec)
+    # Run the real in-container command (`exec NAME CMD...`) on the host against a seeded
+    # code-workspace path, so the autodeploy probe script itself is exercised. The container
+    # has its own git, so drop the host-side git stub directory from PATH.
+    echo "exec $2" >> "$LOG"
+    shift 2
+    PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$(dirname "$0")" | paste -sd: -)" \
+      MCP_CODE_DIR="$(cat "$DS/code-dir" 2>/dev/null)" "$@"
+    exit $? ;;
   start)
     nm="$2"; echo "start $nm" >> "$LOG"
     [ -f "$DS/start-fails" ] && exit 1
@@ -2796,3 +2805,86 @@ def test_running_live_backend_is_still_not_reaped_or_stopped(mcp_box: dict[str, 
     assert not _markers(result, "AUTODEPLOY_ERROR"), (
         f"a healthy RUNNING live backend must emit no error marker\n{ctx}"
     )
+
+
+def _workspace_git(repo: Path, *args: str) -> str:
+    env = subprocess_env(
+        GIT_AUTHOR_NAME="t",
+        GIT_AUTHOR_EMAIL="t@example.com",
+        GIT_COMMITTER_NAME="t",
+        GIT_COMMITTER_EMAIL="t@example.com",
+    )
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], check=True, env=env, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _code_workspace(root: Path) -> tuple[Path, str, str]:
+    """A real repo with two commits; returns (path, first_sha, second_sha), HEAD at second."""
+    repo = root / "mcp-code"
+    repo.mkdir()
+    _workspace_git(repo, "init", "-q", "-b", "main")
+    (repo / "f.txt").write_text("one\n")
+    _workspace_git(repo, "add", "f.txt")
+    _workspace_git(repo, "commit", "-qm", "one")
+    first = _workspace_git(repo, "rev-parse", "HEAD")
+    (repo / "f.txt").write_text("two\n")
+    _workspace_git(repo, "commit", "-qam", "two")
+    return repo, first, _workspace_git(repo, "rev-parse", "HEAD")
+
+
+def _stuck_markers(result: subprocess.CompletedProcess[str]) -> list[str]:
+    return [m for m in _markers(result, "AUTODEPLOY_ERROR") if "mcp-code-workspace-stuck" in m]
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_state"),
+    [
+        ("current", None),
+        ("dirty", "dirty"),
+        ("behind", "behind"),
+        ("unreadable", "unreadable"),
+        ("absent", None),
+    ],
+)
+def test_no_op_tick_reports_a_stuck_mcp_code_workspace(
+    mcp_box: dict[str, object], tmp_path: Path, case: str, expected_state: str | None
+) -> None:
+    """A live code workspace that cannot have refreshed pages through deploy_errors.
+
+    reddish-drinkable-canvasback: the entrypoint refused a dirty checkout with only a stderr
+    line, pinning production gates to a 13-day-old tree and its 4.x model config. The real
+    in-container probe runs against a real repo: HEAD must contain the live image's commit."""
+    repo, first, second = _code_workspace(tmp_path)
+    image_sha = second
+    if case == "dirty":
+        (repo / "f.txt").write_text("edited\n")
+    elif case == "behind":
+        _workspace_git(repo, "reset", "-q", "--hard", first)
+    elif case == "unreadable":
+        (repo / ".git" / "index").write_text("corrupt")
+    elif case == "absent":
+        repo = tmp_path / "never-cloned"
+    (mcp_box["dstate"] / "code-dir").write_text(str(repo))  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(
+        mcp_box["dstate"],  # type: ignore[arg-type]
+        "rebar-mcp-live-8092",
+        8092,
+        in_flight=0,
+        state="running",
+        image=f"compose-mcp:{image_sha}",
+    )
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+
+    result = _run(mcp_box)
+
+    stuck = _stuck_markers(result)
+    ctx = f"cmds={_commands(mcp_box)}\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, ctx
+    if expected_state is None:
+        assert stuck == [], ctx
+    else:
+        assert len(stuck) == 1 and f"'{expected_state}'" in stuck[0], ctx
+        assert "exec rebar-mcp-live-8092" in _commands(mcp_box), ctx
