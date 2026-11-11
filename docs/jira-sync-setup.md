@@ -327,10 +327,12 @@ What round-trips, and where Jira's data model bounds it.
 | Title, description, status, priority, assignee | ✓ | ✓ |
 | Comments | ✓ | ✓ |
 | Labels ↔ tags | ✓ | ✓ |
-| Fix versions ↔ releases (names only; ADR 0124) | not yet (outbound sync is the next story) | ✓ |
+| Fix versions ↔ releases (names only; ADR 0124) | ✓ (per-item add/remove; see note below) | ✓ |
 | Issue links (`blocks`/`depends_on` ↔ Blocks, `relates_to` ↔ Relates) | ✓ | ✓ |
 | Parent — **only when the parent is an Epic** | ✓ | ✓ |
 | Parent — when the parent is a non-Epic (Story/Task/Bug) | **excluded** | n/a |
+
+**Fix versions — pending live verification (ADR 0124; checked by `plucky-jetblack-parrot`).** The bridge writes fix versions one at a time with Jira's `update` add/remove verbs and never creates a version, so a release name must already exist as a version in the Jira project. The project may also need *Fix versions* on its edit screen. It only removes a Jira version that rebar itself once set, so versions added in Jira are never stripped.
 
 **Deleting or archiving a bound ticket closes its Jira issue, then unbinds it.** The bridge
 moves the issue to the project's mapped status for `deleted` or `archived` (`Done` by default)

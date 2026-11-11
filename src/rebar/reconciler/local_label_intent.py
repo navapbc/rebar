@@ -20,6 +20,7 @@ This module owns the I/O the outbound_differ.py contract refuses to do
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -81,25 +82,14 @@ def _extract_tags_from_event(event: dict[str, Any]) -> list[str] | None:
     return None
 
 
-def compute_label_intent_set(ticket_id: str, tracker_dir: Path) -> set[str]:
-    """Read the ticket's event directory and return the ever-seen tag set.
+def _ever_seen(
+    ticket_id: str, tracker_dir: Path, extractor: Callable[[dict[str, Any]], list[str] | None]
+) -> set[str]:
+    """Union of every name ``extractor`` returns across the ticket's event files.
 
-    Args:
-        ticket_id: ticket directory name (e.g., ``"a06c-7075-6c1e-4a96"``).
-        tracker_dir: path to ``.tickets-tracker`` (the orphan-branch worktree).
-
-    Returns:
-        Union of every tag that appeared in a CREATE / EDIT (with
-        ``data.fields.tags``) / SNAPSHOT event in this ticket's directory.
-        Empty set when the directory is missing or contains no
-        contributing events.
-
-    Failure modes:
-        - Missing ticket directory -> empty set (lazy first-pass: caller
-          treats this as "suppress all REMOVEs", safe degradation).
-        - Malformed event JSON -> skip that event, continue with the rest.
-          A single corrupt file must not abort the pass.
-        - Unreadable file -> skip silently (same rationale).
+    Missing ticket directory -> empty set (lazy first pass: the caller treats this as
+    "suppress all REMOVEs", a safe degradation). Malformed or unreadable event files
+    are skipped so a single corrupt file never aborts the pass.
     """
     ticket_dir = Path(tracker_dir) / ticket_id
     if not ticket_dir.is_dir():
@@ -116,10 +106,26 @@ def compute_label_intent_set(ticket_id: str, tracker_dir: Path) -> set[str]:
             continue
         if not isinstance(event, dict):
             continue
-        tags = _extract_tags_from_event(event)
-        if tags:
-            ever_seen.update(tags)
+        names = extractor(event)
+        if names:
+            ever_seen.update(names)
     return ever_seen
+
+
+def compute_label_intent_set(ticket_id: str, tracker_dir: Path) -> set[str]:
+    """Read the ticket's event directory and return the ever-seen tag set.
+
+    Args:
+        ticket_id: ticket directory name (e.g., ``"a06c-7075-6c1e-4a96"``).
+        tracker_dir: path to ``.tickets-tracker`` (the orphan-branch worktree).
+
+    Returns:
+        Union of every tag that appeared in a CREATE / EDIT (with
+        ``data.fields.tags``) / TAG_DELTA / SNAPSHOT event in this ticket's
+        directory; empty when the directory is missing or has no contributing
+        events (see ``_ever_seen`` for the failure modes).
+    """
+    return _ever_seen(ticket_id, tracker_dir, _extract_tags_from_event)
 
 
 def compute_label_intent_map(bound_local_ids: list[str], tracker_dir: Path) -> dict[str, set[str]]:
@@ -133,4 +139,38 @@ def compute_label_intent_map(bound_local_ids: list[str], tracker_dir: Path) -> d
     """
     return {
         local_id: compute_label_intent_set(local_id, tracker_dir) for local_id in bound_local_ids
+    }
+
+
+def _extract_releases_from_event(event: dict[str, Any]) -> list[str] | None:
+    """Release names one event contributes to the ever-seen set (ADR 0124 decision 5).
+
+    Non-inbound ``RELEASE_DELTA.added`` and ``SNAPSHOT.compiled_state.releases``.
+    Inbound-origin deltas are Jira changes applied locally, not user intent, and
+    ``removed`` is never folded: this is an ever-seen UNION, as for tags (bug a06c).
+    """
+    event_type = event.get("event_type")
+    data = event.get("data") or {}
+    if event_type == "RELEASE_DELTA":
+        if data.get("source") == "inbound":
+            return None
+        added = data.get("added")
+        return [str(n) for n in added] if isinstance(added, list) else None
+    if event_type == "SNAPSHOT":
+        releases = (data.get("compiled_state") or {}).get("releases")
+        return [str(n) for n in releases] if isinstance(releases, list) else None
+    return None
+
+
+def compute_release_intent_set(ticket_id: str, tracker_dir: Path) -> set[str]:
+    """The ever-seen release-name set for one ticket (gates outbound fixVersions edits)."""
+    return _ever_seen(ticket_id, tracker_dir, _extract_releases_from_event)
+
+
+def compute_release_intent_map(
+    bound_local_ids: list[str], tracker_dir: Path
+) -> dict[str, set[str]]:
+    """Bulk helper: the release intent set for every bound ticket, once per pass."""
+    return {
+        local_id: compute_release_intent_set(local_id, tracker_dir) for local_id in bound_local_ids
     }

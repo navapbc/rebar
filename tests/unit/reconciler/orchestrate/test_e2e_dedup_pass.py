@@ -103,6 +103,12 @@ class FakeAcliClient:
     def remove_label(self, key: str, label: str) -> None:
         return None
 
+    def add_fix_version(self, key, name):
+        return None
+
+    def remove_fix_version(self, key, name):
+        return None
+
     def add_comment(self, key: str, body: str) -> dict:
         return {"id": "stub-comment"}
 

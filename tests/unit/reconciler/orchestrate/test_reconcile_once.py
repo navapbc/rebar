@@ -111,6 +111,12 @@ def _make_acli_module(issues: list[dict]) -> object:
             if key in state and label in _labels(key):
                 _labels(key).remove(label)
 
+        def add_fix_version(self, key, name):
+            return None
+
+        def remove_fix_version(self, key, name):
+            return None
+
         def add_comment(self, key: str, body: str) -> dict:
             return {"id": "stub-comment"}
 

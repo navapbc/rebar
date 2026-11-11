@@ -337,6 +337,9 @@ def update_one(
     _links_computed, _links_applied, _links_failed = _update_one_dispatch_links(
         mutation, client, issue_key, link_confirm=link_confirm
     )
+    _releases_computed, _releases_applied = _update_one_dispatch_releases(
+        mutation, client, issue_key
+    )
 
     if subop_applied is not None:
         subop_applied.update(
@@ -348,6 +351,8 @@ def update_one(
                 "links_computed": _links_computed,
                 "links_applied": _links_applied,
                 "links_failed": _links_failed,
+                "releases_computed": _releases_computed,
+                "releases_applied": _releases_applied,
             }
         )
 
@@ -544,3 +549,46 @@ def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) ->
                     file=sys.stderr,
                 )
     return _labels_computed, _labels_applied
+
+
+def _release_failure_detail(exc: Exception) -> str:
+    """Jira's error body for a failed fixVersions write (up to 500 bytes), which names
+    the cause: unknown version, field not on the edit screen, or missing permission."""
+    if not isinstance(exc, urllib.error.HTTPError):
+        return ""
+    try:
+        body = exc.read()[:500].decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 — diagnostics only; never mask the original failure
+        return ""
+    return f" body={body!r}" if body else ""
+
+
+def _update_one_dispatch_releases(mutation, client: TicketTransport, issue_key) -> tuple[int, int]:
+    """Phase: per-item fixVersions add/remove (ADR 0124). Returns (computed, applied).
+
+    Best-effort like labels: a failed item is logged and retried on the next pass, and
+    the remaining items still run.
+    """
+    computed = applied = 0
+    releases = mutation.get("releases", []) or []
+    if not isinstance(releases, list):
+        return computed, applied
+    for entry in releases:
+        action = entry.get("action") if isinstance(entry, dict) else None
+        name = entry.get("release", "") if isinstance(entry, dict) else ""
+        if not name or action not in ("add", "remove"):
+            continue
+        computed += 1
+        try:
+            if action == "add":
+                client.add_fix_version(issue_key, name)
+            else:
+                client.remove_fix_version(issue_key, name)
+            applied += 1
+        except Exception as exc:  # noqa: BLE001 — best-effort per item; logged, retried next pass
+            print(  # noqa: T201
+                f"update_one: fix version {action} failed for {issue_key} "
+                f"release={name!r}: {exc!r}{_release_failure_detail(exc)}",
+                file=sys.stderr,
+            )
+    return computed, applied

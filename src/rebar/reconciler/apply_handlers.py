@@ -409,11 +409,12 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     outcome["labels_applied"] = _subop.get("labels_applied", 0)
     outcome["comments_applied"] = _subop.get("comments_applied", 0)
     outcome["links_applied"] = _subop.get("links_applied", 0)
+    outcome["releases_applied"] = _subop.get("releases_applied", 0)
     # Flag a kind with computed post-dedup work but zero applied actions.
     # Fully deduplicated work and partial drops do not trigger this canary.
     _silent = [
         kind
-        for kind in ("labels", "comments", "links")
+        for kind in ("labels", "comments", "links", "releases")
         if _subop.get(f"{kind}_computed", 0) > 0 and _subop.get(f"{kind}_applied", 0) == 0
     ]
     if _silent:

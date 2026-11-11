@@ -101,6 +101,17 @@ class _FakeClient:
         if label in labels:
             labels.remove(label)
 
+    def add_fix_version(self, key: str, name: str) -> None:
+        self._s.write_calls.append(f"add_fix_version({key},{name})")
+        versions = self._s.issues.setdefault(key, {}).setdefault("fixVersions", [])
+        if all(v.get("name") != name for v in versions):
+            versions.append({"name": name})
+
+    def remove_fix_version(self, key: str, name: str) -> None:
+        self._s.write_calls.append(f"remove_fix_version({key},{name})")
+        versions = self._s.issues.get(key, {}).get("fixVersions", [])
+        versions[:] = [v for v in versions if v.get("name") != name]
+
     def add_comment(self, key: str, _body: str) -> dict:
         self._s.write_calls.append(f"add_comment({key})")
         return {"id": "fake-comment"}

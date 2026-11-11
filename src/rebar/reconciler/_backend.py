@@ -116,6 +116,8 @@ _REQUIRED_TRANSPORT_MEMBERS = (
     "get_parent_map",
     "set_parent",
     "remove_label",
+    "add_fix_version",
+    "remove_fix_version",
     "get_issue_property",
     "set_issue_property",
     "set_entity_property",
@@ -215,6 +217,17 @@ class TicketTransport(Protocol, metaclass=_TransportPortMeta):
 
     def remove_label(self, remote_id: str, label: str) -> None:
         """Remove ONE label, leaving the issue's other labels intact."""
+        ...
+
+    def add_fix_version(self, remote_id: str, name: str) -> None:
+        """Add ONE fix version by name (per-item ``update`` verb, never a whole-list set).
+
+        The version must already exist in the project; the bridge never creates one
+        (ADR 0124)."""
+        ...
+
+    def remove_fix_version(self, remote_id: str, name: str) -> None:
+        """Remove ONE fix version by name, leaving the issue's other versions intact."""
         ...
 
     def get_issue_property(self, remote_id: str, property_key: str) -> Any:

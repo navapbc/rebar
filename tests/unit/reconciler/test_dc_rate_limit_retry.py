@@ -115,6 +115,8 @@ def test_every_mutating_transport_member_still_fails_on_the_first_429(
         "add_comment": lambda: transport.add_comment("DIG-1", "body"),
         "add_label": lambda: transport.add_label("DIG-1", "lbl"),
         "remove_label": lambda: transport.remove_label("DIG-1", "lbl"),
+        "add_fix_version": lambda: transport.add_fix_version("DIG-1", "2.4"),
+        "remove_fix_version": lambda: transport.remove_fix_version("DIG-1", "2.4"),
         "transition_issue_by_name": lambda: transport.transition_issue_by_name("DIG-1", "Done"),
         "set_relationship": lambda: transport.set_relationship("DIG-1", "DIG-2"),
         "delete_issue": lambda: transport.delete_issue("DIG-1"),

@@ -196,6 +196,19 @@ class _IssuesMixin(_TransportBase):
             lambda: issue.update(update={"labels": [{"remove": label}]}),
         )
 
+    def add_fix_version(self, remote_id: str, name: str) -> None:
+        """Add ONE fix version by name through the target-specific ``update`` verb
+        (ADR 0124), so a concurrent Jira-side version edit is not clobbered."""
+        self._update_fix_versions("add_fix_version", remote_id, {"add": {"name": name}})
+
+    def remove_fix_version(self, remote_id: str, name: str) -> None:
+        """Remove ONE fix version by name, leaving every other version intact."""
+        self._update_fix_versions("remove_fix_version", remote_id, {"remove": {"name": name}})
+
+    def _update_fix_versions(self, member: str, remote_id: str, item: dict[str, Any]) -> None:
+        issue = _call_logged(member, remote_id, lambda: self._client.issue(remote_id))
+        _call_logged(member, remote_id, lambda: issue.update(update={"fixVersions": [item]}))
+
     def search_issues(
         self, jql: str, start_at: int = 0, max_results: int = 50
     ) -> list[dict[str, Any]]:

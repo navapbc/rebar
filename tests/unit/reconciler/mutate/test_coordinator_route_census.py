@@ -37,6 +37,8 @@ _WRITE_METHODS = frozenset(
         "delete_issue",
         "add_label",
         "remove_label",
+        "add_fix_version",
+        "remove_fix_version",
         "set_entity_property",
         "add_comment",
         "set_parent",
@@ -77,6 +79,12 @@ class _ProtocolFake:
 
     def remove_label(self, key, label):
         self.calls.append(("remove_label", (key, label)))
+
+    def add_fix_version(self, remote_id, name):
+        self.calls.append(("add_fix_version", (remote_id, name)))
+
+    def remove_fix_version(self, remote_id, name):
+        self.calls.append(("remove_fix_version", (remote_id, name)))
 
     def set_entity_property(self, key, name, value):
         self.calls.append(("set_entity_property", (key, name)))

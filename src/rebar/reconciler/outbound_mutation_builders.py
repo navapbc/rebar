@@ -33,6 +33,7 @@ from rebar.reconciler.outbound_labels import (
     _diff_type_annotation_labels,
 )
 from rebar.reconciler.outbound_links import _diff_links
+from rebar.reconciler.outbound_releases import release_mutations_for
 
 
 def _create_prerequisites(ticket, binding_store) -> tuple[str, ...]:
@@ -302,8 +303,12 @@ def _compute_outbound_update_mutation(
         links,
         link_map=_effective_link_map_for(ticket, mapping, repo_root, cache=effective_cache),
     )
+    # ADR 0124: per-item fixVersions edits, intent-gated like labels.
+    release_mutations = release_mutations_for(
+        ticket, jira_fields, local_id, config.local_release_intent
+    )
 
-    if fields or comment_mutations or label_mutations or link_mutations:
+    if fields or comment_mutations or label_mutations or link_mutations or release_mutations:
         # Log changed field names, never values, to expose non-converging
         # updates without leaking content. Non-field updates skip the list.
         print(  # noqa: T201
@@ -311,7 +316,8 @@ def _compute_outbound_update_mutation(
             f"changed=[{','.join(sorted(fields))}] "
             f"comments={len(comment_mutations)} "
             f"labels={len(label_mutations)} "
-            f"links={len(link_mutations)}",
+            f"links={len(link_mutations)} "
+            f"releases={len(release_mutations)}",
             file=sys.stderr,
         )
         mutations.append(
@@ -323,5 +329,6 @@ def _compute_outbound_update_mutation(
                 comments=comment_mutations,
                 labels=label_mutations,
                 links=link_mutations,
+                releases=release_mutations,
             )
         )

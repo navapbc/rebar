@@ -125,26 +125,31 @@ class OutboundCreatePayload(_PayloadMapping):
         )
 
 
-_OUTBOUND_UPDATE_KEYS = frozenset({"changed_fields", "comments", "labels", "links", "local_id"})
+_OUTBOUND_UPDATE_KEYS = frozenset(
+    {"changed_fields", "comments", "labels", "links", "local_id", "releases"}
+)
 
 
 @dataclass(frozen=True)
 class OutboundUpdatePayload(_PayloadMapping):
-    """``(outbound, update)`` — field/comment/label/link diffs for a bound
-    ticket. Mirrors ``outbound_pass.py``'s
-    ``{"changed_fields": ..., "comments": ..., "labels": ..., "links": ...}``."""
+    """``(outbound, update)`` — field/comment/label/link/release diffs for a bound
+    ticket. Mirrors ``outbound_pass.py``'s ``{"changed_fields": ..., "comments": ...,
+    "labels": ..., "links": ...}`` plus ``"releases"`` when non-empty."""
 
     changed_fields: Mapping[str, Any] = field(default_factory=dict)
     comments: tuple[Mapping[str, Any], ...] = ()
     labels: tuple[Mapping[str, Any], ...] = ()
     links: tuple[Mapping[str, Any], ...] = ()
     local_id: str | None = None
+    # Jira fixVersions edits (ADR 0124). Projected only when non-empty, so the legacy
+    # dict, bridge manifests and the canonical manifest hash are unchanged without.
+    releases: tuple[Mapping[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
-        if not (self.changed_fields or self.comments or self.labels or self.links):
+        if not (self.changed_fields or self.comments or self.labels or self.links or self.releases):
             raise ValueError(
                 "OutboundUpdatePayload requires at least one of "
-                "changed_fields/comments/labels/links to be non-empty"
+                "changed_fields/comments/labels/links/releases to be non-empty"
             )
 
     def as_legacy_dict(self) -> dict[str, Any]:
@@ -156,6 +161,8 @@ class OutboundUpdatePayload(_PayloadMapping):
         }
         if self.local_id is not None:
             out["local_id"] = self.local_id
+        if self.releases:
+            out["releases"] = [dict(entry) for entry in self.releases]
         return out
 
     @classmethod
@@ -169,6 +176,7 @@ class OutboundUpdatePayload(_PayloadMapping):
             labels=_as_tuple_of_mappings(payload.get("labels")),
             links=_as_tuple_of_mappings(payload.get("links")),
             local_id=payload.get("local_id"),
+            releases=_as_tuple_of_mappings(payload.get("releases")),
         )
 
 

@@ -475,6 +475,25 @@ class AcliGraphMixin:
             {"fields": {"priority": {"name": priority_name}}},
         )
 
+    def add_fix_version(self, jira_key: str, name: str) -> None:
+        """Add one fix version via REST PUT ``update`` (ADR 0124).
+
+        ACLI has no fix-version edit. The per-item ``add`` verb leaves every other
+        version on the issue intact; ``_direct_rest_put_raw`` raises ``HTTPError``
+        on a non-2xx answer (for example an unknown version name).
+        """
+        self._direct_rest_put_raw(
+            f"/rest/api/3/issue/{jira_key}",
+            {"update": {"fixVersions": [{"add": {"name": name}}]}},
+        )
+
+    def remove_fix_version(self, jira_key: str, name: str) -> None:
+        """Remove one fix version via REST PUT ``update`` (per-item ``remove`` verb)."""
+        self._direct_rest_put_raw(
+            f"/rest/api/3/issue/{jira_key}",
+            {"update": {"fixVersions": [{"remove": {"name": name}}]}},
+        )
+
     def update_issuetype(self, jira_key: str, type_name: str) -> None:
         """Update issue type on a Jira issue via REST PUT.
 

@@ -156,6 +156,8 @@ class OutboundMutation:
     comments: list[dict[str, Any]] = dataclass_field(default_factory=list)
     labels: list[dict[str, Any]] = dataclass_field(default_factory=list)
     links: list[dict[str, Any]] = dataclass_field(default_factory=list)
+    # Jira fixVersions edits (ADR 0124): {action, release} records; update only.
+    releases: list[dict[str, Any]] = dataclass_field(default_factory=list)
     requires_create: tuple[str, ...] = ()
 
 
@@ -170,7 +172,8 @@ class OutboundDiffConfig:
     populated during the pass.
 
     ``excluded_statuses`` defaults to archived/deleted. ``local_label_intent``
-    gates label removals; ``client`` enables live comments and absent-issue GETs;
+    gates label removals and ``local_release_intent`` fix-version edits;
+    ``client`` enables live comments and absent-issue GETs;
     ``pass_id`` keys GET rotation; ``prev_snapshot`` guards Jira-side edits.
     ``conflict_sink`` and ``dropped_field_sink`` collect field diagnostics.
     ``projects_mapping`` and ``repo_root`` resolve project overlays.
@@ -182,6 +185,8 @@ class OutboundDiffConfig:
 
     excluded_statuses: set[str] | None = None
     local_label_intent: dict[str, set[str]] | None = None
+    # Ever-seen release names per bound ticket; gates fixVersions edits (ADR 0124).
+    local_release_intent: dict[str, set[str]] | None = None
     client: Any = None
     pass_id: str = ""
     prev_snapshot: dict[str, Any] | None = None

@@ -49,6 +49,8 @@ MUTATING_TRANSPORT_METHODS = (
     "add_comment",
     "add_label",
     "remove_label",
+    "add_fix_version",
+    "remove_fix_version",
     "set_entity_property",
     "set_issue_property",
     "set_reporter",

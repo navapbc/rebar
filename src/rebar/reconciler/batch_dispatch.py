@@ -126,6 +126,8 @@ def _mutation_to_batch_dict(mutation) -> dict:
         comments = list(typed.comments)
         labels = list(typed.labels)
         links = list(typed.links)
+        # Create payloads carry no releases (ADR 0124: they follow on the next pass).
+        releases = list(getattr(typed, "releases", ()))
         follow_on = None
     else:
         if action_value == "create":
@@ -142,6 +144,7 @@ def _mutation_to_batch_dict(mutation) -> dict:
         comments = payload.get("comments", [])
         labels = payload.get("labels", [])
         links = payload.get("links", [])
+        releases = payload.get("releases", [])
         follow_on = payload.get("follow_on")
     return {
         "action": action_value,
@@ -159,6 +162,9 @@ def _mutation_to_batch_dict(mutation) -> dict:
         # silently dropped every outbound blocks/relates link — the link was
         # reported "applied" (the mutation succeeded) but never created in Jira.
         "links": links,
+        # Surface releases so update_one can dispatch per-item fixVersions edits
+        # (ADR 0124); omitting them here would drop them as bug 3f04 dropped links.
+        "releases": releases,
     }
 
 

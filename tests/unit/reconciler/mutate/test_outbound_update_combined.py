@@ -50,6 +50,12 @@ class _RecordingClient:
     def remove_label(self, key, label):
         self.remove_label_calls.append((key, label))
 
+    def add_fix_version(self, key, name):
+        return None
+
+    def remove_fix_version(self, key, name):
+        return None
+
     def add_comment(self, key, body):
         self.add_comment_calls.append((key, body))
 

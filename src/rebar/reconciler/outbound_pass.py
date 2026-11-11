@@ -91,6 +91,9 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     local_label_intent = local_label_intent_mod.compute_label_intent_map(
         bound_local_ids, tracker_dir
     )
+    local_release_intent = local_label_intent_mod.compute_release_intent_map(
+        bound_local_ids, tracker_dir
+    )
 
     # Share alive absent-key GET fields with inbound diff; omit 404/transport
     # failures. Collect conflict and excluded-field drops for deduped alerts.
@@ -109,6 +112,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
         outbound_differ_mod.OutboundDiffConfig(
             excluded_statuses={"archived", "deleted"},
             local_label_intent=local_label_intent,
+            local_release_intent=local_release_intent,
             client=outbound_diff_client,
             pass_id=pass_id,
             prev_snapshot=prev_snapshot,
@@ -171,6 +175,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
                     # update_one, whose link-dispatch phase (dispatch_apply_phases.py)
                     # reads payload["links"] and calls client.set_relationship.
                     links=tuple(getattr(om, "links", [])),
+                    releases=tuple(getattr(om, "releases", [])),
                 ),
                 provenance={
                     "source": "outbound_differ",

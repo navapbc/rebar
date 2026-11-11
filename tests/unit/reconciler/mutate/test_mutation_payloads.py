@@ -239,3 +239,23 @@ def test_as_legacy_dict_helper_handles_typed_and_raw():
     typed = mp.OutboundDeletePayload()
     assert mp.as_legacy_dict(typed) == {}
     assert mp.as_legacy_dict({"a": 1}) == {"a": 1}
+
+
+def test_outbound_update_round_trips_releases():
+    """ADR 0124: fixVersions edits ride the outbound update payload."""
+    legacy = {
+        "changed_fields": {},
+        "comments": [],
+        "labels": [],
+        "links": [],
+        "releases": [{"action": "add", "release": "2.4"}],
+    }
+    typed = mp.build_typed_payload("outbound", "update", legacy)
+    assert isinstance(typed, mp.OutboundUpdatePayload)
+    assert typed.as_legacy_dict() == legacy
+
+
+def test_outbound_update_without_releases_keeps_the_legacy_shape():
+    """No ``releases`` key is projected when empty, so manifests stay unchanged."""
+    typed = mp.OutboundUpdatePayload(changed_fields={"summary": "x"}, local_id="L")
+    assert "releases" not in typed.as_legacy_dict()

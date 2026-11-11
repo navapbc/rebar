@@ -217,3 +217,50 @@ def test_tag_delta_removed_not_subtracted_from_intent(local_label_intent, tmp_pa
 
     result = local_label_intent.compute_label_intent_set("ticket-tdrm", tracker)
     assert result == {"seen"}
+
+
+# ── Release intent (ADR 0124): same ever-seen rules over RELEASE_DELTA / SNAPSHOT ──
+
+
+def test_release_delta_added_counts_as_release_intent(local_label_intent, tmp_path: Path) -> None:
+    ticket_dir = tmp_path / "rel-local"
+    _write_event(ticket_dir, _make_event("RELEASE_DELTA", {"added": ["2.4"], "removed": []}))
+    assert local_label_intent.compute_release_intent_set("rel-local", tmp_path) == {"2.4"}
+
+
+def test_inbound_release_delta_excluded_from_release_intent(
+    local_label_intent, tmp_path: Path
+) -> None:
+    ticket_dir = tmp_path / "rel-inbound"
+    _write_event(
+        ticket_dir,
+        _make_event("RELEASE_DELTA", {"added": ["2.4"], "removed": [], "source": "inbound"}),
+    )
+    assert local_label_intent.compute_release_intent_set("rel-inbound", tmp_path) == set()
+
+
+def test_release_delta_removed_not_folded_into_release_intent(
+    local_label_intent, tmp_path: Path
+) -> None:
+    ticket_dir = tmp_path / "rel-removed"
+    _write_event(ticket_dir, _make_event("RELEASE_DELTA", {"added": [], "removed": ["2.3"]}))
+    assert local_label_intent.compute_release_intent_set("rel-removed", tmp_path) == set()
+
+
+def test_snapshot_releases_count_as_release_intent(local_label_intent, tmp_path: Path) -> None:
+    ticket_dir = tmp_path / "rel-snap"
+    _write_event(
+        ticket_dir,
+        _make_event("SNAPSHOT", {"compiled_state": {"releases": ["2.4", "2.5"], "tags": ["t"]}}),
+    )
+    assert local_label_intent.compute_release_intent_set("rel-snap", tmp_path) == {"2.4", "2.5"}
+    # Releases and tags stay separate fields.
+    assert local_label_intent.compute_label_intent_set("rel-snap", tmp_path) == {"t"}
+
+
+def test_release_intent_map_covers_every_bound_id(local_label_intent, tmp_path: Path) -> None:
+    _write_event(tmp_path / "a", _make_event("RELEASE_DELTA", {"added": ["2.4"]}))
+    assert local_label_intent.compute_release_intent_map(["a", "missing"], tmp_path) == {
+        "a": {"2.4"},
+        "missing": set(),
+    }

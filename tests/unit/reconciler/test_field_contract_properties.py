@@ -181,6 +181,21 @@ def test_add_wins_release_in_both_added_and_removed_stays_added() -> None:
     assert state["releases"] == ["2.4"]
 
 
+def test_release_intent_gate_never_removes_a_name_rebar_never_held() -> None:
+    """add_wins(releases) outbound: a Jira version outside the ever-seen intent set is
+    never removed, whatever the local list holds (ADR 0124 decision 5, bug a06c)."""
+    from rebar.reconciler.outbound_releases import _diff_releases
+
+    jira = {"fixVersions": [{"name": "jira-only"}, {"name": "2.4"}]}
+    for local in ([], ["2.4"], ["2.5"]):
+        removes = [
+            m["release"]
+            for m in _diff_releases({"releases": local}, jira, {"2.4", "2.5"})
+            if m["action"] == "remove"
+        ]
+        assert "jira-only" not in removes
+
+
 # ---------------------------------------------------------------------------
 # 3d. one_way_gated(links/parent): the REAL removal gate, fail-open.
 # ---------------------------------------------------------------------------
