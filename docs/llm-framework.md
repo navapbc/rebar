@@ -625,6 +625,25 @@ python -m rebar.llm.evals.provider_parity --slot standard --epochs 3 --out parit
 re-mines. The replay harnesses take `--store name=path` to read another tracker and
 `--ledger` to put spend accounting somewhere other than the corpus root.
 
+### Comparing the engines
+
+The plan-review gate has two engines (ADR 0123): the four-pass `pipeline` and the one-agent
+`agentic` engine. `rebar.llm.evals.engine_comparison` reviews each whole plan in the frozen
+replay labels file (`evals/plan-review-gate/replay/labels-*.jsonl`) under both engines, in a
+disposable store seeded with the plan's `file_impact` files at the checkout's HEAD, unsigned
+and with no sidecar. It reports verdict agreement, the confusion matrix, blocking flips,
+finding overlap (token-set Jaccard >= 0.5, DET findings excluded) and each engine's agreement
+with the historical pipeline verdict. Errors, Layer-1 floor blocks and other INDETERMINATEs are
+tallied separately and never scored as disagreement.
+
+```sh
+python -m rebar.llm.evals.engine_comparison --dry-run            # list the corpus, no model call
+AWS_PROFILE=frontier-bedrock python -m rebar.llm.evals.engine_comparison \
+    --out src/rebar/llm/eval_specs/engine_comparison_results.json   # live; --resume after an interruption
+```
+
+The recorded run is `src/rebar/llm/eval_specs/engine_comparison_results.json`.
+
 
 ## External-integration suite (live validation)
 
