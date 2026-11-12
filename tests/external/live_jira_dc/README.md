@@ -167,6 +167,24 @@ decision procedure, and waiting longer is never the answer:
 | **Other `customfield_*` entries present, but not `Epic Link`/`Epic Name`** | Provisioning happened; this image genuinely no longer ships the Epic fields | A real degrade — re-run the capability map against the current image and update `_REQUIRED_FIELDS` |
 | **A non-200 status, or a body that is not a list** | The inventory could not be read at all | Treated as not-ready (never a vacuous pass); the message records the HTTP status actually received |
 
+## Fix-version scenarios
+
+`test_fix_versions_live.py` checks fix-version (`releases`) sync, ADR 0124, against this server
+with real scoped `bootstrap-strict` passes. Each test binds a fresh issue in its own scratch
+project:
+
+1. **Inbound:** a version set on the issue through DC appears in the ticket's `releases`.
+2. **Outbound add:** each release added in rebar is written to `fixVersions`, and earlier ones
+   stay. The pass's `RECON: outbound_update ... releases=1` line shows it wrote one item rather
+   than replacing the whole field.
+3. **Outbound remove:** a release removed in rebar leaves `fixVersions`; the other entry stays.
+4. **Missing version:** a release naming a version the project lacks is not written; the ticket
+   gets a `release-version-missing:<name>` BRIDGE_ALERT. Once the version exists, the next pass
+   writes it and resolves the alert.
+
+Versions are created and deleted as admin over REST with unique `rbj-<label>-<hex>` names,
+each deleted in `finally`; project teardown removes anything left.
+
 ## Feasibility evidence (recorded reproducibly)
 
 - Base digest: `sha256:04326628dc4ac36b2bfc1d0f2ebe5ba3807c1ec9cf9b18307d3c2ad7222537e9`
