@@ -1,0 +1,459 @@
+{
+  "corpus": "labels-b3784f0609e3d7f7dcd5a20f2d83081bc37c31dfddd62e2bf8f0baeb3eed8ad6.jsonl",
+  "corpus_digest": "c386161d43b1ce6ecdf6e0c10a9fc9c9a838d766bf3d3aea5c4a7b9a915fdce1",
+  "dry_run": false,
+  "items": [
+    {
+      "agentic": {
+        "findings": [
+          "Plan names no edit set or module locations for the checks it owns: The plan says this child owns P1/P5/P6/P7 (and now P8), the wiring of P2/P3/P4 into the DET floor, the 'exec=DET' code-executor dispatch path and coverage on the attestation. It does not name one file, module, function or schema to create or change. The repository the tools can read has only README.md ('eval fixture') and .rebar/hlc.state, so none of the targets (the orchestrator, the code executor, the attestation model, the size-handling ladder) can be found from the plan. Only the consumed facade, rebar.grounding.{refute_absence,applies,scan}, resolves, and only in the installed environment. An implementer can't tell where the checks go or which existing contracts they must fit.",
+          "Title, What and first AC still say P1\u2013P7 after P8 was added: P8 was appended as an 'added' section, but the title ('P1-P7'), the What list and the first AC ('P1-P7 implemented ... fail-open tested per tool') were not updated. The later AC says 'P1\u2013P8 run as the deterministic exec=DET tier'. The checklist therefore disagrees on scope: P8 has no implementation/fail-open/test AC that matches the others, and it is unclear whether P8 is part of the 'polyglot, fail-open' contract.",
+          "Fail-open as 'ironclad' PASS lets the only blocking tier pass vacuously: The DET floor is described as the only blocking tier, yet every abstain (no tool installed, unsupported language, parse error, timeout) counts as PASS. In an environment without ctags/scc/syft or network access, P2/P3/P4 all abstain and the floor blocks nothing, and nothing gates on that. The only mitigation is 'Coverage recorded on the attestation', which has no consumer, no minimum-coverage rule and no requirement to show a skipped check differently from a real pass. The approach may be intended, but the plan never weighs this failure mode or says how a fully skipped floor is shown to the user.",
+          "P3 deps.dev registry lookup conflicts with the 'frozen, deterministic' floor: P3 checks package existence against the deps.dev registry, a live network service. Its results change over time (packages get published or yanked) and with network state, so the same plan can PASS or FAIL on different days or machines. That contradicts the stated goal of a 'frozen, deterministic' floor. It also sends dependency names from tickets to an outside service. The plan does not mention pinning, caching, an offline mode or a timeout budget.",
+          "Rebar-owned checks P1, P5, P6, P7 are named but not specified: These are the checks this child actually builds, and each gets only a label: 'readiness-shape', 'task-DAG validity + interference', 'AC/DD quality', 'destructive/irreversible sniff (escalates T4)'. The plan does not say what input each check reads, what rule decides FAIL, what 'interference' means, how 'AC/DD quality' can be judged deterministically without an LLM, or what 'escalates T4' does mechanically when the DET tier is the blocking one. They cannot be built or tested without clarification.",
+          "P8 threshold and token estimator are undefined: P8 fails when content 'exceeds \u2014 or is anticipated to exceed \u2014 the largest configured context window'. The plan does not say where the context-window config lives, which tokenizer or estimator is used, what 'anticipated' means (a safety margin?), or how prompt overhead for one criterion per call is counted. Without these the check is neither reproducible nor testable. Its relation to P4 oversize thresholds is also left open.",
+          "Two different emission paths for P8: One section says P8 is emitted by the orchestrator 'during the size-handling ladder'. The later AC says P1\u2013P8 all run as the exec=DET tier dispatched through the code executor. These are different paths, and it is not stated whether P8 runs once, twice, or which path is authoritative.",
+          "Blocking-posture statements contradict each other: The Why says the DET floor is 'the ONLY blocking tier' and that every LLM criterion is advisory. The third AC says DET is only the default blocking tier and that LLM criteria can opt into blocking through block_threshold, 'not an architectural limit'. The plan needs one consistent posture so tests and docs know what to assert.",
+          "Testing plan covers only fail-open, not check correctness: The only test AC is 'fail-open (skipped=pass) tested per tool'. There are no tests that each check fires on a positive case: a real missing symbol for P2, a nonexistent package for P3, a cyclic DAG for P5, a destructive operation for P7, an oversized ticket for P8. Nothing tests the coverage/attestation recording or the exec=DET dispatch either. A floor that always abstains would pass these ACs."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "PASS",
+      "missing_fixture_files": 0,
+      "overlap": {
+        "agentic_only": 9,
+        "matched": 0,
+        "pipeline_only": 19
+      },
+      "pipeline": {
+        "findings": [
+          "The rebar-owned checks P1 (readiness-shape), P5 (DAG validity + interference), P6 (AC/DD quality) and P7 (destructive sniff) are only named. Their deterministic rules are not specified: what shape counts as 'ready', what 'interference' means between tasks, which AC/DD properties are checked without an LLM, and which patterns P7 sniffs. An executor must invent the semantics of the only blocking tier.",
+          "P7 says it 'escalates T4', but the escalation mechanism is undefined. Is it a FAIL, an advisory finding, a flag that forces the T4 LLM overlay to run, or something that raises block_threshold? 'T4' is also undefined in this plan.",
+          "P7 (destructive/irreversible sniff) is described only as 'escalates T4'. The plan doesn't say whether a P7 hit fails the blocking DET floor or only routes to T4. A heuristic sniff that can block works against the fail-open stance of the floor: a false positive would block a plan outright, with no abstain path.",
+          "P8 depends on two inputs from the LLM configuration: 'the largest configured context window' and a token estimate. The plan does not say what P8 does when no context window is configured, when the window cannot be read, or when the token estimate cannot be computed (unknown model or tokenizer). It is also not tied to the floor's 'abstain -> skipped = PASS' contract. The token-estimate method is not named either, so the 'anticipated to exceed' decision rule is not specified next to the check that needs it.",
+          "P8's size test is under-specified. The plan does not define the token-estimation method (tokenizer or chars/4 heuristic), what 'anticipated to exceed' means operationally, where 'the largest configured context window' is read from, how the prompt/rubric overhead of 'one-criterion-per-call' is counted, or which 'container criteria' trigger the parent+child pairing.",
+          "The title and AC promise to build and per-tool-test 'polyglot tool wrappers', but the scope says this child does NOT re-build the tooling and only consumes the 8f6c facade. Implementers may re-wrap ctags/syft/scc/lizard or write per-tool tests that belong to 8f6c.",
+          "The title ('fail-open polyglot tool wrappers') and AC1 ('fail-open (skipped=pass) tested per tool') read as if this child writes and tests its own wrappers around ctags/deps.dev/syft/scc/lizard. That contradicts Scope, which says this child consumes the shipped 8f6c facade 'as a library, not as new integrations' and 'does NOT re-build it'. Implementers could rebuild per-tool wrappers or tool-level abstain logic that already exists in the oracle.",
+          "P8 FAILs (blocking, DET) when content is 'anticipated (token-estimate) to exceed the largest configured context window', but the plan never names the estimator. Token counts depend on the model, and the vendor's own counting API makes a network call and documents its result as an estimate. A purely deterministic, offline check therefore has to use a local tokenizer or a heuristic (e.g., about 4 chars per token), and none of these options or their error margins are discussed. That matters for a check that blocks.",
+          "The ACs only verify the fail-open (skipped=PASS) path and the tier wiring. No AC requires that each check actually DETECTS its defect on a positive fixture. Examples: P2 flags a nonexistent symbol, P3 flags a nonexistent package, P5 flags a cycle, P8 flags an oversize ticket. The union of ACs therefore does not prove that the floor catches anything.",
+          "Every AC is satisfiable by a floor that never blocks anything. Testing is only specified for the fail-open (skipped=pass) path. No AC requires a fixture showing each check FAILS on a true defect, e.g.: a missing file/symbol for P2, a nonexistent package for P3, a cyclic task DAG for P5, a destructive command for P7, an over-window ticket for P8.",
+          "The plan doesn't say how P2 (file/symbol/import resolution) can ever FAIL. It sends P2 through the oracle's `refute_absence` facade, whose contract is described only as 'abstain-by-default' with abstain = PASS. A facade that refutes absence proves something exists. Its non-pass outcomes may only be 'refuted (exists)' or 'abstain', which leaves no outcome that confirms a referenced file or symbol is missing. If so, P2 can never flag a hallucinated reference, and it becomes a check that can't block.",
+          "P3 uses the deps.dev registry for package existence inside what the plan calls a 'frozen, deterministic polyglot floor', but that claim is not checked against what deps.dev actually is. deps.dev is a live, continuously updated network service. It indexes only a fixed set of public ecosystems (Go, RubyGems, npm, Cargo, Maven, PyPI, NuGet, plus Gradle plugins). It does not cover private or internal registries or ecosystems such as Packagist, Hex, CocoaPods, pub or CRAN. A deps.dev 'not found' therefore does not prove a package is missing, and the same input can give different results over time. The plan never says how a deps.dev miss maps to a result: abstain (pass) or a blocking FAIL.",
+          "P2 promises 'file/symbol/import resolution' through universal-ctags, but ctags does not resolve imports. By default it tags definitions. Import statements show up only as syntactic reference tags (role 'imported'), only when the reference extra is enabled (--extras=+r, off by default), and only in the parsers that implement it. The plan does not say which languages actually get import checking, or that a missing reference tag must count as abstain rather than 'import absent'.",
+          "No acceptance criterion has a proving command. 'Coverage recorded on the attestation' does not say what coverage is: per-check ran/abstained/failed, per-language, per-tool? It also gives no field name or schema, so it cannot be verified.",
+          "AC1 bundles seven distinct checks with effort framing ('implemented in Python'). It is near epic-scale for a single criterion and hard to complete or verify in one session as a single unit.",
+          "The unit bundles eight checks plus a new orchestrator execution path. Most checks are independently valuable, testable and releasable (P1 readiness-shape, P5 DAG/interference, P6 AC/DD quality, P7 destructive sniff, P8 reviewability). There is no sequencing or thin-slice MVP that de-risks the riskiest piece (the exec=DET dispatch path plus facade wiring) first.",
+          "The Why section requires a 'frozen, deterministic' floor, but P3 queries the live deps.dev registry. Registry availability and contents change over time, so the same ticket can PASS (abstain on timeout) on one run and FAIL on another. The plan does not state how determinism is preserved (pinned snapshot, cache, recorded response) or the network/timeout/rate-limit constraints.",
+          "P3 checks package existence against the live deps.dev registry. That contradicts the stated goal of a 'frozen, deterministic' floor. Registry contents change (packages get published or yanked, and slopsquatted names appear), and network availability varies. The same plan can pass or fail on different runs, inside the only tier that blocks.",
+          "The T8 AC says P1-P8 are dispatched by the orchestrator's code executor as the exec=DET tier. The P8 section instead says 'the orchestrator emits it during the size-handling ladder'. It is unclear whether P8 is a DET-tier check run by the code executor or an orchestrator-internal emission, which affects where it is implemented."
+        ],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "85980762-5c73-4f6b-86fd-8b548b5720ca",
+      "ticket_id": "012e-bd01-75c6-40a3"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "No edit-set, and the code it builds on is not in the repo: The plan does not name a single file, module, service or workflow to create or change. The repository has nothing for it to plug into: no queue for `Autosubmit` changes, no Gerrit integration, no CI workflow and no Phase 1 code. The plan says it 'Depends on Phase 1' but does not link that work, and no ticket can be found for it. As written, an implementer has to invent the architecture: where the batcher runs, how it reads the queue, and how it talks to Gerrit and GHA.",
+          "Atomic submit depends on Verified-casting, which is out of scope: Scope moves Verified-casting to a separate story. But the submit criterion ('On green, submits the whole batch atomically') needs something to turn a green CI run into a submittable state in Gerrit. Usually that is a Verified+1 label on every change in the chain, not just the tip. Without Verified-casting, either Gerrit refuses the submit or this story has to cast votes on its own, which duplicates the other story. As scoped, the acceptance criteria cannot be met independently.",
+          "'Tested tip == landed tree' is not protected against `main` moving: The batch is assembled on the current `main` tip, then waits a full CI cycle. If `main` moves in that time (a human submit or another batch), Gerrit's submit types such as Rebase If Necessary or Merge If Necessary will produce a tree that was never tested. Fast Forward Only will reject the submit instead. The plan picks no submit strategy and has no compare-and-abort step to keep its own acceptance criterion true.",
+          "Batch-size bound mixes up runs, jobs and changes, and rests on an unchecked premise: The batch-size criterion bounds 'batch size' to 'one CI run's job budget', justified by a cap of about 3 concurrent runs. That cap limits concurrent runs, not jobs inside one run. If CI runs once on the combined tip, the job count does not depend on how many changes are in the batch, so this bound limits nothing. The '~3 concurrent runs' Free-tier figure is stated without a source, and GHA's documented free-plan limit is on concurrent jobs, not runs. The bound cannot be measured as written, and the plan does not say where it will be documented.",
+          "No mechanism for triggering GHA from a Gerrit chain: GitHub Actions does not trigger natively on Gerrit changes. To 'trigger exactly ONE CI run on the combined tip', something has to push the combined tip to a ref GHA watches, or call workflow_dispatch/repository_dispatch, and then get the result back to Gerrit. The plan says nothing about this, and the repo has no workflow to extend. Without it, the criterion of exactly one CI run per batch cannot be implemented or checked.",
+          "Assembly is unspecified: rebase conflicts, new patchsets and approvals: To put independent stacks into one linear chain, the stacks have to be re-parented onto each other, which creates new patchsets. The plan does not say what happens when a stack does not rebase cleanly (drop it, end the batch, or order stacks differently). It also does not say how stacks are ordered, or whether rebasing keeps the existing Code-Review approvals, which depends on the label's copy conditions. If approvals are lost, the combined chain cannot be submitted.",
+          "No testing plan: The plan has no tests or verification approach for any acceptance criterion. Nothing checks that a single run happens per batch, that an N-change batch lands atomically, that the landed SHA equals the tested SHA, or that the size bound is enforced. The criteria are stated as outcomes, with no evidence kind such as unit tests against a fake Gerrit or an end-to-end run.",
+          "The wall-clock benefit depends on out-of-scope failure handling, and there is no rollback: The value claim (collapsing ~N\u00d7CI to ~1 CI cycle) only holds when the batch is green. With batch-failure handling scoped out, a single bad change makes the whole batch fail, with no bisection or eviction. Every queued change is then blocked, possibly worse than landing serially. The plan also has no feature flag or fallback to serial landing while failure handling is missing."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "BLOCK",
+      "missing_fixture_files": 1,
+      "overlap": {
+        "agentic_only": 8,
+        "matched": 0,
+        "pipeline_only": 19
+      },
+      "pipeline": {
+        "findings": [
+          "The claim that the landed tree equals the tested tip, and that ancestor submit is atomic, rests on an unverified Gerrit project configuration. If the submit type is REBASE_IF_NECESSARY, REBASE_ALWAYS or CHERRY_PICK, or main moves between the CI start and the submit, Gerrit lands rewritten commits whose tree was never tested.",
+          "The plan says 'the tested tip == the landed tree' but has no mechanism to enforce it. Between the CI trigger and the submit, main can advance or someone can upload a new patchset to a change in the chain. With a rebasing or cherry-pick submit type, Gerrit would then land a tree CI never tested. This is a check-then-act (TOCTOU) race.",
+          "The plan asserts Gerrit can do an 'ancestor-atomic submit' where 'the tested tip == the landed tree' without saying which Gerrit submit type or settings make that true. Under the default Merge If Necessary, or under Rebase if Necessary, Gerrit creates a merge commit or rebases at submit time if main has moved since CI. The landed tree then differs from the tested tip. Gerrit's own maintainers describe ancestor submission as only 'pseudo atomic'.",
+          "'Ancestor-atomic submit' is asserted, but the plan never names the Gerrit submit surface (REST POST /changes/{id}/submit, or submitWholeTopic) or the project submit type. 'The tested tip == the landed tree' only holds if the submit type creates no new commits. With REBASE_IF_NECESSARY, REBASE_ALWAYS, MERGE_IF_NECESSARY or MERGE_ALWAYS, Gerrit rebases or merges when `main` has moved during the CI run. In that case the landed tree is not the tree CI tested.",
+          "The 'tested tip == landed tree' guarantee has no mechanism for the case where main advances between CI start and submit. The plan also does not specify the Gerrit submit type, e.g. fast-forward-only, or abort-if-main-moved.",
+          "The plan does not handle main advancing, or a batched change receiving a new patchset or losing its Autosubmit vote, between the CI trigger and the submit. In those cases AC3's guarantee 'the tested tip == the landed tree' cannot hold, and the plan does not say whether to abort, re-batch or rebase.",
+          "The assembly algorithm leaves several decisions undecided. It does not say how independent stacks are ordered in the combined chain, what happens on a rebase/cherry-pick conflict between stacks during assembly, or what triggers a batch (time window, queue threshold, or on every Autosubmit vote).",
+          "Atomic land on green is in scope, but verified-casting is declared a separate story. The plan does not say how a green run makes the chain submittable, e.g. whether Gerrit requires Verified+1 that this story cannot cast.",
+          "The plan never says what happens when assembling the combined linear chain fails because a queued change or stack does not rebase cleanly onto main or onto the preceding stack.",
+          "The plan does not define when batch assembly fires: immediately on the first Autosubmit vote, on a timer or collection window, or when the previous batch finishes. This trigger determines both the latency of a single change and whether batching yields any wall-clock gain.",
+          "AC3 requires the batch to be submitted, but Gerrit submit normally requires a Verified label on each change, and the plan defers 'Verified-casting' to a separate story. The plan does not state how AC3 is satisfiable, or provable, within this story.",
+          "The plan doesn't say how independent stacks become one linear chain. Doing it means re-parenting changes, which uploads new patchsets. The plan doesn't cover rebase conflicts between stacks, whether Code-Review approvals carry over to the new patchsets, or who is recorded as uploader. Conflicts during assembly are part of assembly, not the 'batch-failure handling' that was scoped out.",
+          "Submitting with ancestors in Gerrit needs every change in the chain to be submittable, which includes the Verified label. The Scope section moves 'Verified-casting' to a separate story, so this story's atomic land (AC3) depends on functionality it doesn't deliver. One green combined-tip run also has to turn into Verified on every ancestor change, but the plan doesn't link the two.",
+          "Gerrit only submits a tip together with its ancestors if every ancestor is submittable on its own (Verified, Code-Review and the other labels). The plan triggers CI once on the tip and puts Verified-casting in another story. It never says how ancestors get a passing Verified vote, so ancestor submit may be rejected.",
+          "The batch-size bound is deferred to the executor instead of decided. AC4 says the bound 'fits the GHA concurrency cap' and 'documents the bound', but never states the number or how it is derived. It also conflates the per-run job budget with the ~3 concurrent-runs cap from Why.",
+          "The unit of the batch bound in AC4 is ambiguous. 'one CI run's job budget' is a per-run job count, while the stated constraint is a cap of about 3 concurrent runs. The plan does not say whether the bound counts changes, stacks, or GHA jobs, or how a change's job cost is estimated.",
+          "AC4 bounds batch size by 'one CI run's job budget (fits the GHA concurrency cap)'. But the whole design runs a single workflow on the combined tip, so a bigger batch doesn't use more concurrent runs. The concurrency cap doesn't govern batch size. What actually grows with batch size is the chance a batch fails and how much work it takes to find which change broke it, plus how long a run on the combined tree takes or whether it hits a timeout. The bound is tied to a stand-in for the real constraint.",
+          "No AC has a proving command or check. Nothing shows how 'exactly ONE CI run' is counted, how tree equality is asserted, or how linearity is checked. There is also no end-to-end exercise against live Gerrit + GHA, even though the whole path crosses those external boundaries.",
+          "Assembly reparents independent authors' stacks onto each other by uploading new patch sets. The plan neither acknowledges this user-visible rewrite nor provides a back-out that restores the original parents if the batch is not landed."
+        ],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "39abf91b-3d1f-4303-8c4f-b2c15ff787ff",
+      "ticket_id": "0128-9a17-79db-450e"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "The 'exactly ONE CI run' criterion contradicts the bounded re-batch loop: One acceptance criterion requires exactly one CI run on the combined tip. The TOCTOU criterion requires re-assembling and re-batching each time main advances, up to N=5 times. Each re-assembly produces a new combined-tip SHA, so it needs a new CI run (otherwise the handed-off tested_sha would not match the tree). A batch can therefore trigger up to 6 runs, and both criteria cannot be satisfied as written. The plan also does not say whether a re-batch cancels or reuses the earlier run, or which run_id goes into the handoff record.",
+          "The TOCTOU re-check happens at handoff, but the submit happens later in S8: The re-check runs 'immediately before the batch is handed off for submit'. After the handoff, S8 still casts a Verified vote on every member and then submits. main can move during that window, so the check does not protect the moment that matters (submit). The plan says it will 'never hand off a stale tree', but staleness at submit time is not covered by S7 or by any contract S7 places on S8.",
+          "The handoff record cannot bind each member's vote to the SHA that was assembled: The plan says S8 'binds each vote to a SHA S7 actually assembled + tested'. But the record holds only change IDs plus one tested_sha (the combined tip). Assembly rebases every member and creates new patchsets for them. S8 casts Verified per member on a specific revision, so it needs each member's assembled patchset number or commit SHA. Without them, S8 cannot check that the revision it votes on is the one inside the tested chain.",
+          "No behaviour is defined for conflicts during cross-stack assembly: The Why section and the algorithm both assume the N changes are 'non-conflicting'. Neither the What section nor the acceptance criteria say how conflicts are detected, or what happens when stacking stack B onto stack A's tip fails with a merge conflict: drop the conflicting stack, bisect, or fall back to the serial path. This is the most common non-happy path in batching, and leaving it open means the implementer has to guess.",
+          "The assumption that /rebase:chain can do cross-stack assembly is unverified: Gerrit's rebase:chain rebases one change's ancestry chain onto the branch tip. Joining independent stacks into one linear chain means re-parenting stack B onto stack A's tip, i.e. rebasing onto another open change. That may need a per-change rebase with an explicit `base`, not rebase:chain. The plan presents the reuse as given without a spike. The repository does not contain S2's implementation or the gerrit-verify.yaml workflow the plan references, so neither claim can be checked against code.",
+          "The mechanism for recording the run_id is unspecified: AC2 requires dispatching gerrit-verify.yaml and recording that run's run_id, but the plan never says how the run_id is obtained. The workflow file the plan references does not exist in this repository, so it gives no basis for assuming a mechanism. The plan also does not show how a per-change concurrency group behaves when a re-batch dispatches against a new combined-tip change.",
+          "No testing plan: There are no tests or verification steps for assembly ordering, the BATCH_MAX cap, the N=5 bound and serial fallback, the single-dispatch behaviour, or the handoff record's contents. The acceptance criteria are behavioural claims with no stated evidence kind.",
+          "The BATCH_MAX=8 rationale is incoherent: The cap is justified as 'sized to one run's job budget under the GHA concurrency cap'. But the plan triggers one run on the combined tip, so that run's job count does not depend on how many members are in the batch. The plan itself also says the concurrent-run count is not the limiter. The real trade-off is blast radius versus failure-bisection cost, which S9 has to handle.",
+          "Batch-state storage and lifecycle are undefined: S7 writes the handoff record 'to the batch state', but the plan never says where that state lives, who creates or clears it, or how it behaves across re-batches, a crash or restart, and fallback to serial. This shared state is the contract between S7, S8 and S9."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "BLOCK",
+      "missing_fixture_files": 1,
+      "overlap": {
+        "agentic_only": 9,
+        "matched": 0,
+        "pipeline_only": 19
+      },
+      "pipeline": {
+        "findings": [
+          "The plan says the Phase-1 single-wipChain invariant no longer holds, but its only mitigation is for main advancing. It does not define mutual exclusion between the Phase-2 batcher and the Phase-1 serial lander, nor between overlapping batches. The same change could be selected, rebased and dispatched by both paths concurrently.",
+          "AC2 says the story triggers 'exactly ONE CI run on the combined tip', but the FFO TOCTOU AC re-assembles and re-batches when main advances. A re-assembled chain has a new tip SHA and needs a fresh CI run, so one batch can incur up to 1+5 runs. The two ACs contradict each other as written.",
+          "AC2 and AC3 contradict each other. The TOCTOU re-check runs 'immediately before the batch is handed off', i.e. after CI is green. A re-assembly there produces a new tip that must be re-tested, so up to N=5 CI runs can occur, not exactly ONE. The plan does not say whether re-batch re-dispatches CI. It also does not address the window remaining between S7's handoff and S8's submit.",
+          "Nothing says what happens when a stack can't be rebased cleanly onto the growing combined chain. The What section assumes 'N non-conflicting changes', but stacks that rebase cleanly onto main can still conflict with each other once they are chained. S9 covers CI failure, not conflicts during assembly.",
+          "The cross-stack assembly algorithm is under-specified on several points. (a) Order: in what order are stacks stacked onto main (FIFO by Autosubmit vote time?). (b) Conflicts: how is 'non-conflicting' determined, and what happens to a stack whose rebase onto the growing chain conflicts? (c) Over-cap stacks: when a single stack has more than BATCH_MAX members, or adding the next stack would exceed 8, is the stack split, skipped, or allowed? (d) Re-parenting: /rebase:chain rebases an existing chain onto a base, but re-parenting stack B onto stack A's tip is a different operation (e.g. rebase with base=<A tip>).",
+          "The plan assumes members are 'non-conflicting' but defines no behavior when S2's /rebase:chain fails during cross-stack assembly. Examples: stack B does not rebase cleanly onto stack A's tip, or a member has an unmet dependency.",
+          "The plan assumes Gerrit's `/rebase:chain` endpoint can join separate stacks into one chain without checking that it can. The endpoint rebases one linear ancestry, with the operated change as the tip. Putting stack B on top of stack A's tip requires re-parenting the chain onto a specific change (RebaseInput `base`). Gerrit doc versions disagree on whether chain rebase accepts that option, and the plan pins no Gerrit version and gives no call shape. S2 probably uses rebase:chain only to rebase onto the branch tip.",
+          "AC1 relies on S2's `/rebase:chain` as 'the building block for cross-stack chain assembly'. Gerrit's rebase-chain endpoint rebases one existing ancestry chain (the operated change plus its ancestors) onto its target branch. Nothing confirms that it can put an *independent* stack B on top of stack A's tip to build one combined linear chain. That would need a per-change `base` override or a change to each stack's root parent. This is the central technical move of the story, and it is unverified.",
+          "Value validation is missing. The Why claims batching collapses ~N\u00d7CI to ~1 CI cycle, but no criterion measures it, e.g. before/after queue-to-land time for N queued changes, or the fallback rate.",
+          "The leaf introduces non-trivial new logic but has no testing criteria: assembly, cap enforcement, a bounded re-batch loop with fallback, and dispatch against real Gerrit and GHA boundaries. Nothing requires a live end-to-end exercise of dispatch\u2192run_id\u2192handoff record against a real combined-tip change. That leaves the path satisfiable by mocked-only coverage that never hits the Gerrit/GHA boundary.",
+          "The 'batch state' that S7 writes and S8 reads has no stated storage location, format, or lifecycle. Options include a file, Gerrit hashtag/comment, or a DB row. The plan also does not say when the state is created, superseded on re-batch, or cleared.",
+          "The BATCH_MAX=8 justification ('sized to one run's job budget under the GHA concurrency cap') contradicts the Why section, which says the concurrent-run count isn't the limiter. The value is asserted rather than derived from any measured job budget or runtime.",
+          "The BATCH_MAX=8 rationale ('sized to one run's job budget under the GHA concurrency cap') does not follow from the design. A single gerrit-verify run on the tip runs the same jobs regardless of member count, and the Why section says concurrency is not the limiter. The real tradeoff is not stated: larger batches cost more on failure and bisection.",
+          "The reason given for BATCH_MAX=8 ('sized to one run's job budget') doesn't hold up. A single CI run on the combined tip tests one tree, so its job count doesn't depend on how many members are in it. The real cost of a large batch is how likely it is to fail, and how expensive it is to find the culprit (S9) or re-run when main moves.",
+          "The plan does not handle failure of the single CI dispatch. Undefined cases: workflow_dispatch rejected or erroring, no run appearing, a run stuck in queued/in-progress (likely under the Free-tier cap), and how run_id is reliably correlated to the dispatch. There is no timeout and no retry/backoff.",
+          "Every re-batch caused by main advancing means a full new CI cycle, because the re-assembled tip has a new SHA. With N=5, a single batch can cost up to 6 CI cycles before falling back to serial, which undercuts the '~1 CI cycle' promise. The plan doesn't acknowledge this cost or say what triggers the re-check.",
+          "The plan's reason for BATCH_MAX=8 ('sized to one run's job budget under the GHA concurrency cap') contradicts the plan's own Why section, which says the concurrent-run count is not the limiter. It also doesn't explain how member count affects the job budget of a single combined-tip run. As written, the limit looks borrowed (cargo-cult) rather than worked out.",
+          "Assembling the combined chain mutates the members. Rebasing independent stacks onto each other creates new patchsets that make unrelated changes Gerrit-dependent on one another. The plan gives no back-out step to un-chain members when a batch is dropped to the Phase-1 serial path after N=5 attempts, or when a member is removed. Red-CI handling is deferred to S9, but the N=5 drop path is owned by S7.",
+          "The FFO re-check runs 'immediately before the batch is handed off', but S8 then casts N votes and submits. main can advance between the S7 hand-off and S8's submit, so the stale-tree guarantee does not hold at submit time unless S8 re-checks. The plan does not say who owns that final check."
+        ],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "edb73f0a-cce9-4115-b2c9-04479fb5fef0",
+      "ticket_id": "0128-9a17-79db-450e"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "Two of the five targets were already rewritten as behavioral tests, so the plan's 'VALIDATED' premise is stale: The plan says test_code_review_artifact.py::test_code_review_excluded_from_jira_sync checks for `code_review` in the reconciler source, and that test_fs_tools_extraction.py::test_fs_tools_exposes_the_shared_cluster is a 7-symbol hasattr sweep. Neither is true in the repo. The code_review test already runs the reconciler's real outbound differ and checks two things: the code_review ticket produces zero mutations, and a sibling task still produces a CREATE. The fs_tools test named in the plan does not exist. Its replacement, test_fs_tools_cluster_is_reused_by_identity_and_drives_discovery, already checks reuse with `is` and tests the noise constants through what _discovery_filter does with them. Two of the five rewrites are therefore no-ops, and the inventory the plan calls VALIDATED does not match the code.",
+          "Three of the five scoped test files are not in the repository: Scope lists test_applier_exceptions.py, test_applier_reschedule.py and test_overlap_retrieve.py, but the repo's tests/unit has only test_code_review_artifact.py and test_fs_tools_extraction.py. Searches for `EXIT_RESCHEDULE`, `_FIELD_WEIGHTS`, `test_applier_` and `reschedule` all return nothing. `rebar.llm.overlap_retrieve._FIELD_WEIGHTS` also does not resolve in the installed environment, though that alone does not prove it is gone. Without the files, nobody can carry out the plan's main work \u2014 rewriting the applier exception, reschedule and field-weights tests \u2014 or check that it was done. The plan also does not say which module defines these error classes, EXIT_RESCHEDULE or _FIELD_WEIGHTS, or which 'reschedule path' and ranking function the new tests should call.",
+          "The 'make test green' criterion points at a Makefile target that does not exist: The last acceptance criterion requires `make test` to pass, but the repository root has no Makefile (only .rebar/, README.md and tests/). The test files give their own proving command, `.venv/bin/pytest tests/unit/<file> -v`. As written, the criterion cannot be met or checked here.",
+          "An identity-check test in test_fs_tools_extraction.py is left duplicated: The plan touches test_fs_tools_extraction.py and lists 'duplicates' as a coherence concern, but does not mention that test_pai_tools_consume_the_shared_cluster repeats, line for line, the four `is` assertions in test_fs_tools_cluster_is_reused_by_identity_and_drives_discovery. If this file stays in scope, the useful change is to delete the duplicate, not to add another identity test."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "PASS",
+      "missing_fixture_files": 3,
+      "overlap": {
+        "agentic_only": 4,
+        "matched": 0,
+        "pipeline_only": 15
+      },
+      "pipeline": {
+        "findings": [
+          "The plan claims `test_fs_tools_extraction.py::test_fs_tools_exposes_the_shared_cluster` is a 7-symbol `hasattr` sweep. That test doesn't exist. The file already proves reuse by identity, which is what the plan proposes, so this part of the plan has nothing to replace.",
+          "The plan says `test_code_review_excluded_from_jira_sync` asserts `code_review` is present or absent in the reconciler source. It doesn't. It already runs the outbound differ and asserts on the emitted mutations. It also uses `compute_outbound_mutations` rather than `reconcile`, so the AC's 'running reconcile' wording doesn't match the seam the existing test uses.",
+          "test_fs_tools_extraction.py::test_fs_tools_exposes_the_shared_cluster no longer exists. The file already has an identity-based replacement, test_fs_tools_cluster_is_reused_by_identity_and_drives_discovery, which checks `pai_tools._safe_path is fs_tools._safe_path` and the other shared names, and tests _discovery_filter by its effect. So the fs_tools item and its AC are already done. The plan's description of this target is out of date.",
+          "test_code_review_artifact.py::test_code_review_excluded_from_jira_sync no longer checks reconciler source text. It already builds a code_review ticket and a task ticket and runs rebar.reconciler.outbound_differ.compute_outbound_mutations on them. It then asserts that the code_review ticket produces no mutations while the task still produces a create. The plan's premise for this item is out of date, and its AC is already met.",
+          "Two of the five targets are already behavioral, so rewriting them redoes finished work and the plan's inventory is stale. test_code_review_excluded_from_jira_sync already runs the real outbound differ and checks the emitted mutation list. test_fs_tools_exposes_the_shared_cluster (the 7-symbol hasattr sweep) no longer exists; it has been replaced by an identity + discovery-behavior test.",
+          "No acceptance criterion requires showing that the replacement tests fail when the behavior they guard is broken, yet that failure is the plan's whole stated motivation.",
+          "The only validation AC is 'make test green'. It cannot demonstrate the plan's core value claim that the new tests catch broken behavior where the old ones did not. No AC requires a negative control: temporarily break each behavior and confirm the corresponding new test fails. Examples: suppress the raise, return 0 instead of EXIT_RESCHEDULE, flatten the field weights, remove the code_review filter.",
+          "The `code_review` exclusion test has no positive control. If reconcile syncs nothing to Jira in the fixture, \"code_review excluded\" passes vacuously.",
+          "The code_review Jira-exclusion replacement does not name the observation seam. It does not say whether a fake/injected Jira client records sync calls, or what is asserted. It also lacks a positive control showing a non-code_review ticket IS synced in the same run. A pure negative assertion ('code_review not synced') passes vacuously if reconcile never reaches the sync step: a fixture misconfiguration, an early return, or a stub that short-circuits the sync path.",
+          "The ranking assertion that replaces the exact-values `_FIELD_WEIGHTS` test is unspecified. The plan does not say which field ordering must be observed.",
+          "'Exercise ranking that `_FIELD_WEIGHTS` drives' does not say what makes the ranking test discriminating. With arbitrary fixture data, the expected order could come from term frequency, recency, or ID order instead of the field weights. The test would then pass even if the weights were zeroed or swapped, which is the same 'passes while broken' problem the plan is fixing.",
+          "The plan does not say how to run `reconcile` without live Jira, or what exactly counts as \"excluded\". The fake or patched client and the asserted call are left to the executor.",
+          "The plan says to 'run `reconcile` and assert `code_review` tickets are excluded from Jira sync'. It does not state the auth precondition or say that the test must stay offline. The reconciler builds the default Cloud Jira backend, and that backend now fails loudly when credentials are absent. A literal full `reconcile` run would also need a live or stubbed Jira backend. The plan names neither the entry point (rebar.reconciler.reconcile is a module, not a callable) nor the credential and network setup.",
+          "Three of the five named targets can't be confirmed: test_applier_exceptions.py (three hasattr tests), test_applier_reschedule.py::test_exit_reschedule_constant_is_distinct, and test_overlap_retrieve.py::test_field_weights_constant. None of these files or test names is in the repo, and no file mentions `hasattr`, `EXIT_RESCHEDULE` or `_FIELD_WEIGHTS`. Under fail-closed rules, the 'VALIDATED' inventory claim isn't backed up for these items.",
+          "Three of the five files in Scope can't be found in the repo: test_applier_exceptions.py, test_applier_reschedule.py and test_overlap_retrieve.py. The constants they supposedly test, EXIT_RESCHEDULE and _FIELD_WEIGHTS, don't appear anywhere in the repo either."
+        ],
+        "outcome": "BLOCK"
+      },
+      "review_event_uuid": "d63c565f-c738-4e92-872b-d6a5888e410d",
+      "ticket_id": "003d-e6b0-9e58-4b52"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "AC1 grep check can't tell whether the edit was made: The first acceptance check runs `grep -Eiq \"direct\"` and `grep -Eiq \"transitive|indirect\"` across the whole of docs/writing-a-passing-plan.md. \"indirect\" contains \"direct\", so that one word passes both greps. Any existing \"direct\", \"directly\", \"directory\" or \"direction\" anywhere in the guide passes the first grep. Neither grep is limited to the citation section. So the check can pass on the unchanged file, or on a sentence somewhere else in the doc. It does not show that the citation section now says a transitive or indirect dependency does not count.",
+          "AC2 check doesn't prove that no other files changed: AC2 says the change is docs-only and touches no other files. Its proof only checks that docs/writing-a-passing-plan.md appears somewhere in the diff list (`grep -qx` matches if any line matches). It still passes if code files change too. The clause \"and no other files changed\" is plain prose with no command behind it. The unescaped `.` in the pattern also matches any character."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "INDETERMINATE",
+      "missing_fixture_files": 1,
+      "overlap": {
+        "agentic_only": 2,
+        "matched": 0,
+        "pipeline_only": 5
+      },
+      "pipeline": {
+        "findings": [
+          "AC1's proving command can pass before any edit is made, so it does not prove the criterion.\n- `grep -Eiq \"direct\"` is an unanchored substring match over the whole file. It also matches 'indirect', 'directly', 'direction' and 'directory', any of which a plan-writing guide is likely to contain already.\n- The second grep (`transitive|indirect`) also searches the whole file rather than the citation section.\n- The criterion requires the clause to be in the citation section, but nothing in the command scopes the check to that section.",
+          "AC2's command does not prove the 'no other files changed' half of its own criterion.\n- `git diff --name-only origin/main | grep -qx ...` succeeds as long as the doc file appears anywhere in the diff list, even if other code files also changed.\n- The 'and no other files changed' clause is prose with no proving command.\n- `git diff origin/main` (two-dot, against the working tree) can also show unrelated drift if origin/main has moved, which makes the result noisy.\n- The '.' in the pattern is unescaped, which is a minor issue.",
+          "AC1's PROVE command is not a faithful end-state proof of the new clause. It greps the entire file, not the citation section. The unanchored pattern 'direct' also matches existing words such as 'directly', 'directory' or 'redirect'. 'indirect' likewise matches anywhere in the doc. The check can therefore pass before any edit, or pass if the clause lands in the wrong section.",
+          "AC2's PROVE command does not prove 'no other files changed'. `git diff --name-only origin/main | grep -qxE \"docs/writing-a-passing-plan.md\"` succeeds as long as the doc is among the changed files, even if code files also changed. The 'and no other files changed' clause is prose with no mechanical check.",
+          "The 'docs only' AC's check does not enforce its own scope claim. `git diff --name-only origin/main | grep -qxE \"docs/writing-a-passing-plan.md\"` succeeds whenever that file appears anywhere in the diff, even if other files (including code) also changed. So the 'no other files changed' half of the AC is stated but never checked, and changes outside the plan's scope would get through."
+        ],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "f78cac30-d795-4331-b144-1f1b1364fe96",
+      "ticket_id": "01f8-11eb-4772-4c80"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "Grounding claims marked CONFIRMED can't be checked: the files and prerequisite ticket aren't in this repo: The plan says it confirmed by reading that docs/writing-a-passing-plan.md already has the '## Citing a prerequisite's symbol ([rebar:<id>])' section. It also says it confirmed that src/rebar/llm/plan_review/det_citation.py::_edge_verified checks direct edges only, and it calls 266e-c8b6-0cb0-44ae the shipping ticket. In the repo under review none of these can be found. The only files are README.md and .rebar/hlc.state. No docs/ directory exists, there is no _edge_verified or resolve_deps anywhere, and the prerequisite ticket is missing. The whole 'docs-only, the code is already right' argument rests on the claim that _edge_verified does not recurse. That claim, and the claim that there is an EXISTING section to edit, have nothing behind them that a reviewer or implementer can check here.",
+          "The first acceptance check searches the whole file, so it can pass without the new clause: The PROVE command greps the entire document for the word 'direct' and for 'transitive|indirect'. It does not look only at the [rebar:<id>] citation section. The second grep would also pass with 'indirect' alone. So the check passes if those words show up anywhere in the doc, including text that was there before the change. It does not show that the citation section now says the edge must be direct and that transitive edges don't count, which is the whole point of the deliverable.",
+          "The exactly-one-file diff check can fail if ticket metadata is updated: AC2 requires `git diff --name-only origin/main` to list exactly one file. The repo root has a .rebar/ directory holding hlc.state. It isn't hidden as gitignored noise, so it is likely tracked. That looks like hybrid-logical-clock state that rebar ticket operations write to. If the implementer comments on, transitions or closes the ticket while doing this work, that file would show up in the diff. The check would then fail even though the doc change itself stays within scope. The check is also really a process gate rather than proof of the doc change."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "PASS",
+      "missing_fixture_files": 1,
+      "overlap": {
+        "agentic_only": 3,
+        "matched": 0,
+        "pipeline_only": 4
+      },
+      "pipeline": {
+        "findings": [
+          "AC1's proving command greps the ENTIRE doc rather than the citation section, so it is not scoped to the change. It passes if the word 'direct' and the word 'transitive'/'indirect' appear ANYWHERE in docs/writing-a-passing-plan.md, even in unrelated sections or in separate sentences. It can therefore be true before this work, or true without the clause actually landing in the citation section.",
+          "AC1's PROVE command greps the whole file rather than the citation section. It can pass without the citation section changing, so it is not a faithful end-state proof of the AC.",
+          "AC2 uses `git diff --name-only origin/main`, which compares the working tree against the current origin/main tip rather than against the merge-base. If origin/main advances after branching, files changed upstream show up in the diff and the count exceeds 1, even though this change touched only the doc. The command also silently depends on how fresh origin/main is locally (fetch state).",
+          "AC2's PROVE compares the working tree against the current `origin/main` tip, not the branch's merge base. Once main advances, files changed upstream appear in the diff and the single-file check fails falsely."
+        ],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "c44c8c78-5694-4d52-ad6d-f36c559a98fd",
+      "ticket_id": "01f8-11eb-4772-4c80"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "AC4 (reject --body-file) and AC5 (maybe add a real --body-file) can contradict each other: AC4 requires a test showing `rebar comment <id> --body-file <path>` is REJECTED. AC5 leaves open whether to add a real `--body-file` option, and the plan itself leans towards adding it. If the implementer adds it, `--body-file <path>` becomes the valid form and the AC4 rejection test cannot pass. Both criteria can only hold together if the decision is 'do not add', and the plan never says so. Because the plan defers that decision to the implementer, it cannot be carried out without asking someone first.",
+          "The plan never addresses extra positional arguments being dropped silently, which is half of the bug: In the reported failure, `rebar comment <id> --body-file <path>` stored only the 11-byte `--body-file` token. That means the `<path>` argument (or the `<text>` after `--body`) was thrown away without any error. The plan only guards against a body that starts with `-`. It never requires that surplus positional arguments be rejected. So something like `rebar comment <id> notes.md extra words`, or an unquoted multi-word body, can still store a partial body and exit 0. That breaks the plan's own last criterion: 'no silent truncation or coercion anywhere'.",
+          "Rejecting every body that starts with '-' breaks ordinary markdown bullet comments: AC1 rejects any body argument that begins with `-`. Agents routinely write comments that open with a markdown list item (\"- fixed X\\n- verified Y\") or a checklist (\"- [ ] ...\"). Under this rule, every existing caller that writes such bodies would start failing. The plan treats this breaking change as acceptable without saying so or justifying it, and it pushes the burden onto the `--` escape hatch, which current callers do not use. A narrower check would catch the reported failures without the breakage: reject only tokens that look like an option, such as `^--?[A-Za-z][\\w-]*$` with no whitespace, or an exact match for known-misused flags.",
+          "No edit set: the plan names no files, parser mechanism or command list: The plan does not say where the change lands. The parser lives in `rebar.cli` (`rebar.cli.main` and `rebar.cli.sys` resolve; `rebar.cli.argparse`, `click` and `typer` do not resolve as module attributes, so the parser may be hand-rolled). That affects how the `--` escape hatch and the rejection get built. A hand-rolled parser needs explicit `--` handling, while argparse has its own. The audit criterion is also open-ended (\"at least create/edit/session-log ... fix or document each\"), so scope and completion are undefined.",
+          "The testing plan only covers rejection, not the escape hatch or normal bodies: AC4 requires tests only for rejecting `--body-file` and `--body`. There is no required test that `rebar comment <id> -- \"-starts with a dash\"` stores the body exactly. There is also no test that ordinary bodies (including ones with dashes inside) still store byte-for-byte, and none covering the guard on the other audited commands. AC2 (escape hatch) and AC3 (other commands) could therefore regress without any test catching it.",
+          "The cited evidence tickets do not exist in the reviewed store: The plan backs its premise with ticket b690 (comments 5-9) and session log 55a9 (comment 5), but neither can be found in this repository's store, so the evidence cannot be checked from here. This does not undermine the failure mode itself, but the plan should point to evidence that can be reproduced."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "PASS",
+      "missing_fixture_files": 0,
+      "overlap": {
+        "agentic_only": 6,
+        "matched": 0,
+        "pipeline_only": 0
+      },
+      "pipeline": {
+        "findings": [],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "690fe5fe-6f61-4cbf-8a05-e147ed78f3eb",
+      "ticket_id": "00da-1bda-d59c-4c2e"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "Everything the plan proposes is already in the code and tested: The plan's premise is that `dc_store_copy_repo` still calls `subprocess.run(..., capture_output=True, check=True)` for the fetch, archive and ls-tree, and that there is no retry. The current code says otherwise. `_dc_fixtures.py` already has a module-level `run_git` that raises RuntimeError carrying the argv, cwd, exit status and git's stderr. It also has `fetch_tickets` with bounded retry (`FETCH_ATTEMPTS = 3`), an injectable `sleep` and retry-then-fail behaviour, plus a comment stating the same policy. The fixture already calls `fetch_tickets(source)` and `run_git([... 'ls-tree' ...])`. The unit file the plan wants to create already exists and covers every acceptance criterion: the verbatim-stderr cell, the CalledProcessError negative control, the fail-once-then-succeed cell, the always-fail capped-attempts cell, and an AST check that no `subprocess.run` pairs `capture_output` with `check`. Carried out as written, the plan would either do nothing or add duplicate `_run_git`/`_fetch_tickets` helpers next to the existing `run_git`/`fetch_tickets`. The line numbers it cites (139-141, 142-144, 151-156) describe an older state of the file.",
+          "Routing `git archive` through a capture-output helper would undo the streaming fix for bug 25e0: The plan says to route the fetch, archive and ls-tree calls through `_run_git`, which captures output. `git archive` no longer captures its output. `extract_store_snapshot` pipes `git archive` straight into `tar -x` through `Popen` so that memory use stays constant. It already reports git's stderr ahead of tar's, because GNU tar's empty-stream error would otherwise hide it. Running the archive through a `capture_output=True` helper would hold the whole snapshot in memory again, which the docstring explicitly removed. It would also bring back the separate archive-then-extract shape.",
+          "The 'new' unit test file already exists and has unrelated tests in it: The plan lists `tests/unit/test_dc_store_copy_fetch_diagnostics.py` as a new file. It already exists. Besides the fetch-diagnostic tests, it holds `TestBridgeStateScrub`, the regression cells for bug 91aa / glass-worriless-mammal. If someone writes the file from scratch because the plan calls it new, they would delete those scrub regression tests without saying so.",
+          "The cited example test file does not exist: The plan supports its path-loading approach by pointing to `tests/unit/test_live_dc_isolation_controls_59b2.py` as the existing `spec_from_file_location` pattern. That file is not in the repo. The only `spec_from_file_location` use under tests/unit is in the diagnostics test file itself."
+        ],
+        "outcome": "BLOCK"
+      },
+      "historical_pipeline_verdict": "PASS",
+      "missing_fixture_files": 0,
+      "overlap": {
+        "agentic_only": 3,
+        "matched": 1,
+        "pipeline_only": 10
+      },
+      "pipeline": {
+        "findings": [
+          "The plan routes the `git archive` call through the new capture-output `_run_git` helper. But `_dc_fixtures.py` already has `extract_store_snapshot`, which streams `git archive FETCH_HEAD -- <entries>` into `tar -x` with Popen and already raises a RuntimeError carrying git's stderr. Routing the archive through `_run_git` would rebuild diagnostics that already exist, and buffering the archive in memory would undo the streaming design that keeps memory flat (bug 25e0).",
+          "The plan says the `git archive` call has the same captured-output + check=True shape as the fetch and should go through _run_git, which captures output. At HEAD, git archive runs as a streamed Popen pipe into tar (extract_store_snapshot). It is deliberately not captured, so memory stays constant, and it already raises RuntimeError with git's stderr before reporting tar's. Routing it through a capture_output helper would buffer the whole archive in memory, undoing a deliberate design.",
+          "The plan says to route the `git archive` call through the capture-output `_run_git` helper. In the code, archive extraction is a streaming `git archive | tar -x` Popen pipe (`extract_store_snapshot`). It was built that way so the fixture's memory stays constant (bug 25e0), and it already raises a RuntimeError containing git's stderr. Routing archive through a buffered `subprocess.run(capture_output=True)` helper would hold the whole snapshot in memory, which undoes that fix. This change is wrongly scoped as in-scope.",
+          "The plan routes `git archive` through the new `_run_git` capture_output helper. That would replace the existing streaming path (`extract_store_snapshot`, which pipes `git archive` into `tar -x` via Popen and already raises RuntimeError with git's stderr). The existing code deliberately avoids capture: its docstring says buffering the archive 'held the whole snapshot in memory', which is the runner-exhaustion bug 25e0.",
+          "The plan routes the `git archive` call through `_run_git`, which captures all output. In the current code, `git archive` streams into `tar -x` through a Popen pipe. That was done on purpose to keep memory constant, and the path already reports git's stderr before tar's. Capturing the archive's stdout in a helper would hold the whole snapshot in memory, which the module's docstring identifies as the problem the pipe fixed.",
+          "AC2 has no proving step. It requires the archive and ls-tree calls to route through the new helper, leaving no `capture_output=True` + `check=True` pair in the fixture. But the Testing section only stubs the fetch path, and the fixture itself never runs at repo tier, so nothing verifies the routing.",
+          "AC2 (archive and ls-tree routed through the diagnostic helper) has no named proof. The Testing section only describes fetch scenarios, so the claim that 'no capture_output=True + check=True pair is left' has no stated check. The 'negative control proves it goes RED against the old check=True shape' is also unspecified. If it is done by asserting `str(CalledProcessError)` lacks stderr, it tests the stdlib rather than this code.",
+          "The plan cites tests/unit/test_live_dc_isolation_controls_59b2.py as the existing example of loading _dc_fixtures.py by path with importlib.util.spec_from_file_location. That file doesn't exist, and nothing in tests/ references it, so the cited example can't be found.",
+          "The retry policy is decided before the diagnostic evidence exists, and the plan's own logic says that is backwards. The cause of the exit 128 is unknown. Exit 128 is git's generic fatal code (auth, missing ref, refspec miss, a lock held by another process), so it is not shown to be transient. If the next live run's fetch fails once and then succeeds on retry, the stderr the ticket exists to surface is never shown, and the root cause stays hidden.",
+          "The plan does not put a timeout on `git fetch`. Retry handles a fast failure but not a slow or hung remote. A stalled fetch blocks fixture setup indefinitely, and with retry the worst case grows to N stalls.",
+          "The 'Not in scope' section leaves out the test_outbound_create_stamps_both_provenance_markers failure on the grounds that it is 'already tracked by royal-weariless-zebrafish (10c3-5a33-2e25-4584)'. Looking up that ticket by either ID returns 'not found', so the claim it rests on is false as far as I can verify, and the failure may not be tracked anywhere."
+        ],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "5c2650f4-39aa-4cf0-aada-7c8efe6f6f08",
+      "ticket_id": "00c6-e96e-3f04-434d"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "The only file the plan edits, and every artifact it cites, is missing from the repository under review: The plan says it changes exactly one file, tests/unit/rebar_reconciler/test_wiki_render_hardening.py. It also says its measurements (91.6s idle, 504.8s under load, the lowered-timeout reproduction) were taken 'in this worktree'. The repository the review tools can read holds only README.md ('eval fixture') and .rebar/hlc.state. The test file is not there. Nothing in the tree mentions wiki_render, _EQUIVALENCE, or 'timeout', so the CI workflow (.github/workflows/_build-and-test.yml) is absent too. The renderer module does not import (UNRESOLVED, which alone does not prove it is absent). As a result, none of the plan's code-level claims can be checked against this tree: that _renderable_units() exists and needs no pandoc at import, that _EQUIVALENCE_STRIDE is 1, that the inline `assert len(sampled) >= 100` is there, that the CI flags are --timeout=300 --timeout-method=thread, or that 48a3ba0b8a touched only test_wiki_render_corpus.py. An implementer working from this tree would have no file to edit.",
+          "Acceptance on a single macOS pass cannot tell the fix apart from the flake: The last acceptance criterion counts one 'Verified +1' run passing the macOS py3.13 cell as proof. The plan itself records that the failure is intermittent and that the identical unfixed commit already passed in change 1734. One green run is therefore as likely before the fix as after it, so the criterion proves nothing. The real proof is per-call timing under the load reproduction, which appears in Testing but is not an acceptance criterion.",
+          "Coverage-guard criterion pins 884, contradicting the 'corpus growth adds cases' design: The Approach section says the coverage guard asserts that the chunks concatenate to _renderable_units() and that the total is >= 100. It presents corpus growth as safe ('Growing the corpus adds cases'). The matching acceptance criterion instead says the chunks reassemble '(884 units, >= 100)'. An implementer could reasonably hard-code 884. That guard would then fail as soon as a fixture is added, which defeats the structural property the plan claims."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "PASS",
+      "missing_fixture_files": 1,
+      "overlap": {
+        "agentic_only": 3,
+        "matched": 0,
+        "pipeline_only": 11
+      },
+      "pipeline": {
+        "findings": [
+          "Two deliverables have no covering acceptance criterion: (a) the chunked assertion message carrying the unit's global corpus index, and (b) the module-docstring cost-discipline note.",
+          "The plan computes `_renderable_units()` at module import and parametrizes by chunk index, but never requires the unit sequence to be deterministically ordered across processes. Under xdist, every worker collects independently. If enumeration order differs between workers, the node ids (keyed by chunk index) still match, so xdist reports no collection mismatch. But chunk N on gw0 and chunk N on gw1 would then hold different units, silently skipping some units and duplicating others. The proposed coverage guard runs inside one process, so it cannot detect this.",
+          "The plan computes `_renderable_units()` at module import and keys parametrize cases only by chunk index. Under pytest-xdist every worker imports the module and slices the corpus independently. xdist validates that workers collected identical node IDs, not identical parameter contents. If `_renderable_units()` ordering is not guaranteed deterministic (e.g. unsorted glob/listdir/set iteration), chunk `[k]` can hold different units on different workers. Some units would then be compared twice and others never, while every case and the coverage guard still pass on its own worker.",
+          "The plan assumes pytest-xdist will spread the chunk cases correctly, but it never requires _renderable_units() to return the same order in every worker process. Because test IDs are keyed by chunk index rather than unit identity, any per-process difference in order (for example from set iteration or an unsorted filesystem walk) leaves the IDs identical while the chunk contents differ. xdist's 'Different tests were collected' check would not fire, and units could be silently skipped or compared twice in a CI run.",
+          "The plan computes `_renderable_units()` at module import, slices it, and keys parametrize cases only by chunk index. It never requires the unit order to be identical in every process. Under xdist, each worker (and the controller) imports the module separately. pytest-xdist only checks that test IDs match, and here the IDs are just chunk indices, so they always match. If `_renderable_units()` depends on order that can differ between processes (set or dict-of-set iteration, which varies with per-process hash randomization, or an unsorted directory walk), worker gw0's chunk 3 and gw1's chunk 3 contain different units. Some units are then never compared and others are compared twice, and nothing fails.",
+          "The plan's central claim is that every call now stays well inside 300s under the load that previously produced 504.8s. That claim is checked only by the Testing 'Load path' step. No acceptance criterion requires the post-fix loaded measurement to be recorded, so the AC set can be fully ticked without ever showing the fix closes the reproduced failure.",
+          "The final AC ('A Verified +1 run \u2026 passes the macOS py3.13 cell') cannot tell fixed from unfixed. The Context section itself says the identical failing commit passed in change 1734. The AC also lacks the `[non-codebase]` tag and does not require recording the change id or patchset.",
+          "The Acceptance Criteria omit the post-fix load-path re-measurement, the only discriminating proof that the flake is fixed. The closing AC ('A Verified +1 run on the change passes the macOS py3.13 cell') cannot distinguish fixed from lucky: the plan itself records that the identical unfixed commit passed in change 1734.",
+          "The scope exclusion 'this test is the last one of the shape' is not shown to hold for the other tests in test_wiki_render_hardening.py. The plan's own sibling figure (worst call 12.5s) is already above the ~10s per-test bound that AC2 sets for that file, and the plan plans no work on any other test.",
+          "Two sources of chunk ambiguity. First, the plan keeps `_EQUIVALENCE_STRIDE` but says the chunks reassemble to `_renderable_units()`. It does not say whether the chunks are sliced from the full list or from the stride-sampled list, which matters for both the guard and any future stride change. Second, the coverage AC's parenthetical '(884 units, >= 100)' could be read as pinning exactly 884, which would contradict the design goal that corpus growth adds cases.",
+          "The first AC ('The mechanism is recorded on this ticket \u2026') is already true as soon as this plan text exists, so it is a one-time documentation transition rather than an outcome of the work."
+        ],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "de6ddd9b-1ac8-49b3-8e9f-f257a69fe4bf",
+      "ticket_id": "0078-fa3e-05d1-4e12"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "The fix and the tests the plan asks for are already in the code: The plan rests on the claim that `_metric_invoke` runs `scc --format json <repo>` without `--by-file`, so `_scc_files` never sees a per-file entry. The current code already passes `--by-file`. There is also already an argv-faithful test. Its fake scc returns per-file entries only when `--by-file` is in argv. It asserts that a file with 801 code lines matches, that a file with exactly 800 does not, and that `--by-file` appears in the captured command. A separate parametrized test covers timeout, nonzero exit and invalid JSON, and checks that each one still produces a fail-open abstain. An existing no_tool test covers a missing binary. So the plan's statement that current tests 'use a 50-LOC fixture or force tool absence' is also out of date. As written, the plan can't do what it says: the rebar-debug step will not reproduce a missing `--by-file` argv, the held-out RED oracle cannot fail against the current code, and there is nothing left to correct. Every acceptance criterion is already met, so claiming this plan would spend a ticket on no change and could produce duplicate tests."
+        ],
+        "outcome": "BLOCK"
+      },
+      "historical_pipeline_verdict": "PASS",
+      "missing_fixture_files": 0,
+      "overlap": {
+        "agentic_only": 1,
+        "matched": 0,
+        "pipeline_only": 11
+      },
+      "pipeline": {
+        "findings": [
+          "The plan's main premise is wrong: `_metric_invoke` already passes `--by-file`. The plan says it 'invokes `scc --format json <repo>` without `--by-file`' and that 'its command omits `--by-file`', but the current code builds `[binary, \"--by-file\", \"--format\", \"json\", str(repo_root)]`.",
+          "The claim that existing tests 'do not exercise the positive metric threshold path' is wrong. An argv-sensitive positive/boundary test and fail-open tests for all three failure modes plus tool absence already exist. That means Plan bullets 2 and 4 and most of the Acceptance Criteria are already met by existing code.",
+          "The plan's main edit is already done. `_metric_invoke` already passes `--by-file` to scc, so 'Correct the grounding metric invocation' changes nothing, and the defect in the Context and Reproduction sections is not in the current tree.",
+          "The plan never names its test file. The coverage it plans to add (positive match, below-threshold no-match, invalid output, non-zero exit, timeout, tool absent, argv-sensitive `--by-file` check) already exists in `tests/unit/grounding/test_engine_b.py`. That contradicts the Context claim that tests only use a 50-LOC fixture or force tool absence.",
+          "The plan re-proposes a fix and test oracle that already exist in the repo without acknowledging them. `_metric_invoke` already passes `--by-file`. An argv-faithful test already checks the over-cutoff match, the at-boundary no-match and the presence of `--by-file`. A parametrized test already covers timeout, nonzero-exit and invalid-JSON fail-open. As a result, the planned 'physically withheld RED oracle' cannot go RED, and the Reproduction step that inspects `_metric_invoke` will contradict the plan's own premise.",
+          "The plan's main premise does not match the current code. `_metric_invoke` already passes `--by-file`, and an argv-sensitive positive/boundary test plus fail-open tests already exist. The planned RED oracle ('fails when `--by-file` is absent') would pass immediately against the current code, so the reproduction gate cannot confirm the stated cause.",
+          "The plan says to 'Add positive match, below-threshold no-match, invalid-output, nonzero-exit, and tool-absent coverage', but the repo already has tests for all of these. Writing new ones would duplicate them instead of reusing or extending what exists.",
+          "The Verification section names no concrete command or test path for the focused grounding metric tests. The executor must infer which tests prove the ACs.",
+          "Two cited evidence sources can't be found. The closed bug `rapid-cuboid-velvetcrab`, cited for its history, does not resolve to a ticket. The 'coverage-reconstruction tests' with a '50-LOC fixture' are not present under tests/unit/grounding.",
+          "The prior art the plan cites cannot be found, so the plan can't actually reuse it. The closed bug rapid-cuboid-velvetcrab and the 'code-health adapter' it fixed are both untraceable in this repo.",
+          "The plan promises a 'normalized metric match' (AC1), but nothing in it normalises the match's file location. `_metric_invoke` puts scc's raw `Location` into `location.file`. scc is invoked with an absolute `str(repo_root)`, so `Location` comes back as an absolute path. Every other Engine B backend in the same module converts locations to repo-relative paths. Once the fix makes matches appear, metric-oversize will be the only detector reporting absolute paths, which is inconsistent with the other backends."
+        ],
+        "outcome": "BLOCK"
+      },
+      "review_event_uuid": "14df5e8b-278d-414e-bd8d-30296ea69266",
+      "ticket_id": "0024-fa99-d5bb-49bc"
+    },
+    {
+      "agentic": {
+        "findings": [
+          "Plan premises (files, line numbers, registry rows, check script, tickets) cannot be found in the repository: The plan presents several things as fact: binding_store.py L109/L110 and L538, the binding_lifecycle.py owner, two LEGACY_EXCEPTIONS rows keyed on (relpath, symbol, rationale), and scripts/check_config_ownership.py as the verification command. None of these exist in the repository under review, and none of the referenced tickets resolve. Acceptance criteria 2 and 3 therefore depend on artifacts nobody can inspect or run here, and the line-number claims cannot be checked.",
+          "The bookkeeping ticket declares no ordering links, so it repeats the gap it was created to close: The plan's reason for existing is that the RP-02/RP-04 link is a soft relates_to, so 'nothing enforces the retarget'. Yet the plan itself declares no depends_on on RP-02 S2, and nothing makes RP-04 S7.3.a depend on it. Criterion 2 checks entries 'on the post-RP-02 path', which cannot be satisfied before S2 lands. And unless S7.3.a is blocked on this ticket, S7.3.a can still be claimed against the stale binding_store.py target.",
+          "Registry symbol misspelled as 'RECONCILE R_ABSENT_RETIRE_GRACE': The plan says rows are keyed on PATH + SYMBOL, but it names the second binding_store.py entry 'RECONCILE R_ABSENT_RETIRE_GRACE', with a stray space. Elsewhere it uses 'RECONCILER_ABSENT_RETIRE_GRACE'. Because the match is on the symbol string, an implementer who copies this spelling into the re-registered row or the S7.3.a file-impact symbol list would produce a key that matches nothing.",
+          "The 'instead of (or in addition to)' wording lets the stale binding_store.py target survive: Criterion 1 accepts keeping binding_store.py in S7.3.a's file impact. The plan's own premise is that after S2, binding_store.py 'no longer contains the reads'. Keeping it would leave S7.3.a pointing at a file with nothing to cut, and that contradicts criterion 2's 'no stale binding_store.py row' intent. The hedge makes the criterion non-deterministic.",
+          "Verification gate and rationale line numbers do not fit a bookkeeping-only change: The ticket only edits another ticket's file impact; criterion 4 says it 'does not itself change sourcing behavior'. Running check_config_ownership.py 'before and after the retarget' therefore says nothing about this ticket, since the result depends entirely on whether RP-02 S2 has landed. Meanwhile the registry rationales quote binding_store.py line numbers: L110, which the plan admits is already wrong at L109, and L538. Those references go stale on the move, and no criterion assigns anyone to update them."
+        ],
+        "outcome": "PASS"
+      },
+      "historical_pipeline_verdict": "BLOCK",
+      "missing_fixture_files": 0,
+      "overlap": {
+        "agentic_only": 5,
+        "matched": 0,
+        "pipeline_only": 14
+      },
+      "pipeline": {
+        "findings": [
+          "AC2 has no proving command. The only stated command, check_config_ownership.py, may not detect a stale registry row for a read that no longer exists. Whether it fails on stale or unused exceptions is not stated, so a passing check does not prove 'no stale binding_store.py row'.",
+          "AC1 leaves a real decision to the executor: 'instead of (or in addition to)' binding_store.py. Keeping binding_store.py contradicts the Context, which says that file no longer contains these reads.",
+          "AC1 allows file impact to name binding_lifecycle.py 'instead of (or in addition to)' binding_store.py. That leaves the end state undetermined: keeping binding_store.py listed for these reads would preserve the stale target the ticket is meant to remove. The AC does not say under what condition binding_store.py legitimately stays, for example other S7.3.a reads unrelated to these two symbols.",
+          "AC1's wording 'instead of (or in addition to) `binding_store.py`' leaves RP-04 S7.3.a's final file list ambiguous. The plan says both reads move out of binding_store.py ('S7.3.a's recorded target file no longer contains the reads'). So keeping binding_store.py in S7.3.a's impact for these reads would be a stale target, which is the same kind of stale entry AC2 forbids for the exceptions file.",
+          "The ticket's validity depends on RP-02 S2 having landed, but the plan declares no depends_on edge to RP-02 S2. It also does not say what happens if RP-04 S7.3.a runs before RP-02 S2 moves the reads.",
+          "Nothing in the plan makes this ticket wait for RP-02 S2 or block RP-04 S7.3.a. It is meant to make up for the lack of enforcement, but it is itself just as unenforced. RP-04 S7.3.a can still start and use the stale binding_store.py target before this ticket runs. The plan also ignores the reverse order: if S7.3.a lands before RP-02 S2, there is nothing to retarget, and S2's move/re-registration step would act on reads that S7.3.a has already cut.",
+          "The env-var symbol is spelled inconsistently. The registry description uses 'RECONCILE R_ABSENT_RETIRE_GRACE' (with a space); everywhere else it is 'RECONCILER_ABSENT_RETIRE_GRACE'. Because the registry keys on symbol, the exact spelling matters.",
+          "The re-registered rows' rationale text cites binding_store.py line numbers (L110 / L538), which are already stale (L109). The plan does not require updating the rationale to binding_lifecycle.py with current lines. A row under the new path whose rationale still points at binding_store.py is exactly the kind of misleading stale reference AC2 wants to eliminate.",
+          "The plan describes LEGACY_EXCEPTIONS as keyed on PATH + SYMBOL, then writes the second symbol as 'RECONCILE R_ABSENT_RETIRE_GRACE', with a stray space. Everywhere else it is 'RECONCILER_ABSENT_RETIRE_GRACE'. Because the registry is symbol-keyed and AC1 requires naming the symbols explicitly 'so the target cannot be missed', a misspelled symbol in the ticket is a precision defect.",
+          "AC2 checks only that the registry rows sit on the post-RP-02 path. It does not check the human-readable rationale text, which the plan says carries binding_store.py line numbers (L110, L538) that have already drifted (L110\u2192L109). After the move, those rationales would still cite binding_store.py lines that no longer hold the reads. That contradicts the AC2 intent of leaving nothing 'implying a read that is no longer there'.",
+          "The plan names the second binding_store.py registry entry's symbol two different ways. The Context bullet and the ACs say `RECONCILER_ABSENT_RETIRE_GRACE`, but the registry paragraph calls it `RECONCILE R_ABSENT_RETIRE_GRACE` (with a space). The plan itself says the registry is keyed on PATH + SYMBOL, so it is unverified which string is the real registry key. If the real key differs from the one AC2 uses, AC2's check can't find the row.",
+          "The plan spells the second legacy-exception symbol two different ways. The 'Why this needs its own ticket' section names it 'RECONCILE R_ABSENT_RETIRE_GRACE' (with a space). The Context bullets and AC1 call it 'RECONCILER_ABSENT_RETIRE_GRACE'. LEGACY_EXCEPTIONS is keyed on PATH + SYMBOL, so a wrong symbol string won't match the real row. Anyone confirming or re-keying that row from the 'Why' wording would be looking for a symbol that doesn't exist.",
+          "AC2 checks only the registry key (path plus symbol). The plan says line numbers live only in the human-readable rationale text, and that text currently cites binding_store.py L110 and L538. A row moved to binding_lifecycle.py could pass AC2 while its rationale still points readers to the old file and line numbers. That is exactly the kind of misdirection this ticket is meant to prevent.",
+          "The plan spells the second registry symbol 'RECONCILE R_ABSENT_RETIRE_GRACE' (with a space). Everywhere else it is RECONCILER_ABSENT_RETIRE_GRACE. LEGACY_EXCEPTIONS matches on path plus symbol, so copying the misspelled form when confirming or re-registering the row would give a symbol that matches nothing. The read would then be unregistered, or the confirmation would wrongly report the row as missing."
+        ],
+        "outcome": "PASS"
+      },
+      "review_event_uuid": "68322451-b41b-4654-af21-b3708050065b",
+      "ticket_id": "01d8-c18d-b229-419a"
+    }
+  ],
+  "match_threshold": 0.5,
+  "recorded_at": "2026-11-12T20:03:57.211177+00:00",
+  "schema_version": 1,
+  "summary": {
+    "agreement": 0.8181818181818182,
+    "blocking_flips": 2,
+    "confusion_matrix": {
+      "BLOCK": {
+        "BLOCK": 1,
+        "PASS": 1
+      },
+      "PASS": {
+        "BLOCK": 1,
+        "PASS": 8
+      }
+    },
+    "excluded": {
+      "agentic": {},
+      "pipeline": {}
+    },
+    "historical_pipeline_agreement": {
+      "agentic": {
+        "agree": 5,
+        "n": 10
+      },
+      "pipeline": {
+        "agree": 5,
+        "n": 10
+      }
+    },
+    "n_compared": 11,
+    "n_items": 11,
+    "overlap": {
+      "agentic_only": 53,
+      "matched": 1,
+      "pipeline_only": 127
+    },
+    "valid": true
+  },
+  "valid": true
+}
