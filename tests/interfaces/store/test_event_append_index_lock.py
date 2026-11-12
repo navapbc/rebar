@@ -163,6 +163,7 @@ def test_nonlock_failure_is_unaffected(tmp_path: Path, monkeypatch: pytest.Monke
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
     with pytest.raises(event_append.StoreError):
         event_append.stage_and_commit(tracker, "tk-hard", _event("u-hard"))
     assert calls["commit"] == 1, "a non-lock commit failure must not be retried"

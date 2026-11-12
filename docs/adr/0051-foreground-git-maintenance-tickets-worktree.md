@@ -121,4 +121,5 @@ stranded `objects/maintenance.lock`, which git never expires and which silently 
 `commit-graph`, `loose-objects`, `incremental-repack` (0.35–17.3 s vs 133.9 s for `gc --auto`);
 and a timed-out step is reaped as a process group, SIGTERM first. Follow-ups:
 `saccharine-unwise-barnacle` (stale-lock recovery), `idle-ammoniacal-axisdeer` (group reaping
-for the other bounded calls).
+for the other bounded calls). The latter is resolved: every git call given a timeout
+(`gitutil.run_git`) now runs as its own process group, reaped SIGTERM first.

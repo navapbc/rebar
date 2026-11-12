@@ -166,7 +166,8 @@ def run_git(
     inspect ``returncode`` or raise their own error pass ``check=False``);
     ``timeout`` (when set) lets :class:`subprocess.TimeoutExpired` propagate — a
     caller that wants a timeout folded into a synthetic failed result catches it
-    itself. ``env=None`` inherits the current environment.
+    itself — after git's whole process group is reaped, SIGTERM first (bug 4eed-2e15).
+    ``env=None`` inherits the current environment.
 
     ``cwd=None`` omits the ``-C <cwd>`` prefix entirely, running ``git`` in the
     process CWD (some callers verify commits relative to the caller's directory
@@ -185,6 +186,16 @@ def run_git(
             "encoded in text mode); pass text=False for binary stdin, or a str for text mode."
         )
     argv = ["git", *args] if cwd is None else ["git", "-C", cwd, *args]
+    if timeout is not None:
+        return _run_in_group(
+            argv,
+            check=check,
+            capture_output=capture_output,
+            text=text,
+            timeout=timeout,
+            env=env,
+            input=input_data,
+        )
     return subprocess.run(
         argv,
         check=check,
@@ -194,6 +205,45 @@ def run_git(
         env=env,
         input=input_data,
     )
+
+
+_REAP_GRACE_S = 5.0  # SIGTERM lets git delete its own locks and .keep files; SIGKILL cannot
+
+
+# raw-git-ok: locked store seam internal
+def _run_in_group(
+    argv: list,
+    *,
+    check: bool,
+    capture_output: bool,
+    text: bool,
+    timeout: float,
+    env: Mapping[str, str] | None,
+    input: str | bytes | None,
+) -> subprocess.CompletedProcess:
+    """:func:`subprocess.run` (same keywords) for a bounded git, but in its own process group:
+    on timeout or any interruption the whole group is reaped, SIGTERM first, then the exception
+    re-raised. ``subprocess.run`` SIGKILLs only git itself, stranding its ``.keep`` files and
+    leaving its children running outside the caller's lock (bug 4eed-2e15)."""
+    pipe = subprocess.PIPE if capture_output else None
+    proc = subprocess.Popen(  # raw-git-ok: locked store seam internal
+        argv,
+        stdin=None if input is None else subprocess.PIPE,
+        stdout=pipe,
+        stderr=pipe,
+        text=text,
+        env=env,
+        start_new_session=(os.name == "posix"),
+    )
+    try:
+        stdout, stderr = proc.communicate(input, timeout=timeout)
+    except BaseException:
+        reap_process_group(proc, grace=_REAP_GRACE_S, drain=5.0, label="git", logger=logger)
+        raise
+    result = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+    if check:
+        result.check_returncode()
+    return result
 
 
 # fetch/merge/commit start ``maintenance run --auto``; on a large store that is a full gc
@@ -255,33 +305,14 @@ def _timed_out(
     return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {timeout}s")
 
 
-_REAP_GRACE_S = 5.0  # SIGTERM lets git delete its own locks; SIGKILL cannot
-
-
 # raw-git-ok: locked store seam internal
 def run_git_reaped(
     cwd: str | os.PathLike[str], *args: str, timeout: float
 ) -> subprocess.CompletedProcess:
-    """Run Git as its own process group, reaped on timeout or any interruption, so no
-    child outlives the caller's lock. Timeout returns code ``124``; ``OSError`` propagates."""
-    proc = subprocess.Popen(  # raw-git-ok: locked store seam internal
-        ["git", "-C", str(cwd), *args],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        errors="replace",
-        env=_without_implicit_maintenance(None, args),
-        start_new_session=(os.name == "posix"),
-    )
-    try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-    except BaseException as exc:
-        reap_process_group(proc, grace=_REAP_GRACE_S, drain=5.0, label="git", logger=logger)
-        if isinstance(exc, subprocess.TimeoutExpired):
-            return _timed_out(cwd, args, timeout)
-        raise
-    return subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
+    """The maintenance step's launcher: :func:`run_git_bounded`, whose git runs as its own
+    process group, reaped on timeout or any interruption. Timeout returns code ``124``;
+    ``OSError`` propagates."""
+    return run_git_bounded(cwd, *args, timeout=timeout)
 
 
 # ``git_outcome`` owns transient HEAD-read, object-read, and object-write markers.

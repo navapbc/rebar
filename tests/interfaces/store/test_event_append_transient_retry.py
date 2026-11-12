@@ -113,6 +113,7 @@ def _fail_first_add(monkeypatch: pytest.MonkeyPatch, stderr: str) -> None:
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
 
 
 def test_single_write_retries_transient_add_failure(
@@ -187,6 +188,7 @@ def test_nontransient_add_failure_still_fails_immediately(
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
 
     with pytest.raises(event_append.StoreError):
         event_append.stage_and_commit(tracker, "tk-1", _event("u-hard"))
@@ -216,6 +218,7 @@ def _fail_first_commit(monkeypatch: pytest.MonkeyPatch, stderr: str) -> None:
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
 
 
 def test_single_write_retries_transient_commit_odb_failure(

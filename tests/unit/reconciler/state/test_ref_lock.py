@@ -188,6 +188,7 @@ def test_timeout_raises_reflocktimeout(
         raise subprocess.TimeoutExpired(cmd=args[0] if args else "git", timeout=5.0)
 
     monkeypatch.setattr(ref_lock.subprocess, "run", _boom)
+    monkeypatch.setattr(importlib.import_module("rebar._store.gitutil"), "_run_in_group", _boom)
     with pytest.raises(ref_lock.RefLockTimeoutError):
         ref_lock.read(tmp_git_repo, ref_lock.LOCK_REF)
 
