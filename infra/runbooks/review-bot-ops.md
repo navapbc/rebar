@@ -83,9 +83,11 @@ state is recovered automatically: a fast-forward killed between writing the chec
 the ref (observed when the container was OOM-killed mid-refresh) leaves an index and working tree
 that exactly equal a later `origin/main` commit with nothing unstaged or untracked. The entrypoint
 then moves the ref onto that commit by compare-and-swap and continues the refresh (against the
-last fetched `origin/main` when the remote is unreachable). Every steady-state autodeploy tick
-checks the live backend's workspace: if it is dirty, unreadable, or its HEAD does not contain the
-commit the live image was built from, the tick emits `AUTODEPLOY_ERROR mcp-code-workspace-stuck`
+last fetched `origin/main` when the remote is unreachable). Because a main advance that changes no MCP image path restarts no container, every
+steady-state autodeploy tick also refreshes a live workspace that is not at the deployed target,
+in place, through `mcp-entrypoint.sh --refresh-code` (the same locked, refusing path). It then
+checks the workspace: if it is dirty, unreadable, or its HEAD does not contain the deployed
+target, the tick emits `AUTODEPLOY_ERROR mcp-code-workspace-stuck`
 naming the state, which pages through `rebar-autodeploy-errors` (2 of 4 15-minute periods, so a
 tick that races a refresh in progress does not page).
 

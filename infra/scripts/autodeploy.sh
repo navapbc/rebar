@@ -695,13 +695,33 @@ mcp_self_heal_live_backend() {
   return 0
 }
 
-# The live MCP backend's attested-gate code workspace must stay refreshable. Its entrypoint
-# refuses a dirty, diverged or unreachable checkout (recovering only a provably interrupted
-# fast-forward), so a stuck workspace silently pins gates to an old tree and config
-# (reddish-drinkable-canvasback). The container's entrypoint refreshed the workspace after its
-# image commit reached main, so a healthy HEAD contains that commit. Report anything else every
-# tick as AUTODEPLOY_ERROR, which the deploy_errors alarm (2 of 4 15-minute periods) pages on; a
-# single tick that races a refresh in progress does not page.
+# The live MCP backend's attested-gate code workspace is where gates (notably a close's
+# completion verification) resolve HEAD. Its entrypoint refreshes it at container start, but a
+# main advance that changes no MCP_PATHS restarts nothing, so without this the workspace would
+# trail main until the next MCP deploy (juiced-anarthrous-bird). Refresh it in place, through the
+# entrypoint's own locked, dirty/diverged-refusing path, whenever it is not at $TARGET.
+MCP_CODE_HEAD_PROBE='GIT_OPTIONAL_LOCKS=0 git -C "$MCP_CODE_DIR" rev-parse HEAD 2>/dev/null'
+
+mcp_refresh_code_workspace() {
+  local name head
+  name="$(mcp_live_backend_name)"; [ -n "$name" ] || return 0
+  [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ] || return 0
+  head="$(docker exec "$name" sh -c "$MCP_CODE_HEAD_PROBE" 2>/dev/null)" || return 0
+  [ -n "$head" ] && [ "$head" != "$TARGET" ] || return 0
+  # Bound the in-place refresh like the mirror fetch: a hung remote must not hold the deploy lock.
+  if timeout 300 docker exec "$name" \
+    sh /usr/local/bin/mcp-entrypoint.sh --refresh-code >/dev/null 2>&1; then
+    log "mcp code workspace: refreshed $name from $head toward $TARGET"
+  else
+    log "mcp code workspace: in-place refresh of $name failed; the freshness check reports it"
+  fi
+  return 0
+}
+
+# Every tick then checks the workspace contains $TARGET. A dirty, diverged, unreadable or
+# unreachable workspace cannot have refreshed, so it pins gates to a stale tree and config
+# (reddish-drinkable-canvasback). Report it as AUTODEPLOY_ERROR, which the deploy_errors alarm
+# (2 of 4 15-minute periods) pages on; a single tick that races a refresh does not page.
 MCP_CODE_PROBE='d="$MCP_CODE_DIR"; sha="$1"
 [ -n "$d" ] && [ -e "$d/.git" ] || { echo absent; exit 0; }
 s="$(GIT_OPTIONAL_LOCKS=0 git -C "$d" status --porcelain 2>/dev/null)" || { echo unreadable; exit 0; }
@@ -710,17 +730,14 @@ git -C "$d" merge-base --is-ancestor "$sha" HEAD 2>/dev/null || { echo behind; e
 echo current'
 
 mcp_check_code_workspace() {
-  local name image sha state
+  local name state
   name="$(mcp_live_backend_name)"; [ -n "$name" ] || return 0
   [ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" = "true" ] || return 0
-  image="$(docker inspect -f '{{.Config.Image}}' "$name" 2>/dev/null)"
-  sha="${image##*:}"
-  case "$sha" in *[!0-9a-f]*|"") log "mcp code workspace: live image $image has no release sha; not checked"; return 0 ;; esac
-  state="$(docker exec "$name" sh -c "$MCP_CODE_PROBE" probe "$sha" 2>/dev/null)" || state="exec-failed"
+  state="$(docker exec "$name" sh -c "$MCP_CODE_PROBE" probe "$TARGET" 2>/dev/null)" || state="exec-failed"
   case "$state" in
     current|absent) return 0 ;;
   esac
-  err mcp-code-workspace-stuck "live mcp backend $name: code workspace state '${state:-unknown}' (expected to contain $sha); its entrypoint refuses to refresh it, so gates read a stale tree and config (runbook review-bot-ops.md, MCP code workspace freshness)"
+  err mcp-code-workspace-stuck "live mcp backend $name: code workspace state '${state:-unknown}' (expected to contain $TARGET); gates read a stale tree and config (runbook review-bot-ops.md, MCP code workspace freshness)"
   return 0
 }
 
@@ -772,6 +789,7 @@ if [ "$TARGET" = "$DEPLOYED" ] && [ "$mcp_deployed" = "$TARGET" ] && [ "$bot_dep
   rm -f "$DEFER_FILE"
   reclaim_under_pressure
   mcp_self_heal_live_backend || exit 1
+  mcp_refresh_code_workspace
   mcp_check_code_workspace
   mcp_retire_sweep          # reap mcp containers that finished draining since the last flip
   check_declared_compose_services || exit 1

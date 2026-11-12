@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import pytest
+from _git_upkeep import init_bare_remote
 from _subprocess_env import subprocess_env
 
 AUTODEPLOY = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "autodeploy.sh"
@@ -115,12 +116,16 @@ case "$1" in
     set_state "$nm" exited; exit 0 ;;
   exec)
     # Run the real in-container command (`exec NAME CMD...`) on the host against a seeded
-    # code-workspace path, so the autodeploy probe script itself is exercised. The container
-    # has its own git, so drop the host-side git stub directory from PATH.
-    echo "exec $2" >> "$LOG"
+    # code-workspace path, so the autodeploy probe and refresh scripts are exercised. The
+    # container has its own git, so drop the host-side git stub directory from PATH; the image's
+    # /usr/local/bin/mcp-entrypoint.sh is the repo's entrypoint.
+    echo "exec $2 ${*: -1}" >> "$LOG"
     shift 2
-    PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$(dirname "$0")" | paste -sd: -)" \
-      MCP_CODE_DIR="$(cat "$DS/code-dir" 2>/dev/null)" "$@"
+    args=("${@//\/usr\/local\/bin\/mcp-entrypoint.sh/$(cat "$DS/entrypoint" 2>/dev/null)}")
+    # Run from the state dir (not a git repo) so an unseeded MCP_CODE_DIR resolves nothing,
+    # exactly as in a container with no workspace.
+    host_path="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vx "$(dirname "$0")" | paste -sd: -)"
+    cd "$DS" && PATH="$host_path" MCP_CODE_DIR="$(cat "$DS/code-dir" 2>/dev/null)" "${args[@]}"
     exit $? ;;
   start)
     nm="$2"; echo "start $nm" >> "$LOG"
@@ -2799,12 +2804,16 @@ def test_running_live_backend_is_still_not_reaped_or_stopped(mcp_box: dict[str, 
     assert any(c == "stop rebar-mcp-old-8092" for c in cmds), (
         f"a RUNNING superseded backend must still be asked to drain gracefully\n{ctx}"
     )
-    assert not any("rebar-mcp-live-8093" in c for c in cmds), (
+    # `exec` is the read-only code-workspace probe; every container-lifecycle verb is checked.
+    assert not any("rebar-mcp-live-8093" in c and not c.startswith("exec ") for c in cmds), (
         f"a RUNNING live backend must be neither stopped nor reaped\n{ctx}"
     )
     assert not _markers(result, "AUTODEPLOY_ERROR"), (
         f"a healthy RUNNING live backend must emit no error marker\n{ctx}"
     )
+
+
+_ENTRYPOINT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "mcp-entrypoint.sh"
 
 
 def _workspace_git(repo: Path, *args: str) -> str:
@@ -2819,18 +2828,55 @@ def _workspace_git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def _code_workspace(root: Path) -> tuple[Path, str, str]:
-    """A real repo with two commits; returns (path, first_sha, second_sha), HEAD at second."""
-    repo = root / "mcp-code"
-    repo.mkdir()
-    _workspace_git(repo, "init", "-q", "-b", "main")
-    (repo / "f.txt").write_text("one\n")
-    _workspace_git(repo, "add", "f.txt")
-    _workspace_git(repo, "commit", "-qm", "one")
-    first = _workspace_git(repo, "rev-parse", "HEAD")
-    (repo / "f.txt").write_text("two\n")
-    _workspace_git(repo, "commit", "-qam", "two")
-    return repo, first, _workspace_git(repo, "rev-parse", "HEAD")
+def _code_workspace(root: Path) -> tuple[Path, Path, str, str]:
+    """A source repo pushed to a bare remote and a workspace clone of it.
+
+    Returns (source, workspace, first_sha, second_sha); the remote and the workspace are at
+    second_sha."""
+    source = root / "source"
+    source.mkdir()
+    _workspace_git(source, "init", "-q", "-b", "main")
+    (source / "f.txt").write_text("one\n")
+    _workspace_git(source, "add", "f.txt")
+    _workspace_git(source, "commit", "-qm", "one")
+    first = _workspace_git(source, "rev-parse", "HEAD")
+    (source / "f.txt").write_text("two\n")
+    _workspace_git(source, "commit", "-qam", "two")
+    second = _workspace_git(source, "rev-parse", "HEAD")
+    remote = init_bare_remote(root / "remote.git", initial_branch="main")
+    _workspace_git(source, "remote", "add", "origin", str(remote))
+    _workspace_git(source, "push", "-q", "origin", "main")
+    workspace = root / "mcp-code"
+    _workspace_git(root, "clone", "-q", str(remote), str(workspace))
+    return source, workspace, first, second
+
+
+def _advance_remote(source: Path) -> str:
+    """Push one more commit to the remote (main advancing without an MCP image change)."""
+    (source / "g.txt").write_text("docs only\n")
+    _workspace_git(source, "add", "g.txt")
+    _workspace_git(source, "commit", "-qm", "docs only")
+    _workspace_git(source, "push", "-q", "origin", "main")
+    return _workspace_git(source, "rev-parse", "HEAD")
+
+
+def _seed_steady_state(box: dict[str, object], workspace: Path, target: str) -> None:
+    """A no-op tick at `target` whose live MCP backend uses `workspace` as MCP_CODE_DIR."""
+    dstate = box["dstate"]
+    (dstate / "code-dir").write_text(str(workspace))  # type: ignore[operator]
+    (dstate / "entrypoint").write_text(str(_ENTRYPOINT))  # type: ignore[operator]
+    (box["target_file"]).write_text(target + "\n")  # type: ignore[operator]
+    (box["state"] / "deployed-sha").write_text(target + "\n")  # type: ignore[operator]
+    (dstate / "containers").write_text("")  # type: ignore[operator]
+    _seed_container(
+        dstate,  # type: ignore[arg-type]
+        "rebar-mcp-live-8092",
+        8092,
+        in_flight=0,
+        state="running",
+        image=f"compose-mcp:{target}",
+    )
+    (box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
 
 
 def _stuck_markers(result: subprocess.CompletedProcess[str]) -> list[str]:
@@ -2842,7 +2888,7 @@ def _stuck_markers(result: subprocess.CompletedProcess[str]) -> list[str]:
     [
         ("current", None),
         ("dirty", "dirty"),
-        ("behind", "behind"),
+        ("diverged", "behind"),
         ("unreadable", "unreadable"),
         ("absent", None),
     ],
@@ -2850,33 +2896,27 @@ def _stuck_markers(result: subprocess.CompletedProcess[str]) -> list[str]:
 def test_no_op_tick_reports_a_stuck_mcp_code_workspace(
     mcp_box: dict[str, object], tmp_path: Path, case: str, expected_state: str | None
 ) -> None:
-    """A live code workspace that cannot have refreshed pages through deploy_errors.
+    """A live code workspace that cannot reach the deployed target pages through deploy_errors.
 
     reddish-drinkable-canvasback: the entrypoint refused a dirty checkout with only a stderr
     line, pinning production gates to a 13-day-old tree and its 4.x model config. The real
-    in-container probe runs against a real repo: HEAD must contain the live image's commit."""
-    repo, first, second = _code_workspace(tmp_path)
-    image_sha = second
+    in-container probe and refresh run against a real repo."""
+    _source, workspace, _first, second = _code_workspace(tmp_path)
+    target = second
     if case == "dirty":
-        (repo / "f.txt").write_text("edited\n")
-    elif case == "behind":
-        _workspace_git(repo, "reset", "-q", "--hard", first)
+        (workspace / "f.txt").write_text("edited\n")
+        _workspace_git(workspace, "reset", "-q", "--hard", _first)
+        (workspace / "f.txt").write_text("edited\n")
+    elif case == "diverged":
+        _workspace_git(workspace, "reset", "-q", "--hard", _first)
+        (workspace / "h.txt").write_text("local\n")
+        _workspace_git(workspace, "add", "h.txt")
+        _workspace_git(workspace, "commit", "-qm", "local")
     elif case == "unreadable":
-        (repo / ".git" / "index").write_text("corrupt")
+        (workspace / ".git" / "index").write_text("corrupt")
     elif case == "absent":
-        repo = tmp_path / "never-cloned"
-    (mcp_box["dstate"] / "code-dir").write_text(str(repo))  # type: ignore[operator]
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
-    _seed_container(
-        mcp_box["dstate"],  # type: ignore[arg-type]
-        "rebar-mcp-live-8092",
-        8092,
-        in_flight=0,
-        state="running",
-        image=f"compose-mcp:{image_sha}",
-    )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+        workspace = tmp_path / "never-cloned"
+    _seed_steady_state(mcp_box, workspace, target)
 
     result = _run(mcp_box)
 
@@ -2887,4 +2927,34 @@ def test_no_op_tick_reports_a_stuck_mcp_code_workspace(
         assert stuck == [], ctx
     else:
         assert len(stuck) == 1 and f"'{expected_state}'" in stuck[0], ctx
-        assert "exec rebar-mcp-live-8092" in _commands(mcp_box), ctx
+
+
+def test_no_op_tick_refreshes_a_workspace_behind_main(
+    mcp_box: dict[str, object], tmp_path: Path
+) -> None:
+    """juiced-anarthrous-bird: main advanced without an MCP image change, so nothing restarted
+    the container and its workspace (where a close resolves HEAD) trailed main. The steady-state
+    tick refreshes it in place through the entrypoint and does not page."""
+    source, workspace, _first, second = _code_workspace(tmp_path)
+    target = _advance_remote(source)
+    _seed_steady_state(mcp_box, workspace, target)
+    assert _workspace_git(workspace, "rev-parse", "HEAD") == second
+
+    result = _run(mcp_box)
+
+    ctx = f"cmds={_commands(mcp_box)}\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, ctx
+    assert _workspace_git(workspace, "rev-parse", "HEAD") == target, ctx
+    assert _stuck_markers(result) == [], ctx
+    assert "exec rebar-mcp-live-8092 --refresh-code" in _commands(mcp_box), ctx
+
+
+def test_current_workspace_is_not_refreshed(mcp_box: dict[str, object], tmp_path: Path) -> None:
+    _source, workspace, _first, second = _code_workspace(tmp_path)
+    _seed_steady_state(mcp_box, workspace, second)
+
+    result = _run(mcp_box)
+
+    cmds = _commands(mcp_box)
+    assert result.returncode == 0
+    assert not any("--refresh-code" in c for c in cmds), cmds
