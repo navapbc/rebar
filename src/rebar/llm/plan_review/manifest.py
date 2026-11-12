@@ -61,6 +61,11 @@ _READ_PATH_PREFIX = "read-path:"
 # paths), ``read-set`` (the no-file-impact scoping) or ``fail-safe`` (empty set → whole-HEAD).
 # Diagnostic and additive; ``rebar review-plan --status`` reports it.
 _CURRENCY_BASIS_PREFIX = "currency-basis:"
+# Which plan-review engine produced the signed verdict (ADR 0123 §5). Written ONLY for a
+# non-pipeline engine, so every pipeline manifest stays byte-identical; absent reads "pipeline".
+_ENGINE_PREFIX = "engine:"
+_SIGNED_ENGINES = ("agentic",)
+_KNOWN_ENGINES = ("pipeline", *_SIGNED_ENGINES)
 CURRENCY_BASIS_FILE_IMPACT = "file_impact"
 CURRENCY_BASIS_READ_SET = "read-set"
 CURRENCY_BASIS_FAIL_SAFE = "fail-safe"
@@ -531,6 +536,9 @@ def build_manifest(
         lines.append(f"{_DISABLED_PREFIX} {','.join(disabled)}")
     if refreshed_from:
         lines.append(f"{_REFRESHED_PREFIX} {refreshed_from}")
+    engine = (verdict.get("coverage", {}) or {}).get("engine")
+    if engine in _SIGNED_ENGINES:
+        lines.append(f"{_ENGINE_PREFIX} {engine}")
     # Pin the snapshot SHA the dep hashes were computed against (epic raze-vet-ditch S4b),
     # so the claim gate re-hashes at the SAME basis via the shared boundary. Only present
     # for an attested review; a local review omits it (both sides then use the checkout).
@@ -622,6 +630,19 @@ def manifest_read_set(manifest: list[str] | None) -> list[str] | None:
         for line in manifest or []
         if str(line).startswith(_READ_PATH_PREFIX) and str(line).split(":", 1)[1].strip()
     )
+
+
+def manifest_engine(manifest: list[str] | None) -> str:
+    """The plan-review engine that produced a signed manifest (ADR 0123 §5): the ``engine:``
+    line's value when it names a known engine, else ``"pipeline"`` — so every manifest signed
+    before the line existed, and every pipeline manifest (which never carries it), reads as
+    pipeline."""
+    for line in manifest or []:
+        text = str(line)
+        if text.startswith(_ENGINE_PREFIX):
+            value = text[len(_ENGINE_PREFIX) :].strip()
+            return value if value in _KNOWN_ENGINES else "pipeline"
+    return "pipeline"
 
 
 def manifest_currency_basis(manifest: list[str] | None) -> str:
