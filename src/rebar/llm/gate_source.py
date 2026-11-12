@@ -254,7 +254,22 @@ def annotate_result(result: dict, handle: SnapshotHandle) -> dict:
         result["source"] = handle.source
         result["verified_at_sha"] = handle.sha
         result["signable"] = handle.signable
+        _note_build_drift(result, handle)
     return result
+
+
+def _note_build_drift(result: dict, handle: SnapshotHandle) -> None:
+    """Name a proven build/config skew on a verdict whose model never ran.
+
+    Only an unsigned, model-never-ran verdict is touched: its ``coverage.llm_error`` would
+    otherwise be the only clue, and it is a provider message that points at the wrong remedy.
+    """
+    coverage = result.get("coverage")
+    if not isinstance(coverage, dict) or coverage.get("llm_ran") is not False:
+        return
+    note = build_drift.degraded_verdict_note(handle.sha)
+    if note is not None:
+        coverage["build_drift"] = note
 
 
 def copy_provenance(src: dict | None, dst: dict) -> dict:
