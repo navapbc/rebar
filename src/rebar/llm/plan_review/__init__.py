@@ -601,6 +601,10 @@ def _run_plan_review(
         overlap=overlap,
         engine=engine,
     )
+    if engine != "pipeline":
+        # Every non-pipeline verdict (floor, adapted, degraded) names its engine; pipeline
+        # coverage stays byte-identical.
+        verdict.setdefault("coverage", {})["engine"] = engine
 
     # Mid-run cancellation (story 2c89): the ticket's OWN material changed while the review ran —
     # return the cancelled INDETERMINATE verbatim, BEFORE the floors/signing/sidecar emit.

@@ -200,11 +200,13 @@ def produce_plan_review_verdict(
                 },
                 target_ticket=ctx.ticket_id,
                 repo_root=repo_root,
-                agent_runner=RunnerAgentStep(
-                    runner=runner_sel,
-                    repo_root=repo_root,
-                    config=cfg,
-                    tool_provider=tf_tool_provider,
+                agent_runner=(
+                    agent_step := RunnerAgentStep(
+                        runner=runner_sel,
+                        repo_root=repo_root,
+                        config=cfg,
+                        tool_provider=tf_tool_provider,
+                    )
                 ),
                 batch_runner=ProductionBatchRunner(runner=runner_sel, tf_provider=tf_pass1_hook),
                 recorder=rec,
@@ -282,10 +284,13 @@ def produce_plan_review_verdict(
 
     # finders failed (the LLM tier did not produce findings) — degrade to INDETERMINATE,
     # never sign a hollow PASS, mirroring run_review's broad-except → llm_unavailable path.
+    error: object = res.error or "plan-review workflow LLM tier failed"
+    if engine == "agentic":  # classify the agent's own failure (ADR 0123 fail-closed)
+        error = _plan_review_recovery.agentic_failure_error(agent_step.last_error, str(error))
     return _plan_review_recovery._degraded_plan_review_verdict(
         ctx,
         cfg,
-        error=(res.error or "plan-review workflow LLM tier failed"),
+        error=error,
         advisory_cap=advisory_cap,
         runner_name=runner_sel.name,
     )

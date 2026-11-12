@@ -205,7 +205,13 @@ class UnretryableOutputError(StructuredOutputError):
     model can fix when handed the validation error, so the bounded retry must FAST-FAIL on
     them instead of re-paying the full (often expensive, agentic) call 1+OUTPUT_RETRIES
     times. A subclass of :class:`StructuredOutputError`, so every existing
-    ``except StructuredOutputError`` / ``except LLMError`` handler still catches it."""
+    ``except StructuredOutputError`` / ``except LLMError`` handler still catches it.
+
+    ``stop_reason`` names the stop/finish reason that raised it (``refusal``,
+    ``content_filter``, ``max_tokens``, ``length``) when one did; None otherwise (e.g. an
+    exhausted output-retry budget), so a caller can classify the failure."""
+
+    stop_reason: str | None = None
 
 
 class CompletionRecoveryError(StructuredOutputError):

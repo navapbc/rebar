@@ -8,10 +8,8 @@ of the four-pass pipeline. The gate workflow's agentic arm (``gates/plan-review.
     agentic_review <prompt: plan-review-agentic>   # ONE agent call, read-only tools
     plan_review_agentic_verdict (uses)    # the arm's terminal plan_review_verdict
 
-This module owns the agent's structured-output contract and the two scripted ops. Mapping the
-agent's findings onto a PASS/BLOCK verdict is the adapter ticket's work; until it lands the
-verdict op returns an unsigned INDETERMINATE that carries the validated findings, so an agentic
-review can never sign.
+This module owns the agent's structured-output contract and the two scripted ops. The verdict
+op maps the agent's findings onto the pipeline's verdict shape through ``agentic_verdict``.
 
 Import-light: the ops lazy-import the plan-review units, and the contract builder imports
 pydantic inside its body, so importing this module only runs the registration decorators.
@@ -27,8 +25,6 @@ from rebar.llm.workflow.executor import StepContext, register_step
 FINDINGS_CONTRACT = "plan_review_agentic_findings"
 #: The four severities the agent may claim; only ``blocker`` blocks (ADR 0123).
 SEVERITIES = ("blocker", "major", "minor", "trivial")
-#: The finding id of the interim INDETERMINATE the verdict op returns.
-ADAPTER_PENDING_ID = "agentic-adapter-pending"
 #: The model CLASS the agent step runs on (resolved through the operator's class table).
 AGENT_MODEL_CLASS = "frontier"
 #: The DET floor criteria (P1-P11) the Layer-1 floor already decided before the agent runs.
@@ -126,41 +122,32 @@ def plan_review_agentic_inputs(ctx: StepContext) -> dict[str, Any]:
     input_schema="plan_review_agentic_verdict_input",
     output_schema="plan_review_verdict",
     description=(
-        "The agentic arm's terminal plan_review_verdict. Until the verdict adapter lands it is "
-        "an unsigned INDETERMINATE (finding `agentic-adapter-pending`) carrying the agent's "
-        "validated findings on `coverage.agentic_findings`, so an agentic review never signs."
+        "The agentic arm's terminal plan_review_verdict: the agent's findings mapped onto the "
+        "pipeline's finding shape by severity (only `blocker` blocks) and merged with the DET "
+        "floor's findings through the pipeline's own partition + finalize. Deterministic."
     ),
 )
 def plan_review_agentic_verdict(ctx: StepContext) -> dict[str, Any]:
-    """Wrap the agent's findings in an unsigned INDETERMINATE plan_review_verdict."""
-    from dataclasses import replace
-
+    """Adapt the agent's findings into a PASS/BLOCK/INDETERMINATE plan_review_verdict."""
     from rebar.llm.config import resolve_gate_config, resolve_model
 
-    from .claimability import indeterminate_verdict
+    from .agentic_verdict import adapt_findings
 
     gate_cfg = resolve_gate_config(ctx.repo_root)
-    # The verdict's `model` names the class the agent step ran on, not the verifier class the
-    # gate's shared config carries.
-    agent_cfg = replace(gate_cfg, model=resolve_model(gate_cfg, step=AGENT_MODEL_CLASS))
-
-    findings = [f for f in (ctx.inputs.get("findings") or []) if isinstance(f, dict)]
-    ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
-    return indeterminate_verdict(
-        ticket_id,
-        ticket_type=str(ctx.inputs.get("ticket_type") or ""),
-        finding={
-            "id": ADAPTER_PENDING_ID,
-            "reason": (
-                f"the agentic engine reviewed the plan and returned {len(findings)} finding(s), "
-                "but its verdict adapter is not available yet, so no PASS/BLOCK was decided"
-            ),
-        },
-        coverage_extra={"engine": "agentic", "llm_ran": True, "agentic_findings": findings},
-        signature_reason=ADAPTER_PENDING_ID,
-        remediation=(
-            "Review the findings on coverage.agentic_findings, or rerun with engine "
-            "'pipeline' to earn a signable verdict; no plan-review attestation was signed."
-        ),
-        cfg=agent_cfg,
+    inputs = ctx.inputs
+    provenance = inputs.get("provider_provenance")
+    return adapt_findings(
+        [f for f in (inputs.get("findings") or []) if isinstance(f, dict)],
+        ticket_id=str(inputs.get("ticket_id") or ctx.target_ticket or ""),
+        ticket_type=str(inputs.get("ticket_type") or ""),
+        det_blocking=list(inputs.get("det_blocking") or []),
+        det_advisory=list(inputs.get("det_advisory") or []),
+        det_coverage=dict(inputs.get("det_coverage") or {}),
+        hierarchy_incomplete=bool(inputs.get("hierarchy_incomplete")),
+        hierarchy_incomplete_detail=list(inputs.get("hierarchy_incomplete_detail") or []),
+        runner_name=gate_cfg.runner,
+        # The verdict names the frontier class the agent ran on, not the gate's verifier class.
+        model=resolve_model(gate_cfg, step=AGENT_MODEL_CLASS),
+        provider_provenance=provenance if isinstance(provenance, dict) else None,
+        repo_root=ctx.repo_root,
     )

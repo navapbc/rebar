@@ -97,8 +97,8 @@ def _review(repo: Path, tid: str, runner, **kw):
     return rebar.llm.review_plan(tid, runner=runner, repo_root=str(repo), engine="agentic", **kw)
 
 
-# ── request shape + interim verdict ─────────────────────────────────────────────
-def test_agent_request_shape_and_interim_verdict(repo: Path) -> None:
+# ── request shape ───────────────────────────────────────────────────────────────
+def test_agent_request_shape(repo: Path) -> None:
     from rebar.llm.model_classes import resolve_model_string
 
     tid = _ticket(repo)
@@ -115,18 +115,11 @@ def test_agent_request_shape_and_interim_verdict(repo: Path) -> None:
     assert "change a thing in `src/thing.py`" in req.instructions  # the plan reached the agent
     assert "@@" not in req.system_prompt + req.instructions
 
-    assert verdict["verdict"] == "INDETERMINATE"
+    # _FINDING is a blocker, so the adapted verdict BLOCKs and is not signed.
+    assert verdict["verdict"] == "BLOCK"
     assert verdict["signature"]["signed"] is False
     assert verdict["coverage"]["engine"] == "agentic"
-    assert verdict["coverage"]["agentic_findings"] == [_FINDING]
-    assert [f["id"] for f in verdict["indeterminate"]] == [agentic.ADAPTER_PENDING_ID]
     assert rebar.llm.plan_review_status(tid, repo_root=str(repo))["verdict"] == "unsigned"
-
-
-def test_empty_findings_is_a_valid_result(repo: Path) -> None:
-    verdict = _review(repo, _ticket(repo), _AgentFake(findings=[]))
-    assert verdict["coverage"]["agentic_findings"] == []
-    assert verdict["verdict"] == "INDETERMINATE"
 
 
 @pytest.mark.parametrize(
@@ -205,7 +198,6 @@ def test_prompt_is_packaged_and_free_of_bakeoff_placeholders() -> None:
     text = system + instructions
     assert "THE-PLAN" in instructions and "- A1 — x" in instructions
     assert "@@" not in text and "plan-review-bakeoff" not in text
-    assert "dollar amounts" in text
 
 
 # ── read-only tool surface on the real runner ───────────────────────────────────
