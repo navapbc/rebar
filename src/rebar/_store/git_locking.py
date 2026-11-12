@@ -376,12 +376,19 @@ def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
         return
     # git-marker-ok: the lock file's filesystem PATH, not a failure marker.
     lock_file = os.path.join(git_dir, "index.lock")
+    _reclaim_if_stale(lock_file, stale_s=_INDEX_LOCK_STALE_S, force=force)
+
+
+def _reclaim_if_stale(lock_file: str, *, stale_s: float, force: bool = False) -> bool:
+    """Remove git lock file *lock_file* when older than *stale_s* (or when *force*), after
+    revalidating device, inode, and age so a lock replaced or refreshed meanwhile survives.
+    Return whether this call removed it."""
     try:
         st = os.stat(lock_file)
     except OSError:
-        return  # no lock file (or unstat-able) → nothing to reclaim
-    if not force and time.time() - st.st_mtime <= _INDEX_LOCK_STALE_S:
-        return  # young/live lock (unlocked context) → never reclaim
+        return False  # no lock file (or unstat-able) → nothing to reclaim
+    if not force and time.time() - st.st_mtime <= stale_s:
+        return False  # young/live lock (unlocked context) → never reclaim
     if _reclaim_probe is not None:
         _reclaim_probe()
     # Revalidate device, inode, and age at removal. If a peer replaced or refreshed
@@ -389,15 +396,16 @@ def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
     try:
         st2 = os.stat(lock_file)
     except OSError:
-        return  # already gone (a peer reclaimed it first) → nothing to do
+        return False  # already gone (a peer reclaimed it first) → nothing to do
     if (st2.st_dev, st2.st_ino) != (st.st_dev, st.st_ino):
-        return  # replaced by a different file (a fresh lock) → do NOT remove
-    if not force and time.time() - st2.st_mtime <= _INDEX_LOCK_STALE_S:
-        return  # refreshed in place → now live → do NOT remove
+        return False  # replaced by a different file (a fresh lock) → do NOT remove
+    if not force and time.time() - st2.st_mtime <= stale_s:
+        return False  # refreshed in place → now live → do NOT remove
     try:
         os.remove(lock_file)
     except OSError:
-        pass
+        return False
+    return True
 
 
 # Tests use this disabled-by-default seam to observe every attempt and release a
