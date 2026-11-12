@@ -826,12 +826,15 @@ rebar no longer needs `gc.auto=0` to protect the reflog.
 > (`invalid object` / `Error building trees` → dropped writes; git's own docs warn a
 > concurrent `git gc` "may corrupt the repository"). WU-1's original
 > `gc.autoDetach=true` — chosen precisely so gc "never serializes a foreground write" —
-> was therefore the bug, not the fix. The `gc-config` ensure unit now keeps auto-gc
-> ENABLED but forces it **FOREGROUND** (`--unset gc.auto` + `gc.autoDetach=false` +
-> `maintenance.autoDetach=false`). rebar never lets git start it implicitly (bounded git
-> children carry `maintenance.auto=false`); the only maintenance is the explicit post-write
-> step, **serialized under the write lock**, so no writer races it. It reclaims loose/pack growth on its own, at the cost of an occasional
-> brief global write pause when it fires (see Scale-up posture; ADR 0051). The two
+> was therefore the bug, not the fix. rebar never lets git start gc or maintenance
+> implicitly: every bounded git child carries `gc.auto=0` and `maintenance.auto=false`. The
+> `gc-config` ensure unit still sets the tracker's own config to foreground-only
+> (`--unset gc.auto` + `gc.autoDetach=false` + `maintenance.autoDetach=false`) as a safety net
+> for a plain `git` run by hand there. The only maintenance is the explicit post-write step,
+> **serialized under the write lock**, so no writer races it: git's incremental tasks plus
+> reflog expiry (see Scale-up posture; ADR 0051). Nothing in-band prunes unreachable objects;
+> the measured growth is small, and the operator reclaims them with
+> `infra/runbooks/tickets-store-prune.md` (bug `successive-deceptive-xiphias`). The two
 union merges can in principle conflict only on the **shared mutable root files**
 (`.bridge_state/bindings.json`, the `.reconciler-*` lock/gate files), which the
 tickets-branch `.gitattributes` resolves `merge=ours` (they are per-pass derived
@@ -841,7 +844,11 @@ conflict still aborts → keeps local → hints `fsck` (never a hard read failur
 
 **Scale-up posture.** The explicit step runs only git's incremental tasks (`commit-graph`,
 `loose-objects`, `incremental-repack`), which never walk reachability: 0.35–17.3 s on the
-1.07M-object production store, where `gc --auto` took 134 s. A timed-out step is reaped as a
+1.07M-object production store, where `gc --auto` took 134 s. It then runs
+`git reflog expire --all` under git's configured expiry policy, at most once a day (a stamp
+file in the git dir records the last pass; a new store's first pass runs a day after its first
+write), with its own 30 s bound (0.01–0.06 s measured on that store), skipped when the
+maintenance run timed out. A timed-out step is reaped as a
 process group, SIGTERM first, so git releases `objects/maintenance.lock` (ADR 0051 amendment,
 bug 51e0-5038). The same holds for every bounded git child: `gitutil.run_git(..., timeout=)`
 runs git in its own process group and reaps the group on timeout, so a killed fetch removes its

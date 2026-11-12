@@ -86,26 +86,39 @@ capacity decisions in their own environment.
 
 ## Git maintenance & gc
 
-rebar keeps **stock `git gc`** enabled on the tickets worktree — it does **not** force
-`gc.auto=0` — but runs it **FOREGROUND, never detached**. Because union recovery
-(`_store/sync.py`) keeps every ticket commit ref-reachable, a *serial* gc only ever
-collects truly unreachable objects; but the tickets store is a linked worktree sharing
-the object DB, so a *detached* background gc/maintenance would repack it OUTSIDE the write
-lock and corrupt it under concurrent writes (bug 88eb / ADR 0051). At init (and on every
-re-init, so older trackers self-heal) rebar:
+rebar never lets git run `gc` or `maintenance` on its own in the tickets store: every bounded
+git child carries `gc.auto=0` and `maintenance.auto=false`. The tickets store is a linked
+worktree sharing the object DB, so a gc or repack outside the write lock would corrupt it
+under concurrent writes (bug 88eb / ADR 0051), and a full `gc` takes too long to run inside it
+(134 s for `gc --auto`, 605.6 s for a full repack on the 1.07M-object production store).
 
-- **`--unset gc.auto`** — sheds any stale `gc.auto=0` (auto-gc stays at git's default
-  threshold, so repack still bounds loose growth);
-- **`gc.autoDetach=false`** + **`maintenance.autoDetach=false`** — a triggered repack runs
-  in the FOREGROUND of the write command that holds the lock (serialized), never detaching
-  into a concurrent background process. Both knobs are set because git ≥ 2.47 honors
-  `maintenance.autoDetach` and treats `gc.autoDetach` as only its fallback.
+After each write, still holding the write lock, rebar runs one explicit, bounded step:
+
+- **`git maintenance run --auto`** with only the incremental tasks (`commit-graph`,
+  `loose-objects`, `incremental-repack`), which keep packing bounded without walking
+  reachability;
+- **`git reflog expire --all`**, at most once a day, under git's configured `gc.reflogExpire*`
+  policy (defaults 90 and 30 days), so reflogs stop growing without limit.
+
+**Unreachable objects are not reclaimed in-band.** `loose-objects` packs them along with
+everything else, so they stay until an operator reclaims them with
+`infra/runbooks/tickets-store-prune.md`. On the production store that was at most 157 objects
+in its first 2.5 months (2026-11-12), so the reclaim is occasional housekeeping, not routine.
+
+At init (and on every re-init, so older trackers self-heal) the `gc-config` ensure unit also
+sets the tracker's own config as a safety net for a plain `git` run by hand there:
+
+- **`--unset gc.auto`** — sheds any stale `gc.auto=0`;
+- **`gc.autoDetach=false`** + **`maintenance.autoDetach=false`** — any gc or maintenance git
+  does start runs in the FOREGROUND, never detaching into a concurrent background process.
+  Both knobs are set because git ≥ 2.47 honors `maintenance.autoDetach` and treats
+  `gc.autoDetach` as only its fallback.
 
 (Older rebar builds set `gc.auto=0`, then WU-1 set `gc.autoDetach=true`; both are healed
 to the foreground posture — see `init._gc_config_unit`, `docs/concurrency.md`, ADR 0051.)
 
-**When to run maintenance yourself.** Foreground auto-gc handles packing (at a brief
-global write pause when it fires — ADR 0051). For the
+**When to run maintenance yourself.** The explicit post-write step handles packing and
+reflogs; unreachable objects need the runbook above. For the
 event-store's own compaction of long/verbose tickets (e.g. large session logs),
 use:
 

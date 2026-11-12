@@ -14,9 +14,11 @@ normal and recovery paths.
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 import subprocess
+import time
 
 from rebar._store.git_locking import _reclaim_if_stale, _resolve_common_git_dir
 from rebar._store.gitutil import (
@@ -216,6 +218,93 @@ def _reclaim_stale_maintenance_lock(tracker: str | os.PathLike[str]) -> None:
         _log.warning("removed stale git maintenance lock %s (older than 12 h)", lock_file)
 
 
+# Reflog expiry gets its own short bound, so the step's worst-case lock hold is the maintenance
+# bound plus this. Measured 0.01-0.06 s on the production clone (bug successive-deceptive-xiphias).
+_REFLOG_EXPIRE_TIMEOUT_S = 30.0
+# Expiry runs at most once per interval: each git start costs 0.1-1.3 s on a loaded host, and
+# git's shortest default expiry is 30 days, so a daily pass loses nothing. A stamp file's mtime
+# in the common git dir records the last completed pass (or, on a store that has none yet, the
+# first write, so the first pass runs a day later); the caller's write lock serializes it.
+_REFLOG_EXPIRE_INTERVAL_S = 24 * 3600
+_REFLOG_EXPIRE_STAMP = "rebar-reflog-expire.stamp"
+
+
+def _reflog_expiry_due(common: str) -> bool:
+    """True once a day. A store with no stamp starts the clock instead of expiring at once:
+    a new store has nothing old enough to expire, and its first writes stay spawn-free."""
+    try:
+        last = os.path.getmtime(os.path.join(common, _REFLOG_EXPIRE_STAMP))
+    except OSError:
+        _stamp_reflog_expiry(common)
+        return False
+    return time.time() - last >= _REFLOG_EXPIRE_INTERVAL_S
+
+
+def _stamp_reflog_expiry(common: str) -> None:
+    stamp = os.path.join(common, _REFLOG_EXPIRE_STAMP)
+    try:
+        with open(stamp, "a", encoding="utf-8"):
+            pass
+        os.utime(stamp)
+    except OSError as exc:
+        _log.warning("could not record the reflog expiry pass at %s: %s", stamp, exc)
+
+
+def _ref_locks(common: str) -> list[str]:
+    """Every git ref or reflog lock under the common git dir: the HEAD and packed-refs locks,
+    plus any lock file under ``refs/`` or ``logs/``. rebar's own lock files live elsewhere, so
+    they are never reported."""
+    git_locks = (
+        # mechanism-ok: lock HEAD.lock — successive-deceptive-xiphias names git's lock only
+        "HEAD.lock",
+        # mechanism-ok: lock packed-refs.lock — successive-deceptive-xiphias names git's lock only
+        "packed-refs.lock",
+    )
+    found = [path for name in git_locks if os.path.exists(path := os.path.join(common, name))]
+    for sub in ("refs", "logs"):
+        # mechanism-ok: lock *.lock — successive-deceptive-xiphias lists git's own ref locks only
+        found += glob.glob(os.path.join(common, sub, "**", "*.lock"), recursive=True)
+    return sorted(found)
+
+
+def _expire_reflogs(tracker: str | os.PathLike[str]) -> None:
+    """Expire reflog entries under git's configured policy (``gc.reflogExpire*``; no value here).
+
+    ``git reflog expire`` rather than maintenance's ``reflog-expire`` task: that task needs git
+    2.50, and the production container runs 2.47, where an unknown task fails the WHOLE
+    maintenance run. Nothing else expires reflogs since bounded children run with gc off.
+    """
+    common = _resolve_common_git_dir(str(tracker)) or str(tracker)
+    if not _reflog_expiry_due(common):
+        return
+    try:
+        result = run_git_reaped(
+            tracker, "reflog", "expire", "--all", timeout=_REFLOG_EXPIRE_TIMEOUT_S
+        )
+    except OSError as exc:
+        _log.warning("git reflog expire could not start in %s: %s", tracker, exc)
+        return
+    if result.returncode == 124:
+        # A killed expiry can strand a ref lock git never removes; rebar reclaims only
+        # index.lock, so every later write would fail on it. Name what is there to remove.
+        _log.error(
+            "git reflog expire timed out in %s after %ss; remove any stranded ref lock it left "
+            "(writes fail until then): %s",
+            tracker,
+            _REFLOG_EXPIRE_TIMEOUT_S,
+            _ref_locks(common) or "none found",
+        )
+    elif result.returncode != 0:
+        _log.warning(
+            "git reflog expire failed in %s: rc=%s %s",
+            tracker,
+            result.returncode,
+            (result.stderr or "").strip()[-300:],
+        )
+    else:
+        _stamp_reflog_expiry(common)
+
+
 # raw-git-ok: locked store seam internal
 def run_auto_maintenance(
     tracker: str | os.PathLike[str], *, timeout: float = _LOCAL_GIT_TIMEOUT
@@ -223,9 +312,11 @@ def run_auto_maintenance(
     """Run explicit best-effort Git maintenance after commit (bd66).
 
     The store's only maintenance: bounded Git children run with implicit maintenance off.
-    The caller holds the write lock (ADR 0051); a timed-out group is reaped. A failure is
-    logged, never raised. Return the Git result (timeout is ``124``), or ``None`` when Git
-    cannot launch.
+    The caller holds the write lock (ADR 0051); a timed-out group is reaped. Reflog expiry
+    follows, skipped when maintenance timed out or could not launch so a slow step adds no
+    more lock time. Unreachable objects are reclaimed only out of band
+    (``infra/runbooks/tickets-store-prune.md``). A failure is logged, never raised. Return the
+    maintenance result (timeout is ``124``), or ``None`` when Git cannot launch.
     """
     _reclaim_stale_maintenance_lock(tracker)
     try:
@@ -235,6 +326,8 @@ def run_auto_maintenance(
     except OSError as exc:
         _log.warning("git maintenance could not start in %s: %s", tracker, exc)
         return None
+    if result.returncode != 124:
+        _expire_reflogs(tracker)
     if result.returncode != 0:
         _log.warning(
             "git maintenance failed in %s: rc=%s %s",

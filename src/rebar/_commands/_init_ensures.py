@@ -56,11 +56,12 @@ def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
 
 
 def _gc_config_unit(tracker: str) -> EnsureOutcome:
-    """Keep automatic garbage collection enabled but in the write lock's
-    foreground. Clear stale gc.auto=0 and set gc.autoDetach and
-    maintenance.autoDetach false. Both auto routes must avoid detached
-    repacking of the shared object database while concurrent writers run.
-    Act only when the tracked configuration differs."""
+    """Make any gc or maintenance git starts in the tracker run in the foreground.
+    Clear stale gc.auto=0 and set gc.autoDetach and maintenance.autoDetach false, so
+    neither auto route repacks the shared object database in the background while
+    concurrent writers run. rebar's own git children run with gc and maintenance off;
+    this config is the safety net for git run by hand there. Act only when the
+    tracked configuration differs."""
     changed = False
     if _git(tracker, "config", "--get", "gc.auto").returncode == 0:
         _git(tracker, "config", "--unset", "gc.auto")
