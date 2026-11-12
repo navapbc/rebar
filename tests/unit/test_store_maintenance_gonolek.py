@@ -235,6 +235,8 @@ def test_explicit_step_runs_exactly_the_incremental_tasks(monkeypatch: pytest.Mo
         return subprocess.CompletedProcess(["git", *args], 0, "", "")
 
     monkeypatch.setattr(event_commit_git, "run_git_reaped", fake_reaped)
+    # The once-a-day reflog pass is due here; its throttle is tested in test_store_reflog_expiry.
+    monkeypatch.setattr(event_commit_git, "_reflog_expiry_due", lambda _common: True)
     event_commit_git.run_auto_maintenance("/x")
     assert seen == [
         (
@@ -245,7 +247,8 @@ def test_explicit_step_runs_exactly_the_incremental_tasks(monkeypatch: pytest.Mo
             "--task=commit-graph",
             "--task=loose-objects",
             "--task=incremental-repack",
-        )
+        ),
+        ("reflog", "expire", "--all"),
     ]
 
 

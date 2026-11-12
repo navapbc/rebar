@@ -3,8 +3,8 @@
 Fetch outside the write lock; adopt or merge under it. Empty unrelated stores may
 union, but unrelated stores with local events refuse and report ``DIVERGED``.
 Related stores fast-forward, stay ahead, or merge as needed. Conflicts abort and
-keep local state. Union merges keep both parents reachable for serialized gc;
-auto-gc stays foreground under the store lock. The caller owns throttling, and
+keep local state. Union merges keep both parents reachable, so the write-locked
+maintenance step never loses a ticket commit. The caller owns throttling, and
 this best-effort operation returns ``None``.
 """
 
