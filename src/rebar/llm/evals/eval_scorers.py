@@ -31,6 +31,16 @@ from dataclasses import dataclass
 # fire"; high_validity/low_validity = the verifier's discrimination axis.
 FIRE_EXPECTS = frozenset({"finding", "fail"})
 NOFIRE_EXPECTS = frozenset({"pass"})
+# The ADVISORY expectation (bug 2fb4-feac-049c-4a42). A finder prompt is scored on its Pass-1
+# output, which carries NO severity — the rubric's own contract forbids emitting one, because
+# advisory-vs-blocking is computed deterministically in Pass 3 from the verifier's consequence
+# binaries. Some rubric guards are written as DOWNGRADES rather than suppressions (the tests
+# overlay's guard (vii) keeps a coverage gap on pre-existing behaviour advisory), so the correct
+# Pass-1 behaviour for such a case is "surfacing it is acceptable" — which `pass` cannot say and
+# `finding` overstates, since the finder is not required to surface a downgraded gap every run.
+# `advisory` says exactly that: the case is excluded from the fire/no-fire calibration view, and
+# any finding it does emit is still held to the grounding scorers (`_cites_real_paths`).
+ADVISORY_EXPECTS = frozenset({"advisory"})
 VALIDITY_EXPECTS = frozenset({"high_validity", "low_validity"})
 # The verifier's IMPACT axis (distinct from the validity axis): a planted high-impact
 # finding must grade impact >= the "major" floor and a low-impact one below it, so the
@@ -43,7 +53,12 @@ IMPACT_EXPECTS = frozenset({"high_impact", "low_impact"})
 # that actually separates new findings from reworded prior ones (not one that rates all the same).
 NOVELTY_EXPECTS = frozenset({"high_novelty", "low_novelty"})
 ALLOWED_EXPECTS = (
-    FIRE_EXPECTS | NOFIRE_EXPECTS | VALIDITY_EXPECTS | IMPACT_EXPECTS | NOVELTY_EXPECTS
+    FIRE_EXPECTS
+    | NOFIRE_EXPECTS
+    | ADVISORY_EXPECTS
+    | VALIDITY_EXPECTS
+    | IMPACT_EXPECTS
+    | NOVELTY_EXPECTS
 )
 
 
@@ -227,7 +242,13 @@ def _recall(case: dict, out: dict) -> ScoreResult:
 
 
 def _no_fire(case: dict, out: dict) -> ScoreResult:
-    """On a case that should PASS (expect pass), the reviewer must NOT fire."""
+    """On a case that should PASS (expect pass), the reviewer must NOT fire.
+
+    A case marked ``expect: advisory`` is NOT a no-fire case: its rubric guard downgrades
+    the finding rather than suppressing it, so surfacing it is acceptable and this scorer
+    stands down (the grounding scorers still hold whatever it emits). That is the whole
+    distinction between a downgraded finding and one the rubric surfaces as blocking —
+    Pass-1 output carries no severity, so only the case can declare which it is."""
     if case.get("expect") not in NOFIRE_EXPECTS:
         return _NA
     fired = _fired(out)

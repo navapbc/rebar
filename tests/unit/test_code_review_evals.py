@@ -87,6 +87,28 @@ def test_tests_spec_pairs_each_new_antipattern_kind(kind: str) -> None:
     assert {c.get("expect") for c in nofire} <= sc.NOFIRE_EXPECTS, f"{kind}: FP-* must not fire"
 
 
+def test_advisory_expectation_stands_down_the_no_fire_scorer() -> None:
+    # Bug 2fb4: a rubric guard that DOWNGRADES a finding (the tests overlay's guard (vii))
+    # cannot be expressed at Pass 1, which emits no severity. `expect: advisory` lets the case
+    # say "surfacing this is acceptable", so `_no_fire` must not count a fire against it —
+    # while a plain `expect: pass` case still fails on exactly the same output.
+    advisory = {"expect": "advisory"}
+    assert not sc._no_fire(advisory, _FINDINGS).applicable
+    assert not sc._no_fire(advisory, _EMPTY).applicable
+    assert sc._no_fire({"expect": "pass"}, _FINDINGS) == sc.ScoreResult(
+        True, False, "false fire on a good case"
+    )
+
+
+def test_tests_overlay_carries_the_advisory_guard_vii_case() -> None:
+    # The advisory expectation has a real user: the pre-existing-code coverage gap that guard
+    # (vii) keeps advisory rather than suppressing.
+    ds = ev.load_eval_spec("code-review-tests").get("dataset", [])
+    advisory = [c for c in ds if c.get("expect") == "advisory"]
+    assert advisory, "tests overlay needs the guard-(vii) advisory case"
+    assert {c["mode"] for c in advisory} == {"gap-on-preexisting-code"}
+
+
 # ── the dedicated code_review_* scorers ────────────────────────────────────────
 
 _FINDINGS = {"findings": [{"claim": "x", "dimension": "bug", "evidence": "e"}]}
