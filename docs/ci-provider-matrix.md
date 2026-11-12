@@ -125,7 +125,8 @@ genai-prices' own extraction and pricing arithmetic), so billable uncached input
 of the four token rates versus Anthropic direct (genai-prices offline price data, read 2026-08-03).
 Same models, same token counts, so the delta is purely the provider.
 ³ **Estimated, not measured** — no OpenAI run exists yet. Same token volumes priced at
-`gpt-5.4` / `gpt-5.4-mini` / `gpt-5.4-nano` list, mapping frontier/standard/trivial. OpenAI bills
+`gpt-5.4` / `gpt-5.4-mini` / `gpt-5.4-nano` list, mapping frontier/standard/trivial (the
+arm's models at the time). OpenAI bills
 no cache-*write* premium, which is most of why it lands lower. Replace this column with the arm's
 first real usage log. This estimate predates the 2026-11-09 move of frontier to `gpt-5.5` (see
 §"OpenAI arm model choice") and has not been repriced.
@@ -167,8 +168,17 @@ a static, fully-asserted matrix until the spend justifies it.
 ## OpenAI arm model choice
 
 **Decision (2026-11-09, bug `deceptive-banal-baboon`): the OpenAI arm's frontier and scalar
-model moved from `gpt-5.4` to `gpt-5.5`.** `standard` (`gpt-5.4-mini`) and `trivial`
-(`gpt-5.4-nano`) are unchanged.
+model moved from `gpt-5.4` to `gpt-5.5`.** `standard` (`gpt-5.4-mini`) was unchanged.
+
+**Decision (2026-11-11, bug `wooded-hassium-tamarin`): `trivial` moved from `gpt-5.4-nano` to
+`gpt-5.4-mini`.** OpenAI's deprecations page (`https://developers.openai.com/api/docs/deprecations`,
+read 2026-11-11) lists `gpt-5.4-nano` and `gpt-5.4-nano-2026-03-17` as announced 2026-10-01,
+shutdown 2027-04-01, replacement `gpt-6-luna`. `gpt-5.4-mini` is not on that page, is already
+this arm's `standard` model, and gets the same pinned `pydantic-ai-slim` 1.107.9 profile as
+`gpt-5.4-nano` (reasoning, sampling, structured output), so the request shape is unchanged. The
+named replacement, `gpt-6-luna`, is rejected for the GPT-6 reason below: the pinned profile treats
+it as non-reasoning. `tests/unit/test_ci_provider_matrix.py` fails if any openai slot pins an
+announced-deprecated id or a model the pinned profile treats as non-reasoning.
 
 Why the arm moved off `gpt-5.4`: OpenAI started rejecting unchanged rebar requests on it with HTTP
 400 `invalid_prompt` ("flagged as potentially violating our usage policy"). The cause is on
