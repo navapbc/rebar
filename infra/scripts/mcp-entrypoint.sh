@@ -369,6 +369,13 @@ if [ "${1:-}" = "--with-dir-lock" ]; then
   exit $?
 fi
 
+# Autodeploy refreshes a running container's code checkout when main advances without an MCP
+# image change (juiced-anarthrous-bird); same locked, refusing refresh as at startup.
+if [ "${1:-}" = "--refresh-code" ]; then
+  refresh_code
+  exit $?
+fi
+
 if [ "${1:-}" = "--provision-only" ]; then
   provision_store
   exit $?
