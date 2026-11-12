@@ -843,7 +843,9 @@ conflict still aborts → keeps local → hints `fsck` (never a hard read failur
 `loose-objects`, `incremental-repack`), which never walk reachability: 0.35–17.3 s on the
 1.07M-object production store, where `gc --auto` took 134 s. A timed-out step is reaped as a
 process group, SIGTERM first, so git releases `objects/maintenance.lock` (ADR 0051 amendment,
-bug 51e0-5038).
+bug 51e0-5038). The same holds for every bounded git child: `gitutil.run_git(..., timeout=)`
+runs git in its own process group and reaps the group on timeout, so a killed fetch removes its
+pack `.keep` and leaves no child running outside the write lock (bug 4eed-2e15).
 
 ### Fetch coordination — the Git common-directory lock
 

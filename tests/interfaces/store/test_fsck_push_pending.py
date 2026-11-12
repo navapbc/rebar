@@ -20,6 +20,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar import _cli
+from rebar._store import gitutil
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -314,6 +315,7 @@ def _time_out_git(monkeypatch: pytest.MonkeyPatch, *, when) -> None:
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
 
 
 def _assert_timeout_report(line: str | None, is_issue: bool) -> None:

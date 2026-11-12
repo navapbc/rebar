@@ -195,6 +195,7 @@ def test_last_pass_cas_retries_exactly_three_times_with_jittered_backoff(
 
     sleeps: list[float] = []
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(importlib.import_module("rebar._store.gitutil"), "_run_in_group", run)
     last_pass = importlib.import_module("rebar.reconciler.last_pass")
     monkeypatch.setattr(last_pass, "_sleep", sleeps.append)
 
@@ -244,6 +245,7 @@ def test_persistent_non_cas_push_failure_is_loud_and_still_releases_lock(
         return real_run(argv, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(importlib.import_module("rebar._store.gitutil"), "_run_in_group", run)
 
     rc = reconciler_main.main(["sync", "--repo-root", str(rebar_repo)])
 

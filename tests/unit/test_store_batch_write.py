@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from rebar._commands import _seam
-from rebar._store import event_append, staging
+from rebar._store import event_append, gitutil, staging
 from rebar._store.canonical import canonical_bytes
 
 pytestmark = pytest.mark.unit
@@ -191,6 +191,7 @@ def test_validation_failure_rolls_back_before_any_commit(tracker, monkeypatch):
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
 
     bad = {"uuid": "u-bad", "timestamp": 1, "event_type": "NOPE", "data": {}}
     with pytest.raises(event_append.StoreError):
@@ -214,6 +215,7 @@ def test_commit_failure_rolls_back_whole_batch_and_next_write_is_clean(tracker, 
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
     with pytest.raises(event_append.StoreError):
         event_append.batch_stage_and_commit(
             tracker,

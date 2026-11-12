@@ -45,6 +45,7 @@ def _fail_first_commit(monkeypatch: pytest.MonkeyPatch, stderr: str) -> dict:
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(gitutil.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
     return state
 
 
@@ -84,6 +85,7 @@ def test_nontransient_commit_failure_still_fails_immediately(
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(gitutil.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
 
     with pytest.raises(rebar.RebarError):
         rebar.transition(tid, "open", "in_progress", repo_root=repo)

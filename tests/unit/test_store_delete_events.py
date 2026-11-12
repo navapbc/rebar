@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar._store import event_append
+from rebar._store import event_append, gitutil
 
 pytestmark = pytest.mark.unit
 
@@ -118,6 +118,7 @@ def test_commit_failure_restores_deletions(tracker, monkeypatch):
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
     with pytest.raises(event_append.StoreError):
         event_append.delete_events(tracker, rels[:1], "prune: REVIEW_RESULT sidecar for tk")
 

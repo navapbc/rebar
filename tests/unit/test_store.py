@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from rebar._store import event_append, lock, push, sync
+from rebar._store import event_append, gitutil, lock, push, sync
 
 
 @pytest.fixture
@@ -172,6 +172,7 @@ def test_network_git_is_bounded_and_timeout_is_best_effort(monkeypatch, mod, arg
         raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 0)
 
     monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
     cp = mod._git(*args)
     assert cp.returncode != 0, "a git timeout must surface as a failed CompletedProcess"
     assert isinstance(seen["timeout"], (int, float)) and seen["timeout"] > 0, (

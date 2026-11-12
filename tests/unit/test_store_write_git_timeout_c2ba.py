@@ -161,6 +161,7 @@ def test_run_git_passes_the_timeout(monkeypatch):
         return real_run(argv, *a, **k)
 
     monkeypatch.setattr(event_append.subprocess, "run", _spy)
+    monkeypatch.setattr(gitutil, "_run_in_group", _spy)
     event_append._run_git(["git", "--version"])
     assert seen["timeout"] == event_append._GIT_TIMEOUT
     assert seen["timeout"] is not None and seen["timeout"] > 0
@@ -180,6 +181,7 @@ def test_run_git_folds_timeout_into_a_synthetic_failure(monkeypatch):
         return real_run(argv, *a, **k)
 
     monkeypatch.setattr(event_append.subprocess, "run", _boom)
+    monkeypatch.setattr(gitutil, "_run_in_group", _boom)
     result = event_append._run_git(["git", "status", "--sentinel-c2ba"])
     assert result.returncode == 124
     assert "timed out" in (result.stderr or "")
@@ -197,6 +199,7 @@ def test_stage_and_commit_git_calls_are_all_timeout_bounded(tracker, monkeypatch
         return real_run(cmd, *a, **k)
 
     monkeypatch.setattr(event_append.subprocess, "run", _spy)
+    monkeypatch.setattr(gitutil, "_run_in_group", _spy)
     rc = event_append.stage_and_commit(tracker, "tk", _event("u-A", 1700000000000000000))
     assert rc == 0
     assert timeouts, "no git subprocess call was launched by the append path"

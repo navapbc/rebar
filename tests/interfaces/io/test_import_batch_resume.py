@@ -27,7 +27,7 @@ from _git_counts import commit_count
 import rebar
 from rebar import config
 from rebar._commands import _seam
-from rebar._store import event_append, staging
+from rebar._store import event_append, gitutil, staging
 
 
 def _fresh_repo(tmp_path: Path, name: str) -> Path:
@@ -152,6 +152,7 @@ def test_commit_count_tolerates_transient_git_failure_not_opaque_int_crash(
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(subprocess, "run", flaky_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", flaky_run)
     assert _commit_count(dst) == expected  # retried past the injected transient
     assert calls["revlist"] >= 2, "expected a retry after the transient failure"
     monkeypatch.undo()
@@ -163,6 +164,7 @@ def test_commit_count_tolerates_transient_git_failure_not_opaque_int_crash(
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(subprocess, "run", dead_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", dead_run)
     with pytest.raises(Exception) as ei:
         _commit_count(dst)
     msg = str(ei.value)
@@ -220,6 +222,7 @@ def test_crash_before_later_chunk_leaves_whole_commit_or_none_and_resumes(
         return real_run(cmd, *a, **kw)
 
     monkeypatch.setattr(event_append.subprocess, "run", fake_run)
+    monkeypatch.setattr(gitutil, "_run_in_group", fake_run)
     with pytest.raises(Exception):  # noqa: B017 — the failed chunk aborts the import
         rebar.import_tickets(recs, repo_root=str(dst))
     monkeypatch.undo()
