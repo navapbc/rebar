@@ -312,38 +312,6 @@ def test_safe_submit_returns_stale_when_submit_races_to_409(monkeypatch, capsys)
     assert "cafebabecafebabecafebabecafebabecafebabe" in err
 
 
-def test_safe_submit_reraises_non_409_submit_http_error(monkeypatch):
-    import urllib.error
-
-    safe_submit = _safe_submit_module()
-
-    monkeypatch.setattr(safe_submit, "_credential", lambda host: ("user", "pass"))
-
-    def fake_request(base_url: str, method: str, path: str, auth: str, body=None) -> dict:
-        if method == "POST" and path.endswith("/submit"):
-            raise urllib.error.HTTPError(path, 500, "boom", {}, None)
-        if method == "GET":
-            return {
-                "current_revision": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-                "labels": {
-                    "LLM-Review": {"approved": {"_account_id": 1}},
-                    "Verified": {"approved": {"_account_id": 2}},
-                },
-                "unresolved_comment_count": 0,
-                "submittable": True,
-            }
-        return {}
-
-    monkeypatch.setattr(safe_submit, "_request", fake_request)
-
-    with pytest.raises(urllib.error.HTTPError) as raised:
-        safe_submit.main(
-            ["2764", "--revision", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "--hashtag", ""]
-        )
-
-    assert raised.value.code == 500
-
-
 @pytest.mark.parametrize("inherited", [None, "1"])
 def test_credential_lookup_never_prompts_on_a_terminal(monkeypatch, inherited):
     """With no helper and a controlling terminal, git credential fill asks for a username on
@@ -462,20 +430,6 @@ def test_safe_submit_409_with_empty_body_does_not_claim_staleness(monkeypatch, c
     assert "no longer current" not in err
 
 
-def test_safe_submit_non_409_prints_body_before_reraising(monkeypatch, capsys):
-    import urllib.error
-
-    safe_submit = _submit_failing_with(monkeypatch, 500, b"internal boom detail")
-
-    with pytest.raises(urllib.error.HTTPError) as raised:
-        safe_submit.main(_FULL_SHA_ARGS)
-
-    assert raised.value.code == 500
-    err = capsys.readouterr().err
-    assert "internal boom detail" in err
-    assert "500" in err
-
-
 _CONFLICT_BODY = (
     b"Cannot rebase db3f3e396f1: Change 3169 could not be rebased due to a conflict "
     b"during merge.\n\nmerge conflict(s):\n* docs/release-notes.md\n"
@@ -536,3 +490,109 @@ def test_safe_submit_409_when_reread_fails_still_names_conflict(monkeypatch, cap
     err = capsys.readouterr().err
     assert "merge conflict" in err
     assert "no longer current" not in err
+
+
+# ── Errors after the vote check reconcile against Gerrit (chewy-flavoury-milksnake) ──
+
+_SHA = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+
+def _post_vote_failure(monkeypatch, *, submit_exc=None, hashtag_exc=None, reread=None):
+    """A green change whose hashtag or submit POST raises; later GETs return ``reread``
+    (a dict merged over the green detail, or an exception to raise)."""
+    safe_submit = _safe_submit_module()
+    monkeypatch.setattr(safe_submit, "_credential", lambda host: ("user", "pass"))
+    calls: list[tuple[str, str]] = []
+
+    def fake_request(base_url: str, method: str, path: str, auth: str, body_=None) -> dict:
+        calls.append((method, path))
+        if method == "POST" and path.endswith("/hashtags") and hashtag_exc is not None:
+            raise hashtag_exc
+        if method == "POST" and path.endswith("/submit"):
+            if submit_exc is not None:
+                raise submit_exc
+            return {}
+        if method != "GET":
+            return {}
+        if len([c for c in calls if c[0] == "GET"]) == 1:
+            return dict(_GREEN_DETAIL)
+        if isinstance(reread, Exception):
+            raise reread
+        return {**_GREEN_DETAIL, **(reread or {})}
+
+    monkeypatch.setattr(safe_submit, "_request", fake_request)
+    return safe_submit, calls
+
+
+_MERGED = {"status": "MERGED", "current_revision": "f" * 40, "revisions": {_SHA: {}, "f" * 40: {}}}
+_NOT_MERGED = {"status": "NEW", "revisions": {_SHA: {}}}
+
+
+def _http(status: int, body: bytes):
+    import io
+    import urllib.error
+
+    return urllib.error.HTTPError("submit", status, "err", {}, io.BytesIO(body))
+
+
+def test_submit_http_error_after_merge_exits_0(monkeypatch, capsys):
+    safe_submit, _ = _post_vote_failure(
+        monkeypatch, submit_exc=_http(502, b"bad gateway"), reread=_MERGED
+    )
+    assert safe_submit.main(_FULL_SHA_ARGS) == 0
+    assert "merged" in capsys.readouterr().out
+
+
+def test_submit_timeout_after_merge_exits_0(monkeypatch, capsys):
+    import urllib.error
+
+    safe_submit, _ = _post_vote_failure(
+        monkeypatch, submit_exc=urllib.error.URLError(TimeoutError("timed out")), reread=_MERGED
+    )
+    assert safe_submit.main(_FULL_SHA_ARGS) == 0
+    assert "merged" in capsys.readouterr().out
+
+
+def test_submit_unparseable_body_after_merge_exits_0(monkeypatch, capsys):
+    safe_submit, _ = _post_vote_failure(
+        monkeypatch, submit_exc=ValueError("Expecting value"), reread=_MERGED
+    )
+    assert safe_submit.main(_FULL_SHA_ARGS) == 0
+    assert "merged" in capsys.readouterr().out
+
+
+def test_submit_http_error_not_merged_exits_1_with_body(monkeypatch, capsys):
+    safe_submit, _ = _post_vote_failure(
+        monkeypatch, submit_exc=_http(500, b"internal boom detail"), reread=_NOT_MERGED
+    )
+    assert safe_submit.main(_FULL_SHA_ARGS) == 1
+    err = capsys.readouterr().err
+    assert "internal boom detail" in err
+    assert "500" in err
+
+
+def test_merged_check_requires_the_submitted_revision(monkeypatch):
+    other = {"status": "MERGED", "revisions": {"c" * 40: {}}}
+    safe_submit, _ = _post_vote_failure(monkeypatch, submit_exc=_http(502, b"x"), reread=other)
+    assert safe_submit.main(_FULL_SHA_ARGS) == 1
+
+
+def test_submit_error_and_failed_reread_exits_1_naming_both(monkeypatch, capsys):
+    import urllib.error
+
+    safe_submit, _ = _post_vote_failure(
+        monkeypatch,
+        submit_exc=urllib.error.URLError("connection reset"),
+        reread=urllib.error.URLError("still down"),
+    )
+    assert safe_submit.main(_FULL_SHA_ARGS) == 1
+    err = capsys.readouterr().err
+    assert "connection reset" in err
+    assert "still down" in err
+
+
+def test_hashtag_failure_warns_and_still_submits(monkeypatch, capsys):
+    safe_submit, calls = _post_vote_failure(monkeypatch, hashtag_exc=_http(500, b"tag boom"))
+    assert safe_submit.main(["2764", "--revision", _SHA, "--hashtag", "rebar-session-x"]) == 0
+    assert calls[-1][1].endswith(f"/revisions/{_SHA}/submit")
+    assert "hashtag" in capsys.readouterr().err.lower()

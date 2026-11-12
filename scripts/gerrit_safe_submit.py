@@ -11,7 +11,11 @@ Exit codes:
   3  refused before submitting: a required vote is missing, comments are unresolved,
      or Gerrit reports the change not submittable.
   4  no Gerrit credential for the host.
-  Any other HTTP error from the submit prints Gerrit's response and re-raises (exit 1).
+  1  the submit failed (any other HTTP error, a timeout or connection error, or an
+     unreadable response) and a re-read shows the change is not merged at the revision;
+     stderr prints the error and Gerrit's response. When such an error comes back but
+     Gerrit did merge the revision, the script says so and exits 0.
+  A failure to add the session hashtag only warns; the submit still runs.
 """
 
 from __future__ import annotations
@@ -190,13 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     if args.hashtag:
-        _request(
-            args.base_url.rstrip("/"),
-            "POST",
-            f"/a/changes/{change}/hashtags",
-            auth,
-            {"add": [args.hashtag]},
-        )
+        _add_hashtag(args.base_url.rstrip("/"), change, auth, args.hashtag)
 
     try:
         _request(
@@ -213,9 +211,62 @@ def main(argv: list[str] | None = None) -> int:
             print(_explain_409(body, current, read_change), file=sys.stderr)
             print(reason, file=sys.stderr)
             return 2
-        print(reason, file=sys.stderr)
-        raise
+        return _reconcile(
+            args.change, args.revision, reason, _read_all_revisions(args, change, auth)
+        )
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        reason = f"submit request failed: {exc!r}"
+        return _reconcile(
+            args.change, args.revision, reason, _read_all_revisions(args, change, auth)
+        )
     return 0
+
+
+def _add_hashtag(base_url: str, change: str, auth: str, hashtag: str) -> None:
+    """Tag the change with the session hashtag; a failure only warns (ownership metadata
+    must never block or misreport a submit)."""
+    try:
+        _request(base_url, "POST", f"/a/changes/{change}/hashtags", auth, {"add": [hashtag]})
+    except urllib.error.HTTPError as exc:
+        print(
+            f"warning: could not add hashtag {hashtag} (HTTP {exc.code}): {_error_body(exc)}",
+            file=sys.stderr,
+        )
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        print(f"warning: could not add hashtag {hashtag}: {exc!r}", file=sys.stderr)
+
+
+def _read_all_revisions(args: argparse.Namespace, change: str, auth: str) -> Callable[[], dict]:
+    def read() -> dict:
+        return _request(
+            args.base_url.rstrip("/"), "GET", f"/a/changes/{change}?o=ALL_REVISIONS", auth
+        )
+
+    return read
+
+
+def _reconcile(change: str, revision: str, reason: str, reread: Callable[[], dict]) -> int:
+    """Decide a submit whose request raised: Gerrit may have merged before the error.
+
+    Exit 0 when a re-read shows the change MERGED with ``revision`` among its patch sets
+    (Rebase-If-Necessary adds a rebased patch set, so the merged one may be newer).
+    Otherwise print the original error and exit 1.
+    """
+    try:
+        detail = reread()
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        print(reason, file=sys.stderr)
+        print(f"could not re-read change {change} to check for a merge: {exc!r}", file=sys.stderr)
+        return 1
+    if detail.get("status") == "MERGED" and revision in (detail.get("revisions") or {}):
+        print(
+            f"submitted: change {change} merged (revision {revision}); "
+            f"the submit request itself reported: {reason}"
+        )
+        return 0
+    print(reason, file=sys.stderr)
+    print(f"change {change} is not merged (status {detail.get('status')})", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
