@@ -49,9 +49,11 @@ updates:
       - dependency-name: "mcp"
         update-types: ["version-update:semver-major"]
       # Dependabot names each extras variant separately ("pydantic-ai-slim[bedrock]", ...), so
-      # the bare name matches none of them; the trailing * matches every variant.
+      # the bare name matches none of them; the trailing * matches every variant. It also sees
+      # no current version for those variants, so a semver-major filter cannot classify 2.x as
+      # major; ignore the 2.x range explicitly instead.
       - dependency-name: "pydantic-ai-slim*"
-        update-types: ["version-update:semver-major"]
+        versions: [">=2"]
     labels:
       - "dependencies"
     commit-message:
