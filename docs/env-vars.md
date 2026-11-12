@@ -23,6 +23,8 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_STEP_SUMMARY` | `src/rebar/_cli/_bridge_commands.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
+| `GIT_DIR` | `src/rebar/_config_sources.py` |  |
+| `GIT_WORK_TREE` | `src/rebar/_config_sources.py` |  |
 | `JIRA_API_TOKEN` | `src/rebar/config.py`, `src/rebar/reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/reconciler/runtime.py` |  |
 | `JIRA_PAT` | `src/rebar/reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/reconciler/runtime.py` |  |
 | `JIRA_PROJECT` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sections.py (canonical env name of jira.project)` |  |
@@ -226,7 +228,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_213 variables._
+_215 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -234,10 +236,10 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_config_resolvers.py:291` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:372` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:384` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:391` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:669` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:374` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:386` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:393` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:671` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/terraform_source.py:410` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:37` — `os.environ.get(<non-literal>)`

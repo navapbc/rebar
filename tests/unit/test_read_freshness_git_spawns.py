@@ -231,3 +231,51 @@ def test_missing_tickets_branch_neither_fetches_nor_marks(
     finally:
         _unthrottle(s)
         cfg.reset_config_cache()
+
+
+# ── repo-root discovery is not repeated within one read (carbonous-bipartisan-ammonite) ──
+def _toplevel_spawns(spawns: _GitSpawns) -> list[list[str]]:
+    return [argv for argv, _ in spawns.calls if "--show-toplevel" in argv]
+
+
+def test_show_ticket_without_rebar_root_discovers_the_root_at_most_once(store, monkeypatch) -> None:
+    monkeypatch.delenv("REBAR_ROOT")
+    monkeypatch.chdir(store.repo_root)
+    cfg.reset_config_cache()
+    _throttle(store)
+    spawns = _GitSpawns().install(monkeypatch)
+
+    rebar.show_ticket(BASE_ID)
+
+    assert len(_toplevel_spawns(spawns)) <= 1, _toplevel_spawns(spawns)
+
+
+def test_a_cwd_change_between_reads_resolves_the_new_root(
+    store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("REBAR_ROOT")
+    other = tmp_path / "other"
+    _init_repo(other, "main")
+    monkeypatch.chdir(store.repo_root)
+    cfg.reset_config_cache()
+    assert cfg.repo_root() == store.repo_root.resolve()
+
+    monkeypatch.chdir(other)
+
+    assert cfg.repo_root() == other.resolve()
+
+
+def test_a_repo_created_inside_a_cached_root_is_resolved(
+    store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A nested repo created after the first lookup is found, not shadowed by the cache."""
+    monkeypatch.delenv("REBAR_ROOT")
+    nested = store.repo_root / "sub"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    cfg.reset_config_cache()
+    assert cfg.repo_root() == store.repo_root.resolve()
+
+    _init_repo(nested, "main")
+
+    assert cfg.repo_root() == nested.resolve()
