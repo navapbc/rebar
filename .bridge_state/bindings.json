@@ -41331,7 +41331,7 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\n`tests/unit/test_snapshot_submodules_watchdog_c605.py::test_build_with_timed_out_listing_writes_no_sidecar` failed in a local `make verify` on 2026-11-04 (macOS, py3.12, load average about 44) with `SnapshotError: git ls-tree ... timed out after 1s`, raised from the test's SECOND `materialize` call. That call is meant to succeed: the slow `ls-tree` wrapper is already switched off (`slow_ls_tree(False)`), but the `slow_ls_tree` fixture also monkeypatches `git_fetch._GIT_TIMEOUT` to `_BOUND_S` (1 second) for the whole test, so the real `git ls-tree` on the recovery path has a 1-second budget. A loaded host exceeds it. The module passed 3 of 3 standalone runs right after, at the same load, and passed in all 3 CI Python cells for Gerrit 3309 patch set 1.\n\nDiscovered while verifying bald-diagnostic-cricket, whose change (src/rebar/_logging.py) does not touch snapshots; the module passes 3 of 3 with and without that change.\n\n## Next check\n\nMake the bound apply only to the deliberately slow call: restore `git_fetch._GIT_TIMEOUT` (or a generous bound) before the recovery `materialize`, so the test pins the timeout behaviour without racing host load. Reproduce first by running the module under synthetic CPU load.\n\n## Acceptance Criteria\n\n- [ ] The recovery `materialize` call in the test runs with a git bound that does not depend on host load, and the slow-path assertions still use the 1-second bound.\n- [ ] The module passes under synthetic CPU load that previously reproduced the failure.",
+        "description": "## Context / Problem\n\n`tests/unit/test_snapshot_submodules_watchdog_c605.py::test_build_with_timed_out_listing_writes_no_sidecar` failed in a local `make verify` on 2026-11-04 (macOS, py3.12, load average about 44) with `SnapshotError: git ls-tree ... timed out after 1s`, raised from the test's SECOND `materialize` call. That call is meant to succeed: the slow `ls-tree` wrapper is already switched off (`slow_ls_tree(False)`), but the `slow_ls_tree` fixture also monkeypatches `git_fetch._GIT_TIMEOUT` to `_BOUND_S` (1 second) for the whole test, so the real `git ls-tree` on the recovery path has a 1-second budget. A loaded host exceeds it. The module passed 3 of 3 standalone runs right after, at the same load, and passed in all 3 CI Python cells for Gerrit 3309 patch set 1.\n\nDiscovered while verifying bald-diagnostic-cricket, whose change (src/rebar/_logging.py) does not touch snapshots; the module passes 3 of 3 with and without that change.\n\n## Acceptance Criteria\n\n- [x] The recovery `materialize` call in the test runs with a git bound that does not depend on host load, and the slow-path assertions still use the 1-second bound.\n- [x] The module passes under synthetic CPU load that previously reproduced the failure.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Snapshot watchdog test caps real git at 1s and fails under host load"
@@ -78303,9 +78303,17 @@
       "updated_at": "2026-08-15T15:09:10Z"
     },
     "b23c-8220-e09f-448a": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation (read-only, 2026-11-12 ~05:55 PST)\nThe spend-cap Lambda (`/aws/lambda/bedrock-spend-cap` log, ticks from 13:41Z onward) reported the metered (ceiling-priced CloudWatch token) estimate at about 3 times the Cost Explorer figure for the same UTC day, with `effective_source=metered`. The metered arm crossed the daily threshold and attached `BedrockDailySpendCapDeny` (about 05:40 PST), denying `bedrock:InvokeModel` to every capped role, including rebar-gerrit-instance-role, until the 00:00 UTC release.\n\ninfra/terraform/bedrock-spend-cap/README.md documents the metered arm as an intentional upper bound, running at about 1.1 to 1.9 times settled billing. A ratio of about 3 is outside that band. Dollar figures are deliberately omitted (public tracker); they are in the Lambda log lines and Cost Explorer for 2026-11-12.\n\n## Hypotheses (unproven)\n- The model mix shifted (5.5 inference profiles since change 3340) so more tokens are priced at a ceiling well above their real rate.\n- Cost Explorer lags intra-day, so a same-day comparison overstates the ratio relative to the settled-day figure the README describes.\n- Cache-read tokens are priced at a ceiling far above the actual cache-read rate.\n\n## Acceptance criteria\n- [ ] The ratio for 2026-11-12 is re-measured against the SETTLED Cost Explorer day, and the cause of any excess over the documented band is identified from the per-direction token counts.\n- [ ] Either the ceiling table is corrected or the README band is updated with the measured reason; no config key, env var or flag.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Bedrock spend-cap metered estimate ran about 3x settled billing on 2026-11-12, above the README's documented band"
+      },
       "created_at": "2026-11-12T14:33:41Z",
       "jira_id": "4598935",
       "jira_key": "REB-7142",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-12T14:34:48Z"
     },
@@ -112667,6 +112675,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:43Z"
     },
+    "jira-reb-7141": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation (read-only, 2026-11-12 ~05:55 PST)\nThe spend-cap Lambda (`/aws/lambda/bedrock-spend-cap` log, ticks from 13:41Z onward) reported the metered (ceiling-priced CloudWatch token) estimate at about 3 times the Cost Explorer figure for the same UTC day, with `effective_source=metered`. The metered arm crossed the daily threshold and attached `BedrockDailySpendCapDeny` (about 05:40 PST), denying `bedrock:InvokeModel` to every capped role, including rebar-gerrit-instance-role, until the 00:00 UTC release.\n\ninfra/terraform/bedrock-spend-cap/README.md documents the metered arm as an intentional upper bound, running at about 1.1 to 1.9 times settled billing. A ratio of about 3 is outside that band. Dollar figures are deliberately omitted (public tracker); they are in the Lambda log lines and Cost Explorer for 2026-11-12.\n\n## Hypotheses (unproven)\n- The model mix shifted (5.5 inference profiles since change 3340) so more tokens are priced at a ceiling well above their real rate.\n- Cost Explorer lags intra-day, so a same-day comparison overstates the ratio relative to the settled-day figure the README describes.\n- Cache-read tokens are priced at a ceiling far above the actual cache-read rate.\n\n## Acceptance criteria\n- [ ] The ratio for 2026-11-12 is re-measured against the SETTLED Cost Explorer day, and the cause of any excess over the documented band is identified from the per-direction token counts.\n- [ ] Either the ceiling table is corrected or the README band is updated with the measured reason; no config key, env var or flag.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Bedrock spend-cap metered estimate ran about 3x settled billing on 2026-11-12, above the README's documented band"
+      },
+      "created_at": "2026-11-12T15:31:22Z",
+      "jira_key": "REB-7141",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-11-12T15:31:22Z"
+    },
     "jira-reb-747": {
       "baseline": {
         "assignee": null,
@@ -117940,7 +117962,11 @@
     "1794493412762084001": "__rebar_unknown_comment_id__",
     "1794493659496061238": "__rebar_unknown_comment_id__",
     "1794493666051655644": "__rebar_unknown_comment_id__",
-    "1794493686858254700": "__rebar_unknown_comment_id__"
+    "1794493686858254700": "__rebar_unknown_comment_id__",
+    "1794494748657089001": "__rebar_unknown_comment_id__",
+    "1794494763447083001": "__rebar_unknown_comment_id__",
+    "1794494769374730001": "__rebar_unknown_comment_id__",
+    "1794494776387471001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -123490,6 +123516,7 @@
     "REB-713": "ace2-f784-4b19-4f22",
     "REB-714": "jira-reb-714",
     "REB-7140": "09f3-de69-a8ca-4f5f",
+    "REB-7141": "jira-reb-7141",
     "REB-7142": "b23c-8220-e09f-448a",
     "REB-715": "454a-9266-ada6-43cc",
     "REB-716": "a29a-c52a-5ec0-45d5",
