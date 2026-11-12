@@ -46,7 +46,11 @@ def build_fsck(*, prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--include-archived", action="store_true", help="also check archived tickets"
     )
-    parser.add_argument("--only", help="check only the named ticket(s)")
+    parser.add_argument(
+        "--only",
+        choices=("stale-channel",),
+        help="with --repair, repair only stale-channel snapshots",
+    )
     parser.add_argument("--limit", metavar="N", help="check at most N tickets")
     return parser
 

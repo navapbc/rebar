@@ -322,6 +322,30 @@ def _fsck_govern(
     return None
 
 
+#: Value flags whose help shows the space form (``--only ONLY``, ``--limit N``).
+_VALUE_FLAGS = ("--only", "--limit")
+
+
+def _join_flag_values(argv: list[str]) -> list[str]:
+    """Fold ``--only <value>`` / ``--limit <value>`` into the ``=`` form so both spellings
+    parse the same.
+
+    A value flag that ends the argv, or is followed by another flag, stays bare; a bare
+    ``--only`` is still reported as missing its value.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in _VALUE_FLAGS and i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+            out.append(f"{arg}={argv[i + 1]}")
+            i += 2
+            continue
+        out.append(arg)
+        i += 1
+    return out
+
+
 def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int:
     # ``--repair-snapshots`` permits rebuilding a stale snapshot with a pre-snapshot orphan.
     # Strip it before output parsing and honor it only on mutating paths.
@@ -329,6 +353,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     include_archived = "--include-archived" in argv
     do_repair = "--repair" in argv
     dry_run = "--dry-run" in argv
+    argv = _join_flag_values(argv)
     only_args = [a for a in argv if a == "--only" or a.startswith("--only=")]
     only: str | None = None
     if "--only" in only_args:
@@ -340,7 +365,10 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     if only_args:
         if only_args[0] != "--only=stale-channel":
             value = only_args[0].split("=", 1)[1]
-            sys.stderr.write(f"Error: unknown --only value '{value}'\n")
+            sys.stderr.write(
+                f"Error: unknown --only value '{value}' (the only accepted value is "
+                "'stale-channel', with --repair)\n"
+            )
             return 2
         if not do_repair:
             sys.stderr.write("Error: --only=stale-channel requires --repair\n")
