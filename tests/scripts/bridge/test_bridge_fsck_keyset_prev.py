@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from _git_upkeep import apply_upkeep_pins, maintenance_children
 from _subprocess_env import subprocess_env
 
 
@@ -132,6 +133,10 @@ def _cli_tracker(root: Path, snapshot: dict) -> Path:
     tracker = root / ".tickets-tracker"
     tracker.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "tickets"], cwd=tracker, check=True)
+    # Run auto maintenance in the foreground. Detached, the fixture commit leaves a daemon
+    # holding objects/maintenance.lock after the commit returns, and its rollback unlinks
+    # a file the test may have written meanwhile (bug unheedful-acceptable-fulmar).
+    apply_upkeep_pins(tracker / ".git")
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tracker, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=tracker, check=True)
     ticket_dir = tracker / "loc-a"
@@ -266,3 +271,53 @@ def test_store_snapshot_survives_git_maintenance_but_still_catches_mutation(tmp_
     committed = _store_snapshot(tracker)
     assert committed["head"] != before["head"], "a commit that moves HEAD must be detected"
     assert committed["refs"] != before["refs"], "a commit that moves refs must be detected"
+
+
+def _detached_maintenance(trace: Path) -> list[list[str]]:
+    return [argv for argv in maintenance_children(trace) if "--detach" in argv]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_cli_tracker_leaves_no_detached_upkeep(tmp_path, monkeypatch):
+    """The fixture commit must not leave a maintenance daemon owning objects/maintenance.lock.
+
+    Host git config is replaced by one that forces detached auto maintenance on, so neither
+    result depends on the machine. The unpinned control proves the trace can see the daemon.
+    """
+    hostile = tmp_path / "gitconfig"
+    hostile.write_text(
+        "[maintenance]\n\tauto = true\n\tautoDetach = true\n[gc]\n\tautoDetach = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(hostile))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    control = tmp_path / "control"
+    control.mkdir()
+    control_trace = tmp_path / "control.trace"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(control_trace))
+    subprocess.run(["git", "init", "-q"], cwd=control, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=t@e",
+            "-c",
+            "user.name=T",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "control",
+        ],
+        cwd=control,
+        check=True,
+    )
+    assert _detached_maintenance(control_trace), "control: an unpinned commit detaches upkeep"
+
+    fixture_trace = tmp_path / "fixture.trace"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(fixture_trace))
+    _cli_tracker(tmp_path / "pinned", {"REB-464": {"status": "To Do"}})
+    assert maintenance_children(fixture_trace), "the fixture commit must still run upkeep"
+    assert _detached_maintenance(fixture_trace) == []
