@@ -92,7 +92,9 @@ dataset:
       @@ -1,3 +1,9 @@
       +def test_all_reviewer_prompts_declare_category(reviewers_dir):
       +    # structural invariant over source text — Rule-5 exception, not a behavior grep
-      +    for md in reviewers_dir.glob("code-review-*.md"):
+      +    prompts = sorted(reviewers_dir.glob("code-review-*.md"))
+      +    assert prompts, "no reviewer prompts discovered — the glob cannot pass vacuously"
+      +    for md in prompts:
       +        front = md.read_text().split("---", 2)[1]
       +        assert "category: code-review-pass" in front, md.name
   # ── recall: additional seeded antipatterns (story 0f8f) ──────────────────────
@@ -325,11 +327,16 @@ dataset:
            return _store.claim(tid, assignee)
       --- a/tests/test_claim.py
       +++ b/tests/test_claim.py
-      @@ -1,3 +1,6 @@
-      +def test_claim_requires_assignee(store):
+      @@ -1,3 +1,11 @@
+      +@pytest.mark.parametrize("missing", ["", None])
+      +def test_claim_requires_assignee(store, missing):
       +    # asserts the deliberately tightened contract — a valid narrowing, not a contradiction
       +    with pytest.raises(ValueError):
-      +        claim("t1", "")
+      +        claim("t1", missing)
+      +
+      +def test_claim_still_accepts_a_named_assignee(store):
+      +    # the surviving half of the narrowed contract stays exercised
+      +    assert claim("t1", "ada@example.com") == store.claimed("t1")
   # ── fail-open oracle calibration corpus (story 3fce-cccf-d38b-4072) ──────────
   # The four test-oracle instances from the nine-instance fail-open session
   # (2026-08-20/21), each as its recorded PRE-FIX state (must fire) paired with
@@ -364,10 +371,11 @@ dataset:
     diff: |
       --- a/tests/test_worker_output.py
       +++ b/tests/test_worker_output.py
-      @@ -1,3 +1,9 @@
+      @@ -1,3 +1,10 @@
       +def test_worker_emits_no_deprecation_warning():
-      +    proc = subprocess.run([sys.executable, "-m", "rebar.worker"],
-      +                          capture_output=True, text=True)
+      +    # -W default: CPython hides a non-__main__ DeprecationWarning, so enable it explicitly
+      +    proc = subprocess.run([sys.executable, "-W", "default::DeprecationWarning",
+      +                           "-m", "rebar.worker"], capture_output=True, text=True)
       +    # producer liveness first: the worker RAN and produced its banner
       +    assert proc.returncode == 0
       +    assert "worker started" in proc.stdout
@@ -494,21 +502,24 @@ dataset:
       +    return (int(major), int(minor), int(patch))
   - id: FP-preexisting-code-gap-no-new-behaviour
     corpus: rebar
-    expect: pass
+    expect: advisory
     mode: gap-on-preexisting-code
     note: >-
       Story 2e0f: the same content trigger also fires on ordinary source changes, so the overlay
-      must NOT escalate a coverage gap whose subject is PRE-EXISTING behaviour. Here the diff adds
-      a declaration, but the untested branch is reachable only through lines the diff does not
-      add — guard (vii) keeps that advisory. Must NOT fire.
+      must NOT escalate a coverage gap whose subject is PRE-EXISTING behaviour. The diff adds no
+      executable statement at all — only a docstring on a function shipped for two years — so the
+      untested malformed-tag branch it makes visible is wholly pre-existing. Guard (vii) keeps
+      such a gap ADVISORY rather than suppressing it, which is why this case is `expect: advisory`
+      (bug 2fb4): surfacing the gap is acceptable, escalating it to a blocking demand is not.
     diff: |
       --- a/src/rebar/release/tags.py
       +++ b/src/rebar/release/tags.py
-      @@ -1,9 +1,12 @@
-      +def format_release_tag(parts):
-      +    """Pure inverse of the long-standing parse_release_tag; fully covered below."""
-      +    return ".".join(str(p) for p in parts)
+      @@ -1,4 +1,8 @@
        def parse_release_tag(tag):
+      +    """Split a dotted release tag into its integer components.
+      +
+      +    Documented only; the implementation is unchanged and has shipped for two years.
+      +    """
            # unchanged, shipped and exercised in production for two years
            return tuple(int(p) for p in tag.split("."))
   - id: R-loc-ceiling-pinned-literal
@@ -538,10 +549,15 @@ dataset:
     diff: |
       --- a/tests/unit/reconciler/state/test_get_rotation.py
       +++ b/tests/unit/reconciler/state/test_get_rotation.py
-      @@ -390,3 +390,5 @@
-       def test_not_shredded():
-      +    # a mechanically split module would fall below this; the cap cannot see that
-      +    assert 100 <= line_counts["get_rotation.py"]
+      @@ -381,0 +382,8 @@
+      +def test_rotation_extraction_respects_module_size_policy() -> None:
+      +    rotation = RECONCILER_DIR / "get_rotation.py"
+      +    assert rotation.is_file(), "A2-1 must add the cohesive GET-rotation module"
+      +    # Anti-fragmentation floor only. The upper LOC bound is owned by
+      +    # .github/module-size-limit.txt and the CI module-size gate (ADR 0058);
+      +    # a second copy of that number here would be a change-detector.
+      +    assert 100 <= len(rotation.read_text().splitlines())
+      +
   - id: FP-loc-ceiling-single-sourced-mirror
     corpus: rebar
     expect: pass
@@ -553,10 +569,20 @@ dataset:
     diff: |
       --- a/tests/unit/test_module_size_contract.py
       +++ b/tests/unit/test_module_size_contract.py
-      @@ -24,3 +24,5 @@
+      @@ -12,5 +12,6 @@
+       from module_size_support import (
+           LIMIT_FILE,
+           REPO_ROOT,
+           SRC_ROOT,
+      +    gate_file_loc,
+           read_limit,
+       )
+      @@ -24,1 +25,5 @@
        def test_every_module_is_within_the_authoritative_limit():
-      +    limit = read_limit()
-      +    assert all(count <= limit for count in line_counts.values())
+      +    counts = gate_file_loc()
+      +    assert counts, "no modules discovered under SRC_ROOT"
+      +    over = {path: n for path, n in counts.items() if n > read_limit()}
+      +    assert over == {}, f"modules over the authoritative cap: {over}"
   - id: FP-loc-numeric-budget-not-a-file-size
     corpus: rebar
     expect: pass
@@ -567,12 +593,44 @@ dataset:
       (i), unrelated to ADR 0058. The antipattern must not generalize to every `<= N`. Must NOT
       fire.
     diff: |
-      --- a/tests/unit/workflow/test_completion_prefetch.py
-      +++ b/tests/unit/workflow/test_completion_prefetch.py
-      @@ -133,3 +133,5 @@
-       def test_prefetch_payload_stays_within_budget():
-           base, out = prefetch(ticket)
-      +    assert len(base) + len(out) <= 500
+      --- /dev/null
+      +++ b/src/rebar/_demo/payload_budget.py
+      @@ -0,0 +1,11 @@
+      +PAYLOAD_BUDGET = 500  # documented ceiling on the rendered payload, in characters
+      +
+      +
+      +def render_payload(ticket_id: str, notes: list[str]) -> tuple[str, str]:
+      +    """Render a ticket header and its notes; the pair never exceeds PAYLOAD_BUDGET."""
+      +    base = f"ticket:{ticket_id}"
+      +    if len(base) > PAYLOAD_BUDGET:
+      +        raise ValueError(f"ticket id too long for the {PAYLOAD_BUDGET}-char payload")
+      +    out = "\n".join(notes)[: PAYLOAD_BUDGET - len(base)]
+      +    return base, out
+      +
+      --- /dev/null
+      +++ b/tests/unit/test_payload_budget.py
+      @@ -0,0 +1,21 @@
+      +import pytest
+      +
+      +from rebar._demo.payload_budget import PAYLOAD_BUDGET, render_payload
+      +
+      +
+      +def test_long_notes_are_truncated_to_exactly_the_budget():
+      +    base, out = render_payload("t-1", ["a long note"] * 200)
+      +    assert base == "ticket:t-1"
+      +    assert out == ("\n".join(["a long note"] * 200))[: PAYLOAD_BUDGET - len(base)]
+      +    assert len(base) + len(out) == PAYLOAD_BUDGET
+      +
+      +
+      +def test_short_notes_are_returned_whole():
+      +    assert render_payload("t-1", ["one", "two"]) == ("ticket:t-1", "one\ntwo")
+      +
+      +
+      +def test_a_header_longer_than_the_budget_is_rejected():
+      +    with pytest.raises(ValueError, match="too long"):
+      +        render_payload("x" * PAYLOAD_BUDGET, ["a long note"])
+      +    base, out = render_payload("x" * (PAYLOAD_BUDGET - len("ticket:")), ["note"])
+      +    assert (len(base), out) == (PAYLOAD_BUDGET, "")
   - id: R-reexport-identity-only
     corpus: rebar
     expect: finding
@@ -668,13 +726,17 @@ dataset:
       baseline and asserts the classification it returns. It exercises the unit over inputs the
       test owns rather than re-running the gate over the real tree. Guard (xiv). Must NOT fire.
     diff: |
-      --- a/tests/unit/test_mechanism_compare.py
-      +++ b/tests/unit/test_mechanism_compare.py
-      @@ -22,3 +22,6 @@
-       def test_removed_mechanism_buckets_as_stale():
-      +    baseline = {"lock:store": 1}
-      +    report = compare(baseline, active={})
-      +    assert report.stale == ["lock:store"]
+      --- a/tests/unit/test_mechanism_delta.py
+      +++ b/tests/unit/test_mechanism_delta.py
+      @@ -617,0 +618,8 @@
+      +
+      +
+      +def test_a_mechanism_below_its_baseline_count_buckets_as_stale():
+      +    from _mechanism_delta.compare import compare
+      +
+      +    report = compare(current={"lock::store": 1}, baseline={"lock::store": 2})
+      +    assert report.stale == ["lock::store"]
+      +    assert report.new == [] and report.increased == [] and report.active == []
 
 gold_set:
   - input: "A test that asserts a mock's own configured return value (tautological)."
