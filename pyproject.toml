@@ -135,7 +135,7 @@ agents = [
     # on the first pre-httpx2 SDK version this seam is verified against, while allowing the
     # httpx2-vendoring 1.x line that 2bd6 adapts below; <2 keeps the mirror sweep off the next
     # unreviewed SDK major.
-    "anthropic>=0.121.0,<2",
+    "anthropic>=0.121.0,<3",
     "json-repair>=0.61",  # >=0.61 for repair_json(schema=…) schema-guided repair (story drake)
     "pydantic>=2",
 ]
@@ -202,7 +202,7 @@ wiki = ["pypandoc-binary==1.17"]
 # would let local and CI diverge. adapters/jira/adf.py imports it LAZILY inside the
 # three conversion functions and returns its plain-text results when absent, so the
 # reconciler engine stays importable with no extras installed.
-adf = ["marklas==0.8.6", "mistune==3.3.4"]
+adf = ["marklas==0.8.6", "mistune==3.4.0"]
 # The opt-in T2 semantic-resolution backend (epic 850f, ADR 0030): a self-contained
 # pyright the oracle shells out to. Absent it, the T2 tier abstains (no_tool) — it is
 # never on a deterministic blocking path, so a non-adopting client pays nothing.
@@ -228,7 +228,7 @@ grounding-t2 = [
 # and CI diverge). `hcl2`/`lark` are imported LAZILY inside the worker parse, so `import
 # rebar` and non-Terraform reviews pull nothing; only the Terraform grounding path needs it.
 grounding-terraform = [
-    "python-hcl2==8.1.3",
+    "python-hcl2==8.2.0",
 ]
 # Optional S3 ticket-store backend (epic cf3c). Ships the awslabs/git-remote-s3 remote
 # helper (Apache-2.0) so `sync.remote` can point at an s3://bucket/prefix remote. NEVER
@@ -259,7 +259,7 @@ dev = [
     # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint
     # rules between releases, so an unpinned floor lets local and CI drift (green here,
     # red there). Bump deliberately (and in lock-step with the pre-commit usage).
-    "ruff==0.16.3",
+    "ruff==0.17.4",
     # Provider wrapper shell is checked identically on every developer and CI host.
     # shellcheck-py 0.11.0.1 packages the upstream ShellCheck 0.11.0 binary.
     "shellcheck-py==0.11.0.1",
@@ -292,7 +292,7 @@ dev = [
     "marklas==0.8.6",
     # Mutation-gate runtime. Pinned exactly because result/status semantics and mutant IDs
     # are part of the checked-in comparison contract; upgrade only with a measured baseline.
-    "mutmut==3.7.0",
+    "mutmut==3.8.1",
     # The commit gate driver: `make install`/`make hooks` run `pre-commit install`,
     # and CI runs `pre-commit run --all-files` for local↔CI parity. Declared here so a
     # clean editable install has it (no reliance on a global/pipx pre-commit).
@@ -302,7 +302,7 @@ dev = [
     # over-broad/OIDC permissions). Pinned EXACTLY (not a floor) for local↔CI parity: zizmor
     # tightens/adds audits across releases, so an unpinned floor lets findings drift (green
     # here, red in CI). Bump deliberately.
-    "zizmor==1.29.0",
+    "zizmor==1.32.0",
     # Pull the agents and metrics stacks so optional-capability validation tests
     # (provider construction, MCP/Langfuse, and real polyglot lizard parsing)
     # RUN in CI rather than skipping. Self-referential extras stay here, not in
