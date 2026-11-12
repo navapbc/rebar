@@ -1645,7 +1645,7 @@
     "0376-8839-dc75-4260": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\n\nThe plan-review gate is reached through three surfaces: the CLI (`rebar review-plan`), the library (`rebar.llm.plan_review.review_plan`, `src/rebar/llm/plan_review/__init__.py:199`), and the MCP tools, including the async `review_plan_start` + poll pair (`src/rebar/_mcp_llm.py:268`) with its de-dup and `GATE_CONGESTED` behaviour. The epic requires all of them to work under both engines.\n\n## Approach\n\nThread the optional `engine` argument (ADR 0123 precedence: explicit argument over `[verify] plan_review_engine` over `\"pipeline\"`) through each surface into `review_plan`: a `--engine {pipeline,agentic}` CLI flag, the library keyword the switch ticket adds, and an optional `engine` parameter on `review_plan`, `review_plan_start` and the synchronous MCP tool. The MCP de-dup key includes the resolved engine, so a pipeline run and an agentic run on the same ticket are distinct jobs rather than one attaching to the other; gate admission (`gate_admission`, ADR 0112) is unchanged, so `GATE_CONGESTED` behaves identically. `docs/mcp-reference.md` and the CLI help document the parameter. Passing one argument down an existing call chain is the least change that gives every surface the switch.\n\n## Scope\n\n- the `review-plan` CLI command module (flag)\n- src/rebar/_mcp_llm.py (tool parameters, de-dup key)\n- docs/mcp-reference.md, docs/plan-review-gate.md\n- tests/unit/test_plan_review_engine_surfaces.py (new)\n\n## Testing\n\n- Each surface, with `FakeRunner`, under each engine: CLI flag, library keyword, MCP sync tool, and `review_plan_start` followed by `plan_review_status` and `gate_status`, each returning the same verdict shape with the engine recorded.\n- De-dup: two concurrent same-ticket starts with the same engine attach to one job; with different engines they are two jobs.\n- Congestion: with admission at capacity, the agentic engine returns `GATE_CONGESTED` exactly as the pipeline does.\n\n## Acceptance Criteria\n\n- [ ] CLI, library, MCP synchronous and MCP async start/poll surfaces run under both engines, pinned by `tests/unit/test_plan_review_engine_surfaces.py`.\n- [ ] De-dup and `GATE_CONGESTED` behaviour under the agentic engine match the pipeline, pinned by the same file.\n- [ ] `make verify` exits 0.",
+        "description": "## Context / Problem\n\nThe plan-review gate is reached through three surfaces: the CLI (`rebar review-plan`, handler `_review_plan` in `src/rebar/_cli/_llm_commands.py:300`, parser `build_review_plan` in `src/rebar/_cli/_parsers/advanced/llm.py`), the library (`rebar.llm.review_plan`, which already takes `engine` since [rebar:skilled-cepevorous-naga]), and the MCP tools `review_plan` and `review_plan_start` (`src/rebar/_mcp_llm.py`). Today only `[verify] plan_review_engine` selects the engine on the CLI and MCP paths, so an operator cannot run one ticket under both engines without editing config, and the MCP dedup key (`_plan_review_variant`, `_mcp_llm.py:88`) ignores the engine: a pipeline start and an agentic start on one ticket would attach to the same job.\n\n## Approach\n\nThread one optional `engine` argument down the existing call chains into `review_plan`. Precedence stays as ADR 0123 fixed it and `plan_review.resolve_plan_review_engine` implements: explicit argument, then `[verify] plan_review_engine`, then `\"pipeline\"`. No new config key or env var.\n\n- **CLI:** `build_review_plan` adds `--engine {pipeline,agentic}` (default None = config), and `_review_plan` passes `engine=args.engine` to `llm.review_plan`. `src/rebar/_cli/help/review-plan.txt` is regenerated with `scripts/gen_cli_help.py`, and its drift test (`tests/unit/test_gen_cli_help.py`) passes.\n- **MCP:** `review_plan` and `review_plan_start` gain `engine: str | None = None`, which `_review_plan_body` passes to `rebar.llm.review_plan`. `_plan_review_variant(ticket_id, source, engine)` resolves the engine first, through `resolve_plan_review_engine` against the server's config, and appends `;engine=<resolved>` to the key. Concurrent same-ticket starts under one engine still share a job; a pipeline start and an agentic start are distinct jobs. An explicit unknown value raises `ConfigError` from that resolution, before any job is created or LLM call made. Gate admission (`gate_admission`, ADR 0112) runs inside `review_plan`, so `GATE_CONGESTED` behaves identically for both engines. `verify_completion*` tools are unchanged.\n- **Docs:** `docs/mcp-reference.md` is regenerated with `scripts/gen_mcp_reference.py` (it renders tool signatures), and `docs/plan-review-gate.md` gains a short \"Choosing the engine\" note naming the flag, the MCP parameter and the precedence.\n\nPassing one argument down the existing chain is the least change that gives every surface the switch; the library already has it.\n\n## Scope\n\n- src/rebar/_cli/_parsers/advanced/llm.py (flag)\n- src/rebar/_cli/_llm_commands.py (pass engine)\n- src/rebar/_cli/help/review-plan.txt (regenerated)\n- src/rebar/_mcp_llm.py (tool parameters, body, dedup variant)\n- docs/mcp-reference.md (regenerated), docs/plan-review-gate.md\n- tests/unit/test_plan_review_engine_surfaces.py (new)\n\n## Testing\n\nAll offline with a counting FakeRunner (agent findings `[]`, so an agentic run PASSes) in a temp repo.\n\n- CLI: `rebar review-plan <id> --engine agentic -o json` returns `coverage.engine == \"agentic\"`; without the flag the configured default (pipeline) applies and coverage has no `engine`; `--engine bogus` exits 2 with an argparse error.\n- MCP sync: `review_plan(ticket_id, engine=\"agentic\")` returns the agentic verdict; `engine=\"bogus\"` raises `ConfigError` with zero runner calls.\n- MCP async: `review_plan_start(..., engine=\"agentic\")` then polling `gate_status(job_id)` to `passed` and `plan_review_status` to `certified`.\n- Dedup key: `_plan_review_variant` differs between `engine=\"pipeline\"` and `engine=\"agentic\"`, is equal for `None` and the configured default, and two concurrent same-engine `review_plan_start` calls return one `job_id`.\n- Congestion: with `gate_admission` refusing (`GateCongestedError`, an `LLMError`), the MCP sync tool returns the same `_structured_llm_failure` payload under both engines, and the CLI exits 11 under both.\n\n## Acceptance Criteria\n\n- [ ] The CLI flag, the MCP sync parameter and the async start/poll path each run the selected engine, pinned by `tests/unit/test_plan_review_engine_surfaces.py`.\n- [ ] Different engines get different dedup keys, same-engine starts share a job, and `GATE_CONGESTED` is unchanged, pinned by the same file.\n- [ ] `python scripts/gen_cli_help.py --check` and `python scripts/gen_mcp_reference.py --check` exit 0.\n- [ ] `make verify` exits 0.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Engine parity across CLI, library and MCP sync/async plan-review surfaces"
@@ -24858,7 +24858,7 @@
         },
         "description": "## Observation\nRead-only, 2026-11-11 ~20:00 PST, account 896586841071 us-east-1: 4 CloudWatch alarms exist that no file in the repo defines (`git grep` for `cache-ratio-low` / `unit-cost-high` on origin/main d583578c4da returns nothing):\n- `bedrock-cache-ratio-low-opus-4-8`, `bedrock-cache-ratio-low-sonnet-4-6` (state OK since 2026-09-12)\n- `bedrock-unit-cost-high-opus-4-8` (OK since 2026-09-12), `bedrock-unit-cost-high-sonnet-4-6` (OK since 2026-10-01)\nEach has actions enabled with 1 alarm action. They were created outside Terraform (drift). Production traffic moved to the 5.5 inference profiles with change 3340, so these alarms watch model ids that no longer receive calls: they can never fire, and nothing alarms on cache ratio or unit cost for the 5.5 models.\n\nThe Terraform-managed alarm `rebar-bedrock-invoke-client-errors` was moved to the 5.5 ids by a production apply on 2026-11-11 (~20:00 PST, plan 0/1/0, only the 6 ModelId values changed); this bug covers the 4 that Terraform does not manage.\n\n## Approach\n1. Read each live alarm's full definition (metric math / dimensions, thresholds, periods, evaluation, the alarm-action ARN) with `aws cloudwatch describe-alarms --profile frontier`.\n2. Define equivalent alarms in Terraform under infra/terraform/ for the current model classes (opus-5-5, sonnet-5-5, and haiku-5-5 if the metric applies), keyed so a future model move is a one-line change, reusing the existing alarm-action target.\n3. Land through Gerrit; apply via `scripts/terraform_prod.py plan`/`apply` from a worktree at origin/main; confirm the plan adds only these alarms.\n4. Delete the 4 hand-made 4.x alarms after the Terraform ones exist (record the deletion).\n\n## Acceptance criteria\n- [ ] Terraform defines cache-ratio-low and unit-cost-high alarms for the 5.5 model ids, with the same intent (metric, threshold, period, action) as the hand-made ones; `make verify` passes.\n- [ ] [non-codebase] The production apply creates them and `describe-alarms` shows them in OK or INSUFFICIENT_DATA (not ERROR).\n  provenance: environment=AWS 896586841071 us-east-1 CloudWatch; principal=frontier profile; privilege_posture=production-equivalent; instrument=live-call \u2014 describe-alarms after scripts/terraform_prod.py apply\n- [ ] [non-codebase] The 4 hand-made 4.x alarms are deleted and no longer listed.\n  provenance: environment=AWS 896586841071 us-east-1 CloudWatch; principal=frontier profile; privilege_posture=production-equivalent; instrument=live-call \u2014 describe-alarms --alarm-name-prefix bedrock-",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Bedrock cache-ratio and unit-cost alarms exist only outside Terraform and still watch the 4.x model ids"
       },
       "created_at": "2026-11-12T04:33:08Z",
@@ -105118,6 +105118,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-07T18:56:19Z"
     },
+    "f04a-6819-c968-4826": {
+      "created_at": "2026-11-12T06:40:07Z",
+      "jira_id": "4598917",
+      "jira_key": "REB-7124",
+      "state": "confirmed",
+      "updated_at": "2026-11-12T06:40:11Z"
+    },
     "f059-cb55-6b6e-47a7": {
       "baseline": {
         "assignee": null,
@@ -117504,7 +117511,17 @@
     "1794454918632488879": "__rebar_unknown_comment_id__",
     "1794454922519352761": "__rebar_unknown_comment_id__",
     "1794456978104609550": "__rebar_unknown_comment_id__",
-    "1794456984596947731": "__rebar_unknown_comment_id__"
+    "1794456984596947731": "__rebar_unknown_comment_id__",
+    "1794461474734080259": "__rebar_unknown_comment_id__",
+    "1794461878185689079": "__rebar_unknown_comment_id__",
+    "1794462173820921186": "__rebar_unknown_comment_id__",
+    "1794462408852216793": "__rebar_unknown_comment_id__",
+    "1794462563089591565": "__rebar_unknown_comment_id__",
+    "1794462818810621426": "__rebar_unknown_comment_id__",
+    "1794462819490097845": "__rebar_unknown_comment_id__",
+    "1794463040657187099": "__rebar_unknown_comment_id__",
+    "1794463152916302534": "__rebar_unknown_comment_id__",
+    "1794464047951806621": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -123048,6 +123065,7 @@
     "REB-7121": "5f87-086b-508b-4eeb",
     "REB-7122": "d300-ceda-e2c4-48bc",
     "REB-7123": "370c-b2b2-27eb-4350",
+    "REB-7124": "f04a-6819-c968-4826",
     "REB-713": "ace2-f784-4b19-4f22",
     "REB-714": "jira-reb-714",
     "REB-715": "454a-9266-ada6-43cc",
