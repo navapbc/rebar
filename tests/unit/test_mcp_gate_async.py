@@ -67,7 +67,15 @@ class _BlockingReviewPlan:
         self._lock = threading.Lock()
 
     def __call__(
-        self, ticket_id, *, ref=None, source=None, sign=True, emit_sidecar=True, force=False
+        self,
+        ticket_id,
+        *,
+        ref=None,
+        source=None,
+        sign=True,
+        emit_sidecar=True,
+        force=False,
+        engine=None,
     ):
         with self._lock:
             self.calls += 1

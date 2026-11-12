@@ -1,4 +1,4 @@
-Usage: rebar review-plan [-h] [--output {json,text}] [--no-sign] [--force] [--check] [--status] [--retry] [--ref REF] [--source {attested,local}] [ticket_id]
+Usage: rebar review-plan [-h] [--output {json,text}] [--no-sign] [--force] [--check] [--status] [--retry] [--engine {pipeline,agentic}] [--ref REF] [--source {attested,local}] [ticket_id]
 
 Run the plan-review gate on a ticket. The gate applies a deterministic Layer-1
 floor and a four-pass review of the plan (find, verify, decide, then coach),
@@ -49,6 +49,11 @@ options:
                         compatible with --no-sign. The retry response stays a
                         narrow end-result view, and the per-unit journal is
                         never printed
+  --engine {pipeline,agentic}
+                        plan-review engine (ADR 0123): pipeline (the four-pass
+                        review) or agentic (one read-only agent). Overrides
+                        [verify] plan_review_engine; the default is that key,
+                        else pipeline
   --ref REF             a branch, tag, or commit SHA to verify against (default:
                         origin/main, configurable through REBAR_GATE_REF or
                         [snapshot].ref). Pass --ref HEAD when the review depends

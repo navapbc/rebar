@@ -1638,9 +1638,21 @@
    "readOnlyHint": true,
    "title": null
   },
-  "description": "Review a whole plan through the P1-P11 find/verify/decide/coach passes.\n\n        Returns ``{verdict: PASS|BLOCK|INDETERMINATE, blocking, advisory, coaching,\n        indeterminate, coverage, signature?, source, verified_at_sha}``.\n\n        A writable PASS signs the claim attestation and emits REVIEW_RESULT; readonly is\n        pure. Unchanged valid attestations short-circuit unless ``force=True``. Tickets\n        that cannot be claimed fast-fail unsigned and without an LLM, except in-progress\n        or forced work. Attested source binds the reviewed SHA; local reads the checkout.\n        A PASS is unusable until ``attestation.signed``: follow its structured retry and\n        recovery tool instead of claiming. Concurrent identical reviews share one run;\n        force bypasses dedup, and ``review_plan_start`` is preferred for long calls.\n        Requires the agents extra, model credentials, and ``REBAR_MCP_ALLOW_LLM=1``; the\n        model result intentionally has no output schema.\n        ",
+  "description": "Review a whole plan through the P1-P11 find/verify/decide/coach passes.\n\n        Returns ``{verdict: PASS|BLOCK|INDETERMINATE, blocking, advisory, coaching,\n        indeterminate, coverage, signature?, source, verified_at_sha}``.\n\n        A writable PASS signs the claim attestation and emits REVIEW_RESULT; readonly is\n        pure. Unchanged valid attestations short-circuit unless ``force=True``. Tickets\n        that cannot be claimed fast-fail unsigned and without an LLM, except in-progress\n        or forced work. Attested source binds the reviewed SHA; local reads the checkout.\n        A PASS is unusable until ``attestation.signed``: follow its structured retry and\n        recovery tool instead of claiming. Concurrent identical reviews share one run;\n        force bypasses dedup, and ``review_plan_start`` is preferred for long calls.\n        Requires the agents extra, model credentials, and ``REBAR_MCP_ALLOW_LLM=1``; the\n        model result intentionally has no output schema.\n\n        ``engine`` selects ``pipeline`` (the four-pass review) or ``agentic`` (one read-only\n        agent); omitted, ``[verify] plan_review_engine`` decides, else ``pipeline``.\n        ",
   "inputSchema": {
    "properties": {
+    "engine": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Engine"
+    },
     "force": {
      "default": false,
      "title": "Force",
@@ -1690,9 +1702,21 @@
    "readOnlyHint": true,
    "title": null
   },
-  "description": "Start plan review and immediately return\n        ``{job_id, ticket_id, gate_type, status: \"running\"}``.\n\n        Prefer this timeout-proof path, then poll ``plan_review_status`` for the durable\n        attestation or ``gate_status`` for run state and sidecar readability. Duplicate\n        ticket/basis starts share a job; ``force=True`` creates a fresh one. The local\n        index and daemon do not survive process exit. Requires ``REBAR_MCP_ALLOW_LLM=1``.\n        ",
+  "description": "Start plan review and immediately return\n        ``{job_id, ticket_id, gate_type, status: \"running\"}``.\n\n        ``engine`` selects the plan-review engine: ``pipeline`` (the four-pass review) or\n        ``agentic`` (one read-only agent); omitted, ``[verify] plan_review_engine`` decides,\n        else ``pipeline``. An unknown value is refused before any job starts.\n\n        Prefer this timeout-proof path, then poll ``plan_review_status`` for the durable\n        attestation or ``gate_status`` for run state and sidecar readability. Duplicate\n        ticket/basis starts share a job; ``force=True`` creates a fresh one. The local\n        index and daemon do not survive process exit. Requires ``REBAR_MCP_ALLOW_LLM=1``.\n        ",
   "inputSchema": {
    "properties": {
+    "engine": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Engine"
+    },
     "force": {
      "default": false,
      "title": "Force",

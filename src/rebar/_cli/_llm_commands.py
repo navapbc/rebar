@@ -349,6 +349,7 @@ def _review_plan(argv: list[str]) -> int:
             sign=not args.no_sign,
             force=args.force,
             retry=getattr(args, "retry", False),
+            engine=getattr(args, "engine", None),
         )
     except _admission_refusal() as exc:
         # Admission congestion means the gate never ran, so return retryable exit 11 rather

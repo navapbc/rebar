@@ -85,7 +85,7 @@ def _material_key(ticket_id: str) -> str | None:
         return None
 
 
-def _plan_review_variant(ticket_id: str, source: str | None) -> str:
+def _plan_review_variant(ticket_id: str, source: str | None, engine: str = "pipeline") -> str:
     """Dedup variant for plan review, keyed on the ticket's CURRENT plan material.
 
     Without the material fingerprint, a start issued after a description edit attached to
@@ -93,7 +93,18 @@ def _plan_review_variant(ticket_id: str, source: str | None) -> str:
     a plan they had replaced (bug 3b27-8f4b). See :func:`_material_key` for the
     ``material=None`` arm.
     """
-    return f"source={source or 'attested'};material={_material_key(ticket_id)}"
+    # The RESOLVED engine is part of the key (ADR 0123): a pipeline run and an agentic run on one
+    # ticket are distinct jobs; neither attaches to the other.
+    return f"source={source or 'attested'};material={_material_key(ticket_id)};engine={engine}"
+
+
+def _resolve_engine(engine: str | None) -> str:
+    """The plan-review engine an MCP call runs (ADR 0123): the explicit argument, else
+    ``[verify] plan_review_engine``, else ``pipeline``. Raises ``ConfigError`` on an unknown
+    value."""
+    from rebar.llm.plan_review import resolve_plan_review_engine
+
+    return resolve_plan_review_engine(engine)
 
 
 def _completion_variant(ticket_id: str, graph: bool | None, source: str | None) -> str:
@@ -106,7 +117,9 @@ def _completion_variant(ticket_id: str, graph: bool | None, source: str | None) 
     return f"graph={graph};source={source or 'attested'};material={_material_key(ticket_id)}"
 
 
-def _review_plan_body(ticket_id: str, ref, source, force: bool, *, readonly: bool) -> dict:
+def _review_plan_body(
+    ticket_id: str, ref, source, force: bool, *, readonly: bool, engine: str | None = None
+) -> dict:
     """Run the synchronous plan unit shared by singleflight callers.
 
     It structures LLM failures and classifies signature persistence so one run produces
@@ -123,6 +136,7 @@ def _review_plan_body(ticket_id: str, ref, source, force: bool, *, readonly: boo
             sign=not readonly,
             emit_sidecar=not readonly,
             force=force,
+            engine=engine,
         )
     except rebar.llm.LLMError as exc:
         return _structured_llm_failure(exc)
@@ -270,9 +284,14 @@ def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
         ref: str | None = None,
         source: str | None = None,
         force: bool = False,
+        engine: str | None = None,
     ) -> dict:
         """Start plan review and immediately return
         ``{job_id, ticket_id, gate_type, status: "running"}``.
+
+        ``engine`` selects the plan-review engine: ``pipeline`` (the four-pass review) or
+        ``agentic`` (one read-only agent); omitted, ``[verify] plan_review_engine`` decides,
+        else ``pipeline``. An unknown value is refused before any job starts.
 
         Prefer this timeout-proof path, then poll ``plan_review_status`` for the durable
         attestation or ``gate_status`` for run state and sidecar readability. Duplicate
@@ -290,16 +309,21 @@ def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
 
         # The material read for the dedup variant is a store read too, so it runs in the
         # worker thread with the rest of the start.
+        # Resolve the engine ONCE so the dedup key and the run cannot disagree; an unknown value
+        # raises ConfigError here, before any job exists.
+        resolved = _resolve_engine(engine)
         return await anyio.to_thread.run_sync(
             lambda: _start_gate_job(
                 "plan_review",
                 ticket_id,
                 ref=ref,
                 source=source,
-                variant=_plan_review_variant(ticket_id, source),
+                variant=_plan_review_variant(ticket_id, source, resolved),
                 readonly=ro,
                 force=force,
-                work=lambda: _review_plan_body(ticket_id, ref, source, force, readonly=ro),
+                work=lambda: _review_plan_body(
+                    ticket_id, ref, source, force, readonly=ro, engine=resolved
+                ),
             )
         )
 
@@ -456,6 +480,7 @@ def register_llm_tools(mcp, ctx) -> None:
         ref: str | None = None,
         source: str | None = None,
         force: bool = False,
+        engine: str | None = None,
     ) -> dict:
         """Review a whole plan through the P1-P11 find/verify/decide/coach passes.
 
@@ -471,6 +496,9 @@ def register_llm_tools(mcp, ctx) -> None:
         force bypasses dedup, and ``review_plan_start`` is preferred for long calls.
         Requires the agents extra, model credentials, and ``REBAR_MCP_ALLOW_LLM=1``; the
         model result intentionally has no output schema.
+
+        ``engine`` selects ``pipeline`` (the four-pass review) or ``agentic`` (one read-only
+        agent); omitted, ``[verify] plan_review_engine`` decides, else ``pipeline``.
         """
         if not _allow_llm():
             raise ValueError(
@@ -479,15 +507,18 @@ def register_llm_tools(mcp, ctx) -> None:
             )
         # Stay synchronous for certified-op gauging; force bypasses review reuse and dedup.
         ro = _readonly()
+        resolved = _resolve_engine(engine)  # once: the dedup key and the run agree
         return run_gate_singleflight(
             "plan_review",
             ticket_id,
             ref=ref,
             source=source,
-            variant=_plan_review_variant(ticket_id, source),
+            variant=_plan_review_variant(ticket_id, source, resolved),
             readonly=ro,
             force=force,
-            work=lambda: _review_plan_body(ticket_id, ref, source, force, readonly=ro),
+            work=lambda: _review_plan_body(
+                ticket_id, ref, source, force, readonly=ro, engine=resolved
+            ),
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])

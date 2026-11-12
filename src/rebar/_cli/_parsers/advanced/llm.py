@@ -213,6 +213,14 @@ def build_review_plan(*, prog: str) -> argparse.ArgumentParser:
         "--check, and is compatible with --no-sign. The retry response stays a narrow "
         "end-result view, and the per-unit journal is never printed",
     )
+    parser.add_argument(
+        "--engine",
+        choices=["pipeline", "agentic"],
+        default=None,
+        help="plan-review engine (ADR 0123): pipeline (the four-pass review) or agentic (one "
+        "read-only agent). Overrides [verify] plan_review_engine; the default is that key, "
+        "else pipeline",
+    )
     _add_ref_source(parser)
     return parser
 

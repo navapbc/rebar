@@ -239,7 +239,7 @@ def test_plan_review_variant_tracks_material_and_degrades_to_a_none_key(monkeypa
     unreadable = _plan_review_variant("t", None)
 
     assert before != after, "a material change must change the dedup variant"
-    assert unreadable == "source=attested;material=None"
+    assert unreadable == "source=attested;material=None;engine=pipeline"
     assert unreadable not in {before, after}
 
 
@@ -314,14 +314,17 @@ def _raise_read_failure(_tid):
 
 
 @pytest.mark.parametrize(
-    ("build", "prefix"),
+    ("build", "prefix", "suffix"),
     [
-        (lambda m, tid: m._completion_variant(tid, None, None), "graph=None;source=attested"),
-        (lambda m, tid: m._plan_review_variant(tid, None), "source=attested"),
+        (lambda m, tid: m._completion_variant(tid, None, None), "graph=None;source=attested", ""),
+        # Plan review keys on the resolved engine too (ADR 0123); the default is pipeline.
+        (lambda m, tid: m._plan_review_variant(tid, None), "source=attested", ";engine=pipeline"),
     ],
     ids=["verify_completion", "plan_review"],
 )
-def test_gate_variant_tracks_material_and_degrades_to_a_none_key(build, prefix, monkeypatch):
+def test_gate_variant_tracks_material_and_degrades_to_a_none_key(
+    build, prefix, suffix, monkeypatch
+):
     import rebar._mcp_llm as mcp_llm
     from rebar.llm.plan_review import attest
 
@@ -337,6 +340,6 @@ def test_gate_variant_tracks_material_and_degrades_to_a_none_key(build, prefix, 
     raising = build(mcp_llm, "t")
 
     assert before != after, "a material change must change the dedup variant"
-    assert unreadable == f"{prefix};material=None"
+    assert unreadable == f"{prefix};material=None{suffix}"
     assert raising == unreadable
     assert unreadable not in {before, after}
