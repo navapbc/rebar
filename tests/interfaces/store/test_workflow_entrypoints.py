@@ -10,7 +10,6 @@ import asyncio
 import json
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -103,7 +102,31 @@ def test_cli_run_then_status(rebar_repo: Path) -> None:
 # ── MCP (async) ───────────────────────────────────────────────────────────────
 
 
-def test_mcp_run_workflow_is_async_and_pollable(rebar_repo: Path) -> None:
+def _capture_run_threads(monkeypatch: pytest.MonkeyPatch) -> list:
+    """Record the background run thread(s) run_workflow spawns, so a test can wait on the
+    run's own completion instead of a fixed wall-clock window (weakwilled-catchable-cattle)."""
+    from rebar import _mcp_writes
+
+    threads: list = []
+    real = _mcp_writes.spawn_context_daemon
+
+    def spy(target, *, name=None):
+        thread = real(target, name=name)
+        threads.append(thread)
+        return thread
+
+    monkeypatch.setattr(_mcp_writes, "spawn_context_daemon", spy)
+    return threads
+
+
+#: Upper bound on waiting for the background run to finish. It bounds a hung run, not a slow
+#: one: the run normally finishes in well under a second.
+_RUN_JOIN_BOUND_S = 120
+
+
+def test_mcp_run_workflow_is_async_and_pollable(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from rebar.mcp_server import build_server
 
     r = str(rebar_repo)
@@ -115,6 +138,7 @@ def test_mcp_run_workflow_is_async_and_pollable(rebar_repo: Path) -> None:
         "  - id: review\n    prompt: code_quality\n    mode: findings\n"
     )
     srv = build_server()
+    threads = _capture_run_threads(monkeypatch)
 
     # run_workflow returns a run_id IMMEDIATELY (status 'running'); the run executes
     # in the background.
@@ -129,20 +153,17 @@ def test_mcp_run_workflow_is_async_and_pollable(rebar_repo: Path) -> None:
     assert started["status"] == "running"
     rid = started["run_id"]
 
-    # Poll get_workflow_status until the background run settles. Pass ticket_id (the
-    # run's durable home) so the poll doesn't depend on the process-global run-index
-    # — run_id-only lookup is covered by test_library_run_status_result.
-    final = None
-    for _ in range(50):
-        st = _unwrap(
-            asyncio.run(srv.call_tool("get_workflow_status", {"run_id": rid, "ticket_id": tid}))
-        )
-        if st.get("status") in ("succeeded", "failed"):
-            final = st
-            break
-        time.sleep(0.1)
-    assert final is not None, "background run never settled"
-    assert final["status"] == "succeeded"
+    # Wait on the run's own completion signal (its thread), then read the settled state
+    # through the poll surface. Pass ticket_id (the run's durable home) so the poll doesn't
+    # depend on the process-global run-index — run_id-only lookup is covered by
+    # test_library_run_status_result.
+    assert len(threads) == 1, threads
+    threads[0].join(timeout=_RUN_JOIN_BOUND_S)
+    assert not threads[0].is_alive(), "background run never settled"
+    final = _unwrap(
+        asyncio.run(srv.call_tool("get_workflow_status", {"run_id": rid, "ticket_id": tid}))
+    )
+    assert final["status"] == "succeeded", final
 
     rr = _unwrap(
         asyncio.run(srv.call_tool("get_workflow_result", {"run_id": rid, "ticket_id": tid}))
