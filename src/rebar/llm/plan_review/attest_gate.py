@@ -231,7 +231,7 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     from rebar import signing
 
     from .attest import _authoritative_head, _authoritative_manifest
-    from .manifest import manifest_currency_basis
+    from .manifest import manifest_currency_basis, manifest_engine
 
     gate = claim_gate_check(ticket_id, repo_root=repo_root)
     status: dict[str, Any] = {
@@ -244,6 +244,9 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         # paths), ``read-set`` (the no-file-impact scoping) or ``fail-safe`` (whole-HEAD). None
         # when no readable certified attestation exists.
         "currency_basis": None,
+        # Which engine produced the certified attestation (ADR 0123 §5): "pipeline" or
+        # "agentic". None when no readable certified attestation exists.
+        "engine": None,
     }
     try:
         sig = signing.verify_signature(ticket_id, kind=_MANIFEST_PREFIX, repo_root=repo_root)
@@ -257,6 +260,7 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
             ) or _authoritative_head(sig)
             status["signed_at"] = sig.get("signed_at")
             status["currency_basis"] = manifest_currency_basis(manifest)
+            status["engine"] = manifest_engine(manifest)
     except Exception:  # noqa: BLE001 — enrichment only; the gate verdict already stands
         logger.warning("plan_review_status: could not read bound sha for %s", ticket_id)
     return status

@@ -29,6 +29,7 @@ from .manifest import (
     manifest_currency_basis,
     manifest_deps,
     manifest_disabled_builtins,
+    manifest_engine,
     manifest_file_scope,
     manifest_material,
     manifest_pins,
@@ -96,6 +97,7 @@ __all__ = [
     "manifest_currency_basis",
     "manifest_deps",
     "manifest_disabled_builtins",
+    "manifest_engine",
     "manifest_file_scope",
     "manifest_material",
     "manifest_pins",
@@ -297,7 +299,9 @@ def refresh_attestation(
             "counts": {
                 "blocking": _manifest_int(prior_manifest, "blocking:"),
                 "advisory_surfaced": _manifest_int(prior_manifest, "advisory:"),
-            }
+            },
+            # A refresh re-binds the PRIOR verdict, so its engine is still the provenance.
+            "engine": manifest_engine(prior_manifest),
         },
     }
     disabled = registry.disabled_builtins(repo_root)

@@ -773,6 +773,14 @@ the specific reason (`stale-code` / `stale-head`, `stale-material`,
 (the pinned `verified-at-sha` for a `--source attested` review, else the signed HEAD). The
 library seam is `rebar.llm.plan_review_status(ticket_id)` (wrapping `claim_gate_check`).
 
+The JSON form also carries `engine`: which plan-review engine produced the certified
+attestation (`pipeline` or `agentic`, ADR 0123), or `null` when no readable certified
+attestation exists. It is read from the signed manifest's `engine:` line, which only an
+agentic attestation carries — pipeline manifests are byte-identical to those signed before
+the line existed, and any manifest without it reads as `pipeline`. Because the line is inside
+the signed bytes, editing it breaks verification; `sign-review` and drift refresh carry it
+forward unchanged.
+
 **`--source local` never signs.** A local review reads the in-place checkout — uncommitted
 edits included — so its PASS is real feedback but is **not certifiable**: it carries
 `signature.signed=false` with the machine-readable reason `local-source-never-signs`, the

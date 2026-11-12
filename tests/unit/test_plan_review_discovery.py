@@ -289,6 +289,7 @@ def test_review_plan_status_stays_narrow(tmp_path):
         "verified_at_sha",
         "signed_at",
         "currency_basis",
+        "engine",
     }
 
 

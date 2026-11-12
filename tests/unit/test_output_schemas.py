@@ -41,7 +41,14 @@ _NARROW_PROPERTIES = {
         "runner",
         "model",
     },
-    schemas.PLAN_REVIEW_STATUS: {"ok", "verdict", "reason", "verified_at_sha", "signed_at"},
+    schemas.PLAN_REVIEW_STATUS: {
+        "ok",
+        "verdict",
+        "reason",
+        "verified_at_sha",
+        "signed_at",
+        "engine",
+    },
     schemas.CODE_REVIEW_VERDICT: {
         "verdict",
         "blocking",
