@@ -1629,10 +1629,24 @@
     },
     "0369-ba7f-d5ab-4ba9": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\n`rebar store compact --help` lists `--threshold N` for the store-wide form (`[--all] [--threshold N] ...`, \"compact only above N events\"), but the `--all` path rejects it. Observed 2026-11-09 against the production MCP build 0f409b946e4:\n\n- `rebar store compact --all --dry-run --threshold 8` -> `Error: unknown option '--threshold'`.\n- The single-ticket form accepts only `--threshold=N` (`src/rebar/_commands/compact.py:46,92`).\n- `REBAR_COMPACT_THRESHOLD=8 rebar store compact --all --dry-run` works.\n\nAn operator following the help text can't scope a store-wide sweep's threshold.\n\n## Acceptance Criteria\n\n- [ ] `rebar store compact --all` accepts `--threshold N` and `--threshold=N` as its help states (or the help states what it accepts); a test pins help text and parser behaviour together.\n- [ ] The single-ticket form accepts both spellings too.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "store compact --help lists --threshold for --all, but --all rejects it"
       },
       "created_at": "2026-11-09T19:32:18Z",
@@ -4726,6 +4740,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-04T23:33:53Z"
+    },
+    "09f3-de69-a8ca-4f5f": {
+      "created_at": "2026-11-12T11:30:41Z",
+      "jira_id": "4598933",
+      "jira_key": "REB-7140",
+      "state": "confirmed",
+      "updated_at": "2026-11-12T11:30:46Z"
     },
     "09f6-215a-34f4-4d89": {
       "baseline": {
@@ -18453,10 +18474,24 @@
     },
     "29b8-8d86-af5b-4608": {
       "baseline": {
-        "assignee": null,
-        "description": "## Problem\n\nAfter bug `nickelic-lazuline-gonolek` (Gerrit 3351), the tickets store no longer runs `git gc` on any path:\n- Every bounded git child runs with `maintenance.auto=false` and `gc.auto=0`.\n- The explicit write-locked step runs only `commit-graph`, `loose-objects` and `incremental-repack`.\n\nThat was deliberate. On the 1.07M-object production clone, `gc --auto` took 133.9 s and a full repack took 605.6 s, both past the step's 120 s bound. But it has two consequences:\n- Nothing ever prunes unreachable objects, such as the leftovers of failed writes, abandoned merges and compaction.\n- Nothing ever expires reflogs. The production `.git/logs/HEAD` was 4.5 MB on 2026-11-11.\n\nGrowth is slow. The production clone held about 1,800 unreachable loose objects older than 2 weeks after 2.5 months of operation. Even so, the growth is unbounded.\n\nTwo docs still describe the old posture:\n- `docs/concurrency.md`, in the caveat paragraph: \"keeps auto-gc ENABLED\" and \"It reclaims loose/pack growth on its own\".\n- `docs/scale-envelope.md`: stock `git gc` runs in the foreground of the write command and handles packing.\n\n## Why this is separate\n\nChange 3351 is at the 150-line bug-fix size floor. Its diff covers the incident: the stranded lock, and orphaned gc work running outside the write lock. This ticket covers the long-horizon reclamation policy, which needs a cadence decision. Options include an out-of-band `git maintenance run --task=gc` under the write lock on a schedule (the ADR 0051 escape hatch), `--task=reflog-expire` on newer git, or `--task=gc` gated by its own threshold.\n\n## Acceptance criteria\n\n- [ ] Unreachable objects and reflog entries on the tickets store are reclaimed on some bounded cadence that never runs outside the write lock, or a recorded decision accepts unbounded growth with its measured rate.\n- [ ] `docs/concurrency.md` and `docs/scale-envelope.md` describe the current maintenance posture.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Problem\n\nAfter bug `nickelic-lazuline-gonolek` (Gerrit 3351), the tickets store no longer runs `git gc` on any path:\n- Every bounded git child runs with `maintenance.auto=false` and `gc.auto=0`.\n- The explicit write-locked step runs only `commit-graph`, `loose-objects` and `incremental-repack`.\n\nThat was deliberate. On the 1.07M-object production clone, `gc --auto` took 133.9 s and a full repack took 605.6 s, both past the step's 120 s bound. But it has two consequences:\n- Nothing ever prunes unreachable objects, such as the leftovers of failed writes, abandoned merges and compaction.\n- Nothing ever expires reflogs. The production `.git/logs/HEAD` was 4.5 MB on 2026-11-11.\n\nGrowth is slow. The production clone held about 1,800 unreachable loose objects older than 2 weeks after 2.5 months of operation. Even so, the growth is unbounded.\n\nTwo docs still describe the old posture:\n- `docs/concurrency.md`, in the caveat paragraph: \"keeps auto-gc ENABLED\" and \"It reclaims loose/pack growth on its own\".\n- `docs/scale-envelope.md`: stock `git gc` runs in the foreground of the write command and handles packing.\n\n## Why this is separate\n\nChange 3351 covered the incident (stranded lock, orphaned gc outside the write lock). This ticket covers the long-horizon reclamation policy.\n\n## Decision (recorded 2026-11-12, coordinator; option (1) of the 2026-11-11 Decision comment)\n\n- Reflog entries: expired inside the existing write-locked maintenance step, using git's own expiry defaults (`gc.reflogExpire` 90 days, `gc.reflogExpireUnreachable` 30 days). No config key, env var or flag.\n- Unreachable objects: growth is ACCEPTED at its measured rate, with an operator-run reclaim documented in a runbook.\n\n## Measurements (production tickets clone, read-only, via SSM)\n\nUnreachable objects, counted across loose AND packed storage (2026-11-12 ~02:05 PST):\n- Total objects: 1,071,252 in packs (35 packs) + 95 loose = 1,071,347. Packs can hold duplicate copies, so this total is an upper bound.\n- Reachable objects: `git rev-list --objects --all | wc -l` = 1,071,190, and the same 1,071,190 with `--reflog` added. So reflogs keep no extra objects alive today.\n- Unreachable objects are therefore at most 157 (about 0.015%), accumulated since the clone was made on 2026-08-26 PDT: an upper bound of about 157 objects in 2.5 months. Each reachability walk took 107-112 s.\n- The earlier figures (about 1,800; then 28 from `git prune -n`) counted only LOOSE objects. `loose-objects` packs loose objects, unreachable ones included, into `loose-*` packs, where `git prune` cannot reach them, which is why loose-only counts are not a growth measure.\n\nReflog expiry cost: `git reflog expire --dry-run --all` took 0.01-0.06 s over 3 runs (3 refs, HEAD reflog 4.69 MB / 25,933 entries).\n\nGit version: `git maintenance run --task=reflog-expire` exists only from git 2.50. The production MCP container runs git 2.47.3 (`docker exec rebar-mcp-* git --version`, 2026-11-12), where an unknown task makes the whole `maintenance run` fail and would also stop the incremental tasks. So the step calls `git reflog expire --all` directly.\n\n## Approach\n\n1. `src/rebar/_store/event_commit_git.py::run_auto_maintenance`, still under the caller's write lock:\n   - After `maintenance run`, run `git reflog expire --all` through `run_git_reaped` with its own fixed 30 s timeout (a module constant), so the worst-case lock hold is the maintenance bound plus 30 s.\n   - Skip it when maintenance could not launch (`None`) or timed out (124), so a slow step never adds more.\n   - Any failure (non-zero exit including 128, 124, or OSError) is logged as a warning and never raised. A 124 warning also says a killed expiry may leave a `<ref>.lock` behind and names the git dir to check; rebar's write path already rides out ref-lock conflicts with retries.\n   - The return value is unchanged (the maintenance result).\n2. `infra/runbooks/tickets-store-prune.md` (new), the operator-run reclaim:\n   - Measure first: unreachable upper bound = (in-pack + count from `git count-objects -v`) - `git rev-list --objects --all --reflog | wc -l`. Reclaim only when it is material.\n   - Reclaim with `git -c pack.threads=1 repack -a -d --cruft --cruft-expiration=2.weeks.ago`, which drops unreachable objects older than 2 weeks from packs and loose storage. This is a full repack: 605.6 s measured on this clone in bug nickelic-lazuline-gonolek.\n   - Run it inside the live MCP container while holding rebar's write lock (`rebar._store.lock.write_lock`), so it never races a writer. Writes during that window fail with a lock timeout (writers wait 30 s x 2 attempts), so use a quiet window.\n   - Verify by re-measuring. No rollback is needed: only unreachable objects older than 2 weeks are removed.\n3. `docs/concurrency.md` caveat and `docs/scale-envelope.md` \u00a7\"Git maintenance & gc\" describe the current posture:\n   - No implicit gc or maintenance.\n   - The explicit locked step runs commit-graph, loose-objects, incremental-repack, then reflog expiry.\n   - Unreachable objects are reclaimed only by the operator runbook (for any store shape; the runbook's commands are written for the production MCP deployment).\n   - This replaces \"keeps auto-gc ENABLED\", \"reclaims loose/pack growth on its own\" and \"Foreground auto-gc handles packing\".\n\n## Scope\n\n- `src/rebar/_store/event_commit_git.py`\n- `tests/unit/test_store_reflog_expiry.py` (new)\n- `tests/unit/test_store_maintenance_gonolek.py` (its exact-calls test gains the reflog call)\n- `infra/runbooks/tickets-store-prune.md` (new)\n- `docs/concurrency.md`\n- `docs/scale-envelope.md`\n\n## Testing\n\n- RED then GREEN: a real git repo with isolated config has HEAD reflog entries dated (via `GIT_COMMITTER_DATE`) 120, 60, 45 (unreachable) and 1 day ago. After `run_auto_maintenance`, the 120-day and 45-day entries are gone and the 1-day entry remains. Fails on the pre-fix tree.\n- With `gc.reflogExpire=never` and `gc.reflogExpireUnreachable=never` set in the repo, every entry survives, proving the step passes no expiry value of its own.\n- Measured on git 2.56 (2026-11-12): git's split between the 90-day and 30-day settings does not follow commit reachability the way its docs suggest (a 60-day entry whose commit is an ancestor of the tip was pruned under defaults), so the test does not assert that split; it asserts that git's configured policy is what applies.\n- Failure arms, with `run_git_reaped` faked: the reflog call raising OSError, returning 124, or returning 128 each logs a warning, raises nothing, and still returns the maintenance result.\n- When maintenance returns 124 or cannot launch, the reflog call is not made.\n- `test_explicit_step_runs_exactly_the_incremental_tasks` asserts the maintenance call followed by `reflog expire --all`.\n- Docs check before commit: `git grep` finds none of the 3 stale phrases.\n\n## Acceptance criteria\n\n- [ ] Unreachable objects and reflog entries on the tickets store are reclaimed on some bounded cadence that never runs outside the write lock, or a recorded decision accepts unbounded growth with its measured rate.\n- [ ] Reflog entries past git's expiry policy are expired by the write-locked maintenance step, shown by a test that fails on the pre-fix tree, and the repository's own `gc.reflogExpire*` settings govern (no value is hard-coded), shown by a test.\n- [ ] A failing, erroring or timed-out reflog expiry is logged and never raised, and it is skipped after a timed-out maintenance run, shown by tests.\n- [ ] The recorded decision states the measured unreachable-object rate counted across packs, and `infra/runbooks/tickets-store-prune.md` documents a reclaim that removes packed unreachable objects under the write lock.\n- [ ] `docs/concurrency.md` and `docs/scale-envelope.md` describe the current maintenance posture and no longer contain the 3 stale phrases.\n- [ ] [non-codebase] `env -u JIRA_URL -u JIRA_USER -u JIRA_API_TOKEN make verify` exits 0 on the commit pushed for review.\n  provenance: environment=macOS dev host, fix-xiphias worktree; principal=Rebar Bot Nava; privilege_posture=narrower; instrument=live-call \u2014 exit status and log live outside the repository",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Tickets store never prunes unreachable objects or expires reflogs after implicit gc was disabled; two docs still describe foreground auto-gc"
       },
       "created_at": "2026-11-11T23:30:35Z",
@@ -28763,10 +28798,24 @@
     },
     "4090-8b80-fbe6-411a": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\n`tests/interfaces/facades/test_verify_completion_facades.py::test_cli_llm_error_is_clean_exit_one` fails 3 of 3 runs when pytest runs from a worktree whose `.tickets-tracker` is a symlink to the live store (created by running the rebar CLI there). It passes at the same commit (1bfa37ca141) and at its parent in fresh worktrees without that symlink. stderr carries `--- Logging error --- Traceback ...` naming `no resolvable identity (author_id) for this writer`, so the \"no Traceback\" assertion fails.\n\n## Expected\nThe facade test is hermetic: it does not read or log against the checkout's tracker, and an identity warning cannot reach stderr as a logging traceback.\n\n## Acceptance Criteria\n- [ ] The test passes from a worktree with a live `.tickets-tracker` symlink.\n- [ ] The cause of the logging error (formatting failure in the identity warning, or test reaching the cwd tracker) is identified and fixed at its class.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "CLI facade test leaks into the cwd's live tracker and fails on an identity logging traceback"
       },
       "created_at": "2026-11-04T22:32:43Z",
@@ -31421,10 +31470,24 @@
     },
     "46ec-e50d-49f6-4774": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\nWhen `REBAR_ROOT` is unset, every library read rediscovers the code repo root with `git rev-parse --show-toplevel`, through `repo_root` (`src/rebar/_config_sources.py:53`), which `config.tracker_dir` and `config.load_config` call on each read. Measured on a throwaway two-repo store with the freshness marker fresh, after the synonymous-destined-cricket fix:\n\n- `rebar.show_ticket`: 5 git spawns. 2 come from `_reads._tracker` \u2192 `config.tracker_dir` (one direct, one via `load_config`), 2 from the same path in the cross-session warning's own read, and 1 from `cross_session.cross_session_warning_for` \u2192 `load_config`.\n- `rebar.list_tickets`: 2 git spawns (`tracker_dir` and `load_config`).\n\nWith `REBAR_ROOT` set, or an explicit `repo_root` (as `rebar audit serve` passes), the same reads spawn 0. The root of a process's cwd does not change between reads in one process, so these are repeated lookups of the same answer.\n\nDiscovered while fixing synonymous-destined-cricket (40c3-d22a-3872-4c8c), whose scope is the freshness throttle only.\n\n## Acceptance Criteria\n- [ ] A library `show_ticket` with `REBAR_ROOT` unset, run from inside a git work tree, starts at most 1 `rev-parse --show-toplevel`, shown by a git-spawn-count test.\n- [ ] A cwd change between reads still resolves the new cwd's repo root, shown by a test.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Library reads rediscover the repo root with git on every call when REBAR_ROOT is unset"
       },
       "created_at": "2026-11-04T19:31:26Z",
@@ -41217,10 +41280,24 @@
     },
     "5e68-eb05-64d9-4720": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\n`tests/unit/test_snapshot_submodules_watchdog_c605.py::test_build_with_timed_out_listing_writes_no_sidecar` failed in a local `make verify` on 2026-11-04 (macOS, py3.12, load average about 44) with `SnapshotError: git ls-tree ... timed out after 1s`, raised from the test's SECOND `materialize` call. That call is meant to succeed: the slow `ls-tree` wrapper is already switched off (`slow_ls_tree(False)`), but the `slow_ls_tree` fixture also monkeypatches `git_fetch._GIT_TIMEOUT` to `_BOUND_S` (1 second) for the whole test, so the real `git ls-tree` on the recovery path has a 1-second budget. A loaded host exceeds it. The module passed 3 of 3 standalone runs right after, at the same load, and passed in all 3 CI Python cells for Gerrit 3309 patch set 1.\n\nDiscovered while verifying bald-diagnostic-cricket, whose change (src/rebar/_logging.py) does not touch snapshots; the module passes 3 of 3 with and without that change.\n\n## Next check\n\nMake the bound apply only to the deliberately slow call: restore `git_fetch._GIT_TIMEOUT` (or a generous bound) before the recovery `materialize`, so the test pins the timeout behaviour without racing host load. Reproduce first by running the module under synthetic CPU load.\n\n## Acceptance Criteria\n\n- [ ] The recovery `materialize` call in the test runs with a git bound that does not depend on host load, and the slow-path assertions still use the 1-second bound.\n- [ ] The module passes under synthetic CPU load that previously reproduced the failure.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Snapshot watchdog test caps real git at 1s and fails under host load"
       },
       "created_at": "2026-11-04T21:32:16Z",
@@ -58747,10 +58824,24 @@
     },
     "8797-4707-a264-4ffc": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\n`tests/interfaces/store/test_workflow_entrypoints.py::test_mcp_run_workflow_is_async_and_pollable` polls `get_workflow_status` 50 times with `time.sleep(0.1)` between polls (lines 134-143). That gives the background `run_workflow` a fixed 5-second wall-clock window to settle, and the test then fails with \"background run never settled\" (line 144).\n\nMeasured on a macOS dev host, 2026-11-04 PST:\n- It failed once in a 4-worker targeted run while `make lint` and `make typecheck` were also running.\n- It failed once more in isolation, minutes later, with other sessions active on the host.\n- It then passed 26 of 26 runs on unmodified `origin/main` (`e0bfa4e5154`), and 30 of 30 further runs with the synonymous-destined-cricket change. 16 runs of each arm were 4-way concurrent.\n\nSo the failure tracks host load, not a code difference. A fixed wall-clock deadline on a background thread's completion is the class of flake AGENTS.md says to root-cause rather than retry.\n\nDiscovered while verifying synonymous-destined-cricket (40c3-d22a-3872-4c8c).\n\n## Acceptance Criteria\n- [ ] The test waits on the run's own completion signal or a state change, not a fixed 5-second wall clock, and still fails when the run never settles.\n- [ ] The test passes 20 of 20 runs under 4-way concurrent load.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "MCP run_workflow pollable test gives the background run a fixed 5 s wall clock"
       },
       "created_at": "2026-11-04T19:31:31Z",
@@ -62027,10 +62118,24 @@
     },
     "8e6c-3a37-8570-4e82": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\nDuring `make verify` at 1bfa37ca141 with host load average about 44, 2 tests failed and then passed 3 of 3 in isolation: `tests/interfaces/store/test_bridge_sync_holds_ref_lock.py::test_bridge_sync_honours_an_active_pause` (`cannot pause bridge: git rev-parse --verify timed out after 5.0s (fail-closed: treat as HELD)`) and `tests/interfaces/facades/test_plan_review_attestation_facades.py::test_cli_passed_but_unsigned_is_exit_11_with_byte_identical_stderr` (`OSError: [Errno 48] ... address already in use` binding 127.0.0.1:55506).\n\n## Expected\nNeither test depends on host load: no fixed 5 s subprocess budget in a test path, and no fixed or reused loopback port.\n\n## Acceptance Criteria\n- [ ] Each failure is reproduced deterministically (injected slow git; a pre-bound port) and fixed at its class.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Two tests fail under host load: a 5 s git timeout and a fixed loopback port"
       },
       "created_at": "2026-11-04T22:32:47Z",
@@ -99681,10 +99786,24 @@
     },
     "e395-114c-aee9-42a5": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\n`rebar store fsck --help` documents `--only ONLY` as \"check only the named ticket(s)\" (`src/rebar/_cli/_parsers/core/repair.py:49`), but `fsck_cli` (`src/rebar/_commands/fsck.py:332-348`) accepts exactly one value, `--only=stale-channel`, and only together with `--repair`. Observed 2026-11-04 at e0bfa4e5154:\n\n- `rebar store fsck --repair-snapshots --dry-run --only 77b6-868f-f4bd-461f` -> `Error: --only requires a value` (the space-separated form documented by argparse is rejected outright).\n- `... --only=77b6-868f-f4bd-461f` -> `Error: unknown --only value '77b6-868f-f4bd-461f'`.\n\nAn operator following the help text to scope a snapshot repair to one ticket (respirable-trapezial-ekaltadeta) cannot, and has to run the whole-store pass instead.\n\n## Acceptance Criteria\n\n- [ ] `rebar store fsck --help` describes `--only` as what the command actually accepts, or the command accepts what the help describes; a test pins help text and parser behaviour together.\n- [ ] `--only <value>` (space-separated) and `--only=<value>` behave the same.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "store fsck --help says --only takes ticket ids; the command accepts only --only=stale-channel"
       },
       "created_at": "2026-11-04T20:32:38Z",
@@ -105635,10 +105754,24 @@
     },
     "f121-ed38-6939-43b9": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\ntests/unit/test_fetch_common_dir_coordination.py:431 asserted a ref-CAS race in 40 uncoordinated rounds and saw 0 (`AssertionError: expected the uncoordinated parallel fetches to race git's ref CAS`). Observed in make verify on worktree fix-chihuahua at commit 4f8cd749a61 (session a85e3cd3, 2026-11-03/04 PST). The run took 3 h 45 min (documented 25-30 min) while other sessions' review-plan gates ran on the host; the test passed in isolation (`pytest -n0 <nodeid>`) on the same code. The commit does not touch this test or its code under test. The positive control depends on the race actually happening, which host load can prevent, so the test's verdict depends on host scheduling.\n## Acceptance Criteria\n- [ ] Root cause confirmed with a deterministic reproduction (for example the race forced, or the control made independent of scheduling).\n- [ ] The test's verdict no longer depends on host load.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Fetch-race positive control fails when a loaded host serializes the uncoordinated fetches"
       },
       "created_at": "2026-11-04T07:32:24Z",
@@ -109530,7 +109663,7 @@
         },
         "description": "## Observation\n\n`.github/llm-providers/openai.toml` maps the openai arm's `trivial` class to `openai-responses:gpt-5.4-nano`. OpenAI's deprecations page (`https://developers.openai.com/api/docs/deprecations`, read 2026-11-11) lists `gpt-5.4-nano` / `gpt-5.4-nano-2026-03-17`, announced 2026-10-01, shutdown Apr 1, 2027, replacement `gpt-6-luna`. After shutdown every trivial-class call in the arm fails. `.github/llm-providers/README.md` and `docs/ci-provider-matrix.md` \u00a7\"OpenAI arm model choice\" still describe nano as the current trivial model.\n\n## Root cause\n\nThe overlay pins a model id with no check that it is still current; nothing in the tree records OpenAI's deprecation.\n\n## Choice of replacement\n\n**`gpt-5.4-mini`.**\n- It is not on the deprecations page and is listed on the catalogue; it is already the arm's `standard` model, verified on the repository's OpenAI account on 2026-08-03 and exercised by every openai arm run since.\n- The pinned `pydantic-ai-slim` 1.107.9 gives it the same OpenAI profile as `gpt-5.4-nano` (measured: `supports_json_schema_output`, `supports_thinking`, `openai_supports_reasoning`, `openai_supports_sampling_settings` all True, no unsupported settings), so the request shape is unchanged.\nRejected:\n- `gpt-6-luna`, OpenAI's named replacement: the pinned profile treats it as non-reasoning (`openai_supports_reasoning=False`, `supports_thinking=False`, measured), the same wrong-request-shape reason the docs already give for rejecting the GPT-6 family; recognition needs `pydantic-ai-slim` 2.x.\n- `gpt-5.5`: the frontier model; a trivial slot gains nothing from it.\n\n## Approach\n\n1. `.github/llm-providers/openai.toml`: `trivial = { model = \"openai-responses:gpt-5.4-mini\" }`; update the header comment.\n2. `docs/ci-provider-matrix.md` \u00a7\"OpenAI arm model choice\": record the 2026-11-11 move, the deprecation source and shutdown date, and the `gpt-6-luna` rejection; fix the estimate footnote's model list wording.\n3. `.github/llm-providers/README.md`: state the trivial slot's model.\n4. `tests/unit/test_ci_provider_matrix.py`: add the regression test below.\nNo config key, env var or flag.\n\n## Scope\n\n- `.github/llm-providers/openai.toml`\n- `.github/llm-providers/README.md`\n- `docs/ci-provider-matrix.md`\n- `tests/unit/test_ci_provider_matrix.py`\n\n## Testing\n\n- RED then GREEN: a test reads every class slot and the scalar model in `openai.toml` and asserts (a) none is an id OpenAI has announced as deprecated, from a module-level table citing the deprecations page (currently `gpt-5.4-nano`), and (b) each id's pinned `openai_model_profile` has `openai_supports_reasoning` True, so a non-reasoning-profiled replacement cannot slip in. It fails on the pre-fix tree on (a).\n- The existing `test_the_openai_arm_is_live_ready_with_its_own_credential` stays green.\n- After merge, dispatch `Live External Integration` on `main` and check the openai job's usage log shows `gpt-5.4-mini` trivial-class calls completing.\n\n## Acceptance Criteria\n\n- [x] A test that fails on the pre-fix tree rejects a deprecated id or a non-reasoning-profiled id in any openai overlay slot.\n- [x] `openai.toml`'s `trivial` slot is `openai-responses:gpt-5.4-mini`, and no tracked file names `gpt-5.4-nano` as a current model.\n- [x] `docs/ci-provider-matrix.md` records the replacement, its source and date, and the rejected `gpt-6-luna`.\n- [x] [non-codebase] A `Live External Integration` dispatch on `main` after the merge runs the openai arm with the new trivial model, recorded as a comment with the run id and the trivial-class call outcome.\n  provenance: environment=GitHub Actions Live External Integration on main; principal=repository OPENAI_API_KEY secret; privilege_posture=production-equivalent; instrument=live-call \u2014 workflow_dispatch run and its usage-log artifact\n- [x] [non-codebase] `env -u JIRA_URL -u JIRA_USER -u JIRA_API_TOKEN make verify` exits 0 on the commit pushed for review.\n  provenance: environment=macOS dev host, fix-tamarin worktree; principal=Rebar Bot Nava; privilege_posture=narrower; instrument=live-call \u2014 exit status and log live outside the repository",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Live openai CI arm still pins deprecated gpt-5.4-nano in its trivial model slot"
       },
       "created_at": "2026-11-11T02:31:44Z",
@@ -117701,7 +117834,17 @@
     "1794478339647658398": "__rebar_unknown_comment_id__",
     "1794478957752856634": "__rebar_unknown_comment_id__",
     "1794479005510126001": "__rebar_unknown_comment_id__",
-    "1794479357870902001": "__rebar_unknown_comment_id__"
+    "1794479357870902001": "__rebar_unknown_comment_id__",
+    "1794479565481751450": "__rebar_unknown_comment_id__",
+    "1794479955620395001": "__rebar_unknown_comment_id__",
+    "1794480554252153001": "__rebar_unknown_comment_id__",
+    "1794480671150175001": "__rebar_unknown_comment_id__",
+    "1794481282859537001": "__rebar_unknown_comment_id__",
+    "1794481406860315913": "__rebar_unknown_comment_id__",
+    "1794481949773725001": "__rebar_unknown_comment_id__",
+    "1794481979828617417": "__rebar_unknown_comment_id__",
+    "1794481982256727001": "__rebar_unknown_comment_id__",
+    "1794482345565176001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -123250,6 +123393,7 @@
     "REB-7126": "b26e-757e-bca5-4b5b",
     "REB-713": "ace2-f784-4b19-4f22",
     "REB-714": "jira-reb-714",
+    "REB-7140": "09f3-de69-a8ca-4f5f",
     "REB-715": "454a-9266-ada6-43cc",
     "REB-716": "a29a-c52a-5ec0-45d5",
     "REB-717": "1982-bf75-0f28-4e91",
