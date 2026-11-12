@@ -107,7 +107,11 @@ def test_bedrock_injected_session_is_used(monkeypatch):
     monkeypatch.setattr(boto3.session, "Session", _boom_session)
     import pydantic_ai.providers.bedrock as pai_bedrock
 
-    monkeypatch.setattr(pai_bedrock, "BedrockProvider", lambda **kw: SimpleNamespace(**kw))
+    monkeypatch.setattr(
+        pai_bedrock,
+        "BedrockProvider",
+        lambda **kw: SimpleNamespace(model_profile=lambda model_name: None, **kw),
+    )
 
     cfg = _cfg(model="us.anthropic.claude-sonnet-4-6", model_provider="bedrock")
     runtime = LLMRuntime(bedrock=BedrockAuth(session=_FakeSession()))
