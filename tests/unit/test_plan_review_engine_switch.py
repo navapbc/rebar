@@ -3,8 +3,8 @@
 Pins the resolution order (explicit argument > config key > ``"pipeline"``, no environment
 override), the Layer-1-floor-first dispatch (a floor block or a not-claimable ticket returns
 the same result under both engines with zero LLM calls), and that ``"agentic"`` on a
-DET-passing plan is an unsigned INDETERMINATE naming the engine with zero LLM calls -- even
-when a pipeline attestation or stored verdict would otherwise be reused or re-signed.
+DET-passing plan runs exactly one agent call -- even when a pipeline attestation or stored
+verdict would otherwise be reused or re-signed.
 """
 
 from __future__ import annotations
@@ -144,14 +144,13 @@ def _review(repo: Path, tid: str, runner, **kw):
 
 
 def _assert_agentic_indeterminate(verdict: dict, runner, calls_before: int) -> None:
-    """A DET-passing agentic review: exactly ONE agent call, no pipeline call, and (until the
-    verdict adapter lands) an unsigned INDETERMINATE carrying the agent's findings."""
-    assert verdict["verdict"] == "INDETERMINATE"
-    assert verdict["signature"]["signed"] is False
+    """A DET-passing agentic review: exactly ONE agent call and no pipeline call. The fake agent
+    finds nothing, so the adapted verdict is a signed PASS made by the agentic engine."""
+    assert verdict["verdict"] == "PASS"
+    assert verdict["signature"]["signed"] is True
     assert runner.calls == calls_before + 1
     assert runner.schemas[calls_before:] == ["plan_review_agentic_findings"]
     assert verdict["coverage"]["engine"] == "agentic"
-    assert [f["id"] for f in verdict["indeterminate"]] == ["agentic-adapter-pending"]
     assert verdict["coverage"].get("idempotent_skip") is not True
     assert verdict["coverage"].get("verdict_reuse") is not True
 
@@ -312,6 +311,14 @@ def test_drift_refresh_runs_only_under_pipeline(repo: Path, monkeypatch) -> None
     runner = _CountingFake(block=False)
     _assert_agentic_indeterminate(_review(repo, tid, runner, engine="agentic"), runner, 0)
     assert probes == []
+    # The agentic PASS re-certified the drifted code; drift again so the pipeline run's
+    # attestation is drift-stale and its drift-refresh probe applies.
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-q", "-m", "drift again"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
     _review(repo, tid, runner, engine="pipeline")
     assert len(probes) == 1
 

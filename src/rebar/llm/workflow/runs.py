@@ -157,6 +157,9 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         # primary verifier's criterion-id manifest, so a run carrying the banking tool knows
         # which `criterion_id`s to record. None → context unchanged (every other step).
         self._extra_context = extra_context
+        # The last exception an agent call raised (ADR 0123). The interpreter keeps only a failed
+        # step's error STRING, so a gate that must classify the failure reads it from here.
+        self.last_error: BaseException | None = None
         # Per-CALL tool provider/finalizer seam (REB-640): a callable
         # ``tool_provider(ctx) -> (tools, finalize)`` invoked ONCE PER agent call to mint a
         # fresh, per-call toolset (e.g. a Terraform grounding session owning an immutable
@@ -300,6 +303,9 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             )
             try:
                 outs.append(runner.run(req))
+            except Exception as exc:
+                self.last_error = exc
+                raise
             finally:
                 if finalize is not None:
                     finalize()

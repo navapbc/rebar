@@ -369,6 +369,54 @@ def _config_fault_plan_review_verdict(
     )
 
 
+_REFUSAL_STOP_REASONS = frozenset({"refusal", "content_filter"})
+_TRUNCATION_STOP_REASONS = frozenset({"max_tokens", "length"})
+
+
+def _agentic_outcome(exc: BaseException):
+    """The classified outcome for an agent-call failure that carries none (ADR 0123)."""
+    from rebar.llm import errors as _errors
+    from rebar.llm import failure as _failure
+
+    def fixed(cls: _failure.ResolutionClass) -> _failure.LLMOutcome:
+        diagnostic = {"exception_type": type(exc).__name__}
+        return _failure.LLMOutcome(cls, diagnostic, retryable=cls in _failure._RETRYABLE)
+
+    if getattr(exc, "stop_reason", None) in _TRUNCATION_STOP_REASONS:
+        return fixed(_failure.ResolutionClass.CHANGE_SETTINGS)
+    if isinstance(exc, (_errors.LLMBudgetExhaustedError, _errors.RunawayToolLoopError)):
+        return fixed(_failure.ResolutionClass.FIX_AGENT_DESIGN)
+    return _failure.classify_llm_failure(exc.__cause__ or exc)
+
+
+def agentic_failure_error(last_error: BaseException | None, step_error: str) -> BaseException:
+    """The error a failed agentic run degrades with, always carrying a classified ``outcome``.
+
+    The interpreter keeps only a failed step's error string, so the agent step's own exception
+    (``RunnerAgentStep.last_error``) is classified here: an existing ``outcome`` is kept; a
+    refused or filtered turn becomes an ``LLMInputRejectedError`` (CHANGE_INPUT, so the verdict
+    flags ``input_rejected``); a truncation is CHANGE_SETTINGS; budget or tool-loop exhaustion is
+    FIX_AGENT_DESIGN; anything else goes through ``failure.classify_llm_failure``. With no agent
+    exception (a scripted agentic step failed) the step error is NEEDS_INVESTIGATION."""
+    from rebar.llm import errors as _errors
+    from rebar.llm import failure as _failure
+
+    if last_error is None:
+        err: BaseException = _errors.LLMUnavailableError(step_error)
+        err.outcome = _failure.classify_llm_failure(None)  # type: ignore[attr-defined]
+        return err
+    if _failure.outcome_of(last_error) is not None:
+        return last_error
+    if getattr(last_error, "stop_reason", None) in _REFUSAL_STOP_REASONS:
+        rejected = _errors.LLMInputRejectedError(str(last_error))
+        rejected.outcome = _failure.classify_llm_failure(  # type: ignore[attr-defined]
+            None, _failure.ClassifyContext(finish_reason="content_filter")
+        )
+        return rejected
+    last_error.outcome = _agentic_outcome(last_error)  # type: ignore[attr-defined]
+    return last_error
+
+
 def _degraded_plan_review_verdict(
     ctx, cfg, *, error, advisory_cap: int, runner_name: str | None
 ) -> dict[str, Any]:

@@ -2,12 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/plan_review_agentic_verdict_input.schema.json",
   "title": "PlanReviewAgenticVerdictInput",
-  "description": "INPUT of `plan_review_agentic_verdict`: the agent's validated findings plus the reviewed ticket's identity.",
+  "description": "INPUT of `plan_review_agentic_verdict`: the agent's validated findings, its provider provenance, the reviewed ticket's identity, and the Layer-1 floor results the adapter merges into the verdict.",
   "type": "object",
   "properties": {
     "ticket_id": { "type": "string", "description": "The canonical id of the reviewed ticket." },
     "ticket_type": { "type": "string", "description": "The reviewed ticket's type." },
-    "findings": { "type": "array", "items": { "type": "object" }, "description": "The agent's findings (the plan_review_agentic_findings contract)." }
+    "findings": { "type": "array", "items": { "type": "object" }, "description": "The agent's findings (the plan_review_agentic_findings contract)." },
+    "provider_provenance": { "description": "The agent call's runner-stamped provider record, carried onto the verdict." },
+    "det_blocking": { "type": "array", "items": { "type": "object" }, "description": "The DET floor's blocking findings (empty on a DET-passing review)." },
+    "det_advisory": { "type": "array", "items": { "type": "object" }, "description": "The DET floor's advisory findings." },
+    "det_coverage": { "type": "object", "description": "The DET floor's per-check coverage." },
+    "hierarchy_incomplete": { "type": "boolean", "description": "True when the ticket hierarchy failed to load; the verdict is then INDETERMINATE." },
+    "hierarchy_incomplete_detail": { "type": "array", "items": { "type": "string" }, "description": "Which hierarchy reads failed." }
   },
   "required": ["findings"],
   "additionalProperties": false

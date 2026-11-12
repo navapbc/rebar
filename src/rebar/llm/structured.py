@@ -534,7 +534,9 @@ def check_stop_reason(stop_reason: str | None) -> None:
     :class:`UnretryableOutputError` (re-running reproduces it — fast-fail, don't retry);
     a transient ``error`` raises the retryable :class:`StructuredOutputError`."""
     if stop_reason in _UNRETRYABLE_STOP_REASONS:
-        raise UnretryableOutputError(_BAD_STOP_REASONS[stop_reason])
+        err = UnretryableOutputError(_BAD_STOP_REASONS[stop_reason])
+        err.stop_reason = stop_reason
+        raise err
     if stop_reason in _BAD_STOP_REASONS:
         raise StructuredOutputError(_BAD_STOP_REASONS[stop_reason])
 
@@ -565,9 +567,11 @@ def check_response(response: Any) -> None:
         raw = details.get("finish_reason")
         if raw in _UNRETRYABLE_STOP_REASONS or "refusal" in details:
             msg = _BAD_STOP_REASONS.get(raw) if isinstance(raw, str) else None
-            raise UnretryableOutputError(
+            err = UnretryableOutputError(
                 msg or "the model refused to answer (provider refusal signal in provider_details)"
             )
+            err.stop_reason = raw if raw in _UNRETRYABLE_STOP_REASONS else "refusal"
+            raise err
 
 
 # Default bounded retry budget for the structured-output path (layer 4): ONE retry to

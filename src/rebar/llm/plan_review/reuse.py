@@ -226,6 +226,10 @@ def verdict_reuse(ticket_id: str, ctx, *, repo_root) -> dict[str, Any] | None:
         prior = _latest_reusable_review(ticket_id, repo_root=repo_root)
         if not prior or prior.get("verdict") != "BLOCK":
             return None
+        # A pipeline run never replays another engine's blockers as its own (ADR 0123); a
+        # sidecar without `coverage.engine` predates the agentic engine and is a pipeline one.
+        if (prior.get("coverage") or {}).get("engine", "pipeline") != "pipeline":
+            return None
         base_material = prior.get("material_fingerprint")
         base_sha = prior.get("verified_at_sha")
         if not base_material or not base_sha:

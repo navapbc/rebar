@@ -158,9 +158,10 @@ verify.plan_review_engine = "pipeline"       # plan-review engine (ADR 0123): "p
                                              # agent). An explicit review argument overrides it.
                                              # Deliberately NO env var (REBAR_VERIFY_PLAN_REVIEW_
                                              # ENGINE is never read). The Layer-1 floor runs first
-                                             # under both. Until its verdict adapter lands, an
-                                             # agentic review is an unsigned INDETERMINATE carrying
-                                             # the agent's findings, so it never certifies a claim.
+                                             # under both. An agentic review maps the agent's
+                                             # findings by severity (only `blocker` blocks): PASS
+                                             # signs like a pipeline PASS, BLOCK does not, and a
+                                             # failed agent run is an unsigned INDETERMINATE.
                                              # Unknown values fail config load.
 verify.suggest_duplicate_tickets   = false   # ADVISORY create-time duplicate advice (tickets
                                              # eac3, 80a5). Two probes, one setting. Exact: a

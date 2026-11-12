@@ -4,6 +4,7 @@ title: Plan-review agentic engine
 description: The single read-only agent of the agentic plan-review engine (ADR 0123).
   Reviews the plan against the code it will touch and returns the distinct defects
   it finds.
+outputs: plan_review_agentic_findings
 execution_mode: agentic
 category: plan-review-pass
 ---

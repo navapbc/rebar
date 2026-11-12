@@ -59,8 +59,8 @@ steps:
   with:
     ticket_id: ${{ inputs.ticket_id }}
 # The expression grammar takes single references only, so a deterministic step folds the
-# floor's run_llm and the engine into ONE boolean. Under `agentic` with run_llm true it raises
-# (engine not yet available), so the run fails to an unsigned INDETERMINATE, never a passthrough.
+# floor's run_llm and the engine into two booleans: run_pipeline (the four-pass review below)
+# and run_agentic (the one-agent arm in the else branch). A floor short-circuit sets both false.
 - id: engine_route
   needs:
   - precheck
@@ -461,6 +461,12 @@ steps:
             ticket_id: ${{ steps.precheck.outputs.canonical_id }}
             ticket_type: ${{ steps.precheck.outputs.ticket_type }}
             findings: ${{ steps.agentic_review.outputs.findings }}
+            provider_provenance: ${{ steps.agentic_review.outputs.provider_provenance }}
+            det_blocking: ${{ steps.precheck.outputs.det_blocking }}
+            det_advisory: ${{ steps.precheck.outputs.det_advisory }}
+            det_coverage: ${{ steps.precheck.outputs.det_coverage }}
+            hierarchy_incomplete: ${{ steps.precheck.outputs.hierarchy_incomplete }}
+            hierarchy_incomplete_detail: ${{ steps.precheck.outputs.hierarchy_incomplete_detail }}
         else:
         - id: passthrough
           uses: plan_review_passthrough
