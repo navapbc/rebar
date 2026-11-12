@@ -5,7 +5,8 @@ Bug reluctant-corrupt-whippet: ``repo_snapshot._list_submodules`` parsed the std
 empty stdout, so it answered "no submodules", and ``materialize`` wrote that answer to the
 immutable ``<sha>.caveats.json`` sidecar, where every later cache hit trusted it. These tests
 fire the real watchdog the way ``test_snapshot_git_watchdog_d33f`` does: a ``git`` wrapper
-on ``PATH`` replaces ``ls-tree`` with ``exec sleep`` and ``_GIT_TIMEOUT`` is shrunk to 1 s.
+on ``PATH`` replaces ``ls-tree`` with ``exec sleep`` and ``_GIT_TIMEOUT`` is shrunk to 1 s
+while the hang is switched on.
 """
 
 from __future__ import annotations
@@ -68,17 +69,26 @@ def slow_ls_tree(repo: tuple[str, str], tmp_path: Path, monkeypatch: pytest.Monk
         '&& [ "$3" = "ls-tree" ]; then\n'
         "  exec sleep 30\n"
         "fi\n"
+        # A loaded host: the recovery listing answers, just later than the 1 s slow-path bound.
+        f'if [ -n "$WHIPPET_LOADED" ] && [ "$1" = "-C" ] && [ "$2" = "{root}" ] '
+        '&& [ "$3" = "ls-tree" ]; then\n'
+        "  sleep 2\n"
+        "fi\n"
         f'exec "{real_git}" "$@"\n'
     )
     wrapper.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setattr(git_fetch, "_GIT_TIMEOUT", _BOUND_S)
+    real_bound = git_fetch._GIT_TIMEOUT
 
+    # The 1 s bound applies only while the hang is switched on, so the recovery call that
+    # follows runs with the production bound and cannot race host load (civil-fameless-starfish).
     def _set(on: bool) -> None:
         if on:
             monkeypatch.setenv("WHIPPET_SLOW", "1")
+            monkeypatch.setattr(git_fetch, "_GIT_TIMEOUT", _BOUND_S)
         else:
             monkeypatch.delenv("WHIPPET_SLOW", raising=False)
+            monkeypatch.setattr(git_fetch, "_GIT_TIMEOUT", real_bound)
 
     return _set
 
@@ -135,3 +145,21 @@ def test_healthy_listing_still_answers(repo):
     assert repo_snapshot._list_submodules(root, sha) == ("vendor/sub",)
     base = _git(root, "rev-parse", "HEAD~1")
     assert repo_snapshot._list_submodules(root, base) == ()
+
+
+def test_recovery_listing_is_not_bound_by_the_slow_path_budget(
+    repo, slow_ls_tree, monkeypatch: pytest.MonkeyPatch
+):
+    """civil-fameless-starfish: the 1 s bound must apply only to the deliberately slow call.
+
+    The recovery ``materialize`` once inherited the 1 s budget for the whole test, so a loaded
+    host (here: an ``ls-tree`` that answers after 2 s) failed the call that is meant to pass."""
+    root, sha = repo
+    slow_ls_tree(True)
+    with pytest.raises(SnapshotError):
+        repo_snapshot.materialize(sha, repo_root=root, fetch=False)
+
+    slow_ls_tree(False)
+    monkeypatch.setenv("WHIPPET_LOADED", "1")
+    handle = repo_snapshot.materialize(sha, repo_root=root, fetch=False)
+    assert handle.submodules == ("vendor/sub",)
