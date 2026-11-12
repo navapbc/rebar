@@ -99,4 +99,31 @@ def build_bedrock_provider(cfg: LLMConfig, *, session=None):
         connect_timeout=float(cfg.timeout_s),
     )
     client = session.client("bedrock-runtime", config=boto_config)
-    return BedrockProvider(bedrock_client=client)
+    provider = BedrockProvider(bedrock_client=client)
+    _give_every_vendor_bedrock_profile_fields(provider)
+    return provider
+
+
+def _give_every_vendor_bedrock_profile_fields(provider) -> None:
+    """Make ``provider.model_profile`` return a ``BedrockModelProfile`` for every vendor.
+
+    pydantic-ai 1.x returns a plain ``ModelProfile`` for ``meta`` models and ``None`` for an
+    unknown vendor, yet ``BedrockConverseModel`` reads ``bedrock_supports_strict_tool_definition``
+    from the profile directly whenever a tool is strict, so every agentic run on those models
+    raised ``AttributeError`` (bug garlicky-leery-seal). pydantic-ai main reads the field with a
+    ``False`` default; remove this on the upgrade that carries that fix. ``from_profile`` keeps a
+    profile that already is a ``BedrockModelProfile`` equal, and gives the others the Bedrock
+    fields at their upstream defaults (no strict tools, no prompt or tool caching).
+
+    The method is overridden on the instance, not by subclassing, so the lazy provider import
+    above stays the only reference to ``BedrockProvider``.
+    """
+    from pydantic_ai.profiles import DEFAULT_PROFILE
+    from pydantic_ai.providers.bedrock import BedrockModelProfile
+
+    upstream = provider.model_profile
+
+    def model_profile(model_name: str) -> BedrockModelProfile:
+        return BedrockModelProfile.from_profile(upstream(model_name) or DEFAULT_PROFILE)
+
+    setattr(provider, "model_profile", model_profile)  # noqa: B010 — mypy rejects method assignment

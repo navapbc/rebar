@@ -554,6 +554,9 @@ def _stub_bedrock_provider(monkeypatch):
     seen = {}
 
     class _Stub:
+        # build_bedrock_provider wraps the provider's model_profile (bug garlicky-leery-seal).
+        model_profile = staticmethod(lambda model_name: None)
+
         def __init__(self, *, region_name=None, **kw):
             seen["region_name"] = region_name
             seen.update(kw)
