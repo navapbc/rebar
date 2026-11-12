@@ -516,3 +516,46 @@ def test_the_openai_arm_is_live_ready_with_its_own_credential(
         f"llm_live test would skip and the arm validates nothing (reason: "
         f"{mod._skip_reason()!r})"
     )
+
+
+#: OpenAI model ids announced as deprecated, keyed by id, valued by the shutdown OpenAI published
+#: (https://developers.openai.com/api/docs/deprecations, read 2026-11-11). Both the alias and its
+#: dated snapshot are listed, because the page retires them together.
+_OPENAI_DEPRECATED_IDS = {
+    "gpt-5.4-nano": "shutdown 2027-04-01, announced 2026-10-01",
+    "gpt-5.4-nano-2026-03-17": "shutdown 2027-04-01, announced 2026-10-01",
+}
+
+
+def _openai_overlay_model_ids() -> dict[str, str]:
+    """Map each openai overlay slot (the scalar ``model`` and every class) to its bare id."""
+    llm = tomllib.loads((_ROOT / ".github/llm-providers/openai.toml").read_text("utf-8"))["llm"]
+    slots = {"model": llm["model"]}
+    slots.update({cls: llm["model_classes"][cls]["model"] for cls in _CLASSES})
+    return {slot: model.split(":", 1)[1] for slot, model in slots.items()}
+
+
+def test_the_openai_arm_pins_no_deprecated_model() -> None:
+    """Fail when an openai overlay slot pins a model OpenAI has announced it will shut down."""
+    pinned = {
+        slot: f"{model_id} ({_OPENAI_DEPRECATED_IDS[model_id]})"
+        for slot, model_id in _openai_overlay_model_ids().items()
+        if model_id in _OPENAI_DEPRECATED_IDS
+    }
+    assert not pinned, f"openai.toml pins deprecated models: {pinned}"
+
+
+def test_the_openai_arm_pins_only_reasoning_profiled_models() -> None:
+    """Fail when an openai slot gets a non-reasoning profile from the pinned pydantic-ai.
+
+    rebar's request shape for this arm assumes a reasoning model; the pinned 1.x profiles the
+    GPT-6 family (including OpenAI's named nano replacement, ``gpt-6-luna``) as non-reasoning.
+    """
+    from pydantic_ai.profiles.openai import openai_model_profile
+
+    wrong = {
+        slot: model_id
+        for slot, model_id in _openai_overlay_model_ids().items()
+        if not getattr(openai_model_profile(model_id), "openai_supports_reasoning", False)
+    }
+    assert not wrong, f"openai.toml pins models the pinned profile treats as non-reasoning: {wrong}"

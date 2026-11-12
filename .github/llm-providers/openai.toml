@@ -1,8 +1,9 @@
 # Best-effort OpenAI arm of the external provider matrix. The repository supplies
 # `OPENAI_API_KEY`. frontier moved from gpt-5.4 to gpt-5.5 on 2026-11-09 after OpenAI began
 # rejecting unchanged gpt-5.4 plan-review requests as `invalid_prompt`; see
-# docs/ci-provider-matrix.md §"OpenAI arm model choice". The other two IDs were verified against
-# that account on 2026-08-03.
+# docs/ci-provider-matrix.md §"OpenAI arm model choice". trivial moved from gpt-5.4-nano, which
+# OpenAI shuts down on 2027-04-01, to gpt-5.4-mini on 2026-11-11 (same section). gpt-5.4-mini was
+# verified against that account on 2026-08-03.
 # Credential: `OPENAI_API_KEY`.
 
 # Keep the provider-qualified scalar model and every class slot explicit because some callers
@@ -14,4 +15,4 @@ model = "openai-responses:gpt-5.5"
 [llm.model_classes]
 frontier = { model = "openai-responses:gpt-5.5" }
 standard = { model = "openai-responses:gpt-5.4-mini" }
-trivial  = { model = "openai-responses:gpt-5.4-nano" }
+trivial  = { model = "openai-responses:gpt-5.4-mini" }
