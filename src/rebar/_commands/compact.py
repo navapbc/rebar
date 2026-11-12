@@ -212,14 +212,16 @@ def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, bool, int | No
     no_commit = False
     include_archived = False
     usage = (
-        "Usage: rebar store compact --all [--dry-run] [--limit=N] [--no-commit] "
-        "[--include-archived]\n"
+        "Usage: rebar store compact --all [--dry-run] [--limit=N] [--threshold=N] "
+        "[--no-commit] [--include-archived]\n"
     )
     for a in argv:
         if a == "--dry-run":
             dry_run = True
         elif a.startswith("--limit="):
             limit = int(a[len("--limit=") :])
+        elif a.startswith("--threshold="):
+            pass  # validated and read by the factory below
         elif a == "--no-commit":
             no_commit = True
         elif a == "--include-archived":
@@ -491,6 +493,9 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
     try:
         _cfg = config.compose_config(repo_root).compact
         threshold, horizon = _cfg.threshold, _cfg.COMPACTION_HORIZON_NS
+        # An explicit --threshold overrides the configured sweep threshold, as on the
+        # single-ticket form.
+        threshold = int(ns.threshold) if ns.threshold is not None else threshold
         snapshot_alpha = _cfg.snapshot_alpha
     except config.ConfigError as exc:
         sys.stderr.write(f"Error: {exc}\n")
@@ -566,6 +571,29 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
 # Sweep-only flags: valid only beside ``--all`` (the one-ticket arm has no such options).
 _SWEEP_ONLY_FLAGS = ("--dry-run", "--limit", "--include-archived")
 
+#: Value flags whose help shows the space form (``--threshold N``); both spellings are accepted.
+_VALUE_FLAGS = ("--threshold", "--horizon", "--limit")
+
+
+def _join_flag_values(argv: list[str]) -> list[str]:
+    """Fold ``--flag <value>`` into ``--flag=<value>`` before the ``--`` separator.
+
+    A value flag that ends the argv, or is followed by another flag, stays bare so the
+    arm's parser still rejects it as missing its value.
+    """
+    end = argv.index("--") if "--" in argv else len(argv)
+    out: list[str] = []
+    i = 0
+    while i < end:
+        arg = argv[i]
+        if arg in _VALUE_FLAGS and i + 1 < end and not argv[i + 1].startswith("-"):
+            out.append(f"{arg}={argv[i + 1]}")
+            i += 2
+            continue
+        out.append(arg)
+        i += 1
+    return out + argv[end:]
+
 
 def compact_dispatch_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar store compact`` entry: one ticket, or the store-wide sweep under ``--all``.
@@ -575,6 +603,7 @@ def compact_dispatch_cli(argv: list[str], *, repo_root=None) -> int:
     flag without ``--all`` is a usage error (exit 2) rather than a silently ignored option.
     Anything else is the one-ticket arm, :func:`compact_cli`, unchanged.
     """
+    argv = _join_flag_values(argv)
     end = argv.index("--") if "--" in argv else len(argv)
     head = argv[:end]
     if "--all" in head:
