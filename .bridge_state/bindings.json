@@ -31523,7 +31523,7 @@
         },
         "description": "## Observation\nWhen `REBAR_ROOT` is unset, every library read rediscovers the code repo root with `git rev-parse --show-toplevel`, through `repo_root` (`src/rebar/_config_sources.py:53`), which `config.tracker_dir` and `config.load_config` call on each read. Measured on a throwaway two-repo store with the freshness marker fresh, after the synonymous-destined-cricket fix:\n\n- `rebar.show_ticket`: 5 git spawns. 2 come from `_reads._tracker` \u2192 `config.tracker_dir` (one direct, one via `load_config`), 2 from the same path in the cross-session warning's own read, and 1 from `cross_session.cross_session_warning_for` \u2192 `load_config`.\n- `rebar.list_tickets`: 2 git spawns (`tracker_dir` and `load_config`).\n\nWith `REBAR_ROOT` set, or an explicit `repo_root` (as `rebar audit serve` passes), the same reads spawn 0. The root of a process's cwd does not change between reads in one process, so these are repeated lookups of the same answer.\n\nDiscovered while fixing synonymous-destined-cricket (40c3-d22a-3872-4c8c), whose scope is the freshness throttle only.\n\n## Acceptance Criteria\n- [x] A library `show_ticket` with `REBAR_ROOT` unset, run from inside a git work tree, starts at most 1 `rev-parse --show-toplevel`, shown by a git-spawn-count test.\n- [x] A cwd change between reads still resolves the new cwd's repo root, shown by a test.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Library reads rediscover the repo root with git on every call when REBAR_ROOT is unset"
       },
       "created_at": "2026-11-04T19:31:26Z",
@@ -54850,9 +54850,17 @@
       "updated_at": "2026-09-01T03:43:09Z"
     },
     "7f23-e3dc-a2a6-457b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\n\nFix-version sync (ADR 0124, epic `inferior-seaborgium-aruanas`) is tested only against fakes. Unit tests and the fake-backed `tests/integration/reconciler/test_reconcile_releases_roundtrip.py` are the only automated coverage. Production Jira Cloud was checked live once, by hand (`plucky-jetblack-parrot`, `cognitive-sooty-angelfish`), and no automated test repeats that check.\n\nThe Cloud write and version-read paths (`src/rebar/reconciler/adapters/jira/acli_graph.py` and `src/rebar/reconciler/adapters/jira/acli_rest.py`) have no live regression test. This story is the Cloud counterpart of `ravenous-centric-guppy`, which adds the same coverage to the Jira DC Docker suite.\n\n## Plan\n\nAdd fix-version scenarios to `tests/external/live_jira_cloud_mutation`. That suite is the bounded, self-cleaning write suite that runs against the shared REB project. It runs in the `jira-cloud-mutation-probe` job of `.github/workflows/external-integration.yml`.\n\nDo not put these scenarios in `live_jira_cloud_s3`. That suite is read-only, and its `readonly_jira_guard` must stay intact.\n\nReuse the suite's existing safety model:\n- Every issue created carries the run-scoped `REBAR_PROBE_RUN_LABEL`.\n- Each test deletes the issues it creates in `finally`.\n- The autouse label sweep and the workflow's always-run delete step are the crash backstop.\n\nExtend that model to versions. Every version the test creates gets a unique, run-scoped name (for example `cloudprobe-<run_id>-a`). The owning test deletes it in `finally`. The backstop sweep also removes versions carrying the run prefix.\n\nThe scenarios run real reconcile passes against Jira Cloud:\n\n1. Inbound sync: a run-scoped version is created in REB and set on a throwaway issue's `fixVersions`. It appears in the bound rebar ticket's `releases`.\n2. Outbound add: a release added in rebar for an existing run-scoped version is written to `fixVersions`. Adding a second release keeps the first, so the write is per item.\n3. Outbound remove: a release removed in rebar disappears from `fixVersions`, and the other entries stay.\n4. A missing version is held back: a release naming a run-scoped version that does not exist yet is not written. Instead the ticket gets a BRIDGE_ALERT, and the alert clears once the version is created and a later pass writes it.\n\nBound the blast radius as the suite already does: each test hands the coordinator exactly one plan for one throwaway issue.\n\n## Acceptance criteria\n\n- [ ] New tests in `tests/external/live_jira_cloud_mutation/` cover scenarios 1 to 4 above against live Jira Cloud, with real reconcile passes and no fakes on the Jira side.\n- [ ] Every version and issue the tests create carries the run label or run-scoped name. Each test deletes them in `finally`, and the conftest sweep and the workflow's always-run cleanup step also remove leftover run-scoped versions.\n- [ ] `tests/external/live_jira_cloud_s3` is unchanged, and its read-only guard tests pass.\n- [ ] [non-codebase] A `jira-cloud-mutation-probe` run of `external-integration.yml` on a commit containing the new tests passes, with the new tests listed as passed. Afterwards, a REB version search for the run prefix returns no versions. The run URL and that search result are recorded in a comment on this ticket.\n- [ ] `make verify` passes on the change.\n- [ ] `tests/external/live_jira_cloud_mutation/README.md` lists the new scenarios and the version cleanup.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Live-test fix-version sync in the Jira Cloud mutation suite"
+      },
       "created_at": "2026-11-12T20:30:58Z",
       "jira_id": "4599029",
       "jira_key": "REB-7143",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-12T20:31:02Z"
     },
@@ -58884,7 +58892,7 @@
         },
         "description": "## Observation\n`tests/interfaces/store/test_workflow_entrypoints.py::test_mcp_run_workflow_is_async_and_pollable` polls `get_workflow_status` 50 times with `time.sleep(0.1)` between polls (lines 134-143). That gives the background `run_workflow` a fixed 5-second wall-clock window to settle, and the test then fails with \"background run never settled\" (line 144).\n\nMeasured on a macOS dev host, 2026-11-04 PST:\n- It failed once in a 4-worker targeted run while `make lint` and `make typecheck` were also running.\n- It failed once more in isolation, minutes later, with other sessions active on the host.\n- It then passed 26 of 26 runs on unmodified `origin/main` (`e0bfa4e5154`), and 30 of 30 further runs with the synonymous-destined-cricket change. 16 runs of each arm were 4-way concurrent.\n\nSo the failure tracks host load, not a code difference. A fixed wall-clock deadline on a background thread's completion is the class of flake AGENTS.md says to root-cause rather than retry.\n\nDiscovered while verifying synonymous-destined-cricket (40c3-d22a-3872-4c8c).\n\n## Testing\n\n`pytest tests/interfaces/store/test_workflow_entrypoints.py -k mcp_run_workflow` passes normally, passes with the background run delayed 6 s, fails when the run never settles, and passes 20 of 20 runs at 4-way concurrency.\n\n## Acceptance Criteria\n- [x] The test waits on the run's own completion signal or a state change, not a fixed 5-second wall clock, and still fails when the run never settles.\n- [x] The test passes 20 of 20 runs under 4-way concurrent load.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "MCP run_workflow pollable test gives the background run a fixed 5 s wall clock"
       },
       "created_at": "2026-11-04T19:31:31Z",
@@ -62178,7 +62186,7 @@
         },
         "description": "## Observation\nDuring `make verify` at 1bfa37ca141 with host load average about 44, 2 tests failed and then passed 3 of 3 in isolation: `tests/interfaces/store/test_bridge_sync_holds_ref_lock.py::test_bridge_sync_honours_an_active_pause` (`cannot pause bridge: git rev-parse --verify timed out after 5.0s (fail-closed: treat as HELD)`) and `tests/interfaces/facades/test_plan_review_attestation_facades.py::test_cli_passed_but_unsigned_is_exit_11_with_byte_identical_stderr` (`OSError: [Errno 48] ... address already in use` binding 127.0.0.1:55506).\n\n## Expected\nNeither test depends on host load: no fixed 5 s subprocess budget in a test path, and no fixed or reused loopback port.\n\n## Testing\n\n`pytest tests/interfaces/store/test_bridge_sync_holds_ref_lock.py` passes with every local `git rev-parse --verify` under 6 s forced to time out (the reproduction), and the facade test passes with a stderr handler installed under a closed stream.\n\n## Acceptance Criteria\n- [x] Each failure is reproduced deterministically (injected slow git; a pre-bound port) and fixed at its class.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Two tests fail under host load: a 5 s git timeout and a fixed loopback port"
       },
       "created_at": "2026-11-04T22:32:47Z",
@@ -76933,9 +76941,17 @@
       "updated_at": "2026-08-27T10:42:05Z"
     },
     "af08-19c2-87b4-41d3": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\n\nFix-version sync (ADR 0124, epic `inferior-seaborgium-aruanas`) is tested only against fakes. Unit tests cover the diffs, the transport writes and the release alerts. The one integration test, `tests/integration/reconciler/test_reconcile_releases_roundtrip.py`, runs real `reconcile_once` passes over an in-memory Jira fake. Production was checked live once, against Jira Cloud (`plucky-jetblack-parrot`, `cognitive-sooty-angelfish`).\n\nThe Jira DC suite in `tests/external/live_jira_dc` has no fix-version test. That suite runs a real Jira DC server in Docker, in the `jira-dc-harness` job of `.github/workflows/external-integration.yml`. The DC write path (`src/rebar/reconciler/adapters/jira_datacenter/_issues.py`) and the DC version read have never run against a real server.\n\n## Plan\n\nAdd a fix-version scenario module to `tests/external/live_jira_dc`. Reuse that suite's existing fixtures: the harness project, the bridge configuration and the reconcile runner. Follow the patterns in `test_multi_project_rehearsal.py` and `test_transport.py`. The scenario runs real reconcile passes against the Docker DC server and covers:\n\n1. Inbound sync: a version created in the DC project through the REST API and set on an issue's `fixVersions` appears in the bound rebar ticket's `releases`.\n2. Outbound add: a release added in rebar for a version the project has is written to the issue's `fixVersions`. Adding a second release also writes it and keeps the first, so the write is per item.\n3. Outbound remove: a release removed in rebar disappears from `fixVersions`, and the other entries stay.\n4. A missing version is held back: a release naming a version the DC project lacks is not written. Instead the ticket gets a BRIDGE_ALERT, and the alert clears once that version is created and a later pass writes it.\n\nThe test must leave the harness project clean, with no leftover versions or issues that would affect other tests in the module order.\n\n## Acceptance criteria\n\n- [ ] A new test module under `tests/external/live_jira_dc/` covers scenarios 1 to 4 above against the Docker DC server, with real reconcile passes and no fakes on the Jira side.\n- [ ] Every new test carries the `external` marker. The new tests are picked up by `pytest -m external tests/external/live_jira_dc`, the command the `jira-dc-harness` job runs.\n- [ ] [non-codebase] A `jira-dc-harness` run of `external-integration.yml` on a commit containing the new module passes, with the new tests listed as passed. The run URL is recorded in a comment on this ticket.\n- [ ] `make verify` passes on the change.\n- [ ] `tests/external/live_jira_dc/README.md` lists the new scenario.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Live-test fix-version sync in the Jira DC Docker suite"
+      },
       "created_at": "2026-11-12T20:31:02Z",
       "jira_id": "4599030",
       "jira_key": "REB-7144",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-12T20:31:05Z"
     },
@@ -105862,7 +105878,7 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Observation\ntests/unit/test_fetch_common_dir_coordination.py:431 asserted a ref-CAS race in 40 uncoordinated rounds and saw 0 (`AssertionError: expected the uncoordinated parallel fetches to race git's ref CAS`). Observed in make verify on worktree fix-chihuahua at commit 4f8cd749a61 (session a85e3cd3, 2026-11-03/04 PST). The run took 3 h 45 min (documented 25-30 min) while other sessions' review-plan gates ran on the host; the test passed in isolation (`pytest -n0 <nodeid>`) on the same code. The commit does not touch this test or its code under test. The positive control depends on the race actually happening, which host load can prevent, so the test's verdict depends on host scheduling.\n## Acceptance Criteria\n- [x] Root cause confirmed with a deterministic reproduction (for example the race forced, or the control made independent of scheduling).\n- [x] The test's verdict no longer depends on host load.",
+        "description": "## Observation\ntests/unit/test_fetch_common_dir_coordination.py:431 asserted a ref-CAS race in 40 uncoordinated rounds and saw 0 (`AssertionError: expected the uncoordinated parallel fetches to race git's ref CAS`). Observed in make verify on worktree fix-chihuahua at commit 4f8cd749a61 (session a85e3cd3, 2026-11-03/04 PST). The run took 3 h 45 min (documented 25-30 min) while other sessions' review-plan gates ran on the host; the test passed in isolation (`pytest -n0 <nodeid>`) on the same code. The commit does not touch this test or its code under test. The positive control depends on the race actually happening, which host load can prevent, so the test's verdict depends on host scheduling.\n## Testing\n\n`pytest tests/unit/test_fetch_common_dir_coordination.py` passes; the forced-race control fails when its hook is made a no-op, and the module passed 5 of 5 runs at load average 42.\n\n## Acceptance Criteria\n- [x] Root cause confirmed with a deterministic reproduction (for example the race forced, or the control made independent of scheduling).\n- [x] The test's verdict no longer depends on host load.",
         "priority": "Low",
         "status": "In Progress",
         "summary": "Fetch-race positive control fails when a loaded host serializes the uncoordinated fetches"
@@ -117984,7 +118000,18 @@
     "1794507710285325001": "__rebar_unknown_comment_id__",
     "1794508072208843001": "__rebar_unknown_comment_id__",
     "1794510546828798442": "__rebar_unknown_comment_id__",
-    "1794514062284381718": "__rebar_unknown_comment_id__"
+    "1794514062284381718": "__rebar_unknown_comment_id__",
+    "1794515697082329001": "__rebar_unknown_comment_id__",
+    "1794515713537341001": "__rebar_unknown_comment_id__",
+    "1794515720999203001": "__rebar_unknown_comment_id__",
+    "1794517261252758001": "__rebar_unknown_comment_id__",
+    "1794517464155369001": "__rebar_unknown_comment_id__",
+    "1794517466588553001": "__rebar_unknown_comment_id__",
+    "1794517810500526001": "__rebar_unknown_comment_id__",
+    "1794517826077947001": "__rebar_unknown_comment_id__",
+    "1794517856679057001": "__rebar_unknown_comment_id__",
+    "1794517976740683001": "__rebar_unknown_comment_id__",
+    "1794518899428290926": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
