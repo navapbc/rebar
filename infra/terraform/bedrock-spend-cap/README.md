@@ -59,11 +59,21 @@ is correct for a circuit breaker. If it ever bites in practice, the remedy is an
 exact-match `{ModelId: rate}` override table defaulting to the ceiling — equality
 only, never substring matching, so it cannot reopen the class above.
 
-In practice the metered arm has run between roughly 1.1x and 1.9x of settled
-billing, so the effective cap sits somewhere below the configured figure rather
-than on it, varying with the day's model mix. The measured distribution is in the
-operator's local-only notes; it is deliberately not reproduced here, because this
-repository is public.
+In practice the metered arm runs at **about 1.8x to 2.1x of settled billing** on the
+5.5 model generation (settled days 2026-11-11 and 2026-11-12): about 1.8x for the
+Opus-only mix, and about 2.1x account-wide, where Sonnet traffic priced at the Opus
+ceilings raises it. So the effective cap sits around half the configured figure. The
+ceilings were derived while 4.x models were in use, and the 5.5 models bill less: for
+Opus 5.5 the input, output and cache-write ceilings are about **1.56x** the billed rate
+and the cache-read ceiling is about **3.1x**. **Cache reads drive the excess** above
+1.56x: they are almost 90% of Opus tokens. (On the 4.x models the band was about 1.1x
+to 1.9x.) The measured figures are in the operator's local-only notes; they are
+deliberately not reproduced here, because this repository is public.
+
+**Compare against settled days only.** Cost Explorer lags within the current UTC day,
+so dividing the metered estimate by that day's Cost Explorer figure overstates the
+ratio: a reading of about 3x on 2026-11-12 fell to about 1.9x once that day's billing
+had caught up. The daily guard below re-prices a settled day for the same reason.
 
 `THRESHOLD_USD` is **not** scaled up to compensate. Raising it to centre the
 metered arm would raise it for the Cost Explorer arm too, and that arm is real

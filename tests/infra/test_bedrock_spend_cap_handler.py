@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import datetime as dt
 import importlib.util
+import re
 import sys
 import types
 from pathlib import Path
@@ -1629,3 +1630,73 @@ def test_readme_states_the_upper_bound_and_its_cost():
     assert "trip the cap well below the configured dollar figure" in readme
     # And the measured band stays out of a public repo.
     assert "local-only" in readme
+
+
+# The README's metered-over-settled band (sweating-revolting-oriole). The band documented for
+# the 4.x models (about 1.1x to 1.9x) stopped holding on the 5.5 generation. These pin the
+# README to the ratio the ceiling table implies for the current mix. RATIOS ONLY: no per-token
+# price is written here, because this repository is public; CEILING comes from handler.py.
+
+#: Ceiling over billed rate for Opus 5.5 per token direction (Cost Explorer usage-type rates,
+#: 2026-11-11).
+_OPUS_55_FACTOR = {
+    "InputTokenCount": 1.5625,
+    "OutputTokenCount": 1.5625,
+    "CacheReadInputTokenCount": 3.125,
+    "CacheWriteInputTokenCount": 1.5625,
+}
+#: Share of Opus 5.5 tokens by direction on the settled day 2026-11-11.
+_OPUS_55_TOKEN_SHARE = {
+    "InputTokenCount": 0.0089,
+    "OutputTokenCount": 0.0194,
+    "CacheReadInputTokenCount": 0.8763,
+    "CacheWriteInputTokenCount": 0.0954,
+}
+#: Measured account-wide metered-over-settled ratio for the settled day 2026-11-11.
+_ACCOUNT_RATIO_SETTLED_DAY = 2.04
+
+
+def _ceiling_table() -> dict[str, float]:
+    tree = ast.parse(HANDLER_PATH.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "CEILING" for t in node.targets
+        ):
+            return ast.literal_eval(node.value)
+    raise AssertionError("handler.py defines no CEILING table")
+
+
+def _opus_55_ratio() -> float:
+    """Metered over billed for the Opus 5.5 mix: each direction's factor weighted by its share
+    of billed dollars, i.e. sum(share*ceiling) / sum(share*ceiling/factor)."""
+    ceiling = _ceiling_table()
+    assert set(ceiling) == set(_OPUS_55_FACTOR) == set(_OPUS_55_TOKEN_SHARE)
+    metered = sum(_OPUS_55_TOKEN_SHARE[d] * ceiling[d] for d in ceiling)
+    billed = sum(_OPUS_55_TOKEN_SHARE[d] * ceiling[d] / _OPUS_55_FACTOR[d] for d in ceiling)
+    return metered / billed
+
+
+def _readme_band() -> tuple[float, float]:
+    readme = " ".join(README_PATH.read_text(encoding="utf-8").split())
+    match = re.search(
+        r"runs at \*\*about (\d+(?:\.\d+)?)x to (\d+(?:\.\d+)?)x of settled billing", readme
+    )
+    assert match, "README must state the metered-over-settled band for the current models"
+    return float(match[1]), float(match[2])
+
+
+def test_readme_band_contains_the_ratio_the_ceiling_table_implies() -> None:
+    low, high = _readme_band()
+    ratio = _opus_55_ratio()
+    assert low <= ratio, (low, ratio)
+    assert _ACCOUNT_RATIO_SETTLED_DAY <= high, (high, _ACCOUNT_RATIO_SETTLED_DAY)
+    assert min(_OPUS_55_FACTOR.values()) <= low and high <= max(_OPUS_55_FACTOR.values())
+
+
+def test_readme_explains_the_ratio_and_the_settled_day_comparison() -> None:
+    readme = " ".join(README_PATH.read_text(encoding="utf-8").split())
+    assert "about **1.56x**" in readme
+    assert "about **3.1x**" in readme
+    assert "Cache reads drive the excess" in readme
+    assert "Compare against settled days only" in readme
+    assert "Cost Explorer lags within the current UTC day" in readme
