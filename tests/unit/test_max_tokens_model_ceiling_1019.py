@@ -123,3 +123,31 @@ def test_nova_models_get_their_10k_bedrock_ceiling(resolved, expected) -> None:
     ``nova-lite`` is NOT a substring of ``nova-2-lite``.
     """
     assert model_max_output_tokens(resolved) == expected
+
+
+_LLAMA4_IDS = [
+    "bedrock:us.meta.llama4-maverick-17b-instruct-v1:0",
+    "us.meta.llama4-maverick-17b-instruct-v1:0",
+    "meta.llama4-maverick-17b-instruct-v1:0",
+    "bedrock:us.meta.llama4-scout-17b-instruct-v1:0",
+    "meta.llama4-scout-17b-instruct-v1:0",
+]
+
+
+@pytest.mark.parametrize("resolved", _LLAMA4_IDS)
+def test_llama4_models_get_their_8192_bedrock_ceiling(resolved) -> None:
+    """Llama 4 Maverick and Scout accept at most 8192 output tokens on Bedrock.
+
+    Bug saintly-creeded-gecko, measured 2026-11-12 with Converse in us-west-2: maxTokens 8192
+    answered ``end_turn``; 8193 and 16000 were rejected with "exceeds the model limit of 8192".
+    Unmapped, the 16000 default made every call on these models fail before it ran.
+    """
+    assert model_max_output_tokens(resolved) == 8_192
+
+
+def test_a_maverick_request_from_the_default_cap_is_sent_within_its_ceiling() -> None:
+    from rebar.llm.config import DEFAULT_MAX_TOKENS
+
+    settings = _settings("bedrock:us.meta.llama4-maverick-17b-instruct-v1:0", DEFAULT_MAX_TOKENS)
+
+    assert settings["max_tokens"] == 8_192

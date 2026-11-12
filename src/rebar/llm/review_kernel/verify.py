@@ -307,6 +307,11 @@ MODEL_MAX_OUTPUT_TOKENS = (
     ("nova-2-lite", 10_000),
     ("nova-lite", 10_000),
     ("nova-micro", 10_000),
+    # Llama 4 on Bedrock rejects any request above 8192 output tokens (measured 2026-11-12 with
+    # Converse: 8192 answers, 8193 is `ValidationException ... exceeds the model limit of 8192`),
+    # so the 16k fallback failed every call on them (bug saintly-creeded-gecko).
+    ("llama4-maverick", 8_192),
+    ("llama4-scout", 8_192),
 )
 
 
