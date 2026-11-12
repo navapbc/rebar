@@ -26,6 +26,10 @@ _WARNED: set[tuple[str, str]] = set()
 
 _DIRTY_SUFFIX = "-dirty"
 
+#: The latest proven drift per pinned sha, so the verdict built after handle resolution can
+#: name it (misogynic-scheelite-solitaire). Process-local, like ``_WARNED``.
+_FOUND: dict[str, BuildDrift] = {}
+
 
 @dataclass(frozen=True)
 class BuildDrift:
@@ -199,7 +203,10 @@ def warn_if_behind(pinned_sha: str | None, repo_root: str | None) -> BuildDrift 
     # NOT behind must not inherit the previous one's wording.
     _note_config_wording(drift is not None)
     if drift is None:
+        if pinned_sha:
+            _FOUND.pop(pinned_sha, None)
         return None
+    _FOUND[pinned_sha or drift.pinned_sha] = drift
 
     key = (drift.build_sha, drift.pinned_sha)
     if key in _WARNED:
@@ -220,7 +227,35 @@ def warn_if_behind(pinned_sha: str | None, repo_root: str | None) -> BuildDrift 
     return drift
 
 
+def degraded_verdict_note(pinned_sha: str | None) -> dict | None:
+    """The coverage note for a verdict whose model never ran while the build was behind.
+
+    A newer attested config can name models or settings the older running build drives
+    wrongly, so the provider rejects the request (observed: a 400 for ``temperature`` on a
+    5.5 model whose capability rows the build predates). The provider error alone points at
+    the wrong remedy, so name the proven skew and the real one. ``None`` when drift was not
+    proven for ``pinned_sha`` in this process.
+    """
+    drift = _FOUND.get(pinned_sha) if pinned_sha else None
+    if drift is None:
+        return None
+    return {
+        "build_sha": drift.build_sha,
+        "build_date": drift.build_date,
+        "pinned_sha": drift.pinned_sha,
+        "commits_behind": drift.commits_behind,
+        "dirty": drift.dirty,
+        "remedy": (
+            f"this rebar build ({drift.short_build_sha}) is {drift.commits_behind} commit(s) "
+            f"behind the config this gate read ({drift.short_pinned_sha}); update the checkout "
+            "running the gate to that ref (git fetch origin && git merge --ff-only origin/main) "
+            "and run `make install`, then re-run the gate"
+        ),
+    }
+
+
 def reset_warned() -> None:
     """Clear the once-per-pair dedup set and the config wording flag (tests)."""
     _WARNED.clear()
+    _FOUND.clear()
     _note_config_wording(False)
