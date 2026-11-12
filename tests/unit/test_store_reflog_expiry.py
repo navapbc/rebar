@@ -188,13 +188,11 @@ def test_reflog_expiry_runs_after_a_failed_but_finished_maintenance_run(
     assert [a[0] for a in seen] == ["maintenance", "reflog"]
 
 
-def test_a_timed_out_expiry_names_the_ref_locks_it_may_have_stranded(
+def test_a_timed_out_expiry_points_the_operator_at_the_git_dir_and_runbook(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, git_env
 ) -> None:
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", str(repo)], env=git_env, check=True)
-    stranded = repo / ".git" / "HEAD.lock"
-    stranded.write_text("")
     _age_stamp(repo)
     seen: list[tuple[str, ...]] = []
     monkeypatch.setattr(
@@ -204,7 +202,9 @@ def test_a_timed_out_expiry_names_the_ref_locks_it_may_have_stranded(
     with caplog.at_level(logging.ERROR, logger=event_commit_git.__name__):
         event_commit_git.run_auto_maintenance(repo)
 
-    assert any(str(stranded) in r.getMessage() for r in caplog.records)
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert errors and str(repo / ".git") in errors[0]
+    assert "tickets-store-prune.md" in errors[0]
 
 
 def test_expiry_runs_at_most_once_a_day(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
