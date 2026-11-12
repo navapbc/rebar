@@ -112,6 +112,12 @@ class ModelCapabilities:
     # defaults Opus and Haiku to `medium`, one level below the `high` that Opus 4.8 and Sonnet
     # 4.6 ran at by default, so an unpinned upgrade would silently lower review depth.
     effort: str | None = None
+    # Whether this model can cache prompts at all (bug tardy-coltish-swellfish). Bedrock reports
+    # it per model (`bedrock_supports_prompt_caching`): mistral, cohere, qwen, meta and others
+    # cannot. `prompt_cache_style` stays "bedrock" for them because structured-output routing
+    # keys on it; this field alone decides whether cache settings are sent, so a model that
+    # cannot cache is never treated as having requested caching.
+    prompt_caching: bool = True
 
 
 def _supports_native_web_search(profile: Any) -> bool:
@@ -352,6 +358,7 @@ def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapab
             caps.update(id_overrides)
     resolved_cache_style = str(caps["prompt_cache_style"])
     return ModelCapabilities(
+        prompt_caching=_prompt_caching(profile, resolved_cache_style),
         native_structured_output=bool(caps["native_structured_output"]),
         prompt_cache_style=resolved_cache_style,
         supports_thinking=bool(caps["supports_thinking"]),
@@ -363,6 +370,14 @@ def _capabilities_from_profile(profile: Any, model_id: str | None) -> ModelCapab
         # published property of the model, not a rebar policy knob.
         cache_min_prefix_tokens=_cache_min_prefix_tokens(resolved_cache_style, model_id),
     )
+
+
+def _prompt_caching(profile: Any, cache_style: str) -> bool:
+    """Whether a profile's model can cache prompts: Bedrock says so per model; the other
+    styles keep their existing behaviour (anthropic caches, "none" sends no settings anyway)."""
+    if cache_style != "bedrock":
+        return True
+    return bool(getattr(profile, "bedrock_supports_prompt_caching", False))
 
 
 # Provider name -> the matching resolver in `pydantic_ai.profiles.*` (pure capability records
@@ -593,7 +608,8 @@ _MESSAGE_TAIL_EXECUTION_MODES = frozenset({"agentic"})
 
 
 def cache_settings_for(caps: ModelCapabilities, *, execution_mode: str) -> Any:
-    """Return prompt-cache settings selected only by ``caps.prompt_cache_style``.
+    """Return prompt-cache settings selected by ``caps.prompt_cache_style``, or ``None`` for a
+    Bedrock model that cannot cache prompts (``caps.prompt_caching`` False).
 
     Every caching call marks instructions and tool definitions. Multi-turn modes also mark the
     accumulated message tail to avoid repeatedly sending uncached tool history. The required
@@ -614,7 +630,7 @@ def cache_settings_for(caps: ModelCapabilities, *, execution_mode: str) -> Any:
         if cache_message_tail:
             anthropic_settings["anthropic_cache"] = True
         return anthropic_settings
-    if caps.prompt_cache_style == "bedrock":
+    if caps.prompt_cache_style == "bedrock" and caps.prompt_caching:
         # Imported INSIDE this branch only: `pydantic_ai.models.bedrock` imports `botocore` at
         # module top, so this line executes only when a Bedrock model is actually in use.
         from pydantic_ai.models.bedrock import BedrockModelSettings

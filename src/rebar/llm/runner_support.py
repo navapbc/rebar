@@ -74,6 +74,9 @@ def _intersect_capabilities(per_candidate: list[ModelCapabilities]) -> ModelCapa
     return ModelCapabilities(
         native_structured_output=all(c.native_structured_output for c in per_candidate),
         prompt_cache_style=per_candidate[0].prompt_cache_style,
+        # Follows the primary with `prompt_cache_style`: the two together decide whether the
+        # cache directive is sent (bug tardy-coltish-swellfish).
+        prompt_caching=per_candidate[0].prompt_caching,
         supports_thinking=all(c.supports_thinking for c in per_candidate),
         # `all` like every sibling: a chain may claim native output UNDER THINKING only when EVERY
         # candidate is MEASURED to support it (story 18ae) — any candidate could answer, so a
