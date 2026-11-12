@@ -7,13 +7,13 @@ fetches converge without surfacing CAS conflicts."""
 
 from __future__ import annotations
 
-import contextlib
 import os
 import subprocess
 import threading
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar._snapshot import git_fetch
 from rebar._store import git_locking, git_outcome, sync
@@ -380,22 +380,81 @@ def test_parallel_coordinated_fetches_share_common_dir_no_cas(tmp_path: Path) ->
     assert _git(worktrees[0], "rev-parse", "refs/remotes/origin/tickets").stdout.strip() == tip
 
 
-def test_uncoordinated_parallel_fetches_can_race_but_coordination_prevents_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The parallel control: with coordination DISABLED, concurrent real fetches sharing one
-    common dir race git's ref CAS. We drive rounds until the race is observed (its base rate
-    is high, so this converges in a handful of rounds) — then confirm coordination removes it.
-    """
+def _git_lacks_preparing_state() -> bool:
+    """Git added the ``preparing`` reference-transaction state in 2.48."""
+    out = subprocess.run(["git", "--version"], capture_output=True, text=True, check=True)
+    raw = out.stdout.split()[-1]
+    parts = tuple(int(p) for p in raw.split(".")[:2] if p.isdigit())
+    return parts < (2, 48)
+
+
+#: A reference-transaction hook that, only in the fetch run with REBAR_FORCE_CAS_RACE set,
+#: moves the remote-tracking ref after git read its old value and before it locks the ref:
+#: exactly what a concurrent uncoordinated fetch does, without depending on scheduling.
+_FORCE_RACE_HOOK = """#!/bin/sh
+[ "$1" = "preparing" ] && [ -n "$REBAR_FORCE_CAS_RACE" ] || exit 0
+while read -r old new ref; do
+  [ "$ref" = "refs/remotes/origin/tickets" ] || continue
+  tree=$(git rev-parse "$old^{tree}")
+  moved=$(git commit-tree -p "$old" -m "concurrent fetch" "$tree")
+  REBAR_FORCE_CAS_RACE= git update-ref "$ref" "$moved"
+done
+exit 0
+"""
+
+
+def _install_force_race_hook(worktree: Path) -> None:
+    hooks = Path(_resolve_common_git_dir(str(worktree))) / "hooks"
+    hooks.mkdir(exist_ok=True)
+    hook = hooks / "reference-transaction"
+    hook.write_text(_FORCE_RACE_HOOK)
+    hook.chmod(0o755)
+
+
+def test_a_ref_moved_between_read_and_lock_is_a_cas_mismatch(tmp_path: Path) -> None:
+    """The positive control, made independent of host scheduling (numbing-hasty-shark).
+
+    It once drove up to 40 rounds of 6 concurrent uncoordinated fetches and required at
+    least one to race; a loaded host can serialize them all and see 0. Instead, force the
+    race: move the shared ``refs/remotes/origin/tickets`` between the fetch reading its old
+    value and locking it (the ``preparing`` reference-transaction state), then require the
+    real fetch to fail with the CAS signature ``is_ref_cas_mismatch`` recognises."""
+    if _git_lacks_preparing_state():
+        pytest.skip("this git has no 'preparing' reference-transaction state to force the race")
+    origin, worktrees = _make_shared_worktrees(tmp_path, 2)
+    _commit_event(origin, "race-0000-0000-0000", "{}")
+    _install_force_race_hook(worktrees[0])
+
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(worktrees[0]),
+            "fetch",
+            "origin",
+            "+refs/heads/tickets:refs/remotes/origin/tickets",
+            "--quiet",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=subprocess_env(REBAR_FORCE_CAS_RACE="1"),
+    )
+
+    output = (proc.stderr or "") + (proc.stdout or "")
+    assert git_outcome.is_ref_cas_mismatch(output), output
+
+
+def test_coordination_prevents_the_cas_race(tmp_path: Path) -> None:
+    """With the common-dir fetch lock, concurrent real fetches sharing one common dir
+    produce ZERO CAS mismatches across many rounds. This is deterministic: the lock
+    serialises the fetches whatever the thread timing."""
     n = 6
     origin, worktrees = _make_shared_worktrees(tmp_path, n)
     refspec = "+refs/heads/tickets:refs/remotes/origin/tickets"
 
-    def raw_fetch(wt: Path) -> subprocess.CompletedProcess:
-        return _git(wt, "fetch", "origin", refspec, "--quiet")
-
-    def run_round(coordinated: bool) -> int:
-        """One concurrent round; returns the count of CAS mismatches observed."""
+    def run_round() -> int:
+        """One concurrent coordinated round; returns the count of CAS mismatches observed."""
         for i in range(n):
             _commit_event(origin, f"race-{i:04d}-{threading.get_ident() % 9999:04d}", "{}")
         barrier = threading.Barrier(n)
@@ -403,12 +462,8 @@ def test_uncoordinated_parallel_fetches_can_race_but_coordination_prevents_it(
 
         def worker(wt: Path) -> None:
             barrier.wait()
-            if coordinated:
-                ctx: contextlib.AbstractContextManager = fetch_coordination_lock(str(wt))
-            else:
-                ctx = contextlib.nullcontext()
-            with ctx:
-                proc = raw_fetch(wt)
+            with fetch_coordination_lock(str(wt)):
+                proc = _git(wt, "fetch", "origin", refspec, "--quiet")
             if proc.returncode != 0 and git_outcome.is_ref_cas_mismatch(
                 (proc.stderr or "") + (proc.stdout or "")
             ):
@@ -421,16 +476,5 @@ def test_uncoordinated_parallel_fetches_can_race_but_coordination_prevents_it(
             t.join()
         return len(seen)
 
-    # Observe the race WITHOUT coordination. High base rate → a small cap is more than
-    # enough; hitting the cap with zero races would itself be astronomically unlikely.
-    observed = 0
-    for _ in range(40):
-        observed += run_round(coordinated=False)
-        if observed:
-            break
-    assert observed, "expected the uncoordinated parallel fetches to race git's ref CAS"
-
-    # WITH coordination the same shared-common-dir contention produces ZERO races,
-    # deterministically, across many rounds.
-    coordinated_races = sum(run_round(coordinated=True) for _ in range(8))
+    coordinated_races = sum(run_round() for _ in range(8))
     assert coordinated_races == 0, "the common-dir fetch lock must eliminate the CAS race"
