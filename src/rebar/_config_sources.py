@@ -69,6 +69,11 @@ def repo_root(explicit: str | os.PathLike[str] | None = None) -> Path:
     env = os.environ.get("REBAR_ROOT")
     if env:
         return Path(env).resolve()
+    cwd = os.getcwd()
+    key = (cwd, os.environ.get("GIT_DIR"), os.environ.get("GIT_WORK_TREE"))
+    cached = _TOPLEVEL_BY_CWD.get(key)
+    if cached is not None and _toplevel_still_valid(cached, Path(cwd)):
+        return cached
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -77,10 +82,40 @@ def repo_root(explicit: str | os.PathLike[str] | None = None) -> Path:
             check=True,
         ).stdout.strip()
         if out:
-            return Path(out).resolve()
+            root = Path(out).resolve()
+            _TOPLEVEL_BY_CWD[key] = root
+            return root
     except (OSError, subprocess.SubprocessError):
         pass
+    _TOPLEVEL_BY_CWD.pop(key, None)
     return Path.cwd()
+
+
+#: ``git rev-parse --show-toplevel`` answers per (cwd, GIT_DIR, GIT_WORK_TREE). Every library
+#: read resolved the root several times, each a git spawn with the same answer
+#: (carbonous-bipartisan-ammonite). Entries are re-validated with stat calls on every hit, so a
+#: moved, deleted, or newly nested repository is never answered from here.
+_TOPLEVEL_BY_CWD: dict[tuple[str, str | None, str | None], Path] = {}
+
+
+def _toplevel_still_valid(root: Path, cwd: Path) -> bool:
+    """True while ``root`` is still the nearest repository at or above ``cwd``.
+
+    The cached root must still hold a ``.git`` entry, ``cwd`` must sit inside it, and no
+    directory between them may have gained its own ``.git`` (a repo created later)."""
+    try:
+        resolved = cwd.resolve()
+        rel = resolved.relative_to(root)
+    except (OSError, ValueError):
+        return False
+    if not (root / ".git").exists():
+        return False
+    probe = resolved
+    for _ in rel.parts:
+        if (probe / ".git").exists():
+            return False
+        probe = probe.parent
+    return True
 
 
 def config_file(root: str | os.PathLike[str] | None = None) -> Path | None:

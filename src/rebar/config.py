@@ -49,6 +49,7 @@ from rebar._config_sources import (
     tracker_dir_override,
     user_config_path,
 )
+from rebar._config_sources import _TOPLEVEL_BY_CWD as _TOPLEVEL_BY_CWD
 from rebar._config_sources import RawLayer as RawLayer
 from rebar._config_sources import _discover_project_config as _discover_project_config
 from rebar._config_sources import _parse_toml as _parse_toml
@@ -336,6 +337,7 @@ def reset_config_cache() -> None:
     global _CLI_OVERRIDES
     _TOML_CACHE.clear()
     _RESULT_CACHE.clear()
+    _TOPLEVEL_BY_CWD.clear()
     _CLI_OVERRIDES = None
 
 
