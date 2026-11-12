@@ -48,7 +48,9 @@ updates:
     ignore:
       - dependency-name: "mcp"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "pydantic-ai-slim"
+      # Dependabot names each extras variant separately ("pydantic-ai-slim[bedrock]", ...), so
+      # the bare name matches none of them; the trailing * matches every variant.
+      - dependency-name: "pydantic-ai-slim*"
         update-types: ["version-update:semver-major"]
     labels:
       - "dependencies"
