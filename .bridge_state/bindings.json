@@ -5445,6 +5445,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:54Z"
     },
+    "0bc1-00c3-3c83-4792": {
+      "created_at": "2026-11-12T01:30:11Z",
+      "jira_id": "4598909",
+      "jira_key": "REB-7118",
+      "state": "confirmed",
+      "updated_at": "2026-11-12T01:30:15Z"
+    },
     "0bd6-c3b2-d9a8-45b2": {
       "baseline": {
         "assignee": {
@@ -15934,7 +15941,7 @@
         },
         "description": "## Context / Problem\n\nThe epic's second engine is one Opus 5.5 agent reviewing a plan against its code. The switch [rebar:skilled-cepevorous-naga] selects it with `[verify] plan_review_engine`, but today a DET-passing review under `\"agentic\"` hits a deliberate raise in `plan_review_engine_route` (`src/rebar/llm/plan_review/workflow_ops.py:336-346`). The starting prompt, `~/plan-review-bakeoff/harness/RAWO5_PROMPT.md` (JSON findings with severity `blocker|major|minor|trivial`), is copied into rebar's prompt registry and adapted; no dependency on that repository.\n\n## Approach\n\n**Workflow arm.** `when:` takes single references only, so the route op computes both booleans. `plan_review_engine_route` drops its raise and emits `run_pipeline = run_llm and engine == \"pipeline\"` and `run_agentic = run_llm and engine == \"agentic\"`; `src/rebar/schemas/plan_review_engine_route_output.schema.json` adds required boolean `run_agentic`. In `src/rebar/llm/workflow/gates/plan-review.yaml` the `review` branch's `else` arm becomes a nested branch `agentic_branch` on `${{ steps.engine_route.outputs.run_agentic }}`: `then` = `agentic_inputs` \u2192 `agentic_review` \u2192 `agentic_verdict`; `else` = the unchanged `plan_review_passthrough`, which therefore only receives a floor verdict, never `None`.\n\n**Engine module.** New `src/rebar/llm/plan_review/agentic.py` holds:\n- the structured-output contract `plan_review_agentic_findings`: an object `{findings: [...]}`, each with `id`, `title`, `description`, `severity` (enum of the four), `evidence` (string), `suggested_fix`, and `criteria` (registry ids, may be empty). Registered with `contracts.register_contract` (as `floors.py:232`); the runner binds it via `contracts.response_model_for`. No field asks for reasoning (Bedrock Opus 5.5 refuses that);\n- op `plan_review_agentic_inputs`: renders `plan` (the precheck's `subject_plan` plus each prerequisite block's `rendered_text`) and `criteria` (one `id \u2014 name` line per `registry.by_id()` entry);\n- op `plan_review_agentic_verdict`: the arm's terminal verdict. PASS/BLOCK mapping is the adapter ticket's [rebar:confident-snooty-stinkpot]; until then it returns `claimability.indeterminate_verdict(...)` (unsigned INDETERMINATE, finding id `agentic-adapter-pending`) with `coverage.engine=\"agentic\"`, `coverage.llm_ran=True` and the validated findings under `coverage.agentic_findings`. It never signs.\n\n**Registration (4 edits per op).** `@register_step` with `<op>_input`/`<op>_output` schemas (4 new files, for `test_every_registered_step_has_a_contract`); both names join `CONTRACT_SCHEMAS` in `src/rebar/schemas/__init__.py`; `workflow_ops.py` imports `agentic` for its registration side effect; both join `_EXPECTED_OPS` in `tests/unit/test_plan_review_workflow_ops_seam.py`.\n\n**Agent step.** `agentic_review` is a `prompt:` step (`plan-review-agentic`, `mode: structured`, `output_schema: plan_review_agentic_findings`, `model: frontier`) run by the existing `RunnerAgentStep`. `frontier` is a model CLASS resolved through the operator's class table (rebar.toml: Bedrock Opus 5.5), as Pass-1's `model_ladder` does; no literal model is pinned. Provider chain, fallback, tracing, usage and per-model effort/temperature [rebar:beaten-natural-grouse] apply unchanged. Its `with:` carries `plan`, `criteria`, `output_budget: model_max` (existing) and three new keys `build_agent_request` (`runs.py:327`) maps onto `RunRequest`: `tool_step_limit: 60`, `iteration_limit: 156`, `read_only: true`. ADR 0123's 80 iterations are model requests; `build_usage_limits` sets request_limit = ceil(iteration_limit/2) (+2 output-retry allowance), so 156 gives 78+2 = 80 requests, and the step-60 steering to a final answer fires before that hard cap.\n\n**Read-only runner change.** The runner grants `comment_ticket` in local mode (`allow_comment` in `src/rebar/llm/runner.py`) and always adds `mcp_toolsets(cfg.mcp_servers)`. `RunRequest` gains `read_only: bool = False`; when True the runner forces `allow_comment=False` and passes no MCP toolsets. The agent's surface is then exactly `filesystem_tools`, `grounding_tools` and `show_ticket` (no `extra_tools` on this step), with configured MCP servers or not.\n\n**Prompt.** `src/rebar/llm/reviewers/plan_review_agentic.md`, front matter `execution_mode: agentic`, `category: plan-review-pass` (not a criterion). Adaptations: `@@PLAN_DOC@@` \u2192 `{{plan}}`; `@@REVIEW_ROOT@@` \u2192 \"the repository your file tools read\"; \"write to `@@DEST@@`\" \u2192 \"return the findings as your structured output\"; `{{criteria}}` appended with \"cite criterion ids where they apply\"; bakeoff scoring language replaced by the epic's rule (only `blocker` blocks). The no-dollar-figures line is kept.\n\n**Post-dispatch policy (change 3349 advisories).** In `src/rebar/llm/plan_review/__init__.py` the post-dispatch tail (`_apply_review_floors`: Pass-3 floors, xcheck, fix-unit grouping) runs iff `engine == \"pipeline\"`, replacing the `llm_unavailable` test, so no verdict produced under `\"agentic\"` (floor, interim, degraded or input-rejected) gets pipeline sub-calls. The `REVIEW_RESULT` sidecar is emitted under both engines as today: a degraded pipeline INDETERMINATE already becomes the newest sidecar, so an agentic one costing a later pipeline run its BLOCK reuse is existing, accepted behavior.\n\n**Failure.** Provider error, refusal, timeout, limit exhaustion or schema-invalid output fail the step; the existing failed-run path (`_degraded_plan_review_verdict`) gives unsigned INDETERMINATE. An empty `findings` array is valid.\n\n## Scope\n\n- src/rebar/llm/plan_review/agentic.py (new)\n- src/rebar/llm/reviewers/plan_review_agentic.md (new)\n- src/rebar/schemas/plan_review_agentic_inputs_{input,output}.schema.json, plan_review_agentic_verdict_{input,output}.schema.json (new)\n- src/rebar/schemas/plan_review_engine_route_output.schema.json, src/rebar/schemas/__init__.py\n- src/rebar/llm/plan_review/workflow_ops.py\n- src/rebar/llm/workflow/gates/plan-review.yaml\n- src/rebar/llm/workflow/runs.py, src/rebar/llm/runner.py\n- src/rebar/llm/plan_review/__init__.py\n- docs/config.md (drop \"not available yet\")\n- tests/unit/test_plan_review_agentic.py (new), test_plan_review_engine_switch.py, test_plan_review_workflow_ops_seam.py, test_output_contract_no_reasoning_in_output.py\n\n## Testing\n\n- Happy path (FakeRunner, canned findings): the request has `execution_mode=\"agentic\"`, `mode=\"structured\"`, the new schema, `tool_step_limit=60`, `iteration_limit=156`, `read_only=True`, the frontier class model; the verdict is unsigned INDETERMINATE carrying the validated findings.\n- Read-only: `read_only=True` in local mode with an MCP server configured yields exactly the read tool names (no `comment_ticket`, no MCP toolset); the default keeps both. The no-reasoning contract test's module list gains `rebar.llm.plan_review.agentic`.\n- Prompt: `get_prompt(\"plan-review-agentic\")` renders `{{plan}}`/`{{criteria}}`, no `@@` left.\n- Route op: all four (run_llm, engine) pairs; unknown engine raises ValueError; empty engine defaults to pipeline.\n- Failure: runner raises, schema-invalid output \u2192 unsigned INDETERMINATE, zero attestations.\n- Policy: `_apply_review_floors` runs only under pipeline (agentic floor, interim and input-rejected verdicts skip it); floor-blocked and not-claimable tickets make zero runner calls.\n- Switch tests: a DET-passing agentic review now runs the agent and never reuses or re-signs a pipeline verdict.\n\n## Acceptance Criteria\n\n- [x] `tests/unit/test_plan_review_agentic.py` and the updated switch tests pass, covering request shape, read-only tool set, route booleans, failure \u2192 INDETERMINATE, the tail policy and the zero-call floor case.\n- [x] The prompt is served from the packaged registry with no `@@` placeholders; `git grep -nF plan-review-bakeoff -- src` prints nothing.\n- [x] `src/rebar/llm/plan_review/agentic.py` is under the 800-line cap and `python scripts/check_complexity_baseline.py --check` reports `new=0 increased=0`.\n- [x] `make verify` exits 0.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Agentic plan-review engine: one read-only Opus 5.5 agent on rebar's runner, prompt in the registry"
       },
       "created_at": "2026-11-09T20:32:43Z",
@@ -47168,6 +47175,13 @@
       "peer_parent": "REB-4211",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:24:17Z"
+    },
+    "6dee-f9be-9a2f-41ae": {
+      "created_at": "2026-11-12T01:30:15Z",
+      "jira_id": "4598910",
+      "jira_key": "REB-7119",
+      "state": "confirmed",
+      "updated_at": "2026-11-12T01:30:18Z"
     },
     "6df4-d3f0-a447-4ba3": {
       "baseline": {
@@ -81266,6 +81280,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T07:47:46Z"
+    },
+    "b98c-565a-2e4b-43ca": {
+      "created_at": "2026-11-12T01:30:18Z",
+      "jira_id": "4598911",
+      "jira_key": "REB-7120",
+      "state": "confirmed",
+      "updated_at": "2026-11-12T01:30:22Z"
     },
     "b996-e471-c055-48ee": {
       "baseline": {
@@ -117338,7 +117359,13 @@
     "1794443798366571188": "__rebar_unknown_comment_id__",
     "1794444346997235152": "__rebar_unknown_comment_id__",
     "1794444373208188645": "__rebar_unknown_comment_id__",
-    "1794445008356772240": "__rebar_unknown_comment_id__"
+    "1794445008356772240": "__rebar_unknown_comment_id__",
+    "1794445556838021118": "__rebar_unknown_comment_id__",
+    "1794445563441596908": "__rebar_unknown_comment_id__",
+    "1794445567616990157": "__rebar_unknown_comment_id__",
+    "1794445589970162355": "__rebar_unknown_comment_id__",
+    "1794445594244586730": "__rebar_unknown_comment_id__",
+    "1794445597878860852": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -122875,7 +122902,10 @@
     "REB-7115": "a81a-946a-31c9-4d03",
     "REB-7116": "29b8-8d86-af5b-4608",
     "REB-7117": "cf6d-5d0a-dfb4-4b8b",
+    "REB-7118": "0bc1-00c3-3c83-4792",
+    "REB-7119": "6dee-f9be-9a2f-41ae",
     "REB-712": "f193-223f-eb36-4061",
+    "REB-7120": "b98c-565a-2e4b-43ca",
     "REB-713": "ace2-f784-4b19-4f22",
     "REB-714": "jira-reb-714",
     "REB-715": "454a-9266-ada6-43cc",
