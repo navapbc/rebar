@@ -75,15 +75,15 @@ confirm it succeeds.
 ## If writes fail on a stranded ref lock
 
 The post-write step's daily `git reflog expire` runs with a 30 s bound. If it is ever killed, git can
-leave a ref lock behind, and rebar logs an ERROR (`git reflog expire timed out ... remove any
-stranded ref lock`) listing the lock files it found. Every later write then fails on that
-lock. To recover:
+leave a ref lock behind, and rebar logs an ERROR (`git reflog expire timed out ... stranded
+ref lock`) naming the store's git dir. Every later write then fails on that lock. To recover:
 
 1. Confirm no git process is running in the store: `docker exec "$mcp" pgrep -a git`
    (expect nothing, or only processes you can identify as finishing normally).
-2. Confirm the lock is old: `ls -la --time-style=full-iso <lock path>` from the ERROR line.
-   A lock seconds old may belong to a live operation; wait and recheck.
-3. Remove only the listed lock files: `docker exec "$mcp" rm <lock path>`.
+2. Find the ref locks under the git dir from the ERROR line:
+   `docker exec "$mcp" find <git dir>/HEAD.lock <git dir>/packed-refs.lock <git dir>/refs <git dir>/logs -name '*.lock' -ls 2>/dev/null`.
+   Check each one's age: a lock seconds old may belong to a live operation; wait and recheck.
+3. Remove only those old lock files: `docker exec "$mcp" rm <lock path>`.
 4. Make one ticket write and confirm it succeeds.
 
 ## Rollback

@@ -14,7 +14,6 @@ normal and recovery paths.
 
 from __future__ import annotations
 
-import glob
 import logging
 import os
 import subprocess
@@ -250,23 +249,6 @@ def _stamp_reflog_expiry(common: str) -> None:
         _log.warning("could not record the reflog expiry pass at %s: %s", stamp, exc)
 
 
-def _ref_locks(common: str) -> list[str]:
-    """Every git ref or reflog lock under the common git dir: the HEAD and packed-refs locks,
-    plus any lock file under ``refs/`` or ``logs/``. rebar's own lock files live elsewhere, so
-    they are never reported."""
-    git_locks = (
-        # mechanism-ok: lock HEAD.lock — successive-deceptive-xiphias names git's lock only
-        "HEAD.lock",
-        # mechanism-ok: lock packed-refs.lock — successive-deceptive-xiphias names git's lock only
-        "packed-refs.lock",
-    )
-    found = [path for name in git_locks if os.path.exists(path := os.path.join(common, name))]
-    for sub in ("refs", "logs"):
-        # mechanism-ok: lock *.lock — successive-deceptive-xiphias lists git's own ref locks only
-        found += glob.glob(os.path.join(common, sub, "**", "*.lock"), recursive=True)
-    return sorted(found)
-
-
 def _expire_reflogs(tracker: str | os.PathLike[str]) -> None:
     """Expire reflog entries under git's configured policy (``gc.reflogExpire*``; no value here).
 
@@ -286,13 +268,14 @@ def _expire_reflogs(tracker: str | os.PathLike[str]) -> None:
         return
     if result.returncode == 124:
         # A killed expiry can strand a ref lock git never removes; rebar reclaims only
-        # index.lock, so every later write would fail on it. Name what is there to remove.
+        # index.lock, so every later write would fail on it until an operator removes it.
         _log.error(
-            "git reflog expire timed out in %s after %ss; remove any stranded ref lock it left "
-            "(writes fail until then): %s",
+            "git reflog expire timed out in %s after %ss; it may have left a stranded ref lock "
+            "under %s that blocks every later write. See infra/runbooks/tickets-store-prune.md "
+            "section 'If writes fail on a stranded ref lock'",
             tracker,
             _REFLOG_EXPIRE_TIMEOUT_S,
-            _ref_locks(common) or "none found",
+            common,
         )
     elif result.returncode != 0:
         _log.warning(
