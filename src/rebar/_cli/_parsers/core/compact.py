@@ -51,7 +51,8 @@ def build_compact_one(*, prog: str) -> argparse.ArgumentParser:
 
 
 def build_compact_all(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar store compact --all [--dry-run] [--limit=N] [--no-commit] [--include-archived]``."""
+    """``rebar store compact --all [--dry-run] [--limit=N] [--threshold=N] [--no-commit]
+    [--include-archived]``."""
     parser = build_argument_parser(
         prog=prog,
         description="Compact all eligible tickets.",
@@ -62,6 +63,9 @@ def build_compact_all(*, prog: str) -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="report what would compact without writing"
     )
     parser.add_argument("--limit", metavar="N", help="compact at most N tickets")
+    parser.add_argument(
+        "--threshold", metavar="N", help="compact only tickets above N foldable events"
+    )
     parser.add_argument(
         "--no-commit", action="store_true", help="stage the snapshots without committing"
     )
