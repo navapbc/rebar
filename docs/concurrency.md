@@ -845,7 +845,10 @@ conflict still aborts → keeps local → hints `fsck` (never a hard read failur
 process group, SIGTERM first, so git releases `objects/maintenance.lock` (ADR 0051 amendment,
 bug 51e0-5038). The same holds for every bounded git child: `gitutil.run_git(..., timeout=)`
 runs git in its own process group and reaps the group on timeout, so a killed fetch removes its
-pack `.keep` and leaves no child running outside the write lock (bug 4eed-2e15).
+pack `.keep` and leaves no child running outside the write lock (bug 4eed-2e15). If a hard
+kill still strands `objects/maintenance.lock` (git never expires it, and `maintenance run` then
+exits 0 doing nothing), the next explicit step removes it once it is older than 12 hours, git's
+own staleness rule for `gc.pid`, and logs a warning (bug 3e48-86e5).
 
 ### Fetch coordination — the Git common-directory lock
 

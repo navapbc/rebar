@@ -18,6 +18,7 @@ import logging
 import os
 import subprocess
 
+from rebar._store.git_locking import _reclaim_if_stale, _resolve_common_git_dir
 from rebar._store.gitutil import (
     _AUTOMAINT_OFF,
     _LOCAL_GIT_TIMEOUT,
@@ -197,6 +198,24 @@ _MAINTENANCE_TASKS: tuple[str, ...] = (
 )
 
 
+# Git never expires ``objects/maintenance.lock``; while it exists ``maintenance run`` exits 0
+# doing nothing, so one hard kill disabled maintenance for good (bug 3e48-86e5). Git's own
+# gc.pid lock goes stale after 12 h, far beyond any real run (full gc: 605.6 s on prod).
+# Age, not rebar's write lock, proves staleness: a non-rebar git may share the object DB.
+_MAINTENANCE_LOCK_STALE_S = 12 * 3600
+
+
+def _reclaim_stale_maintenance_lock(tracker: str | os.PathLike[str]) -> None:
+    """Remove a stale git maintenance lock left by a hard-killed run, and say so."""
+    common = _resolve_common_git_dir(str(tracker))
+    if not common:
+        return
+    # mechanism-ok: lock maintenance.lock — sulfuric-zebraic-hackee git's own lock, not rebar's
+    lock_file = os.path.join(common, "objects", "maintenance.lock")
+    if _reclaim_if_stale(lock_file, stale_s=_MAINTENANCE_LOCK_STALE_S):
+        _log.warning("removed stale git maintenance lock %s (older than 12 h)", lock_file)
+
+
 # raw-git-ok: locked store seam internal
 def run_auto_maintenance(
     tracker: str | os.PathLike[str], *, timeout: float = _LOCAL_GIT_TIMEOUT
@@ -208,6 +227,7 @@ def run_auto_maintenance(
     logged, never raised. Return the Git result (timeout is ``124``), or ``None`` when Git
     cannot launch.
     """
+    _reclaim_stale_maintenance_lock(tracker)
     try:
         result = run_git_reaped(
             tracker, "maintenance", "run", "--auto", "--quiet", *_MAINTENANCE_TASKS, timeout=timeout

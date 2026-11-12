@@ -122,4 +122,6 @@ stranded `objects/maintenance.lock`, which git never expires and which silently 
 and a timed-out step is reaped as a process group, SIGTERM first. Follow-ups:
 `saccharine-unwise-barnacle` (stale-lock recovery), `idle-ammoniacal-axisdeer` (group reaping
 for the other bounded calls). The latter is resolved: every git call given a timeout
-(`gitutil.run_git`) now runs as its own process group, reaped SIGTERM first.
+(`gitutil.run_git`) now runs as its own process group, reaped SIGTERM first. The former is
+resolved too: the explicit step removes a `maintenance.lock` older than 12 hours (git's `gc.pid`
+staleness rule) before it runs.
