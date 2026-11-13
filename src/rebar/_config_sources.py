@@ -358,7 +358,7 @@ def _canonical_env_name(sect: str, key: str) -> str:
 
 # Config keys that deliberately take NO environment override (ADR 0123 decision on
 # verify.plan_review_engine): their auto-derived REBAR_<SECTION>_<KEY> is never read,
-# documented, or expected. The engine-switch sunset ticket removes the entry.
+# documented, or expected. The exclusion is permanent, like the key.
 _ENV_EXCLUDED_KEYS: frozenset[tuple[str, str]] = frozenset({("verify", "plan_review_engine")})
 
 

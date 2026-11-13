@@ -31,7 +31,7 @@ require_plan_review_for_close = true
 
 # Plan-review engine (ADR 0123): "pipeline" (the four-pass review) or "agentic". The
 # Layer-1 floor runs first under both. An explicit review argument overrides this key;
-# no environment variable reads it. Sunset with the switch: bossy-impish-hoiho.
+# no environment variable reads it. Both engines are permanent, supported options.
 plan_review_engine = "pipeline"
 
 # Create-time same-title duplicate journal (`rebar create` stderr / `duplicate_warning`);

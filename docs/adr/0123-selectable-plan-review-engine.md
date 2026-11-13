@@ -37,9 +37,10 @@ time rather than falling back silently.
   the MCP tools and the comparison harness pass) over the config key over the built-in default.
   There is no environment variable: a per-call argument already covers one-off runs, and an
   environment layer would be a second, invisible source.
-- **Lifetime:** the key exists only until one engine is retired. Its `mechanism-ok: config_key`
-  marker names the open sunset task `bossy-impish-hoiho`, which removes the key together with the
-  losing engine.
+- **Lifetime:** the key is permanent and both engines are supported options (amended
+  2026-11-12; see the amendment below). Its `mechanism-ok: config_key` marker names the standing
+  admission ticket `cankered-cloistered-bittern` (`7447-47d8-051d-42ab`), which stays open while
+  the key exists.
 
 Selection happens inside the plan-review workflow, after the `precheck` step has run the
 deterministic floor: the existing `review` step gains the condition `engine == 'pipeline'` and a
@@ -133,10 +134,19 @@ that ticket.
 
 ## Consequences
 
-- Two engines are maintained in parallel until the sunset task retires one; the comparison
-  harness and production runs supply the evidence for that decision.
+- Both engines are maintained as supported options, and the key selects between them; the
+  comparison harness and production runs inform which engine a project chooses.
 - An attestation now says which engine produced it, so a project can audit or restrict engines
   later without re-signing history.
 - The agentic engine's findings have no verify pass behind them, so its false-positive rate is a
   property of the prompt and model alone; the comparison harness measures it against the
   pipeline before any project depends on it.
+
+## Amendment (2026-11-12)
+
+The operator decided that `[verify] plan_review_engine` is a permanent setting and that both
+engines stay supported; no engine is retired, and the task planned to retire one is obsolete.
+The key's `mechanism-ok: config_key` marker now names the standing admission ticket
+`cankered-cloistered-bittern` (`7447-47d8-051d-42ab`), which stays open while the key exists.
+The default (`"pipeline"`), the precedence and the absence of an environment variable are
+unchanged.
