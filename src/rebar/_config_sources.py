@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
@@ -17,10 +16,13 @@ from typing import NamedTuple
 # Re-export owned below-seam resolvers here and through ``rebar.config``. Their
 # module uses lazy attribute lookups, preserving late binding without an import cycle.
 from rebar._config_resolvers import _DEFAULT_ABSENT_RETIRE_GRACE as _DEFAULT_ABSENT_RETIRE_GRACE
+from rebar._config_resolvers import _TOPLEVEL_BY_CWD as _TOPLEVEL_BY_CWD
 from rebar._config_resolvers import _gate_str_pref as _gate_str_pref
+from rebar._config_resolvers import _git_toplevel as _git_toplevel
 from rebar._config_resolvers import _positive_int as _positive_int
 from rebar._config_resolvers import _snapshot_int as _snapshot_int
 from rebar._config_resolvers import _snapshot_table as _snapshot_table
+from rebar._config_resolvers import _toplevel_still_valid as _toplevel_still_valid
 from rebar._config_resolvers import repo_root_or_none as repo_root_or_none
 from rebar._config_resolvers import resolve_absent_retire_grace as resolve_absent_retire_grace
 from rebar._config_resolvers import resolve_acli_call_timeout as resolve_acli_call_timeout
@@ -69,53 +71,8 @@ def repo_root(explicit: str | os.PathLike[str] | None = None) -> Path:
     env = os.environ.get("REBAR_ROOT")
     if env:
         return Path(env).resolve()
-    cwd = os.getcwd()
-    key = (cwd, os.environ.get("GIT_DIR"), os.environ.get("GIT_WORK_TREE"))
-    cached = _TOPLEVEL_BY_CWD.get(key)
-    if cached is not None and _toplevel_still_valid(cached, Path(cwd)):
-        return cached
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-        if out:
-            root = Path(out).resolve()
-            _TOPLEVEL_BY_CWD[key] = root
-            return root
-    except (OSError, subprocess.SubprocessError):
-        pass
-    _TOPLEVEL_BY_CWD.pop(key, None)
-    return Path.cwd()
-
-
-#: ``git rev-parse --show-toplevel`` answers per (cwd, GIT_DIR, GIT_WORK_TREE). Every library
-#: read resolved the root several times, each a git spawn with the same answer
-#: (carbonous-bipartisan-ammonite). Entries are re-validated with stat calls on every hit, so a
-#: moved, deleted, or newly nested repository is never answered from here.
-_TOPLEVEL_BY_CWD: dict[tuple[str, str | None, str | None], Path] = {}
-
-
-def _toplevel_still_valid(root: Path, cwd: Path) -> bool:
-    """True while ``root`` is still the nearest repository at or above ``cwd``.
-
-    The cached root must still hold a ``.git`` entry, ``cwd`` must sit inside it, and no
-    directory between them may have gained its own ``.git`` (a repo created later)."""
-    try:
-        resolved = cwd.resolve()
-        rel = resolved.relative_to(root)
-    except (OSError, ValueError):
-        return False
-    if not (root / ".git").exists():
-        return False
-    probe = resolved
-    for _ in rel.parts:
-        if (probe / ".git").exists():
-            return False
-        probe = probe.parent
-    return True
+    found = _git_toplevel()
+    return found[1] if found is not None else Path.cwd()
 
 
 def config_file(root: str | os.PathLike[str] | None = None) -> Path | None:

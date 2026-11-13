@@ -279,3 +279,101 @@ def test_a_repo_created_inside_a_cached_root_is_resolved(
     _init_repo(nested, "main")
 
     assert cfg.repo_root() == nested.resolve()
+
+
+# ── the CLI read path shares that one lookup (carnivoral-scarlet-chihuahua) ──
+def test_cli_show_without_rebar_root_discovers_the_root_at_most_once(
+    store, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``rebar show`` resolved the root in 4 places (snapshot, store mount, init, tracker dir);
+    each must answer from the same per-cwd lookup."""
+    from rebar._cli import main as cli_main
+
+    monkeypatch.delenv("REBAR_ROOT")
+    monkeypatch.chdir(store.repo_root)
+    cfg.reset_config_cache()
+    _throttle(store)
+    spawns = _GitSpawns().install(monkeypatch)
+
+    rc = cli_main(["show", BASE_ID])
+
+    assert rc == 0, capsys.readouterr().err
+    assert len(_toplevel_spawns(spawns)) <= 1, _toplevel_spawns(spawns)
+
+
+def test_repo_root_or_none_is_none_outside_a_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    bare = tmp_path / "no-repo"
+    bare.mkdir()
+    monkeypatch.chdir(bare)
+    cfg.reset_config_cache()
+
+    assert cfg.repo_root_or_none() is None
+    assert cfg.repo_root_or_none() is None  # a miss is never cached as an answer
+
+
+def test_repo_root_or_none_finds_a_repo_created_inside_a_cached_root(
+    store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("REBAR_ROOT")
+    nested = store.repo_root / "sub"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    cfg.reset_config_cache()
+    assert os.path.realpath(cfg.repo_root_or_none() or "") == os.path.realpath(store.repo_root)
+
+    _init_repo(nested, "main")
+
+    assert os.path.realpath(cfg.repo_root_or_none() or "") == os.path.realpath(nested)
+
+
+def test_repo_root_or_none_follows_a_cwd_change(
+    store, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("REBAR_ROOT")
+    other = tmp_path / "other"
+    _init_repo(other, "main")
+    monkeypatch.chdir(store.repo_root)
+    cfg.reset_config_cache()
+    assert os.path.realpath(cfg.repo_root_or_none() or "") == os.path.realpath(store.repo_root)
+
+    monkeypatch.chdir(other)
+
+    assert os.path.realpath(cfg.repo_root_or_none() or "") == os.path.realpath(other)
+
+
+def test_repo_root_or_none_drops_a_moved_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cached root whose repository moved away is re-resolved, not answered from the memo."""
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    repo = tmp_path / "repo"
+    _init_repo(repo, "main")
+    sub = repo / "sub"
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+    cfg.reset_config_cache()
+    assert os.path.realpath(cfg.repo_root_or_none() or "") == os.path.realpath(repo)
+
+    (repo / ".git").rename(tmp_path / "moved.git")
+
+    assert cfg.repo_root_or_none() is None
+
+
+def test_reset_config_cache_empties_the_toplevel_memo(store, monkeypatch) -> None:
+    monkeypatch.delenv("REBAR_ROOT")
+    monkeypatch.chdir(store.repo_root)
+    cfg.reset_config_cache()
+    cfg.repo_root_or_none()
+    from rebar import _config_resolvers
+
+    assert cfg._TOPLEVEL_BY_CWD is _config_resolvers._TOPLEVEL_BY_CWD
+    assert _config_resolvers._TOPLEVEL_BY_CWD
+
+    cfg.reset_config_cache()
+
+    assert not _config_resolvers._TOPLEVEL_BY_CWD
