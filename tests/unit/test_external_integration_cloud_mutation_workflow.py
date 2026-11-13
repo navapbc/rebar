@@ -91,3 +91,23 @@ def test_lane_has_an_always_run_labelled_teardown_sweep() -> None:
     assert "acli jira workitem delete" in body, "teardown does not use the acli delete subcommand"
     assert "--yes" in body, "non-TTY delete must pass --yes so the sweep does not block on stdin"
     assert "REBAR_PROBE_RUN_LABEL" in body, "teardown is not keyed on the run label"
+
+
+def test_teardown_also_sweeps_run_prefixed_issues_and_fix_versions() -> None:
+    """The fix-version probes create run-scoped versions and bind issues before the run label
+    lands, so the failure/cancel teardown must find both by the run prefix
+    (naughty-analytical-crossbill)."""
+    teardown = next(
+        step
+        for step in _steps()
+        if "failure()" in str(step.get("if", ""))
+        and "cancelled()" in str(step.get("if", ""))
+        and "acli jira workitem delete" in str(step.get("run", ""))
+    )
+    body = str(teardown.get("run", ""))
+    env = teardown.get("env") or {}
+    assert 'prefix="${REBAR_PROBE_RUN_LABEL#rebar-id:}"' in body, "no run prefix derived"
+    assert "summary ~" in body and "${prefix}" in body, "no summary sweep by run prefix"
+    assert "/rest/api/3/project/" in body and "/versions" in body, "no fix-version listing"
+    assert "-X DELETE" in body and "/rest/api/3/version/" in body, "no fix-version delete"
+    assert "JIRA_PROJECT" in env, "the version sweep needs the project key"

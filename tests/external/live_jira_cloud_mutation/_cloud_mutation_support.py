@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import time
+import urllib.error
 import uuid
 from typing import Any
 
@@ -54,6 +55,10 @@ def build_cloud_client(project: str | None = None) -> Any:
     )
 
 
+# One label per process, so a local run's tests and its backstops agree on what to sweep.
+_LOCAL_RUN_LABEL = f"rebar-id:cloudprobe-local-{uuid.uuid4().hex[:12]}"
+
+
 def run_label() -> str:
     """The run-scoped sweep label.
 
@@ -65,7 +70,7 @@ def run_label() -> str:
     label = os.environ.get("REBAR_PROBE_RUN_LABEL", "").strip()
     if label:
         return label
-    return f"rebar-id:cloudprobe-local-{uuid.uuid4().hex[:12]}"
+    return _LOCAL_RUN_LABEL
 
 
 def new_local_id() -> str:
@@ -133,3 +138,85 @@ def sweep_label(label: str) -> list[str]:
         except Exception:  # noqa: BLE001 — one undeletable leftover must not abort the sweep
             continue
     return keys
+
+
+def run_prefix() -> str:
+    """The run-scoped name prefix for versions: the run label without ``rebar-id:``.
+
+    ``cloudprobe-<run_id>`` in CI, ``cloudprobe-local-<hex>`` locally, so the version
+    backstops can find exactly this run's versions by name.
+    """
+    return run_label().removeprefix("rebar-id:")
+
+
+def version_name(label: str) -> str:
+    """A unique, run-scoped version name (no commas: rebar parses release lists as CSV)."""
+    return f"{run_prefix()}-{label}-{uuid.uuid4().hex[:8]}"
+
+
+def create_version(client: Any, project: str, name: str) -> str:
+    """Create version ``name`` in ``project`` over REST and return its id."""
+    project_id = client._direct_rest_get(f"/rest/api/3/project/{project}")["id"]
+    created = client._direct_rest_post_json(
+        "/rest/api/3/version", {"name": name, "projectId": int(project_id)}
+    )
+    return str(created["id"])
+
+
+def delete_version(client: Any, version_id: str) -> None:
+    """Delete one version by id; an already-deleted version counts as deleted."""
+    try:
+        client._direct_rest_delete(f"/rest/api/3/version/{version_id}")
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+
+
+def sweep_prefixed_issues(prefix: str) -> list[str]:
+    """Best-effort delete of REB issues whose summary contains ``prefix``; never raises.
+
+    Covers the window between an issue's creation by a binding pass and the run label landing.
+    """
+    keys: list[str] = []
+    try:
+        client = build_cloud_client()
+        client.invalidate_search_cache()
+        hits = client.search_issues(f'project = "{cloud_project()}" AND summary ~ "\\"{prefix}\\""')
+    except Exception:  # noqa: BLE001 — best-effort backstop; must never mask the test result
+        return keys
+    for hit in hits:
+        key = hit.get("key")
+        summary = str((hit.get("fields") or {}).get("summary", ""))
+        if not key or prefix not in summary:
+            continue
+        try:
+            client.delete_issue(key)
+            keys.append(key)
+        except Exception:  # noqa: BLE001 — one undeletable leftover must not abort the sweep
+            continue
+    return keys
+
+
+def sweep_versions(prefix: str, project: str | None = None) -> list[str]:
+    """Best-effort delete of every version in the project whose name starts with ``prefix-``.
+
+    The version counterpart of :func:`sweep_label`. Never raises.
+    """
+    swept: list[str] = []
+    try:
+        client = build_cloud_client()
+        versions = client._direct_rest_get(
+            f"/rest/api/3/project/{project or cloud_project()}/versions"
+        )
+    except Exception:  # noqa: BLE001 — best-effort backstop; must never mask the test result
+        return swept
+    for version in versions or []:
+        name = str(version.get("name", ""))
+        if not name.startswith(f"{prefix}-") or not version.get("id"):
+            continue
+        try:
+            delete_version(client, str(version["id"]))
+            swept.append(name)
+        except Exception:  # noqa: BLE001 — one undeletable leftover must not abort the sweep
+            continue
+    return swept
