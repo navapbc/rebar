@@ -771,6 +771,12 @@ run only under `pipeline`, so ADR 0052's re-review stability (no new blocking fi
 unchanged, signed plan is re-reviewed) holds for that engine only; an `agentic` re-review runs
 the agent afresh (ADR 0123 §6).
 
+Attestation reuse and the drift refresh act on the ticket's current attestation, whichever
+engine signed it. So a `pipeline` review of an unchanged ticket whose current attestation is
+agentic returns that PASS reused (`coverage.idempotent_skip`, `runner: reused`) without running
+the pipeline, and `--status` still reports `engine: agentic`. Revising the plan makes the next
+review run afresh. BLOCK reuse replays only a pipeline BLOCK.
+
 Precedence: the explicit argument, then `[verify] plan_review_engine`, then `pipeline`. No
 environment variable selects it. Over MCP, the resolved engine is part of the de-dup key, so a
 pipeline run and an agentic run on one ticket are separate jobs.
