@@ -764,13 +764,26 @@ jobs:
           JIRA_URL: ${{ vars.JIRA_URL }}
           JIRA_USER: ${{ vars.JIRA_USER }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
         run: |
           set +e
+          # The run prefix names this run's issue summaries and fix versions (the run label
+          # without `rebar-id:`), so leftovers created before the label landed are found too.
+          prefix="${REBAR_PROBE_RUN_LABEL#rebar-id:}"
+          rows_to_keys='import json,sys; d=json.load(sys.stdin); rows=d.get("issues", d) if isinstance(d, dict) else d; rows=rows if isinstance(rows, list) else []; print("\n".join(str(r.get("key") or r.get("id")) for r in rows if isinstance(r, dict) and (r.get("key") or r.get("id"))))'
           hits="$(acli jira workitem search --jql "labels = \"${REBAR_PROBE_RUN_LABEL}\"" --json 2>/dev/null)"
-          keys="$(printf '%s' "$hits" | python3 -c 'import json,sys; d=json.load(sys.stdin); rows=d.get("issues", d) if isinstance(d, dict) else d; rows=rows if isinstance(rows, list) else []; print("\n".join(str(r.get("key") or r.get("id")) for r in rows if isinstance(r, dict) and (r.get("key") or r.get("id"))))' 2>/dev/null)"
+          keys="$(printf '%s' "$hits" | python3 -c "$rows_to_keys" 2>/dev/null)"
+          hits="$(acli jira workitem search --jql "project = \"${JIRA_PROJECT:-REB}\" AND summary ~ \"\\\"${prefix}\\\"\"" --json 2>/dev/null)"
+          keys="$keys $(printf '%s' "$hits" | python3 -c "$rows_to_keys" 2>/dev/null)"
           for key in $keys; do
             echo "sweeping leaked issue $key"
             acli jira workitem delete --key "$key" --yes || true
+          done
+          versions="$(curl -fsS -u "${JIRA_USER}:${JIRA_API_TOKEN}" "${JIRA_URL%/}/rest/api/3/project/${JIRA_PROJECT:-REB}/versions" 2>/dev/null)"
+          ids="$(printf '%s' "$versions" | PREFIX="$prefix" python3 -c 'import json,os,sys; p=os.environ["PREFIX"]+"-"; print("\n".join(str(v["id"]) for v in json.load(sys.stdin) if str(v.get("name","")).startswith(p)))' 2>/dev/null)"
+          for id in $ids; do
+            echo "sweeping leaked fix version $id"
+            curl -fsS -X DELETE -u "${JIRA_USER}:${JIRA_API_TOKEN}" "${JIRA_URL%/}/rest/api/3/version/${id}" || true
           done
 
   pandoc-corpus-replay:
