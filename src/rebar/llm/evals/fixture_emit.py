@@ -12,10 +12,12 @@ from typing import Any
 
 import yaml
 
+from rebar.llm.config import VERIFIER_DEFAULT_MODEL
 from rebar.llm.criteria.ids import criterion_prompt_id
 from rebar.llm.evals.eval import validate_eval_spec
 
-_MODEL = "anthropic:claude-sonnet-4-6"
+# The standard-class default, so emitted specs follow the current model generation.
+_MODEL = f"anthropic:{VERIFIER_DEFAULT_MODEL}"
 _SCORER = {
     "type": "deterministic",
     "name": "emits_valid_findings",

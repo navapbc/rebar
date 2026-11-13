@@ -445,7 +445,7 @@ def size_factor(ticket_size: str) -> float:
 
 
 def chunk_by_facet(
-    crits: list[dict[str, Any]], *, model: str = "claude-sonnet-4-6", ticket_size: str = "moderate"
+    crits: list[dict[str, Any]], *, model: str, ticket_size: str = "moderate"
 ) -> list[list[dict[str, Any]]]:
     """Pack facet-ordered criteria into ``ceil(total/n)`` contiguous, near-equal
     balanced chunks (sizes ``total//k`` and ``total//k + 1``, where ``n`` is
