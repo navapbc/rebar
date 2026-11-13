@@ -52,6 +52,16 @@ def test_message_for_every_class_and_unknown():
     assert message_for("NOT_A_CLASS") is None
 
 
+def test_message_for_change_settings_names_model_and_credentials_not_only_bounds():
+    """Bug stupid-evasive-marten: CHANGE_SETTINGS holds 401/403, invalid-request 400s (e.g. an
+    unknown model id) and UserError, so its message must not name only tokens/steps/timeout."""
+    msg = message_for(ResolutionClass.CHANGE_SETTINGS.value).lower()
+    assert "model" in msg
+    assert "credential" in msg
+    assert "bound" in msg
+    assert "exceeded" not in msg
+
+
 def test_message_for_content_filter_names_guardrail_not_size():
     """A content-filter/guardrail block (finish_reason=content_filter on CHANGE_INPUT) must
     surface a message that names the content policy / guardrail and does NOT misreport the
