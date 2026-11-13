@@ -13914,9 +13914,17 @@
       "updated_at": "2026-09-04T23:40:45Z"
     },
     "1f9a-a161-bd35-404e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n`scripts/gerrit_safe_submit.py` reads the change, refuses a stale `--revision`, then checks the `LLM-Review` and `Verified` labels with `_label_ok`, which needs the label's `approved` summary. Gerrit omits `approved` on a closed change, so re-running the script on a change that already merged reports a vote problem instead of the merge.\n\nObserved 2026-11-13 against change 3393 (MERGED, submitted 2026-11-13 04:09 PST, both votes +1 in `labels.*.all`), read-only:\n- `--revision aa1681bb531e3a607c7366cde951e263b51ba78f` (the merged revision): `refusing submit: missing live labels=['LLM-Review', 'Verified'], unresolved=0, submittable=False`, exit 3.\n- `--revision 0000\u20260000`: `refusing stale submit: inspected 0000\u2026, current is aa1681bb\u2026`, exit 2; correct and safe, but it does not say the change is merged.\n\nThe script's own reconcile path (Gerrit 3393's parent change, `5a4efd52a39`) already treats \"merged at the submitted revision\" as success (exit 0, says so). The pre-submit path should report the same state the same way rather than send the operator after votes that exist.\n\n## Approach\nIn `main`, right after `read_change()` and before the stale and label checks, branch on `detail[\"status\"]`:\n- `MERGED` and `--revision` equals the merged `current_revision`: print `change <n> is already merged at <sha>; nothing to submit` and return 0.\n- `MERGED` at a different revision: print that it is merged at `<current>`, not at the inspected revision, and return 2 (the stale-revision code).\n- `ABANDONED`: print that and return 3.\nNo POST of any kind on these paths (no hashtag, no submit). Update the module docstring's exit-code list. No new flag, config key or env var.\n\n## Acceptance Criteria\n- [ ] A MERGED change with the matching revision exits 0, prints `already merged`, and sends no POST.\n- [ ] A MERGED change with a different revision exits 2 and names both SHAs and `MERGED`, with no POST.\n- [ ] An ABANDONED change exits 3 and says abandoned, with no POST.\n- [ ] Open-change behavior is unchanged; proved by `pytest tests/unit/test_gerrit_submit_if_current_8b1c.py`.\n\n## Testing\nAdd RED cases to `tests/unit/test_gerrit_submit_if_current_8b1c.py` using its existing fake Gerrit, asserting exit code, message and that no POST was recorded. Then run the file, `make verify`, and a read-only live run against change 3393 with `--hashtag \"\"`.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "gerrit_safe_submit.py reports \"missing live labels\" for an already-merged change"
+      },
       "created_at": "2026-11-13T17:32:12Z",
       "jira_id": "4599134",
       "jira_key": "REB-7184",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-13T17:32:17Z"
     },
@@ -21509,9 +21517,17 @@
       "updated_at": "2026-08-15T14:55:29Z"
     },
     "2fdf-ee49-14d4-48d8": {
+      "baseline": {
+        "assignee": null,
+        "description": "Scratch ticket for the 0.16.0 hand-verification of the selectable plan-review engine (ADR 0123). It exists so `review_plan_start` can be exercised on the production MCP server under both engines; it will be closed as obsolete afterwards and its plan is not intended to be implemented.\n\n## Context / Problem\n`resolve_plan_review_engine` in `src/rebar/llm/plan_review/__init__.py` refuses an explicit engine outside `PLAN_REVIEW_ENGINES` with `ConfigError`. `tests/unit/test_plan_review_engine_switch.py` pins the default, the config key and the ignored environment variable, but no test pins that the comparison is case-sensitive, so a change that lower-cased the argument would go unnoticed.\n\n## Approach\nAdd one parametrized test to `tests/unit/test_plan_review_engine_switch.py` that calls `resolve_plan_review_engine` with `\"Agentic\"`, `\"PIPELINE\"` and `\" pipeline\"` and asserts each raises `rebar.config.ConfigError` whose message names the rejected value. No source change, and no existing test is modified.\n\n## Scope\n- `tests/unit/test_plan_review_engine_switch.py`: add `test_explicit_engine_is_case_and_whitespace_sensitive`.\n\nOut of scope: config-file values (already validated by `_as_choice` in `src/rebar/_config_sections.py`).\n\n## Testing\nRun `.venv/bin/pytest tests/unit/test_plan_review_engine_switch.py -q`. Happy path: the existing tests still pass. Failure path: each of the three values raises `ConfigError`.\n\n## Acceptance Criteria\n- [ ] `tests/unit/test_plan_review_engine_switch.py` defines `test_explicit_engine_is_case_and_whitespace_sensitive`, parametrized over `\"Agentic\"`, `\"PIPELINE\"` and `\" pipeline\"`, asserting `ConfigError` with the value in its message.\n- [ ] `.venv/bin/pytest tests/unit/test_plan_review_engine_switch.py -q` exits 0.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "[verify] engine check - safe to close"
+      },
       "created_at": "2026-11-13T17:32:18Z",
       "jira_id": "4599135",
       "jira_key": "REB-7185",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-13T17:32:23Z"
     },
@@ -47425,9 +47441,17 @@
       "updated_at": "2026-08-15T15:02:03Z"
     },
     "6dba-d3ef-b20c-4d01": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nBug `misogynic-scheelite-solitaire` (ac3b-c6cd-8076-4a98, `1fce28eaf9b`) attaches `coverage.build_drift` (build and pinned SHAs, distance, and the remedy: update the checkout and run `make install`) to a gate verdict whose model never ran. Only the JSON output shows it, and the stderr degrade line points at the wrong cause.\n\nReproduced 2026-11-13 in a throwaway clone: running build `aa1681bb531`, attested config 2 commits ahead naming a Bedrock model id that does not exist, `rebar review-plan <id> --ref <sha>`:\n- `--output=json`: verdict INDETERMINATE, `coverage.llm_ran=false`, `coverage.llm_error` holds the provider message, and `coverage.build_drift.remedy` = \"this rebar build (aa1681bb5) is 2 commit(s) behind the config this gate read (37d8a50ab); update the checkout \u2026 and run `make install`, then re-run the gate\". Correct.\n- `--output=text` (the default an operator reads): only `PLAN REVIEW: INDETERMINATE`, the counts line and the source line. No build-drift line, no remedy, no provider error.\n- stderr: `llm-degrade: CHANGE_SETTINGS \u2014 The request exceeded a configured bound (tokens/steps/timeout) \u2014 adjust it and retry.` The provider said `The provided model identifier is invalid` (400 ValidationException). `src/rebar/llm/failure.py` `_map_http` maps 401/403 and every non-context-length 400 to `CHANGE_SETTINGS`, and `classify_llm_failure` maps pydantic-ai `UserError` there too, but `RESOLUTION_MESSAGES[CHANGE_SETTINGS]` describes only the bound case, so it sends the operator to tokens/steps/timeout.\n\n## Approach\n1. `src/rebar/_cli/_llm_commands.py`: add a helper `_render_model_never_ran(result)` called from `_render_plan_review_text` right after `_render_step_failures`. When `coverage.llm_ran is False` it prints `  model did not run: <coverage.llm_error, first 300 chars>` (when present). When `coverage.build_drift` is a dict with a `remedy`, it prints `  build drift: <remedy>`. A clean run (`llm_ran` true or absent) prints neither line. Extracting a helper keeps `_render_plan_review_text` under its complexity ceiling.\n2. `src/rebar/llm/failure.py`: reword `RESOLUTION_MESSAGES[CHANGE_SETTINGS]` to cover what the class actually holds: \"The provider rejected the request because of a setting (credentials, the model id, or a request parameter such as a token/step/timeout bound) \u2014 check the configured model, credentials and bounds, then retry.\" Classification does not change.\nNo new config key, env var or flag. JSON output is unchanged.\n\n## Acceptance Criteria\n- [ ] A text-mode plan-review result whose `coverage` holds `llm_ran: false` and `build_drift` prints a `build drift:` line containing the remedy text (including `make install`); proved by a new test in `tests/unit/test_llm_commands_render.py`.\n- [ ] The same result prints a `model did not run:` line containing the `llm_error` provider message; proved by the same test file.\n- [ ] A result with `llm_ran` true and no `build_drift` prints neither line (no change to clean output); proved by the same test file.\n- [ ] `message_for(\"CHANGE_SETTINGS\")` mentions the model id and credentials as well as the bounds; proved by a new assertion in `tests/unit/test_llm_disposition_plumbing.py`, and `pytest tests/unit/test_llm_disposition_plumbing.py tests/unit/test_llm_commands_render.py tests/unit/test_build_drift_degraded_verdict.py` passes.\n\n## Testing\nWrite the RED tests first in `tests/unit/test_llm_commands_render.py` (degraded result with and without build drift, and a clean result) and `tests/unit/test_llm_disposition_plumbing.py` (message wording), confirm they fail, then implement. Run the 3 test files above and `make verify`.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Degraded review-plan text report hides the build-skew remedy and misnames an invalid-request 400"
+      },
       "created_at": "2026-11-13T17:32:25Z",
       "jira_id": "4599136",
       "jira_key": "REB-7186",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-13T17:32:30Z"
     },
@@ -50589,9 +50613,17 @@
       "updated_at": "2026-08-15T15:02:35Z"
     },
     "7466-c6c6-f0ef-46c8": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nBug `carbonous-bipartisan-ammonite` (46ec-e50d-49f6-4774, `b5d6e57cc01`) memoized the git toplevel per working directory in `_config_sources.repo_root`, and `rebar.show_ticket` now spawns 1 `git rev-parse --show-toplevel`. The CLI still spawns 4 for one `rebar show <id>`, because 3 other resolvers run their own uncached lookup.\n\nMeasured 2026-11-13 on origin/main `aa1681bb531` in a scratch repo with `REBAR_ROOT` unset (`GIT_TRACE2_EVENT`, plus a `subprocess.Popen` stack probe):\n1. `_config_sources.repo_root` (cached), from `_operation_config.compose_operation_snapshot` in `_cli/__init__._main_dispatch`.\n2. `_config_resolvers.repo_root_or_none` (`git -C . rev-parse --show-toplevel` with `GIT_DISCOVERY_ACROSS_FILESYSTEM=1`, uncached), from `_cli/_init.ensure_store_mounted_best_effort`.\n3. `_config_resolvers.repo_root_or_none` again, from `_cli/_init.ensure_initialized` \u2192 `_resolve_repo_root`.\n4. `_engine_support/reads.tracker_dir` (`git rev-parse --show-toplevel`, uncached), from `reads_cli.main`.\nThe library path (`rebar.show_ticket`) makes 1.\n\n## Approach\n`_config_sources` imports from `_config_resolvers` (the stdlib-only leaf), so the one memo must live in the leaf:\n1. Move `_TOPLEVEL_BY_CWD` and `_toplevel_still_valid` from `src/rebar/_config_sources.py` into `src/rebar/_config_resolvers.py`, and add one private lookup there, `_git_toplevel()`: key `(cwd, GIT_DIR, GIT_WORK_TREE)`, stat-only revalidation on a hit (unchanged rule: cached root still has `.git`, cwd inside it, no nested `.git` between), otherwise one `git -C . rev-parse --show-toplevel` with `GIT_DISCOVERY_ACROSS_FILESYSTEM=1`. It stores git's verbatim output and caches successes only.\n2. `repo_root_or_none` uses `_git_toplevel()` (still `None` outside a repository, still verbatim).\n3. `_config_sources.repo_root` uses `_git_toplevel()` and resolves the path; it still falls back to `Path.cwd()` outside a repository. It re-exports `_TOPLEVEL_BY_CWD` so `config.reset_config_cache` keeps clearing the one memo.\n4. `_engine_support/reads.tracker_dir` uses `repo_root_or_none()` and still raises `TrackerRootError` when it returns `None`.\nThe one behavior change: `repo_root` now also discovers across a filesystem boundary, the way `repo_root_or_none` (and so the CLI init path) already does, so both resolvers give the same answer for the same cwd. No new config key, env var or flag; the memo moves rather than a second one being added.\n\n## Acceptance Criteria\n- [ ] An in-process `rebar show <id>` through the CLI entry point (`rebar._cli.main`), with `REBAR_ROOT` unset, spawns at most 1 `git rev-parse --show-toplevel`; proved by a new test in `tests/unit/test_read_freshness_git_spawns.py`.\n- [ ] `repo_root_or_none` still returns `None` outside a repository, and a cwd change, a moved repository or a nested repository created later still resolve afresh; proved by tests in the same file.\n- [ ] `config.reset_config_cache()` empties the memo.\n- [ ] `pytest tests/unit/test_read_freshness_git_spawns.py` passes and `python scripts/check_mechanism_delta.py --check` exits 0.\n\n## Testing\nWrite the CLI spawn-count test first and watch it fail with 4, then fix. Add `repo_root_or_none` cases for `None` outside a repo and for a nested repo created after the first lookup. Run the file, `make verify`, and re-measure with `GIT_TRACE2_EVENT` in a scratch repo.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "CLI reads still spawn several git toplevel lookups: rebar show makes 4"
+      },
       "created_at": "2026-11-13T17:32:30Z",
       "jira_id": "4599137",
       "jira_key": "REB-7187",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-13T17:32:34Z"
     },
@@ -54219,6 +54251,13 @@
       "peer_parent": "REB-370",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:34Z"
+    },
+    "7d68-8e1e-2860-44fc": {
+      "created_at": "2026-11-13T18:32:17Z",
+      "jira_id": "4599148",
+      "jira_key": "REB-7190",
+      "state": "confirmed",
+      "updated_at": "2026-11-13T18:32:27Z"
     },
     "7d6a-16d2-ef8a-4b47": {
       "baseline": {
@@ -60490,9 +60529,17 @@
       "updated_at": "2026-09-05T05:43:58Z"
     },
     "8a82-3588-a6c6-4841": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n`docs/llm-framework.md` \u00a7\"Comparing the engines\" says each engine record in `rebar.llm.evals.engine_comparison` output names \"the verdict's `runner` and `model` and the provider-reported `ran_model`\". `_provenance` (`src/rebar/llm/evals/engine_comparison.py`) reads `ran_model` from `verdict[\"provider_provenance\"][\"ran_model\"]`. The plan-review verdict the harness gets back carries no `provider_provenance` key, so `ran_model` is always `null`.\n\nObserved 2026-11-13 on origin/main `aa1681bb531`. A live Bedrock run (`REBAR_LLM_CONFIG_FILE=.github/llm-providers/bedrock.toml AWS_PROFILE=frontier-bedrock`, a 1-row labels file holding `0128-9a17-79db-450e`) completed both engines: pipeline `model=bedrock:us.anthropic.claude-sonnet-5-5`, agentic `model=bedrock:us.anthropic.claude-opus-5-5`, both `runner=pydantic_ai`, and both `ran_model: null`. A `rebar review-plan --output=json` verdict likewise has keys `advisory, blocking, coaching, coverage, \u2026, model, runner, \u2026` and no `provider_provenance`. The runner builds `provider_provenance` (`src/rebar/llm/runner.py`, `ran_model` set after the call), and `plan_review/orchestrator.py` copies it into its output only when `provider_provenance` is passed in.\n\n## Approach\nTrace where the plan-review gate drops `provider_provenance` between the runner result and the verdict returned to the caller (`plan_review/workflow_ops.py` passes `ctx.inputs.get(\"provider_provenance\")`; `plan_review/agentic.py` reads `inputs.get(\"provider_provenance\")`), and carry the record of the call that produced the verdict onto the returned verdict for both engines. If several calls ran, use the one the verdict already names as its `model`. The harness then reads it unchanged. No new config key, env var or flag.\n\n## Acceptance Criteria\n- [ ] A plan-review verdict produced by either engine through a runner carries `provider_provenance.ran_model` naming the model that served the call; proved by a unit test with the fake runner for each engine.\n- [ ] `engine_comparison` records a non-null `ran_model` for each engine that ran; proved by `pytest tests/unit -k engine_comparison`.\n- [ ] Signed attestation material is unchanged (the field is verdict metadata, not signed material).\n\n## Testing\nAdd RED tests: one per engine asserting `provider_provenance.ran_model` on the returned verdict, and one harness test asserting a non-null `ran_model`. Run them, `make verify`, and a 1-row live comparison as above.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Engine comparison records ran_model as null for both engines"
+      },
       "created_at": "2026-11-13T17:32:34Z",
       "jira_id": "4599138",
       "jira_key": "REB-7188",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-13T17:32:38Z"
     },
@@ -93980,9 +94027,17 @@
       "updated_at": "2026-09-04T20:34:50Z"
     },
     "d631-a767-1327-48f1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n`rebar store fsck` parses its argv by hand (`fsck_cli`, `src/rebar/_commands/fsck.py`). It picks out the flags it knows (`--repair`, `--dry-run`, `--repair-snapshots`, `--include-archived`, `--only`, `--limit`, the output flags) and drops everything else, so an unknown or misspelled flag exits 0 with no message.\n\nObserved on origin/main `aa1681bb531` in a scratch store (2026-11-13):\n- `rebar store fsck --bogus` exits 0 and runs a normal check.\n- `rebar store fsck --limit` (no value) exits 0; the bare flag is dropped.\n- `rebar store fsck --repair --dryrun` (typo for `--dry-run`) runs the REAL repair: output `ensures: swept 10 unit(s); 0 changed, 0 failed`, where `--repair --dry-run` only reports. A typo turns a preview into a mutation of the store.\n\n`rebar store compact` already rejects unknown options (`Error: unknown option '--threshold'`, exit 1), so fsck is the odd one out.\n\n## Approach\nIn `fsck_cli`, after the known flags are taken out and `parse_output` runs, reject any leftover argument: write `Error: unknown option '<arg>'` plus the usage line to stderr and return 2, before any store access or repair. Reject a bare `--limit` the same way `--only` already is (`Error: --limit requires a value`, exit 2). No new flag, config key or env var.\n\n## Acceptance Criteria\n- [ ] `rebar store fsck --bogus` exits 2 and stderr names `--bogus`.\n- [ ] `rebar store fsck --repair --dryrun` exits 2 and makes no change to the store (no ensure sweep, no commit).\n- [ ] `rebar store fsck --limit` exits 2 with `--limit requires a value`.\n- [ ] Every documented spelling still works: `--only stale-channel --repair`, `--only=stale-channel --repair`, `--limit 1`, `--limit=1`, `--include-archived`, `--repair-snapshots`, `--dry-run`, and the output flags; proved by `pytest tests/unit/test_fsck_only_flag.py`.\n\n## Testing\nAdd RED tests to `tests/unit/test_fsck_only_flag.py` for the 3 rejected forms (exit 2, message, and for the typo case no repair call), then make them pass. Run `pytest tests/unit/test_fsck_only_flag.py` and `make verify`.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "rebar store fsck silently ignores unknown flags, so a typo'd --dry-run runs a real repair"
+      },
       "created_at": "2026-11-13T17:32:38Z",
       "jira_id": "4599139",
       "jira_key": "REB-7189",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-13T17:32:42Z"
     },
@@ -123908,6 +123963,7 @@
     "REB-7188": "8a82-3588-a6c6-4841",
     "REB-7189": "d631-a767-1327-48f1",
     "REB-719": "3cf7-56db-cbf2-4ba4",
+    "REB-7190": "7d68-8e1e-2860-44fc",
     "REB-72": "3121-87f8-f3a0-4cf1",
     "REB-720": "6173-32ea-1fc0-4f04",
     "REB-721": "62bc-4070-82b7-4fb9",
