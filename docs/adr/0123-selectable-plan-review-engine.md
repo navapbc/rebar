@@ -89,11 +89,12 @@ error or output that fails schema validation is INDETERMINATE, through the same
 no verify or decide pass, so its findings carry no priority or decision margin, as DET findings
 carry none.
 
-An agentic run that read no code, meaning it made no `read_file`, `search_files` or
-`list_directory` call, also resolves INDETERMINATE and is never signed (amended 2026-11-13, bug
-`bridal-gifted-vampirebat`). The agent call's run shape (`_usage.distinct_fetches`) lists those
-calls; when it is empty, or a reported `_usage` lacks it, the review degrades through the same
-path as a failed run, with `resolution_class` FIX_AGENT_DESIGN.
+Which tools the agent called does not affect the verdict: a run that finishes cleanly with
+schema-valid output is signed or BLOCKed on its findings alone (amended 2026-11-13, bug
+`theophilic-dejected-lunamoth`). A rule added earlier that day (bug `bridal-gifted-vampirebat`)
+made a clean run with no `read_file`, `search_files` or `list_directory` call resolve
+INDETERMINATE, unsigned. The operator never decided that rule, so it is withdrawn. The failed-run
+handling above is unchanged.
 
 ### 4. Finding schema mapping
 
@@ -220,3 +221,7 @@ changed (bug `appealing-driveable-ass`).
 refresh act on the current attestation under either engine, so a pipeline review can return a
 reused agentic PASS, while BLOCK reuse replays only a pipeline BLOCK. No behavior changed (bug
 `kinetic-dewy-reindeer`).
+
+§3 withdraws the rule that an agentic run with no `read_file`, `search_files` or
+`list_directory` call is never signed. The operator never decided it; a clean agentic run is
+again decided by its findings alone (bug `theophilic-dejected-lunamoth`).

@@ -246,12 +246,6 @@ def produce_plan_review_verdict(
 
     verdict = res.terminal_output
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
-        # An agent that read no code cannot certify a PASS (bug bridal-gifted-vampirebat).
-        unread = _plan_review_recovery.agentic_unread_error(rec) if engine == "agentic" else None
-        if unread is not None:
-            return _plan_review_recovery._degraded_plan_review_verdict(
-                ctx, cfg, error=unread, advisory_cap=advisory_cap, runner_name=runner_sel.name
-            )
         _plan_review_recovery._attach_plan_review_metrics(verdict, rec, total_ms)
         return verdict
 
