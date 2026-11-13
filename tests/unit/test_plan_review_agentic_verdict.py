@@ -208,6 +208,7 @@ def _unretryable(stop_reason: str | None) -> BaseException:
         (lambda: _unretryable("refusal"), "CHANGE_INPUT", True),
         (lambda: _unretryable("content_filter"), "CHANGE_INPUT", True),
         (lambda: _unretryable("max_tokens"), "CHANGE_SETTINGS", False),
+        (lambda: _unretryable("length"), "CHANGE_SETTINGS", False),
         (lambda: _unretryable(None), "NEEDS_INVESTIGATION", False),
         (lambda: errors.LLMBudgetExhaustedError("budget"), "FIX_AGENT_DESIGN", False),
         (lambda: errors.RunawayToolLoopError("loop"), "FIX_AGENT_DESIGN", False),
@@ -219,6 +220,7 @@ def _unretryable(stop_reason: str | None) -> BaseException:
         "refusal",
         "content-filter",
         "truncation",
+        "truncation-length",
         "retries-exhausted",
         "budget",
         "tool-loop",
@@ -287,3 +289,37 @@ def test_an_agentic_pass_certifies_for_a_later_pipeline_review(repo: Path) -> No
     assert v["coverage"].get("idempotent_skip") is True
     assert runner.calls == 0
     assert _status(repo, tid) == "certified"
+
+
+# ── the agent's run-shape diagnostic and the DET floor reach the adapted verdict ──
+def test_a_budget_failure_keeps_the_sanitized_run_shape_diagnostic(repo: Path) -> None:
+    exc = errors.LLMBudgetExhaustedError("budget")
+    # Attached as an attribute, exactly as run_failure.interpret_failure does.
+    exc.diagnostic = {"requests": 41, "tool_calls": 80, "input_tokens": 9}  # type: ignore[attr-defined]
+    v = _review(repo, _ticket(repo), _Fake(error=exc))
+    diagnostic = v["coverage"]["diagnostic"]
+    assert v["coverage"]["resolution_class"] == "FIX_AGENT_DESIGN"
+    assert (diagnostic["requests"], diagnostic["tool_calls"]) == (41, 80)
+    assert diagnostic["exception_type"] == "LLMBudgetExhaustedError"
+    assert "input_tokens" not in diagnostic  # off the sanitizer allowlist
+
+
+_PROVENANCE = {"provider": "fake-provider", "model_id": "fake-model", "endpoint": "fake"}
+
+
+class _ProvenanceFake(_Fake):
+    """Stamps a provider record on the agent call, as the real runner does."""
+
+    def run(self, req) -> dict:  # type: ignore[override]
+        out = super().run(req)
+        if req.output_schema == "plan_review_agentic_findings":
+            out = {**out, "provider_provenance": dict(_PROVENANCE)}
+        return out
+
+
+def test_det_advisories_and_provider_provenance_reach_the_agentic_verdict(repo: Path) -> None:
+    # No file_impact declared: the Layer-1 floor raises its P9 advisory, and the review still runs.
+    v = _review(repo, _ticket(repo), _ProvenanceFake([]))
+    det = [f for f in v["advisory"] if f.get("tier") == "DET"]
+    assert any("P9" in (f.get("criteria") or []) for f in det), v["advisory"]
+    assert v["provider_provenance"] == _PROVENANCE

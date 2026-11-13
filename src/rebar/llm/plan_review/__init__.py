@@ -623,7 +623,7 @@ def _run_plan_review(
 
     # The pipeline review's post-dispatch tail (ADR 0123): its floors, cross-checks and fix-unit
     # grouping each judge pipeline findings and may make their own LLM sub-call, so they run only
-    # under the pipeline engine — never on an agentic verdict (floor, interim, degraded or
+    # under the pipeline engine — never on an agentic verdict (floor, adapted, degraded or
     # input-rejected). The REVIEW_RESULT sidecar below is emitted under both engines.
     if engine == "pipeline":
         _apply_review_floors(
