@@ -596,3 +596,83 @@ def test_hashtag_failure_warns_and_still_submits(monkeypatch, capsys):
     assert safe_submit.main(["2764", "--revision", _SHA, "--hashtag", "rebar-session-x"]) == 0
     assert calls[-1][1].endswith(f"/revisions/{_SHA}/submit")
     assert "hashtag" in capsys.readouterr().err.lower()
+
+
+# ── an already-closed change (bug froggy-brightish-xiphias) ──────────────────────
+# Gerrit omits the labels' ``approved`` summary on a closed change, so re-running the script
+# after a merge used to report "missing live labels" (exit 3) for votes that exist.
+
+_MERGED_SHA = "a" * 40
+_EARLIER_SHA = "b" * 40
+_OTHER_SHA = "c" * 40
+_CLOSED_LABELS = {
+    "LLM-Review": {"all": [{"value": 1}]},
+    "Verified": {"all": [{"value": 1}]},
+}
+
+
+def _closed_change(monkeypatch, status: str, revisions: tuple[str, ...]) -> list[tuple]:
+    """Patch the module's Gerrit I/O for a change in ``status``; return the recorded calls."""
+    safe_submit = _safe_submit_module()
+    calls: list[tuple] = []
+
+    def fake_request(base_url: str, method: str, path: str, auth: str, body=None) -> dict:
+        calls.append((method, path, body))
+        assert method == "GET", f"a closed change must not be POSTed to: {path}"
+        return {
+            "status": status,
+            "current_revision": _MERGED_SHA,
+            "revisions": {sha: {} for sha in revisions},
+            "labels": _CLOSED_LABELS,
+            "unresolved_comment_count": 0,
+            "submittable": False,
+        }
+
+    monkeypatch.setattr(safe_submit, "_credential", lambda host: ("user", "pass"))
+    monkeypatch.setattr(safe_submit, "_request", fake_request)
+    monkeypatch.setenv("REBAR_SESSION_ID", "Session 1")
+    return safe_submit, calls
+
+
+def test_safe_submit_reports_a_merged_change_at_the_inspected_revision(monkeypatch, capsys):
+    safe_submit, calls = _closed_change(monkeypatch, "MERGED", (_MERGED_SHA,))
+
+    assert safe_submit.main(["3393", "--revision", _MERGED_SHA]) == 0
+
+    out = capsys.readouterr()
+    assert "already merged" in out.out
+    assert _MERGED_SHA in out.out
+    assert "missing live labels" not in out.err
+    assert all(method == "GET" for method, _, _ in calls)
+
+
+def test_safe_submit_counts_a_rebased_merge_of_the_inspected_revision(monkeypatch, capsys):
+    """Rebase-If-Necessary merges a newer patch set; the inspected one is still among them."""
+    safe_submit, calls = _closed_change(monkeypatch, "MERGED", (_EARLIER_SHA, _MERGED_SHA))
+
+    assert safe_submit.main(["3393", "--revision", _EARLIER_SHA]) == 0
+
+    assert "already merged" in capsys.readouterr().out
+    assert all(method == "GET" for method, _, _ in calls)
+
+
+def test_safe_submit_refuses_a_merged_change_at_another_revision(monkeypatch, capsys):
+    safe_submit, calls = _closed_change(monkeypatch, "MERGED", (_MERGED_SHA,))
+
+    assert safe_submit.main(["3393", "--revision", _OTHER_SHA]) == 2
+
+    err = capsys.readouterr().err
+    assert "MERGED" in err
+    assert _MERGED_SHA in err and _OTHER_SHA in err
+    assert all(method == "GET" for method, _, _ in calls)
+
+
+def test_safe_submit_refuses_an_abandoned_change(monkeypatch, capsys):
+    safe_submit, calls = _closed_change(monkeypatch, "ABANDONED", (_MERGED_SHA,))
+
+    assert safe_submit.main(["3393", "--revision", _MERGED_SHA]) == 3
+
+    err = capsys.readouterr().err
+    assert "abandoned" in err.lower()
+    assert "missing live labels" not in err
+    assert all(method == "GET" for method, _, _ in calls)

@@ -2,13 +2,15 @@
 """Submit a Gerrit change only if the inspected revision is still current.
 
 Exit codes:
-  0  submitted.
+  0  submitted, or the change is already merged with --revision among its patch sets
+     (says so; nothing is sent).
   2  refused: --revision is not a full 40-character commit SHA (checked before any
      Gerrit request), or the revision is stale (checked before submitting, or shown by
      re-reading the change after Gerrit answered 409), or Gerrit refused the submit with 409 for
      another reason (merge conflict, unmet submit requirement). stderr says which and
      prints Gerrit's response.
-  3  refused before submitting: a required vote is missing, comments are unresolved,
+  3  refused before submitting: the change is abandoned, a required vote is missing,
+     comments are unresolved,
      or Gerrit reports the change not submittable.
   4  no Gerrit credential for the host.
   1  the submit failed (any other HTTP error, a timeout or connection error, or an
@@ -176,6 +178,11 @@ def main(argv: list[str] | None = None) -> int:
 
     detail = read_change()
     current = detail.get("current_revision")
+    closed = _closed_change_exit(
+        args.change, args.revision, detail, _read_all_revisions(args, change, auth)
+    )
+    if closed is not None:
+        return closed
     if not _revision_matches(current, args.revision):
         print(
             f"refusing stale submit: inspected {args.revision}, current is {current}",
@@ -220,6 +227,41 @@ def main(argv: list[str] | None = None) -> int:
             args.change, args.revision, reason, _read_all_revisions(args, change, auth)
         )
     return 0
+
+
+def _closed_change_exit(
+    change: str, revision: str, detail: dict, reread: Callable[[], dict]
+) -> int | None:
+    """Report a change that is already closed, before the stale and vote checks; ``None``
+    when it is open.
+
+    Gerrit omits the labels' ``approved`` summary on a closed change, so the vote check would
+    report votes that exist as missing (bug froggy-brightish-xiphias). A merge that includes
+    ``revision`` among its patch sets (Rebase-If-Necessary may merge a newer one) is success,
+    as on the reconcile path. Nothing is POSTed on any of these paths.
+    """
+    status = detail.get("status")
+    current = detail.get("current_revision")
+    if status == "ABANDONED":
+        print(f"refusing submit: change {change} is abandoned", file=sys.stderr)
+        return 3
+    if status != "MERGED":
+        return None
+    revisions = detail.get("revisions") or {}
+    if revision not in revisions:
+        revisions = reread().get("revisions") or {}
+    if revision in revisions:
+        print(
+            f"change {change} is already merged at {current} "
+            f"(includes {revision}); nothing to submit"
+        )
+        return 0
+    print(
+        f"refusing submit: change {change} is MERGED at {current}, "
+        f"not at the inspected revision {revision}; nothing submitted",
+        file=sys.stderr,
+    )
+    return 2
 
 
 def _add_hashtag(base_url: str, change: str, auth: str, hashtag: str) -> None:
