@@ -262,6 +262,26 @@ def test_check_stop_reason_passes_on_normal(reason):
     structured.check_stop_reason(reason)  # no raise
 
 
+@pytest.mark.parametrize("reason", ["refusal", "max_tokens", "length", "content_filter"])
+def test_check_stop_reason_records_the_stop_reason(reason):
+    from rebar.llm.errors import UnretryableOutputError
+
+    with pytest.raises(UnretryableOutputError) as raised:
+        structured.check_stop_reason(reason)
+    assert raised.value.stop_reason == reason
+
+
+def test_check_response_records_a_provider_details_refusal():
+    from types import SimpleNamespace
+
+    from rebar.llm.errors import UnretryableOutputError
+
+    response = SimpleNamespace(finish_reason="stop", provider_details={"refusal": "declined"})
+    with pytest.raises(UnretryableOutputError) as raised:
+        structured.check_response(response)
+    assert raised.value.stop_reason == "refusal"
+
+
 # ── Bounds in the REAL contract models (not just the toy) ──────────────────────
 
 

@@ -379,7 +379,11 @@ def _agentic_outcome(exc: BaseException):
     from rebar.llm import failure as _failure
 
     def fixed(cls: _failure.ResolutionClass) -> _failure.LLMOutcome:
-        diagnostic = {"exception_type": type(exc).__name__}
+        # Keep the run-shape counters run_failure attaches (requests, tool_calls, limits) so an
+        # operator can see how far the agent got; the sanitizer's allowlist drops anything else.
+        diagnostic = _failure.sanitize_diagnostic(
+            {**dict(getattr(exc, "diagnostic", None) or {}), "exception_type": type(exc).__name__}
+        )
         return _failure.LLMOutcome(cls, diagnostic, retryable=cls in _failure._RETRYABLE)
 
     if getattr(exc, "stop_reason", None) in _TRUNCATION_STOP_REASONS:
