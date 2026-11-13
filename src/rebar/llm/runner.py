@@ -658,7 +658,9 @@ class PydanticAIRunner:
             answered = _runner_support._answering_model(run_messages, candidates)
             if answered is not None:
                 ran_model = answered
-            provider_provenance["ran_model"] = ran_model
+        # Every run attests the model that served it, not only a fallback chain: consumers
+        # read `provider_provenance.ran_model` (bug botchy-felt-bluefish).
+        provider_provenance["ran_model"] = ran_model
         # Emitted BEFORE finalize_outcome and it must stay there — see log_call_success's
         # docstring: finalization can raise, and this record is wanted when it does.
         log_call_success(
