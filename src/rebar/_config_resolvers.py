@@ -233,6 +233,30 @@ def repo_root_or_none(explicit: str | os.PathLike[str] | None = None) -> str | N
     env = os.environ.get("REBAR_ROOT")
     if env:
         return os.path.realpath(env)
+    found = _git_toplevel()
+    return found[0] if found is not None else None
+
+
+#: ``git rev-parse --show-toplevel`` answers per (cwd, GIT_DIR, GIT_WORK_TREE): git's verbatim
+#: output and its resolved path. One CLI read resolved the root in 4 places, each a git spawn
+#: with the same answer (carbonous-bipartisan-ammonite, carnivoral-scarlet-chihuahua). Entries
+#: are re-validated with stat calls on every hit, so a moved, deleted, or newly nested
+#: repository is never answered from here; only successful lookups are stored.
+_TOPLEVEL_BY_CWD: dict[tuple[str, str | None, str | None], tuple[str, Path]] = {}
+
+
+def _git_toplevel() -> tuple[str, Path] | None:
+    """The cwd's git toplevel as ``(verbatim, resolved)``, or ``None`` outside a repository.
+
+    The one lookup behind :func:`repo_root_or_none` and ``_config_sources.repo_root``: at most
+    one ``git rev-parse --show-toplevel`` per working directory, discovering across a
+    filesystem boundary."""
+    cwd = os.getcwd()
+    key = (cwd, os.environ.get("GIT_DIR"), os.environ.get("GIT_WORK_TREE"))
+    cached = _TOPLEVEL_BY_CWD.get(key)
+    if cached is not None and _toplevel_still_valid(cached[1], Path(cwd)):
+        return cached
+    _TOPLEVEL_BY_CWD.pop(key, None)
     try:
         cp = subprocess.run(
             ["git", "-C", ".", "rev-parse", "--show-toplevel"],
@@ -244,7 +268,31 @@ def repo_root_or_none(explicit: str | os.PathLike[str] | None = None) -> str | N
     except OSError:
         return None
     out = cp.stdout.strip()
-    return out if cp.returncode == 0 and out else None
+    if cp.returncode != 0 or not out:
+        return None
+    found = (out, Path(out).resolve())
+    _TOPLEVEL_BY_CWD[key] = found
+    return found
+
+
+def _toplevel_still_valid(root: Path, cwd: Path) -> bool:
+    """True while ``root`` is still the nearest repository at or above ``cwd``.
+
+    The cached root must still hold a ``.git`` entry, ``cwd`` must sit inside it, and no
+    directory between them may have gained its own ``.git`` (a repo created later)."""
+    try:
+        resolved = cwd.resolve()
+        rel = resolved.relative_to(root)
+    except (OSError, ValueError):
+        return False
+    if not (root / ".git").exists():
+        return False
+    probe = resolved
+    for _ in rel.parts:
+        if (probe / ".git").exists():
+            return False
+        probe = probe.parent
+    return True
 
 
 def resolve_otlp_endpoint(explicit: str | None = None) -> str:

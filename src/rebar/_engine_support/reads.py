@@ -87,7 +87,13 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
     or Git, append the configured relative directory, and raise
     :class:`TrackerRootError` outside a worktree.
     """
-    from rebar.config import ConfigError, compose_config, repo_root_env, tracker_dir_override
+    from rebar.config import (
+        ConfigError,
+        compose_config,
+        repo_root_env,
+        repo_root_or_none,
+        tracker_dir_override,
+    )
 
     env_dir = tracker_dir_override()
     if env_dir:
@@ -106,16 +112,10 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
         return name
     root = str(repo_root) if repo_root is not None else repo_root_env()
     if not root:
-        try:
-            root = (
-                subprocess.check_output(
-                    ["git", "rev-parse", "--show-toplevel"], stderr=subprocess.DEVNULL
-                )
-                .decode()
-                .strip()
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            raise TrackerRootError(_NOT_A_REPO) from None
+        # The cwd's toplevel, from the one per-cwd lookup the config resolvers share.
+        root = repo_root_or_none()
+        if not root:
+            raise TrackerRootError(_NOT_A_REPO)
     else:
         # Explicit roots must still be Git worktrees. The reconciler relies on a
         # failed read from an uninitialized root meaning "no local tickets".

@@ -23,8 +23,8 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_STEP_SUMMARY` | `src/rebar/_cli/_bridge_commands.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
-| `GIT_DIR` | `src/rebar/_config_sources.py` |  |
-| `GIT_WORK_TREE` | `src/rebar/_config_sources.py` |  |
+| `GIT_DIR` | `src/rebar/_config_resolvers.py` |  |
+| `GIT_WORK_TREE` | `src/rebar/_config_resolvers.py` |  |
 | `JIRA_API_TOKEN` | `src/rebar/config.py`, `src/rebar/reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/reconciler/runtime.py` |  |
 | `JIRA_PAT` | `src/rebar/reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/reconciler/runtime.py` |  |
 | `JIRA_PROJECT` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sections.py (canonical env name of jira.project)` |  |
@@ -235,7 +235,7 @@ _215 variables._
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
-- `src/rebar/_config_resolvers.py:291` — `os.environ.get(<non-literal>)`
+- `src/rebar/_config_resolvers.py:339` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:374` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:386` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:393` — `os.environ.get(<non-literal>)`
