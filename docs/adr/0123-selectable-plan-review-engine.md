@@ -89,6 +89,12 @@ error or output that fails schema validation is INDETERMINATE, through the same
 no verify or decide pass, so its findings carry no priority or decision margin, as DET findings
 carry none.
 
+An agentic run that read no code, meaning it made no `read_file`, `search_files` or
+`list_directory` call, also resolves INDETERMINATE and is never signed (amended 2026-11-13, bug
+`bridal-gifted-vampirebat`). The agent call's run shape (`_usage.distinct_fetches`) lists those
+calls; when it is empty, or a reported `_usage` lacks it, the review degrades through the same
+path as a failed run, with `resolution_class` FIX_AGENT_DESIGN.
+
 ### 4. Finding schema mapping
 
 | agentic field | pipeline finding field |

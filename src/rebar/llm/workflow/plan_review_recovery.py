@@ -20,6 +20,7 @@ STEP_FINDERS = "finders"
 STEP_VERIFY = "verify"
 STEP_DECIDE = "decide"
 STEP_COACH = "coach"
+STEP_AGENTIC_REVIEW = "agentic_review"
 
 # Stable scripted-step failure vocabulary.  This marker crosses the generic workflow recorder
 # boundary so gate dispatch can distinguish a local criteria/configuration fault from an LLM
@@ -28,7 +29,15 @@ CRITERIA_CONFIG_FAILURE_KIND = "criteria_config"
 
 # The step ids the recovery/metrics logic depends on being present in the loaded gate doc.
 _PLAN_REVIEW_REQUIRED_STEP_IDS = frozenset(
-    {STEP_PRECHECK, STEP_ASSEMBLE, STEP_FINDERS, STEP_VERIFY, STEP_DECIDE, STEP_COACH}
+    {
+        STEP_PRECHECK,
+        STEP_ASSEMBLE,
+        STEP_FINDERS,
+        STEP_VERIFY,
+        STEP_DECIDE,
+        STEP_COACH,
+        STEP_AGENTIC_REVIEW,
+    }
 )
 
 
@@ -419,6 +428,49 @@ def agentic_failure_error(last_error: BaseException | None, step_error: str) -> 
         return rejected
     last_error.outcome = _agentic_outcome(last_error)  # type: ignore[attr-defined]
     return last_error
+
+
+_CODE_READ_TOOLS = "read_file, search_files or list_directory"
+
+
+def agentic_unread_error(rec: Any) -> BaseException | None:
+    """The error an agentic review that read no code degrades with (bug bridal-gifted-vampirebat).
+
+    A real agent call records its run shape on ``outputs._usage``; ``distinct_fetches`` lists
+    only the code-reading calls (``usage_log.fetch_target``). A run with none read no code, so
+    its findings (often none) cannot certify a PASS: it degrades like any failed agentic run, as
+    FIX_AGENT_DESIGN. A reported ``_usage`` that lacks the run shape fails closed the same way.
+    ``None`` when the step did not run or its runner reported no usage at all (offline fakes)."""
+    from rebar.llm import errors as _errors
+    from rebar.llm import failure as _failure
+
+    step = next(
+        (
+            s
+            for s in getattr(rec, "steps", []) or []
+            if isinstance(s, dict)
+            and s.get("step_id") == STEP_AGENTIC_REVIEW
+            and s.get("status") == "succeeded"
+        ),
+        None,
+    )
+    usage = ((step or {}).get("outputs") or {}).get("_usage")
+    if not isinstance(usage, dict) or not usage or usage.get("distinct_fetches"):
+        return None
+    message = f"agentic review read no code: no {_CODE_READ_TOOLS} call"
+    err = _errors.LLMRunnerError(message)
+    diagnostic = {
+        "requests": usage.get("requests"),
+        "tool_calls": usage.get("tool_calls"),
+        "message": message,
+        "exception_type": type(err).__name__,
+    }
+    err.outcome = _failure.LLMOutcome(  # type: ignore[attr-defined]
+        _failure.ResolutionClass.FIX_AGENT_DESIGN,
+        _failure.sanitize_diagnostic(diagnostic),
+        retryable=False,
+    )
+    return err
 
 
 def _degraded_plan_review_verdict(

@@ -323,3 +323,69 @@ def test_det_advisories_and_provider_provenance_reach_the_agentic_verdict(repo: 
     det = [f for f in v["advisory"] if f.get("tier") == "DET"]
     assert any("P9" in (f.get("criteria") or []) for f in det), v["advisory"]
     assert v["provider_provenance"] == _PROVENANCE
+
+
+# ── an agent that read no code is never signed (bug bridal-gifted-vampirebat) ───────────
+class _UsageFake(_Fake):
+    """Reports a run-shape ``_usage`` on the agent call, as the real runner does."""
+
+    def __init__(self, usage: dict, findings=None) -> None:
+        super().__init__(findings)
+        self._agent_usage = usage
+
+    def run(self, req) -> dict:  # type: ignore[override]
+        out = super().run(req)
+        if req.output_schema == "plan_review_agentic_findings":
+            out = {**out, "_usage": dict(self._agent_usage)}
+        return out
+
+
+_READ = {"tool": "read_file", "target": "src/thing.py"}
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        {"requests": 1, "tool_calls": 0, "distinct_fetches": []},
+        {"requests": 2, "tool_calls": 1, "distinct_fetches": []},  # a show_ticket-only run
+        {"requests": 1, "input_tokens": 10},  # the run-shape reducer failed: fail closed
+    ],
+    ids=["no-tool-call", "no-code-read", "shape-missing"],
+)
+def test_an_agent_that_read_no_code_is_unsigned_indeterminate(repo: Path, usage: dict) -> None:
+    tid = _ticket(repo)
+    assert _status(repo, tid) == "unsigned"
+    v = _review(repo, tid, _UsageFake(usage))
+    assert v["verdict"] == "INDETERMINATE"
+    assert v["signature"]["signed"] is False
+    assert _status(repo, tid) == "unsigned"  # no attestation was written
+    coverage = v["coverage"]
+    assert coverage["engine"] == "agentic"
+    assert coverage["resolution_class"] == "FIX_AGENT_DESIGN"
+    assert coverage["retryable"] is False
+    assert "read_file" in coverage["diagnostic"]["message"]
+    assert coverage["diagnostic"].get("tool_calls") == usage.get("tool_calls")
+
+
+def test_an_agent_that_read_code_still_passes_and_signs(repo: Path) -> None:
+    tid = _ticket(repo)
+    usage = {"requests": 3, "tool_calls": 2, "distinct_fetches": [dict(_READ)]}
+    v = _review(repo, tid, _UsageFake(usage))
+    assert v["verdict"] == "PASS"
+    assert v["signature"]["signed"] is True
+    assert _status(repo, tid) == "certified"
+
+
+@pytest.mark.parametrize("usage", [None, {}], ids=["absent", "empty"])
+def test_a_runner_that_reports_no_usage_is_unchanged(repo: Path, usage) -> None:
+    runner = _Fake([]) if usage is None else _UsageFake(usage)
+    v = _review(repo, _ticket(repo), runner)
+    assert v["verdict"] == "PASS"
+    assert v["signature"]["signed"] is True
+
+
+def test_agentic_review_is_a_required_gate_step() -> None:
+    from rebar.llm.workflow import plan_review_recovery as recovery
+
+    assert recovery.STEP_AGENTIC_REVIEW == "agentic_review"
+    assert recovery.STEP_AGENTIC_REVIEW in recovery._PLAN_REVIEW_REQUIRED_STEP_IDS

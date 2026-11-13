@@ -249,3 +249,50 @@ def test_default_request_keeps_comment_and_mcp_tools(monkeypatch) -> None:
     names, toolsets = _offered_tools(monkeypatch, read_only=False)
     assert "comment_ticket" in names
     assert len(toolsets) == 1
+
+
+# ── the real runner reports code reads on _usage (bug bridal-gifted-vampirebat) ──────────
+def _usage_of_run(tmp_path: Path, monkeypatch, *, read_first: bool) -> dict:
+    """``_usage`` of one read-only run on the real runner; the model optionally reads a file."""
+    pytest.importorskip("pydantic_ai")
+    import pydantic_ai.models
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.runner import PydanticAIRunner, RunRequest
+
+    monkeypatch.setattr(pydantic_ai.models, "ALLOW_MODEL_REQUESTS", False)
+    (tmp_path / "thing.py").write_text("VALUE = 1\n")
+    turns = {"n": 0}
+
+    def gen(messages, info):
+        turns["n"] += 1
+        if read_first and turns["n"] == 1:
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="read_file", args={"path": "thing.py"})]
+            )
+        return ModelResponse(parts=[TextPart("done")])
+
+    cfg = LLMConfig(repo_path=str(tmp_path))
+    req = RunRequest(
+        system_prompt="s",
+        instructions="i",
+        config=cfg,
+        reviewers=["v"],
+        mode="text",
+        read_only=True,
+    )
+    return PydanticAIRunner(cfg, model_override=FunctionModel(gen)).run(req)["_usage"]
+
+
+def test_real_runner_reports_no_code_read_without_a_read(tmp_path: Path, monkeypatch) -> None:
+    usage = _usage_of_run(tmp_path, monkeypatch, read_first=False)
+    assert usage["tool_calls"] == 0
+    assert usage["distinct_fetches"] == []
+
+
+def test_real_runner_reports_a_read_file_call(tmp_path: Path, monkeypatch) -> None:
+    usage = _usage_of_run(tmp_path, monkeypatch, read_first=True)
+    assert usage["tool_calls"] == 1
+    assert [f["tool"] for f in usage["distinct_fetches"]] == ["read_file"]
