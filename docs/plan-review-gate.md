@@ -766,6 +766,11 @@ agentic engine). Select one per call:
 - MCP: the `engine` parameter of `review_plan` and `review_plan_start`
 - library: `rebar.llm.review_plan(ticket_id, engine="agentic")`
 
+The pipeline's attestation and BLOCK reuse, drift refresh, post-review floors and cross-checks
+run only under `pipeline`, so ADR 0052's re-review stability (no new blocking findings when an
+unchanged, signed plan is re-reviewed) holds for that engine only; an `agentic` re-review runs
+the agent afresh (ADR 0123 §6).
+
 Precedence: the explicit argument, then `[verify] plan_review_engine`, then `pipeline`. No
 environment variable selects it. Over MCP, the resolved engine is part of the de-dup key, so a
 pipeline run and an agentic run on one ticket are separate jobs.

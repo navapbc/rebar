@@ -47,6 +47,10 @@ on byte-identical plan text that cite unrelated code, restate a demonstrably-pre
 re-litigate a settled point. This is the headline contract the Pass-3 drift floor (already landed)
 and the two validation cross-checks below jointly uphold.
 
+> **Scope (2026-11-13).** This contract applies to the `pipeline` plan-review engine. The
+> mechanisms that uphold it run only under that engine, so an `agentic` re-review can surface new
+> blocking findings; see ADR 0123 §6.
+
 ### 3. Validation assessment cross-checks two consistency axes (this change)
 
 The "deciding whether a candidate is real" stage now runs two deterministic drops, each a PURE
