@@ -95,3 +95,83 @@ def test_accepted_spellings_reach_dispatch_with_the_same_values(
 
     assert fsck_cli(argv) == 0
     assert (seen[0]["only"], seen[0]["limit"], seen[0]["do_repair"]) == ("stale-channel", 3, True)
+
+
+# ── unknown and value-less flags (grim-flavoured-bull) ──────────────────────────────────────
+# fsck scans argv by hand and used to drop anything it did not recognise, so a typo exited 0:
+# `--repair --dryrun` ran the REAL repair. Every rejected form must fail before dispatch.
+
+
+def _no_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rebar._commands import fsck
+
+    def _boom(*_a, **_k):
+        raise AssertionError("fsck dispatched past argv validation")
+
+    monkeypatch.setattr(fsck, "_fsck_govern", _boom)
+    monkeypatch.setattr(fsck, "_repair_cli", _boom)
+
+
+@pytest.mark.parametrize(
+    ("argv", "named"),
+    [
+        (["--bogus"], "--bogus"),
+        (["--repair", "--dryrun"], "--dryrun"),
+        (["--repair", "extra"], "extra"),
+        (["--only=stale-channel", "--repair", "--include-archive"], "--include-archive"),
+    ],
+)
+def test_unknown_argument_is_rejected_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], argv, named
+) -> None:
+    _no_dispatch(monkeypatch)
+
+    rc = fsck_cli(argv)
+    err = capsys.readouterr().err
+
+    assert rc == 2
+    assert f"unknown option '{named}'" in err
+    assert "Usage: rebar store fsck" in err
+
+
+@pytest.mark.parametrize("argv", [["--limit"], ["--limit", "--repair"]])
+def test_bare_limit_requires_a_value(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], argv
+) -> None:
+    _no_dispatch(monkeypatch)
+
+    rc = fsck_cli(argv)
+    err = capsys.readouterr().err
+
+    assert rc == 2
+    assert "--limit requires a value" in err
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["--include-archived"], {"include_archived": True}),
+        (["--repair-snapshots"], {"repair_snapshots": True}),
+        (["--repair", "--dry-run"], {"do_repair": True, "dry_run": True}),
+        (["--limit", "1"], {"limit": 1}),
+        (["--limit=1"], {"limit": 1}),
+        (["--output", "json"], {"fmt": "json"}),
+        (["--output=json"], {"fmt": "json"}),
+        (["-o", "json"], {"fmt": "json"}),
+    ],
+)
+def test_documented_spellings_still_reach_dispatch(
+    monkeypatch: pytest.MonkeyPatch, argv, expected
+) -> None:
+    from rebar._commands import fsck
+
+    seen: list[dict] = []
+
+    def govern(**kwargs):
+        seen.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(fsck, "_fsck_govern", govern)
+
+    assert fsck_cli(argv) == 0
+    assert {k: seen[0][k] for k in expected} == expected

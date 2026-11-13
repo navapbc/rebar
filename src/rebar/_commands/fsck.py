@@ -346,6 +346,36 @@ def _join_flag_values(argv: list[str]) -> list[str]:
     return out
 
 
+def _parse_limit(argv: list[str]) -> tuple[int | None, int | None]:
+    """Return ``(limit, None)``, or ``(None, 2)`` after reporting a bare or non-integer
+    ``--limit`` (a bare one is still bare after :func:`_join_flag_values`)."""
+    limit: int | None = None
+    for a in argv:
+        if a == "--limit":
+            sys.stderr.write("Error: --limit requires a value\n")
+            return None, 2
+        if a.startswith("--limit="):
+            try:
+                limit = int(a[len("--limit=") :])
+            except ValueError:
+                sys.stderr.write(f"Error: invalid --limit value in '{a}'\n")
+                return None, 2
+    return limit, None
+
+
+def _reject_unknown(arg: str) -> int:
+    """Refuse an argument fsck does not take, before any store access (grim-flavoured-bull).
+
+    The scan above picks out only the flags it knows; anything left over used to be dropped,
+    so a typo such as ``--repair --dryrun`` ran the real repair and exited 0.
+    """
+    from rebar._cli._parsers.core.repair import build_fsck
+
+    usage = build_fsck(prog="rebar store fsck").format_usage().replace("usage:", "Usage:", 1)
+    sys.stderr.write(f"Error: unknown option '{arg}'\n{usage}")
+    return 2
+
+
 def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int:
     # ``--repair-snapshots`` permits rebuilding a stale snapshot with a pre-snapshot orphan.
     # Strip it before output parsing and honor it only on mutating paths.
@@ -374,14 +404,9 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
             sys.stderr.write("Error: --only=stale-channel requires --repair\n")
             return 2
         only = "stale-channel"
-    limit: int | None = None
-    for a in argv:
-        if a.startswith("--limit="):
-            try:
-                limit = int(a[len("--limit=") :])
-            except ValueError:
-                sys.stderr.write(f"Error: invalid --limit value in '{a}'\n")
-                return 2
+    limit, limit_rc = _parse_limit(argv)
+    if limit_rc is not None:
+        return limit_rc
     argv = [
         a
         for a in argv
@@ -390,10 +415,12 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
         and a not in only_args
     ]
     try:
-        fmt, _rest = parse_output(argv, "report")
+        fmt, rest = parse_output(argv, "report")
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
+    if rest:
+        return _reject_unknown(rest[0])
 
     # The bespoke scan owns repeated flags, equals-only filters, and output parsing. The parser
     # factory still governs canonical argv through ``_fsck_govern`` and may reject it.
