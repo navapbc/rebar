@@ -138,7 +138,14 @@ migration is written. Re-signing carries the field forward.
     bucket, count or verdict;
   - the pre-dispatch shortcuts: idempotent attestation reuse (`reuse.idempotent_reuse`), BLOCK
     verdict reuse (`reuse.verdict_reuse`) and the progressive drift refresh
-    (`orchestrator.drift_refresh`). Each reuses or re-signs a pipeline attestation or verdict.
+    (`orchestrator.drift_refresh`). Each returns a stored attestation or verdict instead of a
+    fresh review, so an agentic review never takes them. Under the pipeline engine,
+    `verdict_reuse` replays a stored BLOCK only when that review's `coverage.engine` is
+    `pipeline`. `idempotent_reuse` and `drift_refresh` act on the ticket's current attestation,
+    whichever engine signed it: a pipeline review of an unchanged ticket whose current
+    attestation is agentic returns that PASS reused (`coverage.idempotent_skip`) without running
+    the pipeline, and a drift refresh keeps the attestation's `engine` (amended 2026-11-13, bug
+    `kinetic-dewy-reindeer`).
 
   Why:
   - §3 makes severity alone decide an agentic verdict: only `blocker` blocks. The drift floor and
@@ -147,8 +154,14 @@ migration is written. Re-signing carries the field forward.
   - The rising and completion floors only thin advisory findings, and fix-unit grouping only
     stamps blocking findings for display. None changes an agentic verdict, and each is tuned to
     pipeline findings.
-  - The shortcuts hand back a pipeline attestation or verdict, which an agentic review must not
-    inherit; under agentic each review runs the agent afresh.
+  - The shortcuts hand back a stored attestation or verdict, which an agentic review must not
+    inherit; under agentic each review runs the agent afresh. A PASS attestation is the same
+    certification under either engine (above), so a pipeline review may reuse or refresh an
+    agentic one, and the attestation's `engine` still names the engine that reviewed the plan. A
+    pipeline review never replays an agentic BLOCK as its own.
+    `tests/unit/test_plan_review_agentic_verdict.py::test_an_agentic_pass_certifies_for_a_later_pipeline_review`
+    and `tests/unit/test_plan_review_attest_engine.py::test_refresh_carries_the_prior_engine`
+    pin this.
   - Every tail step only removes or stamps findings, so skipping it can keep a BLOCK the tail
     would have dropped from the same agentic findings, but cannot turn a BLOCK into a PASS. This
     compares an agentic verdict with the tail run on the same agentic findings, not with the
@@ -202,3 +215,8 @@ completion and drift floors, cross-checks, fix-unit grouping) and the pre-dispat
 (attestation reuse, BLOCK verdict reuse, drift refresh), why each stays pipeline-only, and that
 ADR 0052 §2's re-review stability therefore holds for the pipeline engine only. No behavior
 changed (bug `appealing-driveable-ass`).
+
+§6 also corrects which attestation the shortcuts reuse: attestation reuse and the drift
+refresh act on the current attestation under either engine, so a pipeline review can return a
+reused agentic PASS, while BLOCK reuse replays only a pipeline BLOCK. No behavior changed (bug
+`kinetic-dewy-reindeer`).

@@ -31,7 +31,7 @@ def _register_gate_status_reads(mcp, ann) -> None:
         """Report plan-certificate currency using the exact claim-gate check.
 
         This read uses no LLM or network. It returns ``{ok, verdict, reason,
-        verified_at_sha, signed_at}``; current is ``certified``, otherwise
+        verified_at_sha, signed_at, currency_basis, engine}``; current is ``certified``, otherwise
         ``stale-code``, ``stale-head``, ``stale-material``, ``stale-reopened``,
         ``stale-pin-drift``, ``stale-pin-missing``, ``stale-store``, ``unsigned``,
         ``wrong-kind``, ``malformed-pin``, ``malformed-phase``,
