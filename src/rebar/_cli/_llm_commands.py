@@ -428,6 +428,20 @@ def _render_step_failures(result: dict) -> None:
     )
 
 
+def _render_model_never_ran(result: dict) -> None:
+    """Name why the model never ran, and the build-drift remedy, on a degraded verdict.
+
+    JSON already carries ``coverage.llm_error`` and ``coverage.build_drift``; without these
+    lines the text report shows only the verdict and counts. A clean run prints nothing.
+    """
+    coverage = result.get("coverage", {}) or {}
+    if coverage.get("llm_ran") is False and coverage.get("llm_error"):
+        sys.stdout.write(f"  model did not run: {str(coverage['llm_error'])[:300]}\n")
+    drift = coverage.get("build_drift")
+    if isinstance(drift, dict) and drift.get("remedy"):
+        sys.stdout.write(f"  build drift: {drift['remedy']}\n")
+
+
 def _render_reuse_notation(result: dict) -> None:
     """Explain that unchanged findings were replayed, not freshly reviewed.
 
@@ -469,6 +483,7 @@ def _render_plan_review_text(result: dict) -> None:
     sys.stdout.write(f"PLAN REVIEW: {v} for {result.get('ticket_id')}\n")
     _render_reuse_notation(result)
     _render_step_failures(result)
+    _render_model_never_ran(result)
     counts = (result.get("coverage", {}) or {}).get("counts", {}) or {}
     overflow = counts.get("advisory_overflow", 0)
     sys.stdout.write(

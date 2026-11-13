@@ -349,7 +349,9 @@ RESOLUTION_MESSAGES: dict[str, str] = {
         "Provider usage/quota ceiling hit — raise the provider limit or wait for the reset."
     ),
     ResolutionClass.CHANGE_SETTINGS.value: (
-        "The request exceeded a configured bound (tokens/steps/timeout) — adjust it and retry."
+        "The provider rejected the request because of a setting (credentials, the model id, "
+        "or a request parameter such as a token/step/timeout bound) — check the configured "
+        "model, credentials and bounds, then retry."
     ),
     ResolutionClass.CHANGE_INPUT.value: (
         "The input was rejected (too large / malformed) — reduce or fix it and retry."
