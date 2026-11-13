@@ -126,6 +126,44 @@ migration is written. Re-signing carries the field forward.
   library, and MCP synchronous and async start-and-poll tools, with the MCP de-dup key including
   the engine and gate admission (`GATE_CONGESTED`) unchanged.
 - A non-blocking PASS earns the same certification under both.
+- **Pipeline-only steps** (amended 2026-11-13, bug `appealing-driveable-ass`). `_run_plan_review`
+  runs these only under the pipeline engine:
+  - the post-dispatch tail (`_apply_review_floors`): the rising floor and the completion floor,
+    which drop advisory findings only (the completion floor also needs a container ticket with
+    delivered children and `verify.completion_floor_active`); the drift floor and the two
+    cross-checks (`xcheck`), which drop findings from the blocking and advisory lists and then
+    re-derive the verdict string, so they can turn a BLOCK into a PASS or an INDETERMINATE (the
+    cross-checks are inert unless their `verify.*_xcheck_active` flags are on); and fix-unit
+    grouping, one LLM sub-call that stamps co-cited blocking findings for display and changes no
+    bucket, count or verdict;
+  - the pre-dispatch shortcuts: idempotent attestation reuse (`reuse.idempotent_reuse`), BLOCK
+    verdict reuse (`reuse.verdict_reuse`) and the progressive drift refresh
+    (`orchestrator.drift_refresh`). Each reuses or re-signs a pipeline attestation or verdict.
+
+  Why:
+  - §3 makes severity alone decide an agentic verdict: only `blocker` blocks. The drift floor and
+    cross-checks remove blocking findings by their own rules, so running them on an agentic
+    verdict would override that decision.
+  - The rising and completion floors only thin advisory findings, and fix-unit grouping only
+    stamps blocking findings for display. None changes an agentic verdict, and each is tuned to
+    pipeline findings.
+  - The shortcuts hand back a pipeline attestation or verdict, which an agentic review must not
+    inherit; under agentic each review runs the agent afresh.
+  - Every tail step only removes or stamps findings, so skipping it can keep a BLOCK the tail
+    would have dropped from the same agentic findings, but cannot turn a BLOCK into a PASS. This
+    compares an agentic verdict with the tail run on the same agentic findings, not with the
+    pipeline's verdict: the engines produce different finding sets. It is consistent with the
+    epic's no-bypass invariant, which the attestation binding (§5) enforces.
+
+  Consequence: ADR 0052 §2's re-review-stability contract (re-reviewing an unchanged, signed plan,
+  at an unchanged or a drifted HEAD, yields no new blocking findings) is upheld by attestation
+  reuse, the drift refresh, the drift floor and the cross-checks, so it holds for the pipeline
+  engine only. An agentic re-review runs the agent afresh and can surface new blocking findings.
+
+  `tests/unit/test_plan_review_agentic.py::test_post_dispatch_tail_runs_only_under_pipeline`
+  pins the tail's single entry point, `_apply_review_floors`: it runs for a pipeline review and
+  never for an agentic one (floor-blocked, DET-passing or degraded). It pins the entry point, not
+  each step inside it.
 
 ### 7. Model upgrade
 
@@ -156,3 +194,11 @@ The key's `mechanism-ok: config_key` marker now names the standing admission tic
 `cankered-cloistered-bittern` (`7447-47d8-051d-42ab`), which stays open while the key exists.
 The default (`"pipeline"`), the precedence and the absence of an environment variable are
 unchanged.
+
+## Amendment (2026-11-13)
+
+§6 now records which steps run only under the pipeline engine: the post-dispatch tail (rising,
+completion and drift floors, cross-checks, fix-unit grouping) and the pre-dispatch shortcuts
+(attestation reuse, BLOCK verdict reuse, drift refresh), why each stays pipeline-only, and that
+ADR 0052 §2's re-review stability therefore holds for the pipeline engine only. No behavior
+changed (bug `appealing-driveable-ass`).
