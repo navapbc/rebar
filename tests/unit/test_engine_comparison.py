@@ -370,3 +370,73 @@ def test_cli_exit_code_and_file_backed_resume(tmp_path: Path) -> None:
         )
         == 1
     )
+
+
+# ── defects of vegetarian-mica-phoebe ───────────────────────────────────────────
+def test_overlap_counts_overflow_advisories_beyond_the_cap() -> None:
+    verdict = {
+        "blocking": [{"finding": "block 0", "tier": "LLM"}],
+        "advisory": [
+            {"finding": "det advice", "tier": "DET"},
+            *({"finding": f"advice {n}"} for n in range(20)),
+        ],
+        "overflow": [{"finding": f"overflow {n}"} for n in range(5)],
+    }
+    surfaced = ec._surfaced(verdict)
+    assert len(surfaced) == 26
+    assert "overflow 4" in surfaced and "det advice" not in surfaced
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("corpus_digest", "0" * 64),
+        ("corpus", "labels-other.jsonl"),
+        ("match_threshold", 0.9),
+        ("schema_version", 1),
+    ],
+)
+def test_resume_refuses_a_saved_run_with_a_different_header(
+    tmp_path: Path, capsys, field: str, value: object
+) -> None:
+    labels = _labels(tmp_path, [_row(1, "PASS")])
+    out = tmp_path / "results.json"
+    args = ["--labels", str(labels), "--out", str(out)]
+    assert ec.main(args, make_runner=lambda cfg: _Scripted({}), title_lookup=lambda t: None) == 0
+    saved = json.loads(out.read_text())
+    saved[field] = value
+    out.write_text(json.dumps(saved))
+    capsys.readouterr()
+    runner = _Scripted({})
+    code = ec.main([*args, "--resume"], make_runner=lambda cfg: runner, title_lookup=lambda t: None)
+    assert code == 2
+    assert field in capsys.readouterr().err
+    assert runner.calls == 0
+    assert json.loads(out.read_text())[field] == value  # the saved file is left untouched
+
+
+def test_each_engine_record_names_its_runner_and_model(tmp_path: Path) -> None:
+    rows = [_row(1, "PASS"), _row(2, "PASS", _PLAN.replace("thing", "boom"))]
+    items = _run(tmp_path, rows, _Scripted({"boom": []}, raise_on={"boom"}))["items"]
+    for engine in ec.ENGINES:
+        record = items[0][engine]
+        assert isinstance(record["runner"], str) and record["runner"]
+        assert isinstance(record["model"], str) and record["model"]
+        assert "ran_model" in record
+    # A provider error degrades inside review_plan, so the errored record still names its runner.
+    degraded = items[1]["agentic"]
+    assert degraded["outcome"] == "error" and degraded["runner"]
+
+
+def test_provenance_copies_the_verdicts_runner_model_and_served_model() -> None:
+    verdict = {
+        "runner": "pydantic_ai",
+        "model": "bedrock:us.anthropic.claude-sonnet-5-5",
+        "provider_provenance": {"ran_model": "us.anthropic.claude-opus-5-5"},
+    }
+    assert ec._provenance(verdict) == {
+        "runner": "pydantic_ai",
+        "model": "bedrock:us.anthropic.claude-sonnet-5-5",
+        "ran_model": "us.anthropic.claude-opus-5-5",
+    }
+    assert ec._provenance(None) == {"runner": None, "model": None, "ran_model": None}

@@ -634,13 +634,21 @@ disposable store seeded with the plan's `file_impact` files at the checkout's HE
 and with no sidecar. It reports verdict agreement, the confusion matrix, blocking flips,
 finding overlap (token-set Jaccard >= 0.5, DET findings excluded) and each engine's agreement
 with the historical pipeline verdict. Errors, Layer-1 floor blocks and other INDETERMINATEs are
-tallied separately and never scored as disagreement.
+tallied separately and never scored as disagreement. Overlap counts every non-DET finding,
+including the `overflow` advisories beyond the verdict's advisory cap. Each engine record names
+the verdict's `runner` and `model` and the provider-reported `ran_model`. `--resume` reuses saved
+records only when the saved `schema_version`, `corpus`, `corpus_digest` and `match_threshold`
+match the current run; otherwise it exits 2 and names the mismatched field.
 
 ```sh
 python -m rebar.llm.evals.engine_comparison --dry-run            # list the corpus, no model call
-AWS_PROFILE=frontier-bedrock python -m rebar.llm.evals.engine_comparison \
+REBAR_LLM_CONFIG_FILE=.github/llm-providers/bedrock.toml AWS_PROFILE=frontier-bedrock \
+  python -m rebar.llm.evals.engine_comparison \
     --out src/rebar/llm/eval_specs/engine_comparison_results.json   # live; --resume after an interruption
 ```
+
+Each review runs in a disposable store with no `rebar.toml`, so the provider overlay is what
+selects Bedrock; without `REBAR_LLM_CONFIG_FILE` the stores resolve the built-in default model.
 
 The recorded run is `src/rebar/llm/eval_specs/engine_comparison_results.json`.
 

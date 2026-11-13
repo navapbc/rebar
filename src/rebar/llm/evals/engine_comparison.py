@@ -39,6 +39,10 @@ DECIDED = ("PASS", "BLOCK")
 RETRYABLE = frozenset({"WAIT_AND_RETRY", "RETRY_NOW"})
 RETRY_DELAY_S = 60
 _ERROR_FLAGS = ("llm_unavailable", "input_rejected", "config_fault")
+#: 2: engine records carry ``runner``/``model``/``ran_model`` and overlap counts ``overflow``.
+SCHEMA_VERSION = 2
+#: Header fields a ``--resume`` must match before it may reuse a saved run's records.
+RESUME_KEYS = ("schema_version", "corpus", "corpus_digest", "match_threshold")
 
 __all__ = [
     "DECIDED",
@@ -49,6 +53,7 @@ __all__ = [
     "load_rows",
     "main",
     "match_findings",
+    "resume_mismatch",
     "select_rows",
     "summarize",
 ]
@@ -111,8 +116,10 @@ def classify_outcome(verdict: dict[str, Any] | None, exc: BaseException | None =
 
 
 def _surfaced(verdict: dict[str, Any] | None) -> list[str]:
-    """The non-DET surfaced finding texts of a verdict (DET findings match by construction)."""
-    found = [*((verdict or {}).get("blocking") or []), *((verdict or {}).get("advisory") or [])]
+    """The non-DET finding texts of a verdict (DET findings match by construction), including
+    the ``overflow`` advisories cut by the advisory cap, so the count never depends on it."""
+    v = verdict or {}
+    found = [*(v.get("blocking") or []), *(v.get("advisory") or []), *(v.get("overflow") or [])]
     return [str(f.get("finding") or "") for f in found if f.get("tier") != "DET"]
 
 
@@ -299,8 +306,21 @@ def _review_in_fresh_store(
             sleep(RETRY_DELAY_S)
             result = _review_once(tid, engine, store, cfg, runner)
     record = {k: v for k, v in result.items() if k != "verdict"}
+    record.update(_provenance(result["verdict"]))
     record["findings"] = _surfaced(result["verdict"])
     return record
+
+
+def _provenance(verdict: dict[str, Any] | None) -> dict[str, Any]:
+    """The runner and configured model the verdict names, and the model the provider reported
+    serving (``provider_provenance.ran_model``); all ``None`` when the engine raised."""
+    v = verdict or {}
+    served = v.get("provider_provenance") or {}
+    return {
+        "runner": v.get("runner"),
+        "model": v.get("model"),
+        "ran_model": served.get("ran_model") if isinstance(served, dict) else None,
+    }
 
 
 def review_row(
@@ -364,7 +384,7 @@ def run(
 def _results(labels_path, rows, items, *, dry_run: bool) -> dict[str, Any]:
     summary = summarize(items)
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         # The file NAME (content-hashed), never a local path: the results are committed.
         "corpus": Path(labels_path).name,
         "corpus_digest": corpus_digest(labels_path, rows),
@@ -375,6 +395,36 @@ def _results(labels_path, rows, items, *, dry_run: bool) -> dict[str, Any]:
         "summary": summary,
         "items": list(items),
     }
+
+
+def resume_mismatch(saved: dict[str, Any], current: dict[str, Any]) -> str | None:
+    """The first :data:`RESUME_KEYS` field on which a saved run differs from the current one,
+    or ``None`` when the saved records may be reused."""
+    for key in RESUME_KEYS:
+        if saved.get(key) != current.get(key):
+            return key
+    return None
+
+
+def _load_resume(out: Path, labels: Path, rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    """The saved run at ``out``; ``SystemExit(2)`` when its header does not match this run."""
+    import sys
+
+    saved = json.loads(out.read_text())
+    current = {
+        "schema_version": SCHEMA_VERSION,
+        "corpus": Path(labels).name,
+        "corpus_digest": corpus_digest(labels, rows),
+        "match_threshold": MATCH_THRESHOLD,
+    }
+    field = resume_mismatch(saved, current)
+    if field is not None:
+        sys.stderr.write(
+            f"--resume refused: {field} differs "
+            f"(saved={saved.get(field)!r}, current={current[field]!r})\n"
+        )
+        raise SystemExit(2)
+    return saved
 
 
 def _default_labels() -> Path:
@@ -418,7 +468,10 @@ def main(
         return 0
     resume = None
     if args.resume and args.out and args.out.exists():
-        resume = json.loads(args.out.read_text())
+        try:
+            resume = _load_resume(args.out, labels, rows)
+        except SystemExit as exc:
+            return int(exc.code or 2)
     if make_runner is None:
         from rebar.llm.runner import get_runner
 
