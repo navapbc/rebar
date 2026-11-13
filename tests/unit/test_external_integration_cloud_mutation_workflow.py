@@ -108,6 +108,8 @@ def test_teardown_also_sweeps_run_prefixed_issues_and_fix_versions() -> None:
     env = teardown.get("env") or {}
     assert 'prefix="${REBAR_PROBE_RUN_LABEL#rebar-id:}"' in body, "no run prefix derived"
     assert "summary ~" in body and "${prefix}" in body, "no summary sweep by run prefix"
+    # JQL `summary ~` is fuzzy: the step must re-check the exact prefix before deleting.
+    assert 'os.environ["PREFIX"] in str(' in body, "summary hits are deleted without an exact check"
     assert "/rest/api/3/project/" in body and "/versions" in body, "no fix-version listing"
     assert "-X DELETE" in body and "/rest/api/3/version/" in body, "no fix-version delete"
     assert "JIRA_PROJECT" in env, "the version sweep needs the project key"
