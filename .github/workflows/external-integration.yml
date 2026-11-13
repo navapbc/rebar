@@ -773,8 +773,9 @@ jobs:
           rows_to_keys='import json,sys; d=json.load(sys.stdin); rows=d.get("issues", d) if isinstance(d, dict) else d; rows=rows if isinstance(rows, list) else []; print("\n".join(str(r.get("key") or r.get("id")) for r in rows if isinstance(r, dict) and (r.get("key") or r.get("id"))))'
           hits="$(acli jira workitem search --jql "labels = \"${REBAR_PROBE_RUN_LABEL}\"" --json 2>/dev/null)"
           keys="$(printf '%s' "$hits" | python3 -c "$rows_to_keys" 2>/dev/null)"
-          hits="$(acli jira workitem search --jql "project = \"${JIRA_PROJECT:-REB}\" AND summary ~ \"\\\"${prefix}\\\"\"" --json 2>/dev/null)"
-          keys="$keys $(printf '%s' "$hits" | python3 -c "$rows_to_keys" 2>/dev/null)"
+          # JQL text search is fuzzy, so delete only hits whose summary really contains the prefix.
+          hits="$(acli jira workitem search --jql "project = \"${JIRA_PROJECT:-REB}\" AND summary ~ \"\\\"${prefix}\\\"\"" --fields summary --json 2>/dev/null)"
+          keys="$keys $(printf '%s' "$hits" | PREFIX="$prefix" python3 -c 'import json,os,sys; d=json.load(sys.stdin); rows=d.get("issues", d) if isinstance(d, dict) else d; rows=rows if isinstance(rows, list) else []; print("\n".join(str(r["key"]) for r in rows if isinstance(r, dict) and r.get("key") and os.environ["PREFIX"] in str((r.get("fields") or {}).get("summary", ""))))' 2>/dev/null)"
           for key in $keys; do
             echo "sweeping leaked issue $key"
             acli jira workitem delete --key "$key" --yes || true
