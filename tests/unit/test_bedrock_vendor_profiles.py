@@ -88,7 +88,13 @@ def _cfg(tmp_path, model_id: str):
     )
 
 
-def _run_agentic(monkeypatch, tmp_path, client: _ScriptedClient, model_id: str = _MAVERICK):
+def _run_agentic(
+    monkeypatch,
+    tmp_path,
+    client: _ScriptedClient,
+    model_id: str = _MAVERICK,
+    execution_mode: str = "agentic",
+):
     import boto3
 
     from rebar.llm.runner import PydanticAIRunner, RunRequest
@@ -102,7 +108,7 @@ def _run_agentic(monkeypatch, tmp_path, client: _ScriptedClient, model_id: str =
             instructions="Read notes.txt, then answer.",
             config=cfg,
             mode="text",
-            execution_mode="agentic",
+            execution_mode=execution_mode,
         )
     )
 
@@ -139,6 +145,22 @@ def test_agentic_run_on_a_meta_model_completes_a_tool_turn(monkeypatch, tmp_path
     # meta has no Bedrock prompt caching: no cache point may reach the request.
     for call in client.calls:
         assert not [b for b in _blocks(call) if "cachePoint" in b], call
+
+
+@pytest.mark.parametrize("execution_mode", ["single_turn", "agentic"])
+def test_a_run_with_no_fallback_chain_attests_the_model_that_ran(
+    monkeypatch, tmp_path, execution_mode
+):
+    """``provider_provenance.ran_model`` names the model that served the call even when the
+    config has no fallback chain (bug botchy-felt-bluefish): the engine-comparison harness and
+    the replay corpus read it, and a single-model run used to leave it unset."""
+    client = _ScriptedClient()
+
+    result = _run_agentic(monkeypatch, tmp_path, client, execution_mode=execution_mode)
+
+    assert client.calls[0]["modelId"] == _MAVERICK
+    assert result["provider_provenance"]["ran_model"] == f"bedrock:{_MAVERICK}"
+    assert result["provider_provenance"]["ran_model"] == result["model"]
 
 
 @pytest.mark.parametrize("model_id", [_MAVERICK, "unknownvendor.some-model-v1:0"])
