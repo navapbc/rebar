@@ -12082,10 +12082,24 @@
     },
     "1bdc-d4f7-2160-4fda": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n\n`[verify] plan_review_engine` is a first-class, permanent setting. Both plan-review engines, the 4-pass pipeline and the single read-only agent, stay supported, and this key selects between them (operator decision, 2026-11-12). It must follow the repo's established conventions.\n\nTwo things still treat it as temporary:\n- **Its mechanism-ratchet marker names a retirement ticket.** `src/rebar/_config_sections.py:57` reads `# mechanism-ok: config_key verify.plan_review_engine \u2014 bossy-impish-hoiho`. That ticket plans to retire an engine, which will not happen, and rebar refuses to close it while the marker names it.\n- **Wording calls it temporary:**\n  - `src/rebar/_config_sources.py:361`: \"The engine-switch sunset ticket removes the entry.\"\n  - `rebar.toml:34`: \"Sunset with the switch: bossy-impish-hoiho.\"\n  - `docs/adr/0123-selectable-plan-review-engine.md:40-41`: the Lifetime bullet.\n  - `docs/adr/0123-selectable-plan-review-engine.md:136`: the Consequences bullet.\n\n**Convention for admitting a mechanism added after the baseline froze** (`docs/architecture.md` \u00a7\"Mechanism-delta ratchet\"; `src/rebar/_commands/sunset_markers.py`):\n- A contributor never hand-edits `.github/mechanism-baseline.json`.\n- A `# mechanism-ok:` marker at the definition site names a ticket, and that ticket stays open while the marker exists.\n- For a permanent setting, the named ticket is a standing admission ticket. That ticket is `cankered-cloistered-bittern` (`7447-47d8-051d-42ab`).\n\nThe key's documentation already follows the settings convention: a row in the generated `docs/config-reference.md`, an entry in the `docs/config.md` key inventory, `rebar.toml`, and `docs/plan-review-gate.md`.\n\n## Plan\n\n1. **Repoint the marker** at the standing admission ticket, keeping the marker grammar (a reason that opens with the ticket id):\n   `# mechanism-ok: config_key verify.plan_review_engine \u2014 7447-47d8-051d-42ab permanent engine selection (ADR 0123)`\n   Do not edit `.github/mechanism-baseline.json`.\n2. **Reword the `_config_sources.py` comment.** The `_ENV_EXCLUDED_KEYS` entry is permanent: the key deliberately takes no environment override, per the ADR 0123 decision of 2026-11-09. That decision is unchanged.\n3. **Reword the `rebar.toml` comment** and drop its sunset clause.\n4. **Amend ADR 0123:**\n   - Replace the Lifetime bullet. It should say the key is permanent, both engines are supported, and the ratchet marker names the standing admission ticket `cankered-cloistered-bittern`.\n   - Reword the Consequences bullet to say both engines are maintained as supported options.\n   - Add a dated 2026-11-12 amendment note recording the change of intent.\n   - Keep the ADR status as Accepted.\n5. **Check the settings docs** (`docs/config.md`, `docs/plan-review-gate.md`, `docs/cli-reference.md`).\n   - Remove any sunset or retirement wording for this key.\n   - Match how sibling `verify.*` keys are documented.\n   - If `docs/config-reference.md` is affected, regenerate it with `scripts/gen_config_reference.py`; don't hand-edit it.\n\nNo behavior changes: the key, its `pipeline` default, both engines, and the environment-variable exclusion all stay as they are.\n\n## Acceptance criteria\n\n- [ ] The marker for `verify.plan_review_engine` names `7447-47d8-051d-42ab`, and `.github/mechanism-baseline.json` is unchanged.\n- [ ] `python scripts/check_mechanism_delta.py --check` exits 0.\n- [ ] `git grep -n -iE 'bossy-impish-hoiho|sunset' -- src rebar.toml docs/adr/0123-selectable-plan-review-engine.md docs/config.md docs/plan-review-gate.md docs/cli-reference.md` prints no line about the engine switch.\n- [ ] ADR 0123 states that the key is permanent and both engines are supported, names the standing admission ticket, and carries a dated 2026-11-12 amendment note.\n- [ ] `make verify` exits 0.\n- [ ] [non-codebase] After the change merges, `bossy-impish-hoiho` is closed with `--class obsolete`, and the command and its output are recorded in a comment on this ticket.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Make the plan-review engine a first-class permanent setting"
       },
       "created_at": "2026-11-13T02:31:39Z",
@@ -40520,6 +40534,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-22T12:38:28Z"
+    },
+    "5bd7-33ec-8630-440e": {
+      "created_at": "2026-11-13T05:32:30Z",
+      "jira_id": "4599088",
+      "jira_key": "REB-7181",
+      "state": "confirmed",
+      "updated_at": "2026-11-13T05:32:33Z"
     },
     "5bdb-5dc5-9012-4cc9": {
       "baseline": {
@@ -75532,6 +75553,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-29T17:29:46Z"
     },
+    "ac9f-db05-bc10-41a0": {
+      "created_at": "2026-11-13T05:32:33Z",
+      "jira_id": "4599089",
+      "jira_key": "REB-7182",
+      "state": "confirmed",
+      "updated_at": "2026-11-13T05:32:36Z"
+    },
     "aca0-6a66-0a27-47cf": {
       "baseline": {
         "assignee": {
@@ -100908,6 +100936,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T08:58:45Z"
     },
+    "e57f-200d-d402-4a5e": {
+      "created_at": "2026-11-13T05:32:36Z",
+      "jira_id": "4599090",
+      "jira_key": "REB-7183",
+      "state": "confirmed",
+      "updated_at": "2026-11-13T05:32:39Z"
+    },
     "e57f-85cd-7960-41b6": {
       "baseline": {
         "assignee": null,
@@ -118168,7 +118203,10 @@
     "1794539882039739492": "__rebar_unknown_comment_id__",
     "1794540417182715289": "__rebar_unknown_comment_id__",
     "1794541393712975001": "__rebar_unknown_comment_id__",
-    "1794543528708183001": "__rebar_unknown_comment_id__"
+    "1794543528708183001": "__rebar_unknown_comment_id__",
+    "1794545043135747001": "__rebar_unknown_comment_id__",
+    "1794547266016812001": "__rebar_unknown_comment_id__",
+    "1794547360786554232": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -123729,6 +123767,9 @@
     "REB-7179": "1bdc-d4f7-2160-4fda",
     "REB-718": "2918-24c8-4c2a-4e10",
     "REB-7180": "7447-47d8-051d-42ab",
+    "REB-7181": "5bd7-33ec-8630-440e",
+    "REB-7182": "ac9f-db05-bc10-41a0",
+    "REB-7183": "e57f-200d-d402-4a5e",
     "REB-719": "3cf7-56db-cbf2-4ba4",
     "REB-72": "3121-87f8-f3a0-4cf1",
     "REB-720": "6173-32ea-1fc0-4f04",
