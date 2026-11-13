@@ -12080,6 +12080,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-04T23:39:00Z"
     },
+    "1bdc-d4f7-2160-4fda": {
+      "created_at": "2026-11-13T02:31:39Z",
+      "jira_id": "4599076",
+      "jira_key": "REB-7179",
+      "state": "confirmed",
+      "updated_at": "2026-11-13T02:31:43Z"
+    },
     "1be6-99f4-f337-4ab2": {
       "baseline": {
         "assignee": null,
@@ -76987,7 +76994,7 @@
         },
         "description": "## Problem\n\nFix-version sync (ADR 0124, epic `inferior-seaborgium-aruanas`) is tested only against fakes. Unit tests cover the diffs, the transport writes and the release alerts. The one integration test, `tests/integration/reconciler/test_reconcile_releases_roundtrip.py`, runs real `reconcile_once` passes over an in-memory Jira fake. Production was checked live once, against Jira Cloud (`plucky-jetblack-parrot`, `cognitive-sooty-angelfish`).\n\nThe Jira DC suite in `tests/external/live_jira_dc` has no fix-version test. That suite runs a real Jira DC server in Docker, in the `jira-dc-harness` job of `.github/workflows/external-integration.yml`. The DC write path (`src/rebar/reconciler/adapters/jira_datacenter/_issues.py`) and the DC version read have never run against a real server.\n\n## Plan\n\nAdd a fix-version scenario module to `tests/external/live_jira_dc`. Reuse that suite's existing fixtures: the harness project, the bridge configuration and the reconcile runner. Follow the patterns in `test_multi_project_rehearsal.py` and `test_transport.py`. The scenario runs real reconcile passes against the Docker DC server and covers:\n\n1. Inbound sync: a version created in the DC project through the REST API and set on an issue's `fixVersions` appears in the bound rebar ticket's `releases`.\n2. Outbound add: a release added in rebar for a version the project has is written to the issue's `fixVersions`. Adding a second release also writes it and keeps the first, so the write is per item.\n3. Outbound remove: a release removed in rebar disappears from `fixVersions`, and the other entries stay.\n4. A missing version is held back: a release naming a version the DC project lacks is not written. Instead the ticket gets a BRIDGE_ALERT, and the alert clears once that version is created and a later pass writes it.\n\nThe test must leave the harness project clean, with no leftover versions or issues that would affect other tests in the module order.\n\n## Implementation notes (added 2026-11-12 after plan review)\n\n- **Per item, shown from the pass itself.** Jira's end state cannot tell a per-item `update` from a whole-list `fields` replace, because rebar holds the full intended set. The pass logs `RECON: outbound_update key=<KEY> changed=[<whole fields>] ... releases=<n>` (`outbound_mutation_builders.py`), where `releases` counts per-item add/remove mutations. Scenarios 2 and 3 assert that the pass adding the second release, and the pass removing one, log `releases=1` for that key with `fixVersions` absent from `changed`. A whole-list write would show `fixVersions` in `changed` or a count of 2.\n- **Intent.** Outbound add and remove only act on releases rebar itself set (the ever-seen intent set in `local_label_intent.py`). Scenarios 2 to 4 set releases with `rebar.edit_ticket(..., add_releases=/remove_releases=)`, never through inbound, so they exercise that path.\n- **Versions and cleanup.** Versions are created and deleted through DC REST as admin (`POST /rest/api/2/version`, `DELETE /rest/api/2/version/{id}`), each with a unique `rbj-<label>-<hex>` name, deleted in `finally`. Each test uses its own `jira_dc_project`, whose teardown deletes the project as a backstop.\n- **README.** `tests/external/live_jira_dc/README.md` has no scenario list today; the change adds a short \"Fix-version scenarios\" section naming the module and its 4 scenarios.\n- **Module:** `tests/external/live_jira_dc/test_fix_versions_live.py`, reusing `bound_dc_issue`, `dc_store_copy_repo`, `dc_transport`, `dc_request`, `jira_dc_project` and scoped `bootstrap-strict` passes.\n\n## Acceptance criteria\n\n- [x] A new test module under `tests/external/live_jira_dc/` covers scenarios 1 to 4 above against the Docker DC server, with real reconcile passes and no fakes on the Jira side.\n- [x] Every new test carries the `external` marker. The new tests are picked up by `pytest -m external tests/external/live_jira_dc`, the command the `jira-dc-harness` job runs.\n- [x] [non-codebase] A `jira-dc-harness` run of `external-integration.yml` on a commit containing the new module passes, with the new tests listed as passed. The run URL is recorded in a comment on this ticket.\n  provenance: environment=GitHub Actions external-integration.yml jira-dc-harness job on main at c2b93243cd0; principal=GitHub Actions runner with the ephemeral DC admin; privilege_posture=production-equivalent; instrument=live-call \u2014 workflow_dispatch run 43336157385 and its job log\n- [x] `make verify` passes on the change.\n- [x] `tests/external/live_jira_dc/README.md` lists the new scenario.\n- [x] Scenarios 2 and 3 show per-item writes from the pass's own `RECON: outbound_update` line (`releases=1`, no `fixVersions` in `changed`).",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Live-test fix-version sync in the Jira DC Docker suite"
       },
       "created_at": "2026-11-12T20:31:02Z",
@@ -78393,7 +78400,7 @@
         },
         "description": "## Observation (read-only, 2026-11-12 ~05:55 PST)\nThe spend-cap Lambda (`/aws/lambda/bedrock-spend-cap` log, ticks from 13:41Z onward) reported the metered (ceiling-priced CloudWatch token) estimate at about 3 times the Cost Explorer figure for the same UTC day, with `effective_source=metered`. The metered arm crossed the daily threshold and attached `BedrockDailySpendCapDeny` (about 05:40 PST), denying `bedrock:InvokeModel` to every capped role, including rebar-gerrit-instance-role, until the 00:00 UTC release.\n\ninfra/terraform/bedrock-spend-cap/README.md documents the metered arm as an intentional upper bound, running at about 1.1 to 1.9 times settled billing. A ratio of about 3 is outside that band. Dollar figures are deliberately omitted (public tracker); they are in the Lambda log lines and Cost Explorer for 2026-11-12.\n\n## Root cause (measured; see comment)\nMost of the 3x was same-day Cost Explorer lag (re-read later, the 11-12 ratio is 1.94). The settled 2026-11-11 account-wide ratio is 2.04: the ceilings are tied to the 4.x price list, and for Opus 5.5 the cache-read ceiling is 3.125x the billed rate (other directions 1.5625x), with cache reads about 88% of Opus tokens. The ceilings still match their written definition; the documented band is stale.\n\n## Approach (decided 2026-11-12: README-only)\nUpdate `infra/terraform/bedrock-spend-cap/README.md`, ratios only:\n- Replace the 1.1-1.9x band with the measured band for the 5.5 generation, labelled by what each end is: about 1.8x for the Opus-only mix (lower end) to about 2.1x account-wide, where Sonnet traffic priced at the Opus ceilings raises it. State that cache reads drive the excess above 1.56x.\n- Explain that a same-day Cost Explorer comparison overstates the ratio because Cost Explorer lags intra-day (the \"about 3x\" sighting), so the comparison must use settled days.\nNo change to the handler, threshold, attachment, or Terraform. A per-model exact-match rate table remains a possible future story (not filed): it is a new mechanism, out of scope for a bug fix.\n\n## Testing\nExtend `tests/infra/test_bedrock_spend_cap_handler.py` (which already pins README content via `README_PATH`), ratios only, no new price data:\n- Read `CEILING` from `handler.py` with `ast` (already public). Encode only the Opus 5.5 ceiling-over-billed factors (1.5625 input/output/cache-write, 3.125 cache-read) and the 2026-11-11 Opus token-direction shares (input 0.0089, output 0.0194, cache read 0.8763, cache write 0.0954).\n- Compute ratio = \u03a3_d share_d\u00b7CEILING_d \u00f7 \u03a3_d share_d\u00b7(CEILING_d / factor_d), i.e. the factors weighted by each direction's billed-dollar share (about 1.82), and assert the README band's lower end is at or below it and its upper end at or above the measured account-wide 2.04, with the band inside [min factor, max factor].\n- Assert the README states the 1.56x and 3.1x factors, that cache reads drive the excess, and the same-day-lag / settled-day guidance.\nThese fail on the current README. `make verify` passes.\n\n## Acceptance criteria\n- [x] [non-codebase] The ratio for 2026-11-12 is re-measured against the SETTLED Cost Explorer day, and the cause of any excess over the documented band is identified from the per-direction token counts.\n  provenance: environment=AWS 896586841071 Cost Explorer and CloudWatch AWS/Bedrock (us-east-1); principal=frontier profile; privilege_posture=production-equivalent; instrument=live-call \u2014 ce get-cost-and-usage by service and usage type plus per-ModelId get-metric-data token sums for 2026-11-11 and 2026-11-12; ratios recorded in ticket comments, figures in operator-local notes\n- [x] Either the ceiling table is corrected or the README band is updated with the measured reason; no config key, env var or flag.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Bedrock spend-cap metered estimate ran about 3x settled billing on 2026-11-12, above the README's documented band"
       },
       "created_at": "2026-11-12T14:33:41Z",
@@ -118125,7 +118132,14 @@
     "1794530832158012001": "__rebar_unknown_comment_id__",
     "1794531770073413145": "__rebar_unknown_comment_id__",
     "1794531796693172001": "__rebar_unknown_comment_id__",
-    "1794532855657005001": "__rebar_unknown_comment_id__"
+    "1794532855657005001": "__rebar_unknown_comment_id__",
+    "1794533809483688001": "__rebar_unknown_comment_id__",
+    "1794534652128139888": "__rebar_unknown_comment_id__",
+    "1794534842862602978": "__rebar_unknown_comment_id__",
+    "1794534855086309654": "__rebar_unknown_comment_id__",
+    "1794535597439766615": "__rebar_unknown_comment_id__",
+    "1794535656331386386": "__rebar_unknown_comment_id__",
+    "1794536813988095001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -123683,6 +123697,7 @@
     "REB-716": "a29a-c52a-5ec0-45d5",
     "REB-7161": "e1f6-d986-5adc-4d0b",
     "REB-717": "1982-bf75-0f28-4e91",
+    "REB-7179": "1bdc-d4f7-2160-4fda",
     "REB-718": "2918-24c8-4c2a-4e10",
     "REB-719": "3cf7-56db-cbf2-4ba4",
     "REB-72": "3121-87f8-f3a0-4cf1",
