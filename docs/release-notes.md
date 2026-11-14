@@ -8,6 +8,34 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## 0.16.0: plan review gains a selectable `engine`
+
+**Contract change for any agent or client that starts a plan review or reads plan-review
+certificates.** ADR 0123's `agentic` engine is implemented, and three surfaces now carry
+the engine name. All three are additive; a client that ignores them sees the same
+behaviour as on 0.15.x, where `pipeline` is the default.
+
+**`engine` parameter on `review_plan` and `review_plan_start` (MCP), and `--engine` on
+`rebar review-plan`.** Both are optional and accept `pipeline` or `agentic`. Precedence is
+the explicit argument, then `[verify] plan_review_engine`, then `pipeline`. An unknown value
+raises a configuration error before any job starts. The async de-duplication key gains
+`;engine=<name>`, so two starts for the same engine on one ticket share a job, while a
+`pipeline` and an `agentic` start on the same ticket run as separate jobs.
+
+**`engine` on attestations.** An agentic PASS writes an `engine: agentic` line inside the
+signed plan-review manifest. A pipeline manifest never carries the line and stays
+byte-identical to 0.15.x, and a reader treats a missing or unknown line as `pipeline`, so
+every existing attestation keeps validating with no migration. Reuse and drift refresh act
+on the current attestation whichever engine signed it: a `pipeline` request on an unchanged
+ticket with a current agentic PASS returns that PASS without running. Only BLOCK reuse is
+engine-matched.
+
+**`engine` on `plan_review_status`.** The MCP tool and the `rebar review-plan --status` JSON
+gain an optional `engine` field (`pipeline`, `agentic`, or `null` when no readable certified
+attestation exists), declared in `plan_review_status.schema.json`.
+
+`[verify] plan_review_engine` is a permanent setting, not a transitional one.
+
 ## The canary's `github-api` heartbeat source is removed
 
 **Contract change for any repository running a copy of `reconcile-bridge-canary.yml`.** The

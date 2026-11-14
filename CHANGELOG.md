@@ -10,6 +10,77 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-13
+
+### Added
+
+- The `agentic` plan-review engine (ADR 0123) is now implemented. One read-only agent
+  reviews the plan against the code and returns findings. Only `blocker` findings
+  block; `major`, `minor` and `trivial` are advisory. An agentic PASS is signed like a
+  pipeline PASS. A failed agent run returns an unsigned INDETERMINATE. `pipeline`
+  stays the default, and `[verify] plan_review_engine` is now a permanent,
+  first-class setting rather than a transitional one.
+- `rebar review-plan --engine {pipeline,agentic}`, and an optional `engine` parameter on
+  the MCP `review_plan` and `review_plan_start` tools. An explicit engine overrides
+  `[verify] plan_review_engine`. Async starts for different engines on one ticket run
+  as separate jobs.
+- Agentic plan-review attestations record `engine: agentic` in the signed manifest, and
+  `review-plan --status` and the MCP `plan_review_status` tool report the engine.
+  Pipeline attestations are unchanged, and existing attestations keep validating with
+  no migration. A current PASS attestation is reused for an unchanged ticket whichever
+  engine signed it, so a pipeline review can return an agentic PASS without running;
+  only a BLOCK is reused per engine.
+- `python -m rebar.llm.evals.engine_comparison`, an operator-run harness that reviews
+  the frozen replay corpus under both engines and reports verdict agreement, the
+  confusion matrix, blocking flips and finding overlap. It supports `--limit`,
+  `--dry-run` and `--resume`. `--resume` exits 2 and names the field when the saved
+  corpus, corpus digest, match threshold or schema version differs. Each record names
+  its runner and model.
+- When a gate's model never ran and the running rebar build is behind the config the
+  gate read, the verdict's `coverage.build_drift` names both commits, the distance, and
+  the fix: update the checkout and run `make install`. The text output of
+  `rebar review-plan` now shows the cause too, as `model did not run:` and
+  `build drift:` lines; a clean run prints neither.
+
+### Fixed
+
+- `rebar store fsck` rejects an unknown option (exit 2, naming it) and a `--limit`
+  with no value, before touching the store. It used to ignore them, so a misspelled
+  `--dry-run` alongside `--repair` ran a real repair.
+- `rebar store fsck --help` now says `--only` accepts only `stale-channel`, with
+  `--repair`. `--only` and `--limit` accept both `--flag value` and `--flag=value`, and
+  an unknown `--only` value names the accepted one.
+- `rebar store compact --all` accepts `--threshold`. Both the sweep and the
+  single-ticket form accept `--threshold`, `--horizon` and `--limit` in either spelling.
+- The `CHANGE_SETTINGS` resolution message no longer claims a token, step or timeout
+  bound was exceeded. That class also covers credential failures and an invalid model
+  id, and the message now names credentials, the model id and bounds.
+- Llama 4 Maverick and Scout on Bedrock no longer fail at the default `max_tokens`.
+  Output is capped at the 8192 tokens Bedrock allows.
+- Bedrock models that cannot cache prompts (Llama, Mistral, Qwen and others) are no
+  longer sent cache settings.
+- Agentic runs on Bedrock `meta` (Llama) models no longer fail before sending a request.
+  Every Bedrock vendor now gets a Bedrock model profile.
+- Verdict provider provenance records `ran_model` on every LLM call, not only for a
+  fallback chain, so engine-comparison records name the model that served each review.
+- Library reads, and CLI commands such as `rebar show`, no longer run
+  `git rev-parse --show-toplevel` repeatedly when `REBAR_ROOT` is unset. The
+  repository root is looked up once per working directory and shared by every
+  resolver (a `rebar show` made 4 lookups, now 1). Root lookup now crosses
+  filesystem boundaries everywhere, as CLI start-up already did, so all resolvers
+  agree for the same directory.
+- The tickets store's reflogs are now expired once a day under the store's write lock,
+  so they stop growing without bound. If expiry times out, the error names the git
+  directory and points at `infra/runbooks/tickets-store-prune.md`.
+- A git maintenance lock left behind by a killed process no longer disables store
+  maintenance forever. A lock older than 12 hours is removed before the next
+  maintenance step.
+- A timed-out git call now stops git and all of its child processes. Leftover pack
+  `.keep` files and git children running outside the write lock are no longer left
+  behind.
+- Two built-in defaults that still named `claude-sonnet-4-6` (facet chunking and
+  emitted eval specs) now follow the configured 5.5-generation models.
+
 ## [0.15.1] - 2026-11-11
 
 ### Fixed
@@ -2096,7 +2167,8 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.14.0...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/navapbc/rebar/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/navapbc/rebar/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/navapbc/rebar/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/navapbc/rebar/compare/v0.13.1...v0.14.0
