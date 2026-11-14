@@ -46136,9 +46136,17 @@
       "updated_at": "2026-09-05T01:20:15Z"
     },
     "6a4d-33ec-bc55-4ed1": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Outstanding dependency advisory on `main`\n\nThe scheduled dependency-advisory lane found CRITICAL/HIGH advisories against the committed lock. Per bug `63e8`, this does NOT block merges or Gerrit submit for changes that leave the dependency map alone \u2014 it blocks **releases**, and it is owned here rather than by whoever happens to have a change in flight.\n\n- **Advisories:** CVE-2026-126360\n- **Detail:** CVE-2026-126360 (opentelemetry-api 1.45.1, HIGH)\n- **Detected at:** 2026-11-14T03:29:44Z\n- **Run:** https://github.com/navapbc/rebar/actions/runs/43551469934\n\n## Remediation\n\nFollow `docs/dependency-advisory-runbook.md`: upgrade the direct dependency first; if an upstream cap blocks that, `override-dependencies` with a recorded justification; then track the upstream fix so the override can be removed. `constraint-dependencies` cannot express this \u2014 it only NARROWS, and returns UNSATISFIABLE as its expected output.\n\nThis ticket auto-closes when the advisory clears.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "[dependency-advisory] outstanding advisory on main: CVE-2026-126360"
+      },
       "created_at": "2026-11-14T03:33:16Z",
       "jira_id": "4599225",
       "jira_key": "REB-7194",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-14T03:33:19Z"
     },
@@ -118574,7 +118582,8 @@
     "1794608119837434863": "__rebar_unknown_comment_id__",
     "1794616832015890077": "__rebar_unknown_comment_id__",
     "1794621181379035192": "__rebar_unknown_comment_id__",
-    "1794622774861929278": "__rebar_unknown_comment_id__"
+    "1794622774861929278": "__rebar_unknown_comment_id__",
+    "1794628421578539701": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
