@@ -46140,7 +46140,7 @@
         "assignee": null,
         "description": "# Outstanding dependency advisory on `main`\n\nThe scheduled dependency-advisory lane found CRITICAL/HIGH advisories against the committed lock. Per bug `63e8`, this does NOT block merges or Gerrit submit for changes that leave the dependency map alone \u2014 it blocks **releases**, and it is owned here rather than by whoever happens to have a change in flight.\n\n- **Advisories:** CVE-2026-126360\n- **Detail:** CVE-2026-126360 (opentelemetry-api 1.45.1, HIGH)\n- **Detected at:** 2026-11-14T03:29:44Z\n- **Run:** https://github.com/navapbc/rebar/actions/runs/43551469934\n\n## Remediation\n\nFollow `docs/dependency-advisory-runbook.md`: upgrade the direct dependency first; if an upstream cap blocks that, `override-dependencies` with a recorded justification; then track the upstream fix so the override can be removed. `constraint-dependencies` cannot express this \u2014 it only NARROWS, and returns UNSATISFIABLE as its expected output.\n\nThis ticket auto-closes when the advisory clears.",
         "priority": "High",
-        "status": "To Do",
+        "status": "Done",
         "summary": "[dependency-advisory] outstanding advisory on main: CVE-2026-126360"
       },
       "created_at": "2026-11-14T03:33:16Z",
