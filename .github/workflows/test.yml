@@ -252,6 +252,11 @@ jobs:
 
   # The advisory Windows job detects path, temporary-directory, Git, and file-lock regressions.
   # Windows is not a supported gate target, so failures remain visible without blocking merges.
+  # It runs a maintained subset that is held green: the pytest argument files under
+  # .github/windows-sweep-deselect/ deselect the tests known to fail on Windows, one file per
+  # defect class, so any red result here is a NEW Windows regression. Fixing a class removes its
+  # lines (and the file once empty); tests/unit/test_windows_sweep_deselect.py keeps the files and
+  # this command in step (bug 6798-606d-37dc-46e7).
   sweep-windows:
     name: sweep (windows)
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -276,6 +281,16 @@ jobs:
           uv run --no-sync pytest -m "not integration and not external"
           -n 4 --dist worksteal -q -p no:cacheprovider
           --timeout=600 --timeout-method=thread
+          '@.github/windows-sweep-deselect/file-locks.args'
+          '@.github/windows-sweep-deselect/hardcoded-tmp.args'
+          '@.github/windows-sweep-deselect/max-path.args'
+          '@.github/windows-sweep-deselect/nested-pytest-plugins.args'
+          '@.github/windows-sweep-deselect/path-separators.args'
+          '@.github/windows-sweep-deselect/posix-api.args'
+          '@.github/windows-sweep-deselect/posix-permissions.args'
+          '@.github/windows-sweep-deselect/posix-shell.args'
+          '@.github/windows-sweep-deselect/text-encoding.args'
+          '@.github/windows-sweep-deselect/unclassified.args'
 
   # Scheduled full macOS default suite catches platform regressions outside Verified's reduced
   # `platform_compat` subset without extending the hot path.
