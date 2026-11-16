@@ -11,6 +11,7 @@ request-path proof. Shutdown grace is a module constant rather than config surfa
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import functools
 import logging
 import os
@@ -61,6 +62,31 @@ runs BEFORE ``should_exit`` is set), never by this timeout, so keeping it short 
 IDLE held-open streams fast and never truncates a real in-flight op."""
 
 _GAUGE_ATTR = "_rebar_in_flight_gauge"
+
+
+@functools.cache
+def _malloc_trim() -> Callable[[int], int] | None:
+    """Return glibc's ``malloc_trim``, or ``None`` where the C library lacks it (macOS, musl)."""
+    try:
+        return ctypes.CDLL(None).malloc_trim
+    except (AttributeError, OSError):
+        return None
+
+
+def release_freed_heap() -> bool:
+    """Hand freed C-heap pages back to the OS; return whether the call was available.
+
+    A gate's large strings (prompts, tool output) are C-heap allocations on its worker
+    thread. glibc keeps them in that thread's arena after they are freed, so an idle
+    server held more than a gigabyte for hours (bug unmedical-stational-chrysalis).
+    The gauge calls this when its count returns to zero; ``malloc_trim(0)`` only
+    releases free pages and never touches live objects.
+    """
+    trim = _malloc_trim()
+    if trim is None:
+        return False
+    trim(0)
+    return True
 
 
 class MCPRetiringError(RuntimeError):
@@ -142,6 +168,9 @@ class InFlightGauge:
                     return
                 released[0] = True
                 self._value -= 1
+                now_idle = self._value == 0
+            if now_idle:
+                release_freed_heap()
 
         return _release
 
