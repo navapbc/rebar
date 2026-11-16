@@ -4799,6 +4799,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-02T02:58:37Z"
     },
+    "09f9-6b9f-24b1-4fb6": {
+      "created_at": "2026-11-16T20:30:43Z",
+      "jira_id": "4599304",
+      "jira_key": "REB-7212",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:30:51Z"
+    },
     "09f9-f66c-9748-48e5": {
       "baseline": {
         "assignee": null,
@@ -14969,6 +14976,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-07T18:51:11Z"
     },
+    "21fb-6afd-c5e7-4f4a": {
+      "created_at": "2026-11-16T20:30:53Z",
+      "jira_id": "4599305",
+      "jira_key": "REB-7213",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:30:58Z"
+    },
     "21fb-f4cd-3eaa-4b60": {
       "created_at": "2026-08-15T14:53:58Z",
       "jira_key": "REB-1403",
@@ -17725,6 +17739,13 @@
       "peer_parent": "REB-993",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:38Z"
+    },
+    "2846-ec55-c258-4e2c": {
+      "created_at": "2026-11-16T20:31:01Z",
+      "jira_id": "4599306",
+      "jira_key": "REB-7214",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:05Z"
     },
     "2854-fc8a-aa2e-4b94": {
       "baseline": {
@@ -30115,6 +30136,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T01:07:19Z"
     },
+    "4357-c54c-71b0-4bb4": {
+      "created_at": "2026-11-16T20:31:05Z",
+      "jira_id": "4599307",
+      "jira_key": "REB-7215",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:08Z"
+    },
     "436f-1759-124e-43d9": {
       "baseline": {
         "assignee": null,
@@ -30551,6 +30579,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T01:07:40Z"
     },
+    "44b2-e70e-2b9f-4d2a": {
+      "created_at": "2026-11-16T20:31:11Z",
+      "jira_id": "4599308",
+      "jira_key": "REB-7216",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:14Z"
+    },
     "44b7-2f9e-26ee-4835": {
       "baseline": {
         "assignee": {
@@ -30863,6 +30898,13 @@
       "peer_parent": "REB-164",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:51Z"
+    },
+    "453c-cad2-fab5-456d": {
+      "created_at": "2026-11-16T20:31:16Z",
+      "jira_id": "4599309",
+      "jira_key": "REB-7217",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:19Z"
     },
     "454a-9266-ada6-43cc": {
       "baseline": {
@@ -45119,7 +45161,7 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\n\n`sweep (windows)` in `.github/workflows/test.yml` is an advisory job (`continue-on-error: true`). The workflow states its purpose at `:253-254`:\n\n```\n# The advisory Windows job detects path, temporary-directory, Git, and file-lock regressions.\n# Windows is not a supported gate target, so failures remain visible without blocking merges.\n```\n\nThe job is currently red at a scale that defeats that purpose.\n\n## Measurement\n\nRun 35250748887, `workflow_dispatch` on merged ref `4f12815e9a0b0cee5ded72d73e22256115e10c87`:\n\n```\n1626 failed, 16984 passed, 281 skipped, 1683 warnings, 1382 errors in 5514.06s (1:31:54)\n```\n\nError-signature census across the run:\n\n| Count | Signature |\n|---:|---|\n| 2722 | `PermissionError` |\n| 136 | `ModuleNotFoundError` |\n| 63 | `FileNotFoundError [WinError]` |\n| 34 | `OSError` |\n| 21 | `FileNotFoundError('shell not found: ...')` |\n| 19 | `OSError [WinError]` |\n| 16 | `AttributeError: 'types.SimpleNamespace' object has no attribute` |\n| 10 | `AttributeError: module 'signal' has no attribute` |\n| 4 | `ModuleNotFoundError: No module named 'fcntl'` |\n| 4 | `AttributeError: module 'os' has no attribute` |\n\n## The dominant class: Windows path length\n\nThe most frequently visible failure in the `FAILED` lines is `MAX_PATH` exhaustion during gate-snapshot materialisation:\n\n```\nrebar._snapshot.git_fetch.SnapshotError: git checkout-index for 2c684ee31a74 failed:\nerror: unable to create file C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pytest-of-runneradmin\\\npytest-1\\popen-gw3\\gate-store\\rebar-gate-snapshots\\tmp\\\ntickets-2c684ee31a74-57739aaf299d4a5ca43572977cd0316c\\.tickets-tracker\\4805-7680-90b5-4fef\\\n1789665984171900001-4960ae39-c6d4-42a1-9f62-0ae54f3992a1-CREATE.json: Filename too long\n```\n\nThe path is built from several nested components that each contribute length: the pytest tmp root, the per-worker xdist directory (`popen-gw3`), the gate-store root, a snapshot directory carrying a full 32-character hex suffix, the tracker directory, a four-quad ticket id directory, and finally an event filename combining a nanosecond timestamp with a full UUID. Affected modules observed include `tests/unit/test_plan_review_reuse.py`, `tests/interfaces/lifecycle/test_ref_coherence.py`, `tests/interfaces/lifecycle/test_plan_review_sign_transaction_lifecycle.py`, `tests/interfaces/store/test_gate_ticket_snapshot.py`, and `tests/interfaces/store/test_snapshot_environments.py`.\n\nTwo candidate remedies exist and they are not equivalent: enabling long-path support on the runner and in Git (`core.longpaths`), versus shortening the constructed path. The former is an environment change that may not hold for downstream consumers on Windows; the latter changes behaviour that POSIX platforms also exercise. That tradeoff needs deciding rather than assuming.\n\n## Not all of it is path length\n\nAt least four further classes are present and need separating before any fix:\n\n1. `PermissionError` at high volume \u2014 likely Windows file-locking semantics where a handle is still open when a test tries to delete or replace a file. This is exactly the \"temporary-directory and file-lock regression\" the job exists to detect.\n2. `shell not found` \u2014 tests assuming a POSIX shell is available.\n3. `AttributeError: module 'signal' has no attribute ...` \u2014 POSIX-only signal names.\n4. Residual `fcntl` imports (4 occurrences, outside the module already fixed under `visionary-geologic-harrier`).\n\n## Why this matters even though the job does not gate\n\nAn advisory job exists to make regressions visible. At 1626 failures it cannot do that: a genuine new Windows regression is indistinguishable from the standing noise, so the signal is already lost. This is the same failure mode recorded in `enviable-beloved-buffalo` (dead metrics leaving alarms unfalsifiable) and `catty-giddied-hedgehog` (an alarm latched for days) \u2014 a monitoring surface that cannot change state carries no information.\n\nA decision is therefore required up front, and it is a scoping decision rather than a technical one: either Windows is worth supporting to the point where this job can be read, or the job should be reduced to the subset that is genuinely maintained so that subset can be held green. Filing at P3 because Windows is explicitly not a gate target; the priority should be revisited once the scoping decision is made.\n\n## Acceptance criteria\n\n- [ ] The 1626 failures and 1382 errors are classified into named defect classes with a count per class, so the work can be scoped and split.\n- [ ] The `MAX_PATH` remedy is chosen explicitly between runner/Git long-path support and path shortening, with the tradeoff for downstream Windows consumers recorded.\n- [ ] The `PermissionError` population is diagnosed rather than assumed \u2014 confirmed as file-handle lifetime, or identified as something else.\n- [ ] A scoping decision is recorded: either Windows is supported to a readable-green standard, or the advisory job is narrowed to a maintained subset that is held green.\n- [ ] After the change, `sweep (windows)` is in a state where a NEW regression would be visible \u2014 either green, or red with a known and enumerated baseline that CI compares against.",
+        "description": "## Context / Problem\n\n`sweep (windows)` in `.github/workflows/test.yml` is an advisory job (`continue-on-error: true`) whose stated purpose is to make Windows path, temporary-directory, Git and file-lock regressions visible. It has been red at a scale that destroys that signal: run 35250748887 (2026-09-17) reported 1626 failed + 1382 errors. A new Windows regression is indistinguishable from the standing noise.\n\nMeasured today (2026-11-16) on the 5 scheduled runs at `b4e0d01b649` (43715434886, 43748511894, 43783350127, 43820680079, 43871224211): 877-882 failed + 43 errors per run, 909 node ids failing in all 5 and 918 in at least one (9 intermittent, all concurrency tests). The class-1 cascade (read-only `gitdir:` pointer, bug d724-6bb0-2674-42a0) is fixed on main; the remaining 918 ids sort into these classes by failure signature:\n\n| Class | Tests | Modules | Signature |\n|---|---:|---:|---|\n| max-path | 216 | 30 | `SnapshotError ... Filename too long`, `WinError 206` |\n| posix-shell | 143 | 23 | `bash` resolves to WSL with no distribution, `/bin/sh`, `.sh` scripts |\n| text-encoding | 133 | 58 | `UnicodeDecodeError` reading UTF-8 files with the cp1252 default |\n| posix-permissions | 47 | 8 | `0600 or stricter` key mode, `group/world accessible` artifact dir |\n| path-separators | 42 | 21 | `\\` vs `/` in asserted paths, cross-drive `relpath` |\n| posix-api | 28 | 16 | `fcntl`/`flock`, `signal.SIGKILL`, `DETACHED_PROCESS` stubs |\n| nested-pytest-plugins | 27 | 5 | nested pytest fails loading `pytest11` / root conftest plugin |\n| hardcoded-tmp | 21 | 5 | literal `/tmp/.ticket-sync-*` paths |\n| file-locks | 19 | 15 | `WinError 5`/`32` on open handles or read-only git objects, plus the 9 intermittent concurrency tests |\n| unclassified | 242 | 100 | assertion-level failures not yet root-caused |\n\nDecisions already recorded on this ticket (2026-10-26, user): narrow the advisory job to a maintained subset and hold that subset green; for MAX_PATH, shorten rebar's constructed paths and do not enable `core.longpaths` on the runner, because a runner setting hides the defect from CI while it stays live for downstream Windows users.\n\n## Approach\n\nHold a maintained subset green by deselecting the known-failing tests through pytest argument files, one file per defect class:\n\n- `.github/windows-sweep-deselect/<class>.args`, each line `--deselect=<nodeid>` (or `--ignore=<module>` for `tests/unit/test_bridge_runner_spawn.py`, which fails at collection). pytest's argument parser reads `@file` natively (`fromfile_prefix_chars=\"@\"`), so no conftest hook, plugin, env var or config key is added.\n- The `sweep (windows)` \"Run the default suite\" step passes every file as `'@.github/windows-sweep-deselect/<class>.args'`. The job stays `continue-on-error: true` (Windows is not a gate target), so a red sweep now means a NEW Windows regression.\n- The list is the union of the 5 runs above, so the 9 intermittent tests are covered.\n- A new unit test, `tests/unit/test_windows_sweep_deselect.py`, runs on the Linux gate and pins that every file is wired into the command and nothing else is, every line is a well-formed argument (sorted, unique, ASCII, no blanks), no test sits in two classes, and every listed module still exists so a rename cannot leave a dead entry.\n- Each class becomes its own bug linked `discovered_from` this ticket. Fixing a class deletes its lines (and its file once empty), so the list only shrinks.\n\nRejected: comparing results against an enumerated baseline after the run. That needs a new junit-parsing script and CI step, and node ids are lossy in junit.\n\n## Scope\n\n- `.github/workflows/test.yml` - pass the argument files to the Windows suite step and document the maintained-subset contract in the job comment.\n- `.github/windows-sweep-deselect/*.args` (10 new files) - the per-class deselect lists.\n- `tests/unit/test_windows_sweep_deselect.py` (new) - pins the files to the command.\n\nOut of scope: fixing any class (the child bugs own that), and making the job gate.\n\n## Testing\n\n- `pytest tests/unit/test_windows_sweep_deselect.py -q` passes (13 tests). Failure cases checked by hand: adding an unreferenced `.args` file, a malformed line, and a line naming a missing module each make it fail.\n- `pytest --collect-only -m \"not integration and not external\" @.github/windows-sweep-deselect/*.args` on Linux collects without error. All 917 `--deselect` ids match a collected node id, so none is a silent no-op.\n- `make verify` green; `Verified +1` on Gerrit.\n- After merge: the next `sweep (windows)` run on main (scheduled, or `gh workflow run test.yml --ref main`) concludes `success`.\n\n## Acceptance criteria\n\n- [ ] The 1626 failures and 1382 errors are classified into named defect classes with a count per class, so the work can be scoped and split.\n- [ ] The `MAX_PATH` remedy is chosen explicitly between runner/Git long-path support and path shortening, with the tradeoff for downstream Windows consumers recorded.\n- [ ] The `PermissionError` population is diagnosed rather than assumed \u2014 confirmed as file-handle lifetime, or identified as something else.\n- [ ] A scoping decision is recorded: either Windows is supported to a readable-green standard, or the advisory job is narrowed to a maintained subset that is held green.\n- [ ] After the change, `sweep (windows)` is in a state where a NEW regression would be visible \u2014 either green, or red with a known and enumerated baseline that CI compares against.",
         "priority": "Low",
         "status": "In Progress",
         "summary": "Advisory sweep (windows) is red at a scale that destroys its signal: 1626 failures across five defect classes"
@@ -60724,6 +60766,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:25:29Z"
     },
+    "8aa0-2120-5ef3-4750": {
+      "created_at": "2026-11-16T20:31:21Z",
+      "jira_id": "4599310",
+      "jira_key": "REB-7218",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:24Z"
+    },
     "8ab9-48fe-a8e9-4a3f": {
       "baseline": {
         "assignee": null,
@@ -65949,6 +65998,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T06:47:24Z"
+    },
+    "9660-c4b0-1b57-4849": {
+      "created_at": "2026-11-16T20:31:27Z",
+      "jira_id": "4599311",
+      "jira_key": "REB-7219",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:30Z"
     },
     "9675-65aa-8b60-4ceb": {
       "created_at": "2026-08-15T15:06:13Z",
@@ -77680,10 +77736,24 @@
     },
     "aff9-1252-ad21-4695": {
       "baseline": {
-        "assignee": null,
-        "description": "Detect a clone whose last convergence with the remote exceeds the N-day horizon and force it to override local state with remote on reconnect (rather than reintroducing pre-compaction events by rebase). This converts the remote-anchored horizon from probabilistic to enforced (closes the I1 hole). Accepted cost: discards the stale clone's divergent local work. Independently verifiable: a simulated >N-day-stale clone is overridden, not merged.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nADR 0106 \u00a75 (`docs/adr/0106-remote-anchored-history-reclamation.md:114-124`) requires that a clone whose last convergence predates the N-day reclaim horizon OVERRIDE its local `tickets` with the remote on reconnect, instead of reintroducing pre-collapse history. Today nothing implements that: after a publish-swap every clone's local `tickets` shares no commit with the rewritten remote, and `sync._do_reconverge` (`src/rebar/_store/sync.py:94`, refusal at `:111-121`) refuses to merge unrelated histories that carry ticket events and logs `DIVERGED`. Such a clone stays wedged forever, its writes are refused by `freshness.write_blocking_divergence`, and a manual repair risks the resurrection (re-merging reclaimed events) that the horizon exists to prevent. This story closes that hole so the S2 publish-swap and S3 dry-run can rely on enforced, not probabilistic, convergence (epic C3).\n\n## Approach\n\nReuse the existing store-epoch guard rather than invent a new marker. `.store-compat.json` already carries an optional opaque `epoch` and `compat.store_epoch_problem` (`src/rebar/_store/compat.py:198`) already refuses unions across differing epochs (commit `019e32e03d1`, ticket ac32), but nothing yet stamps or interprets a successor epoch. A reclaimed baseline is identified by a remote record whose `epoch` differs from the local one AND whose new `epoch_lineage` list names the local epoch (JSON `null` stands for the pre-epoch/absent record). That lineage is the proof that the remote is a rewrite of THIS store, not an unrelated store, so unrelated stores keep today's refusal.\n\nOn reconverge, when HEAD and the remote share no merge-base and the remote epoch supersedes the local one, a new module `src/rebar/_store/stale_override.py` runs under the write lock `_do_reconverge` already holds:\n\n1. **Local-only events.** Parse event filenames per the I2 contract (`{ts}-{uuid}-{TYPE}.json`, optional `.retired`; `docs/event-schema.md:14-29`). A local event is *unpushed* iff its uuid appears nowhere on the remote tip \u2014 not as a file under the ticket dir (any suffix), and not in any remote SNAPSHOT's `data.source_event_uuids` for that ticket (`docs/event-schema.md:54`). Local SNAPSHOT events are derived state and are never replayed. This is the no-resurrection rule: anything the remote folded or retired is known to it and is not re-added.\n2. **Stale vs fresh.** The clone is *stale* iff its oldest unpushed event's `ts` is older than `now \u2212 [reclaim].horizon_days` (`config.reclaim_horizon_days`, `src/rebar/config.py:288`). Because every write auto-pushes (I5), the oldest unpushed write bounds the clone's last convergence.\n3. **Backup, then override.** Point `refs/rebar/stale-override/<utc-stamp>` at the old local HEAD (local only, never pushed), then `reset --hard` to the pinned remote commit.\n4. **Fresh clones replay; stale clones do not.** A fresh clone re-adds its unpushed event files byte-identically (`.retired` suffix stripped) in ONE local commit on top of the remote, which the normal push path then delivers. A stale clone replays nothing and logs a WARNING naming the backup ref and the discarded event count \u2014 the accepted residual loss in ADR 0106 \u00a75.\n\n`compat.py` gains `epoch_lineage` parsing (malformed lineage fails closed like a malformed `epoch`), a `remote_epoch_supersedes_local(tracker, remote_commit)` predicate, and a pure `superseding_record(record, new_epoch)` that S2's publish-swap will use to stamp the rewritten baseline. `write_compat_record` (`compat.py:347`) preserves `epoch_lineage` just as it already preserves `epoch`. No config key, env var, or feature flag is added; the horizon key already exists.\n\n## Scope\n\n- `src/rebar/_store/stale_override.py` (new): local-only event detection, stale classification, backup ref, override, fresh replay.\n- `src/rebar/_store/compat.py`: `epoch_lineage` parse, supersedes predicate, `superseding_record`, lineage-preserving write.\n- `src/rebar/_store/sync.py`: in `_do_reconverge`'s unrelated-history branch, call the override when the remote supersedes; otherwise keep the existing refusal unchanged.\n- `tests/unit/test_stale_clone_override.py` (new).\n- `docs/concurrency.md`: document the reconnect protocol under \"Inbound \u2014 background sync\".\n\n## Testing\n\nTDD, red first, using throwaway `git init` remotes and clones under `tmp_path` (never the live tracker). The fixture builds a store, clones it, then rewrites the remote into a parentless baseline carrying a superseding epoch record.\n\n- Happy path, stale: a clone whose only unpushed event is older than the horizon is overridden \u2014 HEAD equals the remote, the event file is gone, the backup ref holds the old HEAD.\n- Happy path, fresh: a clone with an unpushed event inside the horizon ends on a commit whose parent is the remote tip and which adds exactly that event file.\n- No resurrection: a local event that the remote retired (`.retired`) or folded (listed in a remote SNAPSHOT's `source_event_uuids`) is NOT replayed.\n- Failure/edge: an unrelated remote (different epoch, lineage not naming the local epoch) and a remote with a malformed `epoch_lineage` both still refuse with `DIVERGED`, leaving local HEAD untouched; a clone with no unpushed events simply resets to the remote with nothing replayed.\n- `write_compat_record` round-trips `epoch_lineage`; `superseding_record` appends the old epoch (or `null`) to the lineage.\n\n## Acceptance Criteria\n\n- [ ] A simulated >N-day-stale clone reconverging against a superseding-epoch rewritten remote is overridden, not merged: HEAD equals the remote commit, no local-only event survives in the tree, and `refs/rebar/stale-override/*` points at the old HEAD \u2014 checked by `tests/unit/test_stale_clone_override.py`.\n- [ ] A fresh (<N-day) clone's unpushed events are replayed in one commit on top of the remote, and retired or SNAPSHOT-folded events are not replayed \u2014 checked by the same test module.\n- [ ] Unrelated or malformed-lineage remotes keep the existing `DIVERGED` refusal with local HEAD unchanged \u2014 checked by the same test module.\n- [ ] `docs/concurrency.md` documents the reconnect protocol (lineage proof, stale classification, backup ref, accepted loss).\n- [ ] `make verify` passes; `python scripts/check_mechanism_delta.py --check` and `python scripts/check_complexity_baseline.py --check` exit 0.\n- [ ] [non-codebase] No live tickets store or `origin/tickets` is rewritten, reset, or force-pushed by this story; all evidence comes from throwaway `tmp_path` repositories.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Stale-clone detection + forced remote-override on reconnect"
       },
       "created_at": "2026-08-24T19:40:55Z",
@@ -81708,6 +81778,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T07:47:13Z"
     },
+    "b8dd-85be-1dbb-45b9": {
+      "created_at": "2026-11-16T20:31:32Z",
+      "jira_id": "4599312",
+      "jira_key": "REB-7220",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:35Z"
+    },
     "b8de-7cf7-370e-4379": {
       "baseline": {
         "assignee": {
@@ -81921,6 +81998,13 @@
       "peer_parent": "REB-6406",
       "state": "confirmed",
       "updated_at": "2026-09-07T19:34:08Z"
+    },
+    "b93b-40ce-0da3-4c67": {
+      "created_at": "2026-11-16T20:31:37Z",
+      "jira_id": "4599313",
+      "jira_key": "REB-7221",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:41Z"
     },
     "b943-19c6-a332-4228": {
       "baseline": {
@@ -85523,6 +85607,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:39Z"
     },
+    "c1cf-bf46-01a9-4b17": {
+      "created_at": "2026-11-16T20:31:43Z",
+      "jira_id": "4599314",
+      "jira_key": "REB-7222",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:49Z"
+    },
     "c1da-1701-ab01-4db7": {
       "created_at": "2026-08-15T15:10:40Z",
       "jira_key": "REB-1122",
@@ -88905,7 +88996,7 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Symptom\n\n`transition_ticket(fattish-plucky-bufflehead, \"in_progress\" -> \"closed\")` over MCP returned `McpError: -32001: Request timed out` on three successive attempts. The ticket stayed `in_progress` each time. The call runs the completion-verifier close gate inline, and that gate takes 9-11 minutes by `AGENTS.md`'s own published estimate, against an MCP client request deadline of roughly 60 seconds.\n\nThe timeout is not a verdict. The server keeps running, the caller learns nothing, and the natural response is to re-fire the same call -- a second billable gate pass. This is precisely the failure `AGENTS.md` already describes for the direct gate tools, and the reason `review_plan_start` / `verify_completion_start` exist.\n\n## Why the existing workaround does not cover it\n\nPre-computing the attestation does NOT make the close fast. Measured on `62dc-535b-5d05-421d` at `origin/main` `f1fe7c6f587d3a57fcd4b49598485d7fd4101711`:\n\n1. `verify_completion_start` -> job\n   `1793725995508270393-89be127e921a4bf8b7acd1bbfaee7749`.\n2. `gate_status` -> `status: \"passed\"`, `verdict: \"PASS\"`,\n   `verified_at_sha: f1fe7c6f587...`, `signed_at: 1793726842234944794`.\n3. `transition_ticket` with that signed certificate in place -> **timed out again**.\n\nSo the async surface covers the gate op but not the operation that actually needs it. An agent that follows the documented guidance still cannot close a ticket over MCP without an ambiguous timeout.\n\n## Scope: which surfaces run a gate with no async counterpart\n\nIn `src/rebar/_mcp_llm.py`, `_start_gate_job` (:213-258) and `_spawn_gate_daemon` (:174-210) are already generic over `gate_type` -- the daemon machinery is not specific to the two gates that use it. But:\n\n- `_register_gate_start_tools` (:261-342) registers exactly two starters:\n  `review_plan_start` (:265) and `verify_completion_start` (:304).\n- `_gate_sidecar_fields` (:162-171) hard-restricts to\n  `{\"plan_review\", \"verify_completion\"}`.\n\nSurfaces that run one of these gates inline and have NO async form:\n\n| Surface | Gate run inline | Async form |\n|---|---|---|\n| `transition_ticket` (`_mcp_tool_specs.py:649`) | completion-verifier on close; plan-review on claim-equivalent transitions (:657) | none |\n| `claim_ticket` (`_mcp_tool_specs.py:217`) | plan-review | none |\n| `review_code` (`_mcp_llm.py:354`) | code review | none |\n\n`review_code` is the clearest gap of the three: it is a long LLM gate op registered synchronously alongside `review_plan` and `verify_completion`, which both got starters, and it was simply not given one.\n\n## The invariant to establish\n\nEvery MCP surface that can run the plan-review, completion-verifier, or code-review gate must have an async counterpart returning a `{job_id, ..., status: \"running\"}` handle pollable by `gate_status`, so no caller is ever forced into a request that can outlive the client deadline. Today that invariant holds for 2 surfaces and fails for 3.\n\n## Acceptance criteria\n\n- [ ] AC1 -- `review_code_start` exists, returns a `{job_id, ticket_id, gate_type,\n      status: \"running\"}` handle in milliseconds, and its job is pollable through\n      `gate_status` to a terminal `passed`/`failed` with the review result.\n- [ ] AC2 -- `claim_ticket` and `transition_ticket` each have an async counterpart\n      (or an async mode) that starts the gate on the daemon, returns a handle\n      immediately, and applies the status change on gate success -- so the\n      state transition itself is never blocked on an inline gate run.\n- [ ] AC3 -- `gate_status` reports the new gate types, and `_gate_sidecar_fields`\n      no longer silently drops sidecar provenance for them.\n- [ ] AC4 -- a test drives each new starter through `gate_status` to a terminal\n      state, asserting the handle is returned before the gate completes (the\n      point of the change is the immediate return, so a test that only checks the\n      terminal verdict does not cover it).\n- [ ] AC5 -- a test asserts the invariant directly: every registered MCP tool that\n      can run one of the three gates has an async counterpart. This is the\n      regression guard that stops a fourth surface shipping without one.\n- [ ] AC6 -- `docs/mcp-reference.md` documents the new starters, and the\n      `AGENTS.md` guidance that currently names only `review_plan` /\n      `verify_completion` is widened to cover every gate-running surface.\n- [ ] AC7 -- de-dup protection applies to the new surfaces as it does to the\n      synchronous `review_plan` / `verify_completion`, so a re-fire after a\n      timeout attaches to the in-flight run instead of double-billing.\n\n## Provider neutrality\n\nNothing here is provider- or model-specific. The daemon machinery, the job handle, and the polling surface are all transport-level; they are indifferent to which provider backs the gate.\n\n## Out of scope\n\n- Changing any gate's verdict logic, prompt, or criteria.\n- Raising the MCP client request deadline -- that is a client setting and would not\n  fix a 10-minute gate behind a 60-second deadline anyway.\n- The CLI surfaces, which are not subject to the MCP request deadline.",
+        "description": "## Symptom\n\n`transition_ticket(fattish-plucky-bufflehead, \"in_progress\" -> \"closed\")` over MCP returned `McpError: -32001: Request timed out` on three successive attempts. The ticket stayed `in_progress` each time. The call runs the completion-verifier close gate inline, and that gate takes 9-11 minutes by `AGENTS.md`'s own published estimate, against an MCP client request deadline of roughly 60 seconds.\n\nThe timeout is not a verdict. The server keeps running, the caller learns nothing, and the natural response is to re-fire the same call -- a second billable gate pass. This is precisely the failure `AGENTS.md` already describes for the direct gate tools, and the reason `review_plan_start` / `verify_completion_start` exist.\n\n## Why the existing workaround does not cover it\n\nPre-computing the attestation does NOT make the close fast. Measured on `62dc-535b-5d05-421d` at `origin/main` `f1fe7c6f587d3a57fcd4b49598485d7fd4101711`:\n\n1. `verify_completion_start` -> job\n   `1793725995508270393-89be127e921a4bf8b7acd1bbfaee7749`.\n2. `gate_status` -> `status: \"passed\"`, `verdict: \"PASS\"`,\n   `verified_at_sha: f1fe7c6f587...`, `signed_at: 1793726842234944794`.\n3. `transition_ticket` with that signed certificate in place -> **timed out again**.\n\nSo the async surface covers the gate op but not the operation that actually needs it. An agent that follows the documented guidance still cannot close a ticket over MCP without an ambiguous timeout.\n\n## Scope: which surfaces run a gate with no async counterpart\n\nIn `src/rebar/_mcp_llm.py`, `_start_gate_job` and `_spawn_gate_daemon` are already generic over `gate_type` -- the daemon machinery is not the gap; only two gates use it:\n- `_register_gate_start_tools` registers exactly two starters: `review_plan_start` and\n  `verify_completion_start`.\n- `_gate_sidecar_fields` hard-restricts `{\"plan_review\", \"verify_completion\"}`.\n- `rebar/llm/gate_runs.py` (`_durable_verdict`, `_GATE_SIDECARS`), the `gate_status` docstring\n  in `_mcp_reads.py`, and `schemas/gate_run.schema.json` describe only those two job kinds.\n\nSurfaces that run one of the long gates inline with NO async form:\n\n| Surface | Gate run inline | Async form |\n|---|---|---|\n| `transition_ticket` (`_mcp_tool_specs.py`) | completion-verifier on a close (`transition_close.close_ticket`) | none |\n| `review_code` (`_mcp_llm.py`) | four-pass code review | none |\n\nOut of the gate-running scope, verified in code: `claim_ticket` and the `open -> in_progress` branch of `transition_ticket` go through `gates.plan_review_precheck`, which only calls `llm.claim_gate_check` -- a local HMAC + freshness check with no LLM and no network call (`_commands/gates.py:319-366`). They return in milliseconds and need no starter. The `claim --review` flag that does run `llm.review_plan` is CLI-only and not exposed over MCP.\n\n`review_code` is the clearest gap: a long LLM gate op registered synchronously alongside `review_plan` and `verify_completion`, which both got starters.\n\n## Invariant to establish\n\nEvery MCP surface that runs the plan-review, completion-verifier, or code-review gate must have an async counterpart returning a `{job_id, ..., status: \"running\"}` handle pollable by `gate_status`, so no caller is ever forced into a request that can outlive the client deadline. Today the invariant holds for 2 surfaces (`review_plan`, `verify_completion`) and fails for 2 (`review_code`, `transition_ticket`).\n\n## Design\n\n- `review_code_start` (in `_mcp_llm.py`) mirrors `review_plan_start`, with gate type\n  `code_review`, an empty `ticket_id` (a code review covers a git range), and a dedup variant\n  carrying `base`/`head`/`source`. The sync `review_code` and the starter share one body\n  (`_review_code_body`) so a provider failure is the same structured result on both, and the\n  sync tool goes through `run_gate_singleflight` with the same key.\n- `transition_ticket_start` (new `src/rebar/_mcp_ticket_async.py`) wraps the SAME derived\n  `transition_ticket` tool (spec pre/post hooks included) and runs it on the gate daemon via\n  `_start_gate_job`. It uses its own gate type `transition`, not `verify_completion`: the dedup\n  key starts with the gate type, so reusing `verify_completion` would let a close ATTACH to a\n  running `verify_completion_start`, report that check's `passed`, and never transition. A\n  completed transition settles `passed` with verdict `applied`; a refusal (gate FAIL,\n  ConcurrencyError) settles `failed` with the message in `error`. Registered from\n  `mcp_server.build_server` and skipped on a read-only server, like the write tools.\n- `_terminal_from_result` unwraps the nested code-review verdict dict to its PASS/BLOCK string;\n  `_gate_sidecar_fields` reads a `GATE_TYPES_WITH_SIDECARS` constant that includes `code_review`.\n- `gate_runs._durable_verdict` maps a `transition` job to the ticket's completion-certificate\n  currency, so a close poller sees whether the completion cert persisted.\n\n## Acceptance criteria\n\n- [ ] AC1 -- `review_code_start` exists, returns a `{job_id, ticket_id, gate_type,\n  status: \"running\"}` handle in milliseconds, and its job is pollable through `gate_status` to\n  a terminal `passed`/`failed` carrying the review's PASS/BLOCK verdict.\n- [ ] AC2 -- `transition_ticket_start` starts the transition (and its completion-verifier close\n  gate) on a daemon, returns a handle immediately, and applies the status change only on gate\n  success -- so a close over MCP is never blocked on an inline gate run.\n- [ ] AC3 -- `gate_status` reports the new `code_review` and `transition` job kinds (gate type,\n  verdict, and for `transition` the durable completion currency), and `_gate_sidecar_fields`\n  no longer silently drops sidecar provenance for `code_review`. The `gate_status` docstring and\n  the `GateRun` schema description name every starter.\n- [ ] AC4 -- a test drives each new starter through `gate_status` to a terminal state,\n  asserting the handle returned BEFORE the gate completed (a terminal-verdict-only test would\n  pass against the blocking code this bug is about).\n- [ ] AC5 -- a test asserts the invariant directly against the real `build_server()`: every\n  registered MCP tool that runs one of the three gates has a `<name>_start` counterpart, and a\n  second test classifies every billable LLM tool so a new gate surface cannot ship without one.\n- [ ] AC6 -- `docs/mcp-reference.md` (regenerated by `scripts/gen_mcp_reference.py`, which must\n  enumerate the new registrar) documents the new starters, and the `AGENTS.md` async-gate\n  guidance that names only `review_plan` / `verify_completion` is widened to every\n  gate-running surface.\n- [ ] AC7 -- de-dup protection applies to the new surfaces as it does to synchronous\n  `review_plan` / `verify_completion`: a re-fire while a run is in flight attaches to it (same\n  `job_id`, one gate run) instead of double-billing.\n\n## Provider neutrality\n\nNothing here is provider- or model-specific. The daemon machinery, job handle, and polling surface are all transport-level and indifferent to which provider backs a gate.\n\n## Out of scope\n\n- Changing any gate's verdict logic, prompt, or criteria.\n- Raising the MCP client request deadline -- a client setting, and it would not fix a\n  10-minute gate behind a 60-second deadline anyway.\n- CLI surfaces, which are not subject to the MCP request deadline.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Gate-running MCP surfaces lack async counterparts, so closes time out"
@@ -105644,6 +105735,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:04Z"
     },
+    "ef38-6d04-e9cd-4403": {
+      "created_at": "2026-11-16T20:31:52Z",
+      "jira_id": "4599315",
+      "jira_key": "REB-7223",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T20:31:56Z"
+    },
     "ef3e-5b52-7769-4eec": {
       "baseline": {
         "assignee": null,
@@ -118583,7 +118681,14 @@
     "1794616832015890077": "__rebar_unknown_comment_id__",
     "1794621181379035192": "__rebar_unknown_comment_id__",
     "1794622774861929278": "__rebar_unknown_comment_id__",
-    "1794628421578539701": "__rebar_unknown_comment_id__"
+    "1794628421578539701": "__rebar_unknown_comment_id__",
+    "1794857829451968751": "__rebar_unknown_comment_id__",
+    "1794858129079399679": "__rebar_unknown_comment_id__",
+    "1794858154406634744": "__rebar_unknown_comment_id__",
+    "1794858276048080856": "__rebar_unknown_comment_id__",
+    "1794858530986644312": "__rebar_unknown_comment_id__",
+    "1794858629356844714": "__rebar_unknown_comment_id__",
+    "1794860082587854924": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -124162,7 +124267,19 @@
     "REB-72": "3121-87f8-f3a0-4cf1",
     "REB-720": "6173-32ea-1fc0-4f04",
     "REB-721": "62bc-4070-82b7-4fb9",
+    "REB-7212": "09f9-6b9f-24b1-4fb6",
+    "REB-7213": "21fb-6afd-c5e7-4f4a",
+    "REB-7214": "2846-ec55-c258-4e2c",
+    "REB-7215": "4357-c54c-71b0-4bb4",
+    "REB-7216": "44b2-e70e-2b9f-4d2a",
+    "REB-7217": "453c-cad2-fab5-456d",
+    "REB-7218": "8aa0-2120-5ef3-4750",
+    "REB-7219": "9660-c4b0-1b57-4849",
     "REB-722": "7192-fe9f-e3fa-4ed4",
+    "REB-7220": "b8dd-85be-1dbb-45b9",
+    "REB-7221": "b93b-40ce-0da3-4c67",
+    "REB-7222": "c1cf-bf46-01a9-4b17",
+    "REB-7223": "ef38-6d04-e9cd-4403",
     "REB-723": "81b4-985e-b3e8-4026",
     "REB-724": "8d1d-941c-9589-4004",
     "REB-725": "90b2-8427-a60f-4d2a",
