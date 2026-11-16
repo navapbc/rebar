@@ -46,8 +46,10 @@ __all__ = [
     "StoreIncompatibleError",
     "check_store_compat",
     "describe_store_compat",
+    "remote_epoch_supersedes_local",
     "store_epoch_merge_target",
     "store_epoch_problem",
+    "superseding_record",
     "write_compat_record",
 ]
 
@@ -241,6 +243,71 @@ def store_epoch_merge_target(
     return target, store_epoch_problem(tracker, target)
 
 
+def _lineage_from_record(raw: str) -> list[str | None] | None:
+    """Return a record's ``epoch_lineage``, or ``None`` when absent or malformed.
+
+    Each entry is a prior epoch string, or ``null`` for the pre-epoch (absent) record.
+    A malformed lineage proves nothing, so callers treat it as "does not supersede".
+    """
+    try:
+        record = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    lineage = record.get("epoch_lineage")
+    if not isinstance(lineage, list):
+        return None
+    if not all(entry is None or isinstance(entry, str) for entry in lineage):
+        return None
+    return lineage
+
+
+def remote_epoch_supersedes_local(tracker: str | os.PathLike[str], remote_commit: str) -> bool:
+    """Whether *remote_commit*'s store is a reclaimed rewrite of this local store.
+
+    True only when the remote record carries a valid epoch different from the local one
+    AND its ``epoch_lineage`` names the local epoch (``null`` for an absent local record).
+    That lineage is the proof that the unrelated remote history replaced THIS store's
+    history (ADR 0106 §5), so an unrelated or malformed remote still refuses to merge.
+    """
+    local_epoch, local_problem = _local_store_epoch(tracker)
+    if local_problem is not None:
+        return False
+    source = f"{remote_commit}:{COMPAT_FILENAME}"
+    try:
+        shown = run_git(os.fspath(tracker), "show", source, check=False)
+    except OSError:
+        return False
+    if shown.returncode != 0:
+        return False
+    remote_epoch, remote_problem = _epoch_from_record(shown.stdout, source)
+    if remote_problem is not None or remote_epoch is None or remote_epoch == local_epoch:
+        return False
+    lineage = _lineage_from_record(shown.stdout)
+    return lineage is not None and local_epoch in lineage
+
+
+def superseding_record(record: dict[str, object], new_epoch: str) -> dict[str, object]:
+    """Return *record* re-stamped with *new_epoch*, its old epoch appended to the lineage.
+
+    The publish-swap stamps the rewritten baseline with this record so clones can prove
+    the new history supersedes theirs (:func:`remote_epoch_supersedes_local`).
+    """
+    old_epoch = record.get("epoch")
+    if old_epoch is not None and not isinstance(old_epoch, str):
+        raise ValueError("record 'epoch' must be a string when present")
+    lineage = record.get("epoch_lineage", [])
+    if not isinstance(lineage, list):
+        raise ValueError("record 'epoch_lineage' must be a list when present")
+    if new_epoch == old_epoch or new_epoch in lineage:
+        raise ValueError(f"epoch {new_epoch!r} is already in this store's lineage")
+    updated = dict(record)
+    updated["epoch"] = new_epoch
+    updated["epoch_lineage"] = [*lineage, old_epoch]
+    return updated
+
+
 def _analyze(tracker: str | os.PathLike[str]) -> dict[str, str] | None:
     """The single read-parse-validate core shared by the raising gate
     (:func:`check_store_compat`) and the non-raising diagnostic
@@ -349,11 +416,14 @@ def write_compat_record(tracker: str | os.PathLike[str]) -> None:
     unit stamps it at init). Uses :func:`rebar._store.fsutil.atomic_write` so a reader
     never observes a torn record."""
     epoch: str | None = None
+    lineage: list[str | None] | None = None
     try:
         with open(_record_path(tracker), encoding="utf-8") as fh:
-            existing = json.loads(fh.read())
+            raw = fh.read()
+        existing = json.loads(raw)
         if isinstance(existing, dict) and isinstance(existing.get("epoch"), str):
             epoch = existing["epoch"]
+            lineage = _lineage_from_record(raw)
     except (OSError, json.JSONDecodeError, ValueError):
         pass
 
@@ -363,6 +433,8 @@ def write_compat_record(tracker: str | os.PathLike[str]) -> None:
     }
     if epoch is not None:
         record["epoch"] = epoch
+    if lineage is not None:
+        record["epoch_lineage"] = lineage
     body = json.dumps(record, indent=2, sort_keys=True) + "\n"
     fsutil.atomic_write(_record_path(tracker), body)
 

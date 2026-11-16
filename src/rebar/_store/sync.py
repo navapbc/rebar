@@ -15,7 +15,7 @@ import os
 import subprocess
 import time
 
-from rebar._store import compat, git_outcome, merge_recovery
+from rebar._store import compat, git_outcome, merge_recovery, stale_override
 from rebar._store import lock as _lock
 from rebar._store.gitutil import (
     _LOCAL_GIT_TIMEOUT,
@@ -111,6 +111,8 @@ def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
     # Union an empty unrelated local store. Refuse one with ticket events:
     # independently built histories need operator recovery, not implicit grafting.
     if not _ok(tracker, "merge-base", "HEAD", remote):
+        if _override_if_reclaimed(tracker, remote):
+            return
         if _carries_ticket_events(tracker):
             logger.warning(
                 "tickets sync DIVERGED — local store and %s share no common ancestor "
@@ -134,6 +136,48 @@ def _do_reconverge(tracker: str, branch: str, remote_name: str) -> None:
 
     # Diverged → merge-as-union. Conflict → abort, keep local, hint fsck.
     _union_merge(tracker, remote)
+
+
+# raw-git-ok: locked store seam internal
+def _override_if_reclaimed(tracker: str, remote: str) -> bool:
+    """Move a clone onto a reclaimed remote baseline (ADR 0106 §5); report whether it ran.
+
+    Applies only when the remote's store epoch provably supersedes the local one; any
+    other unrelated history keeps the ``DIVERGED`` refusal. Runs under the write lock.
+    """
+    if not _ok(tracker, "rev-parse", "--verify", "HEAD"):
+        return False  # unborn HEAD: the empty-store union path handles it
+    target = _git(tracker, "rev-parse", "--verify", f"{remote}^{{commit}}").stdout.strip()
+    if not target or not compat.remote_epoch_supersedes_local(tracker, target):
+        return False
+    horizon_days = _reclaim_horizon_days(tracker)
+    if horizon_days is None:
+        return False
+    try:
+        stale_override.override_onto_reclaimed_remote(
+            _git, tracker, target, horizon_days=horizon_days
+        )
+    except stale_override.StaleOverrideError as err:
+        logger.warning(
+            "tickets sync: could not move onto reclaimed remote %s (%s); the previous tip "
+            "is kept under %s* — run: rebar store fsck",
+            remote,
+            err,
+            stale_override.BACKUP_REF_PREFIX,
+        )
+    return True
+
+
+def _reclaim_horizon_days(tracker: str) -> int | None:
+    """The configured reclaim horizon, or ``None`` when config cannot be read."""
+    from rebar import config
+    from rebar.config import ConfigError
+
+    try:
+        # repo-root-ok: the horizon is read from the STORE's project config, as for branch/remote
+        return config.reclaim_horizon_days(os.path.dirname(tracker))
+    except ConfigError:
+        return None
 
 
 # raw-git-ok: locked store seam internal
