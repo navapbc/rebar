@@ -99,10 +99,16 @@ def _checkout(root: Path) -> tuple[Path, str]:
     return root, diff
 
 
-def _verify_once(repo: Path, diff_text: str) -> dict[int, dict]:
-    """One aggregate code-review Pass-2 call, in a local gate session on ``repo``."""
+def _verify_once(repo: Path, diff_text: str) -> tuple[dict[int, dict], list[str]]:
+    """One aggregate code-review Pass-2 call, in a local gate session on ``repo``.
+
+    Returns the verifications and the provider errors the call raised. ``verify_findings``
+    degrades a failed chunk to no verification, so without the errors a provider outage would
+    read as the veto dropping the finding (bug leady-soldierly-nurseshark).
+    """
     from rebar.llm import gate_source
     from rebar.llm.config import LLMConfig
+    from rebar.llm.errors import LLMError
     from rebar.llm.model_classes import resolve_model_string
     from rebar.llm.prompting import prompts
     from rebar.llm.review_kernel import verify as kverify
@@ -114,6 +120,7 @@ def _verify_once(repo: Path, diff_text: str) -> dict[int, dict]:
     cfg = replace(cfg, model=resolve_model_string("standard", str(_REPO_ROOT)), temperature=0.0)
     runner = get_runner(cfg)
     prompt = prompts.get_prompt("code-review-verify", repo_root=str(_REPO_ROOT))
+    provider_errors: list[str] = []
 
     def run_chunk(instructions: str, context: str) -> list[dict]:
         system, user, _meta = prompts.resolve_prompt_cached(
@@ -131,7 +138,11 @@ def _verify_once(repo: Path, diff_text: str) -> dict[int, dict]:
             output_schema="code_review_verification",
             execution_mode="agentic",
         )
-        return runner.run(req).get("verifications", []) or []
+        try:
+            return runner.run(req).get("verifications", []) or []
+        except LLMError as exc:
+            provider_errors.append(f"{type(exc).__name__}: {exc}"[:300])
+            raise
 
     handle = gate_source.resolve_gate_handle(None, gate_source.SOURCE_LOCAL, str(repo), fetch=False)
     with gate_source.gate_read_root(handle):
@@ -142,7 +153,7 @@ def _verify_once(repo: Path, diff_text: str) -> dict[int, dict]:
             window_tokens=1_000_000,
             est_tokens=lambda s: len(s) // 4,
         )
-    return result["verifications"]
+    return result["verifications"], provider_errors
 
 
 @_live_llm.skip_without_live_llm
@@ -155,9 +166,13 @@ def test_live_code_review_veto_spares_a_finding_that_reports_a_wrong_change_cita
     monkeypatch.setenv("REBAR_LLM_REPO_PATH", str(repo))
     spared_runs = 0  # the change-citation finding was verified and escaped the veto
     control_runs = 0  # the control's own wrong citation was vetoed
+    unavailable: list[str] = []  # runs the provider failed, so behavior was not measured
     try:
         for _ in range(_RUNS):
-            verifications = _verify_once(repo, diff_text)
+            verifications, provider_errors = _verify_once(repo, diff_text)
+            if provider_errors and not verifications:
+                unavailable.append(provider_errors[0])
+                continue
             reasons = [
                 kdecide.pass3_decide(verifications.get(i), impact_fn=kdecide.impact_code)["reason"]
                 for i in range(2)
@@ -172,6 +187,10 @@ def test_live_code_review_veto_spares_a_finding_that_reports_a_wrong_change_cita
             check=False,
             capture_output=True,
         )
+    assert len(unavailable) <= _RUNS - _MAJORITY, (
+        f"the provider failed {len(unavailable)}/{_RUNS} runs, so verifier behavior was not "
+        f"measured: {unavailable[0]}"
+    )
     assert spared_runs >= _MAJORITY, (
         f"only {spared_runs}/{_RUNS} runs kept the finding that reports a wrong citation in the "
         "change"

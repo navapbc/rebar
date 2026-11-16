@@ -120,10 +120,16 @@ def _fixture_repo(root: Path) -> Path:
     return root
 
 
-def _verify_once(execution_mode: str, repo: Path) -> dict[int, dict]:
-    """One aggregate Pass-2 call over the fixture, inside a local gate session on ``repo``."""
+def _verify_once(execution_mode: str, repo: Path) -> tuple[dict[int, dict], list[str]]:
+    """One aggregate Pass-2 call over the fixture, inside a local gate session on ``repo``.
+
+    Returns the verifications and the provider errors the call raised. ``verify_findings``
+    degrades a failed chunk to no verification, so without the errors a provider outage would
+    read as the veto dropping the findings (bug leady-soldierly-nurseshark).
+    """
     from rebar.llm import gate_source
     from rebar.llm.config import LLMConfig
+    from rebar.llm.errors import LLMError
     from rebar.llm.prompting import prompts
     from rebar.llm.review_kernel import verify as kverify
     from rebar.llm.runner import RunRequest, get_runner
@@ -131,6 +137,7 @@ def _verify_once(execution_mode: str, repo: Path) -> dict[int, dict]:
     cfg = LLMConfig.from_env()
     runner = get_runner(cfg)
     prompt = prompts.get_prompt(_PROMPT_BY_MODE[execution_mode], repo_root=cfg.repo_path)
+    provider_errors: list[str] = []
 
     def run_chunk(instructions: str, context: str) -> list[dict]:
         system, _meta = prompts.resolve_prompt(
@@ -147,7 +154,11 @@ def _verify_once(execution_mode: str, repo: Path) -> dict[int, dict]:
             output_schema="plan_review_verification",
             execution_mode=execution_mode,
         )
-        return runner.run(req).get("verifications", []) or []
+        try:
+            return runner.run(req).get("verifications", []) or []
+        except LLMError as exc:
+            provider_errors.append(f"{type(exc).__name__}: {exc}"[:300])
+            raise
 
     handle = gate_source.resolve_gate_handle(None, gate_source.SOURCE_LOCAL, str(repo), fetch=False)
     with gate_source.gate_read_root(handle):
@@ -158,7 +169,7 @@ def _verify_once(execution_mode: str, repo: Path) -> dict[int, dict]:
             window_tokens=1_000_000,
             est_tokens=lambda s: len(s) // 4,
         )
-    return result["verifications"]
+    return result["verifications"], provider_errors
 
 
 @_live_llm.skip_without_live_llm
@@ -173,8 +184,12 @@ def test_live_veto_spares_findings_that_report_a_wrong_plan_citation(
     control_index = len(_PLAN_CITATION_FINDINGS)
     spared_runs = 0  # every plan-citation finding was verified and escaped the veto
     control_runs = 0  # the control's own wrong citation was vetoed
+    unavailable: list[str] = []  # runs the provider failed, so behavior was not measured
     for _ in range(_RUNS):
-        verifications = _verify_once(execution_mode, repo)
+        verifications, provider_errors = _verify_once(execution_mode, repo)
+        if provider_errors and not verifications:
+            unavailable.append(provider_errors[0])
+            continue
         reasons = [
             kdecide.pass3_decide(verifications.get(i))["reason"] for i in range(control_index + 1)
         ]
@@ -182,6 +197,10 @@ def test_live_veto_spares_findings_that_report_a_wrong_plan_citation(
             spared_runs += 1
         if reasons[control_index] == _VETO:
             control_runs += 1
+    assert len(unavailable) <= _RUNS - _MAJORITY, (
+        f"{execution_mode}: the provider failed {len(unavailable)}/{_RUNS} runs, so verifier "
+        f"behavior was not measured: {unavailable[0]}"
+    )
     assert spared_runs >= _MAJORITY, (
         f"{execution_mode}: only {spared_runs}/{_RUNS} runs kept every finding that reports a "
         "wrong plan citation"
