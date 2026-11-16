@@ -12,6 +12,7 @@ git's Trace2 process tree: no maintenance, gc or repack process may be a DESCEND
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -162,11 +163,23 @@ def _maintenance_diagnosis(trace: Path, tracker: str) -> str:
     )
 
 
-def _cross_the_maintenance_threshold(repo: Path) -> str:
-    tracker = str(tracker_dir(str(repo)))
+def _sampled_loose_count(tracker: str) -> int:
+    """Loose objects in ``objects/17``: the one directory git's auto-gc samples. Git starts
+    auto-gc when this count exceeds ``ceil(gc.auto / 256)`` (``too_many_loose_objects``)."""
+    sampled = Path(_git(tracker, "rev-parse", "--git-path", "objects/17").stdout.strip())
+    sampled = sampled if sampled.is_absolute() else Path(tracker) / sampled
+    return len(list(sampled.iterdir())) if sampled.is_dir() else 0
+
+
+def _assert_foreground_maintenance(tracker: str) -> None:
     # Precondition: rebar's gc-config makes auto-maintenance FOREGROUND (so it lands inside the
     # commit subprocess). If this ever changes, the mechanism under test no longer applies.
     assert _git(tracker, "config", "--get", "maintenance.autoDetach").stdout.strip() == "false"
+
+
+def _cross_the_maintenance_threshold(repo: Path) -> str:
+    tracker = str(tracker_dir(str(repo)))
+    _assert_foreground_maintenance(tracker)
 
     _fill_loose(tracker, _LOOSE)
     # Clean up the scratch worktree files so they don't become tracked noise; the loose objects
@@ -175,6 +188,56 @@ def _cross_the_maintenance_threshold(repo: Path) -> str:
         p.unlink()
     (Path(tracker) / ".bd66_loose").rmdir()
     assert int(_git(tracker, "count-objects").stdout.split()[0]) >= 6700
+    # The gc strategy samples objects/17 against ceil(6700/256) = 27; the geometric strategy
+    # counts all loose objects against 6700 (the count-objects check above).
+    assert _sampled_loose_count(tracker) > 27
+    return tracker
+
+
+# Which threshold auto-maintenance applies depends on git's default strategy: the gc strategy
+# reads gc.auto, the geometric one (git 2.56 here) reads maintenance.geometric-repack.auto.
+# Command-scope settings outrank the store's config, which rebar's ensure sweep rewrites.
+_MINIMAL_THRESHOLDS = (("gc.auto", "1"), ("maintenance.geometric-repack.auto", "1"))
+
+
+def _cross_a_minimal_maintenance_threshold(repo: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Make git's next auto-maintenance check say "run" while leaving it almost nothing to
+    pack (bug ab03-0276).
+
+    The detector only has to show that git starts maintenance inside a commit once the
+    suppression is gone. With the 20,000-object fill, the commit it observes also has to
+    finish that repack inside the store's per-call git bound; under host load it did not
+    ("git timed out after 30s"), so the detector failed before checking anything. Here
+    gc.auto=1 gives a sampled threshold of ceil(1/256) = 1, which two loose objects whose ids
+    start with ``17`` exceed, and geometric-repack.auto=1 is met by those same two objects.
+    The repack then covers only the few objects a fresh store holds.
+    """
+    tracker = str(tracker_dir(str(repo)))
+    _assert_foreground_maintenance(tracker)
+    contents: list[bytes] = []
+    i = 0
+    while len(contents) < 2:
+        body = f"bd66-sampled-{i}\n".encode()
+        if hashlib.sha1(b"blob %d\0" % len(body) + body).hexdigest().startswith("17"):
+            contents.append(body)
+        i += 1
+    for body in contents:
+        oid = (
+            subprocess.run(
+                ["git", "-C", tracker, "hash-object", "-w", "--stdin"],
+                input=body,
+                capture_output=True,
+                check=True,
+            )
+            .stdout.decode()
+            .strip()
+        )
+        assert oid.startswith("17"), f"store is not SHA-1, so {oid} misses objects/17"
+    assert _sampled_loose_count(tracker) > 1
+    for index, (key, value) in enumerate(_MINIMAL_THRESHOLDS):
+        monkeypatch.setenv(f"GIT_CONFIG_KEY_{index}", key)
+        monkeypatch.setenv(f"GIT_CONFIG_VALUE_{index}", value)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", str(len(_MINIMAL_THRESHOLDS)))
     return tracker
 
 
@@ -210,7 +273,7 @@ def test_the_trace_check_detects_maintenance_inside_a_commit(
 ) -> None:
     """The check must be able to fail: with the suppression removed, git runs
     ``maintenance run --auto`` (and the repack below it) as a child of the commit."""
-    tracker = _cross_the_maintenance_threshold(repo)
+    tracker = _cross_a_minimal_maintenance_threshold(repo, monkeypatch)
     monkeypatch.setattr(event_commit_git, "_AUTOMAINT_OFF", ())
     # Bounded git children also carry the suppression in their environment (bug 51e0-5038).
     monkeypatch.setattr(gitutil, "_IMPLICIT_MAINTENANCE_OFF", ())
