@@ -768,6 +768,10 @@ fetch origin tickets    # (network; best-effort; common-dir-coordinated — see 
 if no origin/tickets: return
 
 if merge-base(HEAD, origin/tickets) is empty:          # UNRELATED histories
+    if origin's store epoch supersedes local:          # reclaimed baseline (below)
+        back up HEAD; reset --hard origin/tickets; replay unpushed events if fresh
+        return
+    if local carries ticket events: refuse — DIVERGED  # keep local untouched
     merge --allow-unrelated-histories origin/tickets   # UNION both orphans:
         on conflict: merge --abort; keep local; hint fsck  # keep EVERY local
                                                        # commit (UUID-named event
@@ -789,6 +793,31 @@ else:                                                  # RELATED histories
         on conflict: merge --abort; keep local; hint fsck   # never reset,
                                                             # never hard-fail a read
 ```
+
+**Reconnect after a history reclaim (ADR 0106 §5).** A reclaim publish-swap replaces the
+shared history with a rewritten baseline, so afterwards no clone shares a commit with the
+remote. The baseline's `.store-compat.json` carries a new `epoch` plus an `epoch_lineage`
+list that names every epoch it replaced (`null` stands for a store that had no epoch);
+`rebar._store.compat.superseding_record` builds that record. When the histories are
+unrelated and `compat.remote_epoch_supersedes_local` finds the local epoch in the remote
+lineage, `_do_reconverge` hands off to `rebar._store.stale_override` under the write lock
+instead of refusing:
+
+1. It finds the clone's **unpushed** events: event files whose uuid the remote tip does not
+   know, either as a file in the ticket directory (with any suffix) or in a remote
+   SNAPSHOT's `data.source_event_uuids`. Local SNAPSHOT events are derived and never
+   count. Anything the remote retired or folded is therefore never added back.
+2. The clone is **stale** when its oldest unpushed event is older than
+   `[reclaim].horizon_days`. Every write auto-pushes (I5), so the oldest unpushed write
+   bounds when the clone last converged.
+3. It points `refs/rebar/stale-override/<utc-stamp>` (a local ref that is never pushed) at
+   the old HEAD and resets to the pinned remote commit.
+4. A **fresh** clone re-adds its unpushed event files byte-for-byte in one commit, which the
+   normal push path then delivers. A **stale** clone re-adds nothing and logs a warning that
+   names the backup ref and the number of events it dropped; ADR 0106 accepts that loss.
+
+A remote whose lineage does not name the local epoch, or whose lineage is malformed, is not
+proven to be this store's rewrite, so it still gets the `DIVERGED` refusal.
 
 **Why HEAD, not the branch ref (the WS3 data-loss fix).** The tracker worktree can
 be in a detached-HEAD-local-ahead state (after an interrupted rebase, or on older
