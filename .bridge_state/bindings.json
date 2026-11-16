@@ -58604,6 +58604,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-29T19:30:14Z"
     },
+    "8613-902c-a4cd-4d80": {
+      "created_at": "2026-11-16T23:33:18Z",
+      "jira_id": "4599329",
+      "jira_key": "REB-7224",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T23:33:21Z"
+    },
     "8625-7bea-67db-4cdc": {
       "baseline": {
         "assignee": {
@@ -84013,6 +84020,13 @@
       "peer_parent": "REB-4232",
       "state": "confirmed",
       "updated_at": "2026-09-01T01:27:27Z"
+    },
+    "bd8d-54e9-682f-46a3": {
+      "created_at": "2026-11-16T23:33:23Z",
+      "jira_id": "4599330",
+      "jira_key": "REB-7225",
+      "state": "confirmed",
+      "updated_at": "2026-11-16T23:33:28Z"
     },
     "bd9e-0740-1b47-47f8": {
       "baseline": {
@@ -118798,7 +118812,15 @@
     "1794858276048080856": "__rebar_unknown_comment_id__",
     "1794858530986644312": "__rebar_unknown_comment_id__",
     "1794858629356844714": "__rebar_unknown_comment_id__",
-    "1794860082587854924": "__rebar_unknown_comment_id__"
+    "1794860082587854924": "__rebar_unknown_comment_id__",
+    "1794868242522920309": "__rebar_unknown_comment_id__",
+    "1794868280859004574": "__rebar_unknown_comment_id__",
+    "1794868404164881796": "__rebar_unknown_comment_id__",
+    "1794869337272486871": "__rebar_unknown_comment_id__",
+    "1794869523660699512": "__rebar_unknown_comment_id__",
+    "1794869533798591224": "__rebar_unknown_comment_id__",
+    "1794869551659322072": "__rebar_unknown_comment_id__",
+    "1794871089698890955": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -124390,6 +124412,8 @@
     "REB-7221": "b93b-40ce-0da3-4c67",
     "REB-7222": "c1cf-bf46-01a9-4b17",
     "REB-7223": "ef38-6d04-e9cd-4403",
+    "REB-7224": "8613-902c-a4cd-4d80",
+    "REB-7225": "bd8d-54e9-682f-46a3",
     "REB-723": "81b4-985e-b3e8-4026",
     "REB-724": "8d1d-941c-9589-4004",
     "REB-725": "90b2-8427-a60f-4d2a",
