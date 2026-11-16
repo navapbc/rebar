@@ -3,8 +3,9 @@
 rebar MCP server exposes, grouped by gate tier (ticket 235a).
 
 The reference is DERIVED from the server's OWN registrars (``register_read_tools`` /
-``register_llm_tools`` / ``register_write_tools``), so a CI drift gate can regenerate it
-and fail the build on any diff — a newly-registered tool cannot ship undocumented.
+``register_llm_tools`` / ``register_write_tools``, with ``register_ticket_async_tools``
+folded into the write group because its starters are write-gated), so a CI drift gate
+can regenerate it and fail the build on any diff — a newly-registered tool cannot ship undocumented.
 
 Each registrar is enumerated onto its OWN ``FastMCP`` instance so the registrar is the
 ground-truth grouping. Enumeration runs with ``REBAR_MCP_READONLY`` OFF (the write
@@ -86,7 +87,13 @@ def _registrar_tools() -> dict[str, dict[str, str]]:
     import rebar.mcp_server as ms
     from rebar._mcp_llm import register_llm_tools
     from rebar._mcp_reads import register_read_tools
+    from rebar._mcp_ticket_async import register_ticket_async_tools
     from rebar._mcp_writes import register_write_tools
+
+    def _write_group(m, ctx) -> None:
+        # The ticket-op starters are write-gated like the claim/transition tools they front.
+        register_write_tools(m, ctx)
+        register_ticket_async_tools(m, ctx)
 
     def _group(reg) -> dict[str, str]:
         m = FastMCP("x")
@@ -109,7 +116,7 @@ def _registrar_tools() -> dict[str, dict[str, str]]:
     return {
         "read": _group(register_read_tools),
         "llm": _group(register_llm_tools),
-        "write": _group(register_write_tools),
+        "write": _group(_write_group),
     }
 
 

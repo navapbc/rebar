@@ -1019,7 +1019,7 @@
    "readOnlyHint": true,
    "title": null
   },
-  "description": "Poll an async plan-review or completion run without executing it.\n\n        Replaying the local gate index returns ``{job_id, status, ticket_id,\n        gate_type, verdict?, error?, durable?, findings?}``. Status is ``running``,\n        then ``passed`` or ``failed``; stale runs fail diagnostically, ``attaching``\n        awaits a duplicate's index record, and ``unknown`` marks an unrecognized ID.\n        ``durable`` reports signed-certificate currency. Read plan findings only after\n        ``findings.readable`` is true.\n        ",
+  "description": "Poll an async gate run (any ``*_start`` job) without executing it.\n\n        Replaying the local gate index returns ``{job_id, status, ticket_id,\n        gate_type, verdict?, error?, durable?, findings?}``. Status is ``running``,\n        then ``passed`` or ``failed``; stale runs fail diagnostically, ``attaching``\n        awaits a duplicate's index record, and ``unknown`` marks an unrecognized ID.\n        ``durable`` reports signed-certificate currency. ``gate_type`` is ``plan_review``,\n        ``verify_completion``, ``code_review`` (verdict PASS/BLOCK), or ``transition``\n        (verdict ``applied``; ``durable`` is the completion certificate). Read plan\n        findings only after ``findings.readable`` is true.\n        ",
   "inputSchema": {
    "properties": {
     "job_id": {
@@ -1627,6 +1627,56 @@
     }
    },
    "title": "review_codeArguments",
+   "type": "object"
+  }
+ },
+ "review_code_start": {
+  "annotations": {
+   "destructiveHint": null,
+   "idempotentHint": null,
+   "openWorldHint": true,
+   "readOnlyHint": true,
+   "title": null
+  },
+  "description": "Start a code review of ``base..head`` and immediately return\n        ``{job_id, ticket_id, gate_type: \"code_review\", status: \"running\"}``.\n\n        The async counterpart of ``review_code``: poll ``gate_status(job_id)`` until\n        ``passed`` (``verdict`` is the gate's PASS/BLOCK) or ``failed``. ``ticket_id`` is\n        empty because a code review covers a git range. A start for the same range while one\n        runs attaches to it. Requires ``REBAR_MCP_ALLOW_LLM=1``.\n        ",
+  "inputSchema": {
+   "properties": {
+    "base": {
+     "default": "HEAD~1",
+     "title": "Base",
+     "type": "string"
+    },
+    "head": {
+     "default": "HEAD",
+     "title": "Head",
+     "type": "string"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "source": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Source"
+    }
+   },
+   "title": "review_code_startArguments",
    "type": "object"
   }
  },
@@ -2285,6 +2335,78 @@
     "target_status"
    ],
    "title": "transition_ticketArguments",
+   "type": "object"
+  }
+ },
+ "transition_ticket_start": {
+  "annotations": {
+   "destructiveHint": false,
+   "idempotentHint": false,
+   "openWorldHint": false,
+   "readOnlyHint": false,
+   "title": null
+  },
+  "description": "Start ``transition_ticket`` on a background daemon and immediately return\n        ``{job_id, ticket_id, gate_type: \"transition\", status: \"running\"}``.\n\n        Takes exactly ``transition_ticket``'s arguments. Prefer it for a close, whose\n        completion-verifier gate takes minutes: the transition and its gate run on the\n        daemon, and the status changes only if the gate passes. Poll\n        ``gate_status(job_id)``: ``passed`` with verdict ``applied`` means the transition\n        landed; ``failed`` carries the refusal in ``error``. A start with the same\n        arguments while one runs attaches to it instead of running the gate twice.\n        ",
+  "inputSchema": {
+   "properties": {
+    "caused_by": {
+     "default": "",
+     "title": "Caused By",
+     "type": "string"
+    },
+    "close_class": {
+     "default": "",
+     "title": "Close Class",
+     "type": "string"
+    },
+    "current_status": {
+     "title": "Current Status",
+     "type": "string"
+    },
+    "force": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Force"
+    },
+    "reason": {
+     "default": "",
+     "title": "Reason",
+     "type": "string"
+    },
+    "ref": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null,
+     "title": "Ref"
+    },
+    "target_status": {
+     "title": "Target Status",
+     "type": "string"
+    },
+    "ticket_id": {
+     "title": "Ticket Id",
+     "type": "string"
+    }
+   },
+   "required": [
+    "ticket_id",
+    "current_status",
+    "target_status"
+   ],
+   "title": "transition_ticket_startArguments",
    "type": "object"
   }
  },

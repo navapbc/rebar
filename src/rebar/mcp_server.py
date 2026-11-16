@@ -13,8 +13,10 @@ The ``mcp`` dependency is an optional extra and is imported lazily.
 
 Structure: ``build_server`` is a thin assembler — it builds the FastMCP server,
 packs the shared handles + gate helpers into a ``ctx`` namespace, and calls the
-three per-cluster registrars (``register_read_tools`` / ``register_llm_tools`` /
-``register_write_tools`` in ``_mcp_reads`` / ``_mcp_llm`` / ``_mcp_writes``). The
+per-cluster registrars (``register_read_tools`` / ``register_llm_tools`` /
+``register_write_tools`` in ``_mcp_reads`` / ``_mcp_llm`` / ``_mcp_writes``, plus
+``register_ticket_async_tools`` in ``_mcp_ticket_async`` for the gated claim/close
+starters). The
 gate helpers, the workflow-payload budget cap, and the
 startup entry points live here. Tool results are plain dicts; ``rebar._mcp_schema``
 advertises each one's canonical JSON Schema as its ``outputSchema``.
@@ -34,6 +36,7 @@ from rebar._mcp_budget import (
 )
 from rebar._mcp_llm import register_llm_tools
 from rebar._mcp_reads import register_read_tools
+from rebar._mcp_ticket_async import register_ticket_async_tools
 from rebar._mcp_writes import register_write_tools
 
 logger = logging.getLogger(__name__)
@@ -513,6 +516,8 @@ def build_server(cfg=None):
     register_read_tools(_instrumented(mcp), ctx)
     register_llm_tools(_instrumented(mcp), ctx)
     register_write_tools(_instrumented(mcp), ctx)
+    # Async starters for the gated claim/close (bug cb1b); skipped when read-only.
+    register_ticket_async_tools(_instrumented(mcp), ctx)
 
     # Box-facing health/gauge/grace (ADR deft-evolutive-mosasaur): expose /health with
     # the certified-op in-flight gauge and instrument the LLM tools. Harmless for stdio

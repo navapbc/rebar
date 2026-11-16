@@ -59,14 +59,16 @@ def _register_gate_status_reads(mcp, ann) -> None:
 
     @mcp.tool(annotations=ann["READ_ONLY"])
     def gate_status(job_id: str) -> dict[str, Any]:
-        """Poll an async plan-review or completion run without executing it.
+        """Poll an async gate run (any ``*_start`` job) without executing it.
 
         Replaying the local gate index returns ``{job_id, status, ticket_id,
         gate_type, verdict?, error?, durable?, findings?}``. Status is ``running``,
         then ``passed`` or ``failed``; stale runs fail diagnostically, ``attaching``
         awaits a duplicate's index record, and ``unknown`` marks an unrecognized ID.
-        ``durable`` reports signed-certificate currency. Read plan findings only after
-        ``findings.readable`` is true.
+        ``durable`` reports signed-certificate currency. ``gate_type`` is ``plan_review``,
+        ``verify_completion``, ``code_review`` (verdict PASS/BLOCK), or ``transition``
+        (verdict ``applied``; ``durable`` is the completion certificate). Read plan
+        findings only after ``findings.readable`` is true.
         """
         import rebar.llm
 

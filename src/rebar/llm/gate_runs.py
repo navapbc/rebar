@@ -48,6 +48,8 @@ _STALE_GRACE_SECONDS: float = 5.0
 
 _PLAN_REVIEW = "plan_review"
 _VERIFY_COMPLETION = "verify_completion"
+# A ``transition_ticket_start`` job (bug cb1b): a close runs the completion gate inline.
+_TRANSITION = "transition"
 _TERMINAL_STATUSES = {"passed", "failed"}
 _REVIEW_RESULT = "REVIEW_RESULT"
 _COMPLETION_VERDICT = "COMPLETION_VERDICT"
@@ -118,11 +120,12 @@ def _durable_verdict(
     Reuses the existing read-only, no-LLM attestation readers — never a re-run — so a
     poll after a process restart still resolves the authoritative verdict from the git
     store even when the local index is gone. Returns ``None`` only for a gate_type that has
-    NO durable-attestation concept; for a plan-review/completion job it ALWAYS returns a
+    NO durable-attestation concept; a ``transition`` job reports the completion certificate,
+    which its close gate signs. For a plan-review/completion/transition job it ALWAYS returns a
     dict — an explicit ``{ok: False, verdict: 'unknown', reason}`` if the read raises —
     rather than silently dropping the field on error (the sibling readers never return
     ``None``, so the caller can rely on a durable dict being present)."""
-    if gate_type not in (_PLAN_REVIEW, _VERIFY_COMPLETION):
+    if gate_type not in (_PLAN_REVIEW, _VERIFY_COMPLETION, _TRANSITION):
         return None
     try:
         if gate_type == _PLAN_REVIEW:
@@ -333,9 +336,11 @@ def gate_run_status(job_id: str, *, repo_root: str | None = None) -> dict[str, A
     flight in the live registry but has no
     index record yet — a follower ``*_start`` shares the leader's ``job_id`` and writes no
     index entry, so a poll in the window before the leader's own ``running`` write lands
-    would otherwise read a misleading ``unknown``; keep polling. For a plan-review or
-    completion job it also attaches ``durable`` — the gate's own signed-attestation
-    currency — so a caller can confirm the run's verdict actually persisted (the
+    would otherwise read a misleading ``unknown``; keep polling. Job kinds follow the starter:
+    ``plan_review`` / ``verify_completion`` / ``code_review`` (verdict PASS/BLOCK) and
+    ``transition`` (verdict ``applied``, or ``failed`` with the refusal in ``error``). For a
+    plan-review, completion, or transition job it also attaches ``durable`` — the gate's own
+    signed-attestation currency — so a caller can confirm the run's verdict actually persisted (the
     moving-base-ref / passed-but-unsigned question). For plan-review jobs it attaches
     ``findings`` with ``readable`` and the expected/latest ``REVIEW_RESULT`` timestamps, so
     a poller never has to guess whether the latest sidecar belongs to this job."""

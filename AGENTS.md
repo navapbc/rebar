@@ -240,15 +240,19 @@ restated here:
 - **Long gate ops over MCP — PREFER the async `*_start`+poll surface.** A gate can outlast
   the MCP client's ~60s request deadline, which then returns a `-32001` timeout while the
   server keeps running — an ambiguous non-signal that provokes a duplicate, double-billed
-  re-run. So for `review_plan`/`verify_completion` over MCP, call the async starters
-  **`review_plan_start`/`verify_completion_start`** (they return a `{job_id,…,status:'running'}`
-  handle in ms on a background daemon, mirroring `run_workflow`), then POLL —
+  re-run. Every MCP surface that runs a gate has an async starter, so over MCP call
+  **`review_plan_start`/`verify_completion_start`/`review_code_start`**, and for a
+  completion-gated close (which runs the verifier inline and times out the same way)
+  **`transition_ticket_start`**, which applies the status change only when the gate passes.
+  Each returns a `{job_id,…,status:'running'}` handle in ms on a background
+  daemon, mirroring `run_workflow`; then POLL —
   `plan_review_status`/`verify_completion_status` for the durable signed verdict, or
   `gate_status(job_id)` for the run handle (`running` → `passed`/`failed`, with a
   stale daemon materialized as a failed diagnostic);
   for plan-review jobs, wait for `gate_status(job_id).findings.readable` before reading the
-  latest `REVIEW_RESULT` findings sidecar. The
-  synchronous `review_plan`/`verify_completion` tools remain the fallback and are now
+  latest `REVIEW_RESULT` findings sidecar; a transition job reads `passed` with verdict
+  `applied` once the status changed, or `failed` with the refusal in `error`. The
+  synchronous `review_plan`/`verify_completion`/`review_code` tools remain the fallback and are
   **de-dup-protected**: a concurrent same-key retry attaches to the in-flight run (kill-switch
   `REBAR_MCP_DEDUP=0`) instead of launching a second billable pass, so an accidental re-fire
   after a timeout no longer double-charges. Never wrap a gate call in a `timeout` (see the
