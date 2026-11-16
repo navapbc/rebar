@@ -117,6 +117,29 @@ def _completion_variant(ticket_id: str, graph: bool | None, source: str | None) 
     return f"graph={graph};source={source or 'attested'};material={_material_key(ticket_id)}"
 
 
+def _code_review_variant(base: str, head: str, source: str | None) -> str:
+    """Dedup variant for code review, which is scoped to a git RANGE rather than a ticket.
+
+    The basis SHA pins the reviewed head; ``base`` and ``head`` stay in the variant so two
+    ranges ending at one commit remain distinct runs.
+    """
+    return f"base={base};head={head};source={source or 'attested'}"
+
+
+def _review_code_body(base: str, head: str, ref, source) -> dict:
+    """Run one code review, structuring an ``LLMError`` exactly as the sync tool does.
+
+    Shared by ``review_code`` and ``review_code_start`` so a provider outage settles the async
+    job with the same structured result the sync tool returns, rather than as a raise.
+    """
+    import rebar.llm
+
+    try:
+        return rebar.llm.review_code(base=base, head=head, ref=ref, source=source)
+    except rebar.llm.LLMError as exc:
+        return _structured_llm_failure(exc)
+
+
 def _review_plan_body(
     ticket_id: str, ref, source, force: bool, *, readonly: bool, engine: str | None = None
 ) -> dict:
@@ -170,6 +193,10 @@ def _terminal_from_result(result: Any) -> tuple[str, Any]:
     if isinstance(result, dict) and result.get("error"):
         return "failed", result.get("error")
     verdict = result.get("verdict") if isinstance(result, dict) else None
+    # A code-review ``review_result`` nests the typed gate verdict under ``verdict``; the run
+    # index records its PASS/BLOCK string, not the whole dict.
+    if isinstance(verdict, dict):
+        verdict = verdict.get("verdict")
     return "passed", verdict
 
 
@@ -368,6 +395,42 @@ def _register_gate_start_tools(mcp, ann, allow_llm, readonly) -> None:
             )
         )
 
+    @mcp.tool(annotations=ann["READ_ONLY_OPEN_WORLD"])
+    async def review_code_start(
+        base: str = "HEAD~1",
+        head: str = "HEAD",
+        ref: str | None = None,
+        source: str | None = None,
+    ) -> dict:
+        """Start a code review of ``base..head`` and immediately return
+        ``{job_id, ticket_id, gate_type: "code_review", status: "running"}``.
+
+        The async counterpart of ``review_code``: poll ``gate_status(job_id)`` until
+        ``passed`` (``verdict`` is the gate's PASS/BLOCK) or ``failed``. ``ticket_id`` is
+        empty because a code review covers a git range. A start for the same range while one
+        runs attaches to it. Requires ``REBAR_MCP_ALLOW_LLM=1``.
+        """
+        if not allow_llm():
+            raise ValueError(
+                "review_code_start is disabled: it makes live, billable LLM call(s). "
+                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
+            )
+        ro = readonly()
+        import anyio.to_thread  # deferred: keep this module importable with core deps only
+
+        return await anyio.to_thread.run_sync(
+            lambda: _start_gate_job(
+                "code_review",
+                "",
+                ref=ref or head,
+                source=source,
+                variant=_code_review_variant(base, head, source),
+                readonly=ro,
+                force=False,
+                work=lambda: _review_code_body(base, head, ref, source),
+            )
+        )
+
 
 def register_llm_tools(mcp, ctx) -> None:
     """Register the LLM/agent tools on ``mcp`` (see module docstring)."""
@@ -402,12 +465,17 @@ def register_llm_tools(mcp, ctx) -> None:
                 "review_code is disabled: it makes live, billable LLM call(s). "
                 "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
             )
-        import rebar.llm
-
-        try:
-            return rebar.llm.review_code(base=base, head=head, ref=ref, source=source)
-        except rebar.llm.LLMError as exc:
-            return _structured_llm_failure(exc)
+        # Same dedup key as ``review_code_start``: a re-fire after a timeout attaches.
+        return run_gate_singleflight(
+            "code_review",
+            "",
+            ref=ref or head,
+            source=source,
+            variant=_code_review_variant(base, head, source),
+            readonly=_readonly(),
+            force=False,
+            work=lambda: _review_code_body(base, head, ref, source),
+        )
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def scan_spec(

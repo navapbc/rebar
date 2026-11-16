@@ -24,7 +24,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `clarity_check` | Score ticket clarity (score / verdict / threshold / passed). |
 | `explain_criterion` | Read a plan criterion or an author guide without an LLM. |
 | `fsck` | Check ticket-store integrity (JSON validity, CREATE presence, lock cleanup). Set recover=True to run the recovery path. _(the recover path is gated by `REBAR_MCP_READONLY` (plain fsck is read-only))_ |
-| `gate_status` | Poll an async plan-review or completion run without executing it. |
+| `gate_status` | Poll an async gate run (any ``*_start`` job) without executing it. |
 | `get_file_impact` | Get the file-impact array (consumed by next-batch conflict scheduling). |
 | `get_verify_commands` | Get the DD-level verify-commands array for a ticket. |
 | `get_workflow_result` | Read a workflow run's outputs via replay -> {run_id, status, terminal_step, terminal_output, outputs, error}. The terminal step's output is the run result. |
@@ -52,6 +52,7 @@ Registered by `register_llm_tools` and always present, but each makes a live, bi
 | Tool | Summary |
 |------|---------|
 | `review_code` | Run the gate-backed LLM code review of a git range (base..head) -> an aggregated review_result dict (findings carry agreement + reviewers). |
+| `review_code_start` | Start a code review of ``base..head`` and immediately return ``{job_id, ticket_id, gate_type: "code_review", status: "running"}``. |
 | `review_plan` | Review a whole plan through the P1-P11 find/verify/decide/coach passes. |
 | `review_plan_start` | Start plan review and immediately return ``{job_id, ticket_id, gate_type, status: "running"}``. |
 | `scan_spec` | Batch-scan the store's open epics against a specification -> a review_result dict (gaps/conflicts/overlaps), epics evaluated in batches. |
@@ -90,6 +91,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `sign_review` | Persist a current PASS sidecar without an LLM and return ``{ok, signed, ticket_id, verdict, reason, signature?}``. _(hybrid: in the LLM registrar, but write-gated (`REBAR_MCP_READONLY`) — it persists a signature event, not a billable LLM call)_ |
 | `tag_ticket` | Add a tag to a ticket. |
 | `transition_ticket` | Transition a ticket's status (optimistic concurrency). Returns the engine result {ticket_id, from, to, newly_unblocked}. |
+| `transition_ticket_start` | Start ``transition_ticket`` on a background daemon and immediately return ``{job_id, ticket_id, gate_type: "transition", status: "running"}``. |
 | `unlink_tickets` | Remove a link between two tickets, optionally selecting its relation. |
 | `untag_ticket` | Remove a tag from a ticket. |
 
@@ -134,4 +136,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 | `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
-_64 tools._
+_66 tools._

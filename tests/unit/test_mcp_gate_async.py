@@ -704,3 +704,263 @@ def test_gate_status_includes_durable_unknown_when_the_durable_read_raises(store
     assert out["durable"]["ok"] is False
     assert out["durable"]["verdict"] == "unknown"
     assert "unreadable" in out["durable"]["reason"]
+
+
+# ── Bug cb1b: every gate-running MCP surface has an async counterpart ─────────────────
+
+
+class _BlockingOp:
+    """A stand-in for a gate-running library op that blocks until released, counting calls.
+
+    ``result`` is what the op returns once released; ``raises`` makes it raise instead."""
+
+    def __init__(self, result: dict, hold: float = 5, raises: BaseException | None = None):
+        self.calls = 0
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.finished = threading.Event()
+        self._hold = hold
+        self._result = result
+        self._raises = raises
+        self._lock = threading.Lock()
+
+    def __call__(self, *args, **kwargs):
+        with self._lock:
+            self.calls += 1
+        self.started.set()
+        self.release.wait(timeout=self._hold)
+        self.finished.set()
+        if self._raises is not None:
+            raise self._raises
+        return dict(self._result)
+
+
+# (starter tool, library attribute it drives, the module holding it, args, result, verdict)
+_CODE_REVIEW_RESULT = {
+    "findings": [],
+    "summary": "PASS: 0 blocking, 0 advisory.",
+    "verdict": {"verdict": "PASS", "runner": "code-review-gate"},
+}
+_STARTERS = [
+    pytest.param(
+        "review_code_start",
+        ("rebar.llm", "review_code"),
+        {"base": "HEAD~1", "head": "HEAD"},
+        _CODE_REVIEW_RESULT,
+        "PASS",
+        "code_review",
+        id="review_code_start",
+    ),
+    pytest.param(
+        "transition_ticket_start",
+        ("rebar", "transition"),
+        {"ticket_id": "d80d", "current_status": "in_progress", "target_status": "closed"},
+        {"ticket_id": "d80d", "from": "in_progress", "to": "closed", "newly_unblocked": []},
+        "applied",
+        "transition",
+        id="transition_ticket_start",
+    ),
+]
+
+
+def _server_with_gate_starters():
+    """A server carrying every gate starter: the LLM registrar plus the ticket-op starter."""
+    from rebar._mcp_ticket_async import register_ticket_async_tools
+
+    mcp = _server_with_llm_tools()
+    ctx = SimpleNamespace(allow_llm=lambda: True, readonly=lambda: False)
+    register_ticket_async_tools(mcp, ctx)
+    return mcp
+
+
+def _patch_op(monkeypatch, target: tuple[str, str], op) -> None:
+    import importlib
+
+    monkeypatch.setattr(importlib.import_module(target[0]), target[1], op)
+
+
+def _poll_terminal(job_id: str, budget: float = 5) -> dict:
+    deadline = time.monotonic() + budget
+    while time.monotonic() < deadline:
+        out = gate_runs.gate_run_status(job_id)
+        if out["status"] in ("passed", "failed"):
+            return out
+        time.sleep(0.02)
+    return gate_runs.gate_run_status(job_id)
+
+
+@pytest.mark.parametrize(("tool", "target", "args", "result", "verdict", "gate_type"), _STARTERS)
+def test_gate_starter_returns_its_handle_before_the_gate_completes(
+    store, monkeypatch, tool, target, args, result, verdict, gate_type
+):
+    # AC1/AC2/AC4: the handle comes back while the op is still held inside the gate, and the job
+    # then polls through gate_status to a terminal verdict. A terminal-only check would pass
+    # against the blocking surfaces this bug is about.
+    inflight.reset_registry()
+    op = _BlockingOp(result, hold=60)
+    _patch_op(monkeypatch, target, op)
+    mcp = _server_with_gate_starters()
+    holder: dict = {}
+
+    async def scenario():
+        holder["handle"] = await mcp._tool_manager.call_tool(tool, args)
+        holder["op_finished"] = op.finished.is_set()
+
+    anyio.run(scenario)
+    handle = holder["handle"]
+    assert not holder["op_finished"], f"{tool} must return without waiting on the gate"
+    assert handle["status"] == "running"
+    assert handle["gate_type"] == gate_type
+    assert set(handle) == {"job_id", "ticket_id", "gate_type", "status"}
+    assert op.started.wait(timeout=5)
+    assert gate_runs.gate_run_status(handle["job_id"])["status"] == "running"
+    op.release.set()
+    out = _poll_terminal(handle["job_id"])
+    assert out["status"] == "passed"
+    assert out["verdict"] == verdict
+    assert out["gate_type"] == gate_type
+    assert op.calls == 1
+
+
+@pytest.mark.parametrize(("tool", "target", "args", "result", "verdict", "gate_type"), _STARTERS)
+def test_gate_starter_refire_attaches_to_the_inflight_run(
+    store, monkeypatch, tool, target, args, result, verdict, gate_type
+):
+    # AC7: the re-fire reflex after a timeout attaches to the live job instead of a second run.
+    inflight.reset_registry()
+    op = _BlockingOp(result)
+    _patch_op(monkeypatch, target, op)
+    mcp = _server_with_gate_starters()
+    holder: dict = {}
+
+    async def scenario():
+        holder["a"] = await mcp._tool_manager.call_tool(tool, args)
+        assert op.started.wait(timeout=5)
+        holder["b"] = await mcp._tool_manager.call_tool(tool, args)
+
+    try:
+        anyio.run(scenario)
+    finally:
+        op.release.set()
+    assert holder["a"]["job_id"] == holder["b"]["job_id"]
+    assert _poll_terminal(holder["a"]["job_id"])["status"] == "passed"
+    assert op.calls == 1
+
+
+_CLOSE_ARGS = {"ticket_id": "d80d", "current_status": "in_progress", "target_status": "closed"}
+
+
+def test_transition_starter_reports_a_gate_refusal_as_failed(store, monkeypatch):
+    # A gate refusal leaves the ticket where it was and settles the job as failed with the
+    # refusal message, so the poller learns why the status change was not applied.
+    inflight.reset_registry()
+    op = _BlockingOp({}, hold=0, raises=rebar.RebarError("completion gate refused: FAIL"))
+    monkeypatch.setattr(rebar, "transition", op)
+    mcp = _server_with_gate_starters()
+    handle = anyio.run(mcp._tool_manager.call_tool, "transition_ticket_start", _CLOSE_ARGS)
+    out = _poll_terminal(handle["job_id"])
+    assert out["status"] == "failed"
+    assert "completion gate refused" in str(out.get("error"))
+
+
+def test_close_starter_never_attaches_to_a_completion_check_job(store, monkeypatch):
+    # A close RUNS completion verification. Keyed on gate_type verify_completion it would attach
+    # to a live verify_completion_start for the same ticket, report that check's "passed", and
+    # never transition.
+    inflight.reset_registry()
+    check = _BlockingOp({"verdict": "PASS"})
+    close = _BlockingOp({"ticket_id": "d80d", "from": "in_progress", "to": "closed"})
+    import rebar.llm
+
+    monkeypatch.setattr(rebar.llm, "verify_completion", check)
+    monkeypatch.setattr(rebar, "transition", close)
+    mcp = _server_with_gate_starters()
+    holder: dict = {}
+
+    async def scenario():
+        holder["check"] = await mcp._tool_manager.call_tool(
+            "verify_completion_start", {"ticket_id": "d80d"}
+        )
+        assert check.started.wait(timeout=5)
+        holder["close"] = await mcp._tool_manager.call_tool("transition_ticket_start", _CLOSE_ARGS)
+
+    try:
+        anyio.run(scenario)
+        assert close.started.wait(timeout=5), "the close must run, not inherit the check"
+    finally:
+        check.release.set()
+        close.release.set()
+    assert holder["close"]["job_id"] != holder["check"]["job_id"]
+    assert holder["close"]["gate_type"] == "transition"
+    assert _poll_terminal(holder["close"]["job_id"])["status"] == "passed"
+    assert close.calls == 1
+
+
+def test_transition_job_reports_the_durable_completion_certificate(store):
+    # AC3: a close poller sees whether the completion certificate persisted.
+    gate_runs.record_gate_run(
+        {
+            "job_id": "close-1",
+            "ticket_id": "d80d",
+            "gate_type": "transition",
+            "status": "passed",
+            "verdict": "applied",
+            "finished_at": time.time(),
+        }
+    )
+    inflight.reset_registry()
+    out = gate_runs.gate_run_status("close-1")
+    assert out["gate_type"] == "transition"
+    assert out["verdict"] == "applied"
+    assert "durable" in out and "verdict" in out["durable"]
+
+
+def test_terminal_from_result_reads_the_code_review_gate_verdict():
+    # review_result nests the gate verdict as a dict; the run index records its PASS/BLOCK.
+    from rebar._mcp_llm import _terminal_from_result
+
+    assert _terminal_from_result({"verdict": {"verdict": "BLOCK"}}) == ("passed", "BLOCK")
+
+
+# The surfaces that run the plan-review, completion-verifier, or code-review gate inline.
+# claim_ticket is absent on purpose: its claim gate is the local, no-LLM claim_gate_check.
+_GATE_RUNNING_TOOLS = frozenset(
+    {"review_plan", "verify_completion", "review_code", "transition_ticket"}
+)
+# Billable LLM tools that are not one of those three gates, with the reason.
+_NOT_GATE_SURFACES = {
+    "scan_spec": "billable spec scan over epics; it runs none of the three gates",
+}
+
+
+def _live_tool_names() -> set[str]:
+    from rebar.mcp_server import build_server
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.delenv("REBAR_MCP_READONLY", raising=False)
+        return {t.name for t in anyio.run(build_server().list_tools)}
+
+
+def test_every_gate_running_mcp_tool_has_an_async_counterpart():
+    # AC5: the invariant itself, against the real server. A gate surface without a
+    # ``<name>_start`` forces callers into a request that outlives the client deadline.
+    names = _live_tool_names()
+    assert _GATE_RUNNING_TOOLS <= names
+    missing = sorted(t for t in _GATE_RUNNING_TOOLS if f"{t}_start" not in names)
+    assert not missing, f"gate-running MCP tools without an async *_start: {missing}"
+
+
+def test_gate_running_roster_covers_every_billable_llm_tool():
+    # Keeps the roster above honest: every LLM-registrar tool that makes a billable call is
+    # either a gate surface (and so needs a starter) or listed with a reason it is not.
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("roster")
+    register_llm_tools(mcp, SimpleNamespace(allow_llm=lambda: False, readonly=lambda: False))
+    billable = {
+        name
+        for name, tool in mcp._tool_manager._tools.items()
+        if "REBAR_MCP_ALLOW_LLM" in (tool.description or "") and not name.endswith("_start")
+    }
+    unclassified = billable - _GATE_RUNNING_TOOLS - set(_NOT_GATE_SURFACES)
+    assert not unclassified, f"classify these billable tools for the cb1b invariant: {unclassified}"

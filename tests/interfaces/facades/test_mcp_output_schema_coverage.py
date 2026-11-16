@@ -142,6 +142,12 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "verify_completion_start": "async completion-verifier START (bug d80d P2): same "
     "fire-and-forget START-ack shape and rationale as review_plan_start — a plain dict "
     "(no outputSchema); poll verify_completion_status/gate_status for the verdict.",
+    "review_code_start": "async code-review START (bug cb1b): same fire-and-forget START-ack "
+    "shape and rationale as review_plan_start — a plain dict (no outputSchema); poll "
+    "gate_status for the PASS/BLOCK verdict.",
+    "transition_ticket_start": "async gated-transition START (bug cb1b): same START-ack shape "
+    "as review_plan_start — a plain dict (no outputSchema); poll gate_status for "
+    "applied/failed.",
     "bridge_projects_list": "pure store READ of the bridge-projects sync mapping "
     "({key: {repos: [...]}}); returns a plain free-form dict (no pydantic model), so it "
     "advertises NO outputSchema by design — the durable shape is the store's sync list.",

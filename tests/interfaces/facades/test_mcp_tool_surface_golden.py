@@ -14,7 +14,7 @@ were re-implemented as derived tools, with::
         for x in t}, indent=1, sort_keys=True))'
 
 ``REBAR_MCP_ALLOW_LLM`` does not change the advertised surface (it is a call-time gate),
-but ``REBAR_MCP_READONLY=1`` registers only 37 of the 64 tools, so the test clears it
+but ``REBAR_MCP_READONLY=1`` registers only the read-side subset, so the test clears it
 before building the server. ``outputSchema`` is deliberately not pinned here: the schema
 story's canonical diff test owns it (one owner per contract).
 
