@@ -580,6 +580,19 @@ def _slot_configs(slot: str, base: LLMConfig) -> tuple[LLMConfig, LLMConfig]:
     return replace(base, model=v1_model), replace(base, model=v2_model)
 
 
+def _mount_existing_store() -> None:
+    """Attach this checkout's existing ticket store before a real run, as every CLI command does.
+
+    The agentic finders read tickets through ``show_ticket`` on the in-place checkout; in a
+    fresh linked worktree that store is unattached until something mounts it, and every read
+    fails "ticket system not initialized" (bug 4e0a-0d78-ecac-4656). The CLI's best-effort
+    mount links or attaches an existing store only, never creates one, and never raises.
+    """
+    from rebar._cli._init import ensure_store_mounted_best_effort
+
+    ensure_store_mounted_best_effort()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Operator CLI. ``--probe`` runs step 1 only; otherwise the paired corpus run."""
     import argparse
@@ -624,6 +637,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
+    _mount_existing_store()
     base = LLMConfig.from_env()
     blocks: dict[str, Any] = {}
     for slot in slots:

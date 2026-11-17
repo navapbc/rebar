@@ -842,3 +842,37 @@ def test_the_pinned_effort_reaches_the_wire_on_both_provider_arms(slot, monkeypa
     ).get("effort")
     assert direct_effort == "high", direct.get("output_config")
     assert bedrock_effort == "high", bedrock.get("additionalModelRequestFields")
+
+
+def _record_mount_and_run(monkeypatch) -> list[str]:
+    """Record the order of the store mount and the first model-facing step (bug 4e0a)."""
+    from rebar._cli import _init as cli_init
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        cli_init, "ensure_store_mounted_best_effort", lambda: events.append("mount")
+    )
+    monkeypatch.setattr(pp, "eligible_cases", lambda: [])
+    monkeypatch.setattr(pp, "select_corpus", lambda cases: _fixture_corpus(1, 1))
+
+    def run_slot(slot, items, **kwargs):
+        events.append("run")
+        return {"measured": False}
+
+    monkeypatch.setattr(pp, "run_slot", run_slot)
+    monkeypatch.setattr(pp, "probe_slot", lambda *a, **k: events.append("probe") or {})
+    return events
+
+
+def test_a_real_run_mounts_the_existing_store_before_any_model_call(monkeypatch, capsys) -> None:
+    """A fresh worktree's show_ticket tool otherwise reads an unattached store (bug 4e0a)."""
+    events = _record_mount_and_run(monkeypatch)
+    pp.main(["--slot", "standard", "--epochs", "1"])
+    assert events == ["mount", "run"]
+
+
+@pytest.mark.parametrize("flag", ["--dry-run", "--probe"])
+def test_dry_run_and_probe_do_not_mount_the_store(monkeypatch, capsys, flag: str) -> None:
+    events = _record_mount_and_run(monkeypatch)
+    assert pp.main(["--slot", "standard", flag]) == 0
+    assert "mount" not in events
