@@ -1,6 +1,19 @@
-"""Escalate xdist worker crashes into an explicit pytest failure."""
+"""Escalate xdist worker crashes into an explicit pytest failure.
+
+It also makes a pytest-timeout expiry in an xdist worker name itself. With the thread method
+(pyproject.toml), pytest-timeout writes its banner and stack dump through the terminal writer,
+which in a worker is fd 1 -- and execnet points every worker's fd 1 at /dev/null. The worker
+then ``os._exit(1)``s, and the controller reports only an unexplained worker loss
+(bug d1de-f99f-f638-4b27). The worker's fd 2 reaches the controller, so the announcement and
+the thread stacks go there before pytest-timeout's own exit path runs.
+"""
 
 from __future__ import annotations
+
+import faulthandler
+import os
+import threading
+from typing import Any
 
 import pytest
 
@@ -30,3 +43,43 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         else:  # pragma: no cover - terminalreporter is present in normal pytest runs
             print(msg)
     session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.hookimpl(tryfirst=True, optionalhook=True)
+def pytest_timeout_set_timer(item: pytest.Item, settings: Any) -> bool | None:
+    """Arm a worker's thread-method timer whose expiry is announced on fd 2.
+
+    Returns ``None`` (pytest-timeout's own implementation runs) outside an xdist worker or
+    for any other method; the single-process terminal already shows pytest-timeout's dump.
+    """
+    workerinput = getattr(item.config, "workerinput", None)
+    if workerinput is None or settings.method != "thread":
+        return None
+    timer = threading.Timer(settings.timeout, _announce_then_expire, (item, settings))
+    timer.name = f"rebar crash guard timeout {item.nodeid}"
+
+    def cancel() -> None:
+        timer.cancel()
+        timer.join()
+
+    item.cancel_timeout = cancel  # type: ignore[attr-defined]  # pytest-timeout's protocol
+    timer.start()
+    return True
+
+
+def _announce_then_expire(item: pytest.Item, settings: Any) -> None:
+    import pytest_timeout
+
+    if not settings.disable_debugger_detection and pytest_timeout.is_debugging():
+        return
+    capman = item.config.pluginmanager.getplugin("capturemanager")
+    if capman is not None:
+        capman.suspend_global_capture(item)  # restores the worker's real fd 2
+    worker_id = item.config.workerinput.get("workerid")  # type: ignore[attr-defined]
+    message = (
+        f"\n+++ Timeout +++ pytest-timeout expired after {settings.timeout}s in "
+        f"{item.nodeid} (xdist worker {worker_id}); the worker exits now\n"
+    )
+    os.write(2, message.encode("utf-8", "replace"))
+    faulthandler.dump_traceback(file=2, all_threads=True)
+    pytest_timeout.timeout_timer(item, settings)
