@@ -819,6 +819,27 @@ instead of refusing:
 A remote whose lineage does not name the local epoch, or whose lineage is malformed, is not
 proven to be this store's rewrite, so it still gets the `DIVERGED` refusal.
 
+**Publishing a reclaimed baseline, and rolling it back (ADR 0106 §6).**
+`rebar._commands.reclaim_publish` publishes from a disposable shadow clone only (S1's shadow
+guard refuses anything else). Each publish succeeds only if the remote still holds T0, the
+history the reclaim was computed from; otherwise it raises `PublishAborted` and writes
+nothing. First `stamp_superseding_epoch` commits the superseding record on the new tip.
+On a git remote, `publish_git_ref` then runs one `git push --atomic` that moves the branch
+under `--force-with-lease` on T0 and creates `refs/tickets-backup/pre-reclaim-<stamp>` at T0.
+Because the push is atomic, a moved remote gets neither ref. On a `git-remote-s3` remote,
+`publish_s3_bundle_set` works under the helper's per-ref lock. It checks that the bundle heads
+still equal T0, copies every bundle to `<prefix>/<ref>/PROTECTED#rollback-<stamp>/`, writes one
+bundle for the new tip and deletes the originals. It never runs the auto-doctor, which would
+merge the old history back.
+
+A rollback restores the backup tip with one stamp commit on top, made with
+`replaced_tip=<rewritten tip>` so that its lineage names both earlier epochs.
+`rollback_git_ref` publishes it under a lease on the rewritten tip. Clients that already moved
+onto the rewritten baseline share no history with the restored one, so they take the
+reconnect override above. Clients that never moved do share history with it, and
+`compat.store_epoch_problem` lets them merge their unpushed writes as usual, because the
+restored record's lineage names their epoch.
+
 **Why HEAD, not the branch ref (the WS3 data-loss fix).** The tracker worktree can
 be in a detached-HEAD-local-ahead state (after an interrupted rebase, or on older
 git): a local commit advances `HEAD` but not `refs/heads/tickets`. The previous
