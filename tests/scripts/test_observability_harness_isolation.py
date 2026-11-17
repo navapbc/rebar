@@ -20,6 +20,7 @@ import pytest
 from _observability_harness import (
     HOST_STATE_ROOT,
     SCRIPT,
+    SCRIPT_RUN_TIMEOUT,
     observability_env,
     run_observability,
     state_path_defaults,
@@ -111,7 +112,7 @@ def test_an_unredirected_state_path_is_refused_by_name(
     with monkeypatch.context() as patch:
         patch.setattr(subprocess, "Popen", _no_process)
         with pytest.raises(AssertionError, match=r"REGION_CACHE=/var/lib/rebar/probe-region"):
-            run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+            run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
 
 def test_the_host_docker_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,7 +128,7 @@ def test_the_host_docker_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     with monkeypatch.context() as patch:
         patch.setattr(subprocess, "Popen", _no_process)
         with pytest.raises(AssertionError, match="host's docker"):
-            run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+            run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
 
 def _script_names(tree: ast.Module) -> set[str]:
@@ -225,3 +226,40 @@ def test_a_timeout_leaves_no_process_behind(tmp_path: Path) -> None:
     while _alive(grandchild) and time.monotonic() < deadline:
         time.sleep(0.1)
     assert not _alive(grandchild), f"pid {grandchild} survived the timed-out run"
+
+
+def _literal_sixty_second_bounds() -> list[str]:
+    """Every call in an observability test that passes a literal ``timeout=60`` keyword."""
+    hits: list[str] = []
+    for path in sorted(TESTS_DIR.glob("test_observability_*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            for keyword in node.keywords:
+                value = keyword.value
+                if (
+                    keyword.arg == "timeout"
+                    and isinstance(value, ast.Constant)
+                    and value.value == 60
+                ):
+                    hits.append(f"{path.name}:{node.lineno}")
+    return hits
+
+
+def test_script_runs_use_the_measured_tier_not_a_literal_60s_bound() -> None:
+    """A fixed 60 s bound sits inside the legitimate run-time range under suite load (bug 8613).
+
+    A stubbed run is ~480 processes: 3-8 s idle, 42-47 s at 24-way contention. Bound every
+    whole-script run with ``SCRIPT_RUN_TIMEOUT`` so the tier is changed in one place.
+    """
+    assert _literal_sixty_second_bounds() == []
+
+
+def test_two_script_runs_fit_inside_the_per_test_budget() -> None:
+    """A test that runs the script twice must still fail on its own bound, not pytest's."""
+    import tomllib
+    from _observability_harness import SCRIPT_RUN_TIMEOUT
+
+    pyproject = TESTS_DIR.parents[1] / "pyproject.toml"
+    budget = float(tomllib.loads(pyproject.read_text())["tool"]["pytest"]["ini_options"]["timeout"])
+    assert 2 * SCRIPT_RUN_TIMEOUT < budget, (SCRIPT_RUN_TIMEOUT, budget)

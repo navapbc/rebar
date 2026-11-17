@@ -4,7 +4,7 @@ import json
 import textwrap
 from pathlib import Path
 
-from _observability_harness import observability_env, run_observability
+from _observability_harness import SCRIPT_RUN_TIMEOUT, observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -68,8 +68,8 @@ def test_reviewbot_webhook_auth_rejections_publish_from_health_payload(tmp_path:
         }
     )
 
-    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
-    repeated = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
+    repeated = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
     assert (result.returncode, repeated.returncode) == (0, 0)
     published = [
@@ -141,7 +141,7 @@ def test_reviewbot_webhook_auth_rejections_survive_process_counter_reset(tmp_pat
         }
     )
 
-    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
     assert result.returncode == 0
     published = [

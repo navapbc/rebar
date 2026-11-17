@@ -11,7 +11,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from _observability_harness import observability_env, run_observability
+from _observability_harness import SCRIPT_RUN_TIMEOUT, observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -104,7 +104,7 @@ def _values(log: Path, metric: str) -> list[int]:
 
 
 def _run(env: dict[str, str]) -> None:
-    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
     assert result.returncode == 0
 
 

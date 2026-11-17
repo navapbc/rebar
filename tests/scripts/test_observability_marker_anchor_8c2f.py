@@ -11,7 +11,7 @@ import textwrap
 from pathlib import Path
 
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _observability_harness import observability_env, run_observability
+from _observability_harness import SCRIPT_RUN_TIMEOUT, observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -140,7 +140,7 @@ def _values(log: Path, metric: str) -> list[int]:
 
 
 def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
-    return run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    return run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
 
 def test_review_prose_naming_the_markers_is_not_counted(tmp_path: Path) -> None:
