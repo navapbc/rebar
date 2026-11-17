@@ -466,6 +466,11 @@ def main(
         }
         sys.stdout.write(json.dumps(listing, indent=2) + "\n")
         return 0
+    # Attach the checkout's existing store as the CLI does, so the default title lookup reads
+    # the real ticket title rather than silently falling back to prose (bug 4e0a-0d78-ecac-4656).
+    from rebar._cli._init import ensure_store_mounted_best_effort
+
+    ensure_store_mounted_best_effort()
     resume = None
     if args.resume and args.out and args.out.exists():
         try:

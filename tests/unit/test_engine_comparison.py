@@ -440,3 +440,34 @@ def test_provenance_copies_the_verdicts_runner_model_and_served_model() -> None:
         "ran_model": "us.anthropic.claude-opus-5-5",
     }
     assert ec._provenance(None) == {"runner": None, "model": None, "ran_model": None}
+
+
+def _record_mount_and_run(monkeypatch) -> list[str]:
+    from rebar._cli import _init as cli_init
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        cli_init, "ensure_store_mounted_best_effort", lambda: events.append("mount")
+    )
+
+    def run(rows, **kwargs):
+        events.append("run")
+        return {"summary": {}, "valid": True}
+
+    monkeypatch.setattr(ec, "run", run)
+    return events
+
+
+def test_a_real_run_mounts_the_existing_store_before_the_run(tmp_path: Path, monkeypatch) -> None:
+    """The default title lookup reads the checkout's store; mount it first (bug 4e0a)."""
+    events = _record_mount_and_run(monkeypatch)
+    labels = _labels(tmp_path, [_row(1, "PASS"), _row(2, "BLOCK")])
+    assert ec.main(["--labels", str(labels)], make_runner=lambda cfg: _Scripted({})) == 0
+    assert events == ["mount", "run"]
+
+
+def test_dry_run_does_not_mount_the_store(tmp_path: Path, monkeypatch) -> None:
+    events = _record_mount_and_run(monkeypatch)
+    labels = _labels(tmp_path, [_row(1, "PASS")])
+    assert ec.main(["--labels", str(labels), "--dry-run"]) == 0
+    assert events == []
