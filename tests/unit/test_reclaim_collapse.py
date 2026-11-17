@@ -747,3 +747,62 @@ def test_stream_failure_raises_and_leaves_the_branch_unchanged(
 
     assert _git(tracker, "rev-parse", "HEAD") == tip
     assert _git(tracker, "for-each-ref", "refs/rebar/reclaim-collapse/") == ""
+
+
+# --- ledger anchor on the rewritten branch (euhedral-svelte-chimpanzee) ------------------
+
+
+def test_ledger_anchor_is_on_the_rewritten_branch_when_commits_replay(tmp_path: Path) -> None:
+    tracker, _ticket_id, boundary, _tip = _build_collapsible_store(tmp_path)
+
+    result = _engine().collapse_shadow_tracker(tracker, boundary_commit=boundary, apply=True)
+
+    assert result.replayed_commits >= 1
+    ancestry = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tracker),
+            "merge-base",
+            "--is-ancestor",
+            result.ledger_anchor_sha,
+            "HEAD",
+        ],
+        check=False,
+    )
+    assert ancestry.returncode == 0
+    assert result.enforce_since == result.ledger_anchor_sha
+    first_replayed = _git(
+        tracker, "rev-list", "--reverse", "--ancestry-path", f"{result.ledger_anchor_sha}..HEAD"
+    ).split()[0]
+    assert _git(tracker, "rev-parse", f"{first_replayed}^1") == result.ledger_anchor_sha
+
+
+def test_enforce_since_enforces_unsigned_replayed_events(tmp_path: Path) -> None:
+    tracker, _ticket_id, boundary, _tip = _build_collapsible_store(tmp_path)
+
+    result = _engine().collapse_shadow_tracker(tracker, boundary_commit=boundary, apply=True)
+
+    env = subprocess_env(
+        {
+            "REBAR_ROOT": str(tmp_path),
+            "REBAR_TRACKER_DIR": str(tracker),
+            "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
+            "REBAR_IDENTITY_ENFORCE_SINCE": result.enforce_since,
+        }
+    )
+    completed = subprocess.run(
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = completed.stdout + completed.stderr
+    assert completed.returncode != 0, output
+    lines = output.splitlines()
+    replayed = [line for line in lines if "2000-44444444" in line]
+    below = [line for line in lines if "1001-22222222" in line]
+    assert replayed and "grandfathered" not in replayed[0], output
+    assert below and "grandfathered" in below[0], output

@@ -509,7 +509,12 @@ class _StreamedRewrite:
     ) -> None:
         new_parents: list[str] = []
         for parent in parents:
-            mapped = self.old_to_new.get(parent)
+            # The boundary's rewrite for ledger purposes is the checkpoint, but its place in
+            # the graph belongs to the ledger anchor, so enforce_since stays on the branch.
+            if parent == self.boundary:
+                mapped: str | None = self.ledger_anchor_sha
+            else:
+                mapped = self.old_to_new.get(parent)
             if mapped is None and parent not in in_range:
                 mapped = self.current_tip
             if mapped is not None and mapped not in new_parents:
