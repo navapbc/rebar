@@ -15,6 +15,7 @@ import ctypes
 import functools
 import logging
 import os
+import sys
 import threading
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -66,7 +67,15 @@ _GAUGE_ATTR = "_rebar_in_flight_gauge"
 
 @functools.cache
 def _malloc_trim() -> Callable[[int], int] | None:
-    """Return glibc's ``malloc_trim``, or ``None`` where the C library lacks it (macOS, musl)."""
+    """Return glibc's ``malloc_trim``, or ``None`` where the C library lacks it.
+
+    glibc only exists on Linux, so every other platform returns ``None`` before touching
+    ``ctypes``: on Windows ``ctypes.CDLL(None)`` raises ``TypeError``, which failed every
+    certified tool call there (bug equatorial-iconic-cardinal). On Linux, a C library
+    without ``malloc_trim`` (musl) also returns ``None``.
+    """
+    if not sys.platform.startswith("linux"):
+        return None
     try:
         return ctypes.CDLL(None).malloc_trim
     except (AttributeError, OSError):

@@ -9,6 +9,7 @@ returns to zero.
 
 from __future__ import annotations
 
+import ctypes
 import random
 import sys
 import threading
@@ -54,6 +55,31 @@ def test_tracked_certified_call_trims_when_it_finishes(monkeypatch):
 
 def test_release_freed_heap_reports_availability():
     assert release_freed_heap() is sys.platform.startswith("linux")
+
+
+def test_windows_has_no_trim_and_a_release_does_not_raise(monkeypatch):
+    """On Windows ``ctypes.CDLL(None)`` raises TypeError; every certified tool call failed
+    there because its gauge release reached the trim (bug equatorial-iconic-cardinal)."""
+    real_cdll = ctypes.CDLL
+
+    class _WindowsCDLL(real_cdll):
+        def __init__(self, name, *args, **kwargs):
+            if name is None:
+                raise TypeError("LoadLibrary() argument 1 must be str, not None")
+            super().__init__(name, *args, **kwargs)
+
+    monkeypatch.setattr(ctypes, "CDLL", _WindowsCDLL)
+    monkeypatch.setattr(sys, "platform", "win32")
+    _mcp_health._malloc_trim.cache_clear()
+    try:
+        assert release_freed_heap() is False
+        gauge = InFlightGauge()
+        gauge.hold()()
+        with gauge.track("transition_ticket"):
+            pass
+        assert gauge.value == 0
+    finally:
+        _mcp_health._malloc_trim.cache_clear()
 
 
 def _rss_anon_mib() -> int:
