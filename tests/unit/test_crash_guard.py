@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import textwrap
 from pathlib import Path
 
@@ -166,3 +167,63 @@ def test_conftest_registers_crash_guard_plugin() -> None:
         for item in (value if isinstance(value, (list, tuple)) else [value])
     }
     assert "_crash_guard" in flattened
+
+
+_HANGING_MODULE = """\
+import time
+
+
+def test_hangs_past_its_budget():
+    time.sleep(60)
+"""
+_HANGING_NODE_ID = "test_hangs.py::test_hangs_past_its_budget"
+
+
+def _timed_out_run(tmp_path: Path, *xdist_args: str):
+    """Run one hanging test past a 2 s budget under the repo's thread timeout method.
+
+    The tmp project has no ini, and pytest-timeout's POSIX default is ``signal``, so the
+    thread method that pyproject.toml configures is pinned explicitly.
+    """
+    project = tmp_path / "timeout_probe"
+    project.mkdir()
+    (project / "test_hangs.py").write_text(_HANGING_MODULE, encoding="utf-8")
+    return run_nested_pytest(
+        tmp_path / "nested",
+        "-q",
+        *xdist_args,
+        "-p",
+        "_crash_guard",
+        "-o",
+        "timeout=2",
+        "-o",
+        "timeout_method=thread",
+        "test_hangs.py",
+        env=_env_with_tests_on_path(),
+        cwd=project,
+        timeout=120,
+    )
+
+
+@pytest.mark.timeout(180)
+def test_xdist_thread_timeout_names_itself_and_the_test(tmp_path: Path) -> None:
+    """A thread-method timeout in a worker must not read as an unexplained crash (bug d1de).
+
+    The worker's fd 1 is /dev/null under execnet, so pytest-timeout's own dump is lost; the
+    controller output must still say it was a timeout, and in which test.
+    """
+    completed = _timed_out_run(tmp_path, "-n", "2")
+    combined = completed.stdout + completed.stderr
+    assert completed.returncode != 0, combined
+    assert any("Timeout" in line and _HANGING_NODE_ID in line for line in combined.splitlines()), (
+        combined
+    )
+
+
+@pytest.mark.timeout(180)
+def test_single_process_thread_timeout_keeps_pytest_timeouts_own_report(tmp_path: Path) -> None:
+    completed = _timed_out_run(tmp_path)
+    combined = completed.stdout + completed.stderr
+    assert completed.returncode != 0, combined
+    # pytest-timeout's own banner (terminal.sep("+", "Timeout")) reaches the real terminal.
+    assert re.search(r"\+{3,} Timeout \+{3,}", combined), combined
