@@ -11,6 +11,29 @@ from types import ModuleType
 import pytest
 from _events import _UUID, _UUID2, _UUID3, _write_event
 
+
+@pytest.fixture
+def coarse_cache_mtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every cache rewrite keep the path's first mtime, as a coarse-timestamp host does.
+
+    On a filesystem whose timestamp tick is coarser than the gap between two writes, a
+    rewrite reads back the old mtime (bug d45f-229f-effe-4cf8: 16 of 30 runs on a Linux VM).
+    Running the rewrite-detecting tests under this model keeps their oracles off the clock.
+    """
+    import rebar.reducer._cache as cache_module
+
+    real_write = cache_module.atomic_write
+    first_mtime_ns: dict[str, int] = {}
+
+    def write_within_one_tick(path: str, data: str, **kwargs: object) -> None:
+        real_write(path, data, **kwargs)  # type: ignore[arg-type]
+        stat = os.stat(path)
+        pinned = first_mtime_ns.setdefault(os.fspath(path), stat.st_mtime_ns)
+        os.utime(path, ns=(stat.st_atime_ns, pinned))
+
+    monkeypatch.setattr(cache_module, "atomic_write", write_within_one_tick)
+
+
 # Test 12: unchanged input hits the cache
 
 
@@ -112,6 +135,7 @@ def test_cache_miss_on_directory_listing_change(tmp_path: Path, reducer: ModuleT
 
 @pytest.mark.unit
 @pytest.mark.scripts
+@pytest.mark.usefixtures("coarse_cache_mtime")
 def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType) -> None:
     """Deleting an event invalidates and rewrites the cache with current state."""
     ticket_dir = tmp_path / "tkt-cache-delete"
@@ -159,8 +183,8 @@ def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType)
         "caching is not yet implemented"
     )
 
-    # Capture mtime of cache file before deletion-triggered recompute
-    mtime_after_warm = cache_file.stat().st_mtime if cache_file.exists() else None
+    inode_after_warm = cache_file.stat().st_ino
+    hash_after_warm = json.loads(cache_file.read_text())["dir_hash"]
 
     # Delete the COMMENT file — changes directory listing → cache miss
     comment_file.unlink()
@@ -174,13 +198,17 @@ def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType)
         "state and return 0 comments (cache invalidated on file deletion)"
     )
 
-    # Cache file must be updated after recompute (mtime must change)
+    # The recompute must REWRITE the cache with the new state. Proven by inode and contents,
+    # never mtime: on a coarse-timestamp filesystem both writes can share one mtime tick
+    # (bug d45f-229f-effe-4cf8; the coarse_cache_mtime fixture models exactly that host).
     assert cache_file.exists(), ".cache.json must still exist after recompute following deletion"
-    mtime_after_recompute = cache_file.stat().st_mtime
-    assert mtime_after_recompute != mtime_after_warm, (
-        ".cache.json must be updated (mtime changed) after cache-miss recompute "
-        "triggered by file deletion"
+    assert cache_file.stat().st_ino != inode_after_warm, (
+        ".cache.json must be rewritten (atomic_write publishes a new inode) after the "
+        "cache-miss recompute triggered by file deletion"
     )
+    envelope = json.loads(cache_file.read_text())
+    assert envelope["dir_hash"] != hash_after_warm, "the rewritten cache must key the new listing"
+    assert len(envelope["state"]["comments"]) == 0, "the rewritten cache must hold the new state"
 
 
 # Test 15: 200 warm reads
@@ -327,6 +355,7 @@ def test_cache_miss_on_same_filename_content_change(tmp_path: Path, reducer: Mod
 
 @pytest.mark.unit
 @pytest.mark.scripts
+@pytest.mark.usefixtures("coarse_cache_mtime")
 def test_cache_miss_on_same_size_inplace_rewrite(tmp_path: Path, reducer: ModuleType) -> None:
     """An equal-size rewrite changes mtime and invalidates without breaking hits."""
     ticket_dir = tmp_path / "tkt-same-size-rewrite"
@@ -366,10 +395,12 @@ def test_cache_miss_on_same_size_inplace_rewrite(tmp_path: Path, reducer: Module
 
     # No-change second call MUST hit the cache (cache still effective — no
     # regression): the cache file must not be rewritten.
-    cache_mtime_before = cache_file.stat().st_mtime_ns
+    # The inode, not the mtime, proves no rewrite: a rewrite inside one coarse timestamp tick
+    # keeps the old mtime and would pass an mtime check (bug d45f-229f-effe-4cf8).
+    cache_inode_before = cache_file.stat().st_ino
     state_hit = reducer.reduce_ticket(ticket_dir)
     assert state_hit == state1, "Unchanged dir must serve identical cached state"
-    assert cache_file.stat().st_mtime_ns == cache_mtime_before, (
+    assert cache_file.stat().st_ino == cache_inode_before, (
         "Unchanged dir must be a cache HIT (cache file must not be rewritten)"
     )
 
