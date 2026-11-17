@@ -43161,9 +43161,31 @@
       "updated_at": "2026-09-05T01:16:39Z"
     },
     "6238-9307-c74c-4d5c": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nChange 3407 (merged as 9beecb409ab, bug unmedical-stational-chrysalis) made the MCP in-flight gauge call `release_freed_heap()` when its count returns to zero. `_malloc_trim()` (`src/rebar/_mcp_health.py:68`) resolves glibc's `malloc_trim` with `ctypes.CDLL(None)` and catches only `AttributeError` and `OSError`. On Windows, `ctypes.CDLL(None)` raises `TypeError: LoadLibrary() argument 1 must be str, not None`, so every release that takes the gauge to zero raises. That breaks every certified/signing tool call (`transition_ticket`, `verify_completion`, `review_plan`, `sign_manifest`, `sign_review`) and every direct gauge release on Windows.\n\n## Observation\n\n- GitHub Actions run 44002909290, job 133771119760 (\"sweep (windows)\", main at 390f926c7ea): 46 failures, all in MCP tests; the log contains 109 lines with `LoadLibrary() argument 1 must be str, not None`.\n- Reproduced on macOS by patching `ctypes.CDLL` so `CDLL(None)` raises that `TypeError`: running the 16 affected test files on origin/main 57d45053272 gives 47 failures, a superset of all 46 Windows failures (including the parity `REJECTED`-vs-`ACCEPTED` cases and the missing `signed_at` case, which receive the `TypeError` as a failed tool call). The one extra, `test_close_picked_up_but_not_started_when_the_server_stops_never_runs`, does not run in the Windows sweep.\n\n## Approach\n\nMake `_malloc_trim()` return `None` on any platform that is not Linux, before touching `ctypes` (`sys.platform.startswith(\"linux\")`), and keep the existing `AttributeError`/`OSError` catch for Linux C libraries without `malloc_trim` (musl). glibc is a Linux C library, so no other platform can have `malloc_trim`. No config key, environment variable, flag or other mechanism.\n\n## Scope\n\n- `src/rebar/_mcp_health.py`: platform check in `_malloc_trim()`; docstring states the Windows case.\n- `tests/unit/test_mcp_idle_heap_release.py`: Windows-shaped test.\n\n## Testing\n\n- New test: with `sys.platform` set to `win32`, `ctypes.CDLL(None)` patched to raise `TypeError` as on Windows, and the `_malloc_trim` cache cleared, `release_freed_heap()` returns `False` and a gauge `hold()` release does not raise. It fails on current main (the `TypeError` escapes) and passes with the fix.\n- Re-run the 16 affected files under the same `ctypes.CDLL(None)` simulation: 0 failures expected.\n- Existing Linux tests keep passing (`release_freed_heap()` is `True` on Linux; the idle-memory test still releases memory).\n\n## Acceptance Criteria\n\n- [ ] `_malloc_trim()` returns `None` without calling `ctypes.CDLL` on non-Linux platforms, and `pytest tests/unit/test_mcp_idle_heap_release.py` passes.\n- [ ] The new Windows-shaped test fails on origin/main 57d45053272 and passes with the fix.\n- [ ] Under the `ctypes.CDLL(None)`-raises-`TypeError` simulation, the 16 test files that failed in job 133771119760 report 0 failures.\n- [ ] `make verify` passes, and `python scripts/check_mechanism_delta.py --check` exits 0.\n- [ ] After merge, a dispatched `test.yml` run on main has its \"sweep (windows)\" job pass; the run and job IDs are recorded here.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "MCP certified and signing tools fail on Windows: the idle heap trim calls ctypes.CDLL(None), which raises TypeError there"
+      },
       "created_at": "2026-11-17T04:33:30Z",
       "jira_id": "4599353",
       "jira_key": "REB-7245",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-17T04:33:33Z"
     },
