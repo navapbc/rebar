@@ -212,6 +212,10 @@ def store_epoch_problem(tracker: str | os.PathLike[str], remote_ref: str) -> str
         return _epoch_refusal(remote_problem)
     if local_epoch == remote_epoch:
         return None
+    if _remote_lineage_names(tracker, remote_ref, local_epoch):
+        # The remote history superseded this store's epoch (a reclaim rollback restores
+        # history the local clone still shares); merging into it resurrects nothing.
+        return None
     local_description = repr(local_epoch) if local_epoch is not None else "absent"
     remote_description = repr(remote_epoch) if remote_epoch is not None else "absent"
     return _epoch_refusal(
@@ -261,6 +265,19 @@ def _lineage_from_record(raw: str) -> list[str | None] | None:
     if not all(entry is None or isinstance(entry, str) for entry in lineage):
         return None
     return lineage
+
+
+def _remote_lineage_names(
+    tracker: str | os.PathLike[str], remote_ref: str, epoch: str | None
+) -> bool:
+    try:
+        shown = run_git(os.fspath(tracker), "show", f"{remote_ref}:{COMPAT_FILENAME}", check=False)
+    except OSError:
+        return False
+    if shown.returncode != 0:
+        return False
+    lineage = _lineage_from_record(shown.stdout)
+    return lineage is not None and epoch in lineage
 
 
 def remote_epoch_supersedes_local(tracker: str | os.PathLike[str], remote_commit: str) -> bool:
