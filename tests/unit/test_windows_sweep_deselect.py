@@ -11,6 +11,7 @@ test module that exists, so a renamed or deleted module cannot leave a dead entr
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,10 @@ def test_every_argfile_is_passed_to_the_windows_suite_and_nothing_else() -> None
 def test_argfile_lines_are_well_formed_sorted_and_unique(argfile: Path) -> None:
     raw = argfile.read_bytes()
     assert raw.isascii(), f"{argfile.name} must stay ASCII so any argparse encoding reads it"
+    assert b"\r" not in raw, (
+        f"{argfile.name} was checked out with CRLF line endings; .gitattributes must pin "
+        ".github/windows-sweep-deselect/*.args to eol=lf"
+    )
     lines = raw.decode("ascii").split("\n")
     assert lines[-1] == "", f"{argfile.name} must end with one newline"
     lines = lines[:-1]
@@ -61,6 +66,26 @@ def test_argfile_lines_are_well_formed_sorted_and_unique(argfile: Path) -> None:
     assert not ignores, f"{argfile.name}: --ignore takes a module path, not a node id: {ignores}"
     assert lines == sorted(lines), f"{argfile.name} must be sorted"
     assert len(lines) == len(set(lines)), f"{argfile.name} holds duplicate lines"
+
+
+def test_every_argfile_is_pinned_to_lf_line_endings() -> None:
+    """``eol=lf`` keeps a Windows ``core.autocrlf`` checkout from adding ``\\r`` to each line.
+
+    The byte check above proves LF on the platform that runs it; this proves the attribute that
+    guarantees it on every platform, including the Linux gate where autocrlf is off.
+    """
+    paths = [path.relative_to(_ROOT).as_posix() for path in _argfiles()]
+    result = subprocess.run(
+        ["git", "check-attr", "eol", "--", *paths],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=True,
+    )
+    unpinned = [line for line in result.stdout.splitlines() if not line.endswith(": eol: lf")]
+    assert len(result.stdout.splitlines()) == len(paths)
+    assert not unpinned, f"these argument files are not pinned to eol=lf: {unpinned}"
 
 
 def test_no_test_is_listed_in_two_classes() -> None:

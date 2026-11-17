@@ -10,3 +10,8 @@ src/rebar/llm/reviewers/*.md   eol=lf
 .rebar/prompts/**              eol=lf
 .rebar/prompts.index.json      eol=lf
 .rebar/workflows/**            eol=lf
+
+# The Windows sweep's deselect argument files (bug 6798-606d-37dc-46e7). A Windows checkout
+# with core.autocrlf would rewrite them to CRLF; pin LF so every platform holds the same bytes
+# and tests/unit/test_windows_sweep_deselect.py can compare lines exactly.
+.github/windows-sweep-deselect/*.args eol=lf
