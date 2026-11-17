@@ -12,10 +12,12 @@ import os
 import subprocess
 import sys
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from rebar._commands.reclaim_collapse_stream import FastImportSession, ObjectReader, StreamError
 from rebar._mcp_errors import js_safe_dumps
 from rebar._store.gitutil import run_git
 from rebar.reducer import reduce_all_tickets
@@ -35,7 +37,12 @@ class ShadowSafetyError(ReclaimCollapseError):
 
 @dataclass(frozen=True)
 class CollapseResult:
-    """Observable result of one offline collapse attempt."""
+    """Observable result of one offline collapse attempt.
+
+    ``ledger_entries_rewritten`` counts ledger entries changed in the SNAPSHOT blobs the
+    collapse actually wrote; a SNAPSHOT carried unchanged into later commits is not
+    counted again.
+    """
 
     applied: bool
     original_tip: str
@@ -91,83 +98,41 @@ def collapse_shadow_tracker(
     original_position_map = _position_commit_map_for_tracker(tracker)
     ref = _SCRATCH_REF if apply else _DRY_RUN_REF
     _delete_ref(tracker, ref)
-    fast_import_commits = 0
-
-    checkpoint_sha, _ = _fast_import_tree_commit(
-        tracker,
-        ref,
-        boundary,
-        message=_commit_message(tracker, boundary),
-        metadata=_commit_metadata(tracker, boundary),
-        parents=(),
-        old_to_new={},
-        original_position_map=original_position_map,
-        boundary=boundary,
-    )
-    fast_import_commits += 1
-    old_to_new: dict[str, str] = {boundary: checkpoint_sha}
-
-    ledger_anchor_sha, rewritten_at_anchor = _fast_import_tree_commit(
-        tracker,
-        ref,
-        boundary,
-        message=b"rebar reclaim: reconcile authorship ledger\n",
-        metadata=_derived_metadata(),
-        parents=(checkpoint_sha,),
-        old_to_new=old_to_new,
-        original_position_map=original_position_map,
-        boundary=boundary,
-    )
-    fast_import_commits += 1
-
-    commits = _rev_list(tracker, f"{boundary}..{original_tip}")
-    current_tip = ledger_anchor_sha
-    ledger_rewrites = rewritten_at_anchor
-    for commit in commits:
-        parents = _rewritten_parents(tracker, commit, boundary, current_tip, old_to_new)
-        current_tip, rewrites = _fast_import_tree_commit(
-            tracker,
-            ref,
-            commit,
-            message=_commit_message(tracker, commit),
-            metadata=_commit_metadata(tracker, commit),
-            parents=parents,
-            old_to_new=old_to_new | {boundary: checkpoint_sha},
-            original_position_map=original_position_map,
-            boundary=boundary,
-        )
-        fast_import_commits += 1
-        old_to_new[commit] = current_tip
-        ledger_rewrites += rewrites
+    rewrite = _StreamedRewrite(tracker, ref, boundary, original_position_map)
+    try:
+        rewrite.run(_rev_list_with_parents(tracker, f"{boundary}..{original_tip}"))
+    except StreamError as exc:
+        _delete_ref(tracker, ref)
+        raise ReclaimCollapseError(str(exc)) from exc
+    finally:
+        rewrite.close_reader()
 
     original_count = int(_git(tracker, "rev-list", "--count", original_tip).stdout)
-    collapsed = max(0, original_count - len(commits))
+    collapsed = max(0, original_count - rewrite.replayed)
     if apply:
-        _update_current_branch(tracker, current_tip, original_tip)
+        _update_current_branch(tracker, rewrite.current_tip, original_tip)
         # raw-git-ok: resets only the safety-checked shadow clone worktree
         _git(
             tracker,
             "reset",
             "--hard",
             "-q",
-            current_tip,
+            rewrite.current_tip,
         )
-        _delete_ref(tracker, ref)
-    else:
-        _delete_ref(tracker, ref)
+    _delete_ref(tracker, ref)
 
     return CollapseResult(
         applied=apply,
         original_tip=original_tip,
         boundary_commit=boundary,
-        checkpoint_sha=checkpoint_sha,
-        ledger_anchor_sha=ledger_anchor_sha,
-        rewritten_tip=current_tip,
-        enforce_since=ledger_anchor_sha,
+        checkpoint_sha=rewrite.checkpoint_sha,
+        ledger_anchor_sha=rewrite.ledger_anchor_sha,
+        rewritten_tip=rewrite.current_tip,
+        enforce_since=rewrite.ledger_anchor_sha,
         collapsed_commits=collapsed,
-        replayed_commits=len(commits),
-        ledger_entries_rewritten=ledger_rewrites,
-        used_fast_import=fast_import_commits > 0,
+        replayed_commits=rewrite.replayed,
+        ledger_entries_rewritten=rewrite.ledger_rewrites,
+        used_fast_import=rewrite.commits_written > 0,
     )
 
 
@@ -287,11 +252,6 @@ def _is_ancestor(tracker: Path, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
-def _rev_list(tracker: Path, rev_range: str) -> list[str]:
-    out = _git(tracker, "rev-list", "--reverse", "--topo-order", rev_range).stdout
-    return [line.strip() for line in out.splitlines() if line.strip()]
-
-
 # raw-git-ok: mutates only scratch refs in the safety-checked disposable shadow clone
 def _delete_ref(tracker: Path, ref: str) -> None:
     # raw-git-ok: deletes only scratch refs in the safety-checked shadow clone
@@ -319,23 +279,6 @@ def _update_current_branch(tracker: Path, new: str, old: str) -> None:
     )
 
 
-def _commit_metadata(tracker: Path, commit: str) -> tuple[str, str, str, str, str, str]:
-    fmt = "%an%x00%ae%x00%at%x00%ai%x00%cn%x00%ce%x00%ct%x00%ci"
-    parts = _git(tracker, "show", "-s", f"--format={fmt}", commit).stdout.split("\x00")
-    if len(parts) != 8:
-        raise ReclaimCollapseError(f"cannot read commit metadata for {commit}")
-    author_date = _raw_date(parts[2], parts[3], commit)
-    committer_date = _raw_date(parts[6], parts[7], commit)
-    return (
-        parts[0].strip(),
-        parts[1].strip(),
-        author_date,
-        parts[4].strip(),
-        parts[5].strip(),
-        committer_date,
-    )
-
-
 def _commit_message(tracker: Path, commit: str) -> bytes:
     raw = _git(  # raw-git-ok: cat-file commit reads an object type, not git-commit mutation
         tracker, "cat-file", "commit", commit, text=False
@@ -344,91 +287,6 @@ def _commit_message(tracker: Path, commit: str) -> bytes:
     if not sep:
         raise ReclaimCollapseError(f"cannot read commit message for {commit}")
     return message
-
-
-def _raw_date(epoch_seconds: str, iso_date: str, commit: str) -> str:
-    offset = iso_date.strip().rsplit(" ", 1)[-1]
-    if len(offset) != 5 or offset[0] not in "+-" or not offset[1:].isdigit():
-        raise ReclaimCollapseError(f"cannot read timezone offset for {commit}")
-    return f"{epoch_seconds.strip()} {offset}"
-
-
-def _tree_entries(tracker: Path, treeish: str) -> list[tuple[str, str, str, bytes]]:
-    out = _git(tracker, "ls-tree", "-rz", treeish, text=False).stdout
-    entries: list[tuple[str, str, str, bytes]] = []
-    for raw in out.split(b"\x00"):
-        if not raw:
-            continue
-        meta, path = raw.split(b"\t", 1)
-        mode, kind, oid = meta.decode().split()
-        entries.append((mode, kind, oid, path))
-    return entries
-
-
-def _fast_import_tree_commit(
-    tracker: Path,
-    ref: str,
-    treeish: str,
-    *,
-    message: bytes,
-    metadata: tuple[str, str, str, str, str, str],
-    parents: tuple[str, ...],
-    old_to_new: Mapping[str, str],
-    original_position_map: Mapping[str, str],
-    boundary: str,
-) -> tuple[str, int]:
-    _delete_ref(tracker, ref)
-    an, ae, ad, cn, ce, cd = metadata
-    chunks: list[bytes] = [
-        f"commit {ref}\n".encode(),
-        f"author {an} <{ae}> {ad}\n".encode(),
-        f"committer {cn} <{ce}> {cd}\n".encode(),
-        f"data {len(message)}\n".encode(),
-        message,
-    ]
-    if parents:
-        chunks.append(f"from {parents[0]}\n".encode())
-        for parent in parents[1:]:
-            chunks.append(f"merge {parent}\n".encode())
-    chunks.append(b"deleteall\n")
-    rewrite_count = 0
-    for mode, kind, oid, path in _tree_entries(tracker, treeish):
-        if kind != "blob":
-            continue
-        blob = _blob_bytes_for_oid(tracker, oid)
-        rewritten, changed_entries = _rewrite_snapshot_blob(
-            blob, original_position_map, old_to_new, boundary, tracker
-        )
-        if rewritten is None:
-            chunks.append(
-                b"M " + mode.encode() + b" " + oid.encode() + b" " + _quote_path(path) + b"\n"
-            )
-        else:
-            rewrite_count += changed_entries
-            chunks.append(b"M " + mode.encode() + b" inline " + _quote_path(path) + b"\n")
-            chunks.append(f"data {len(rewritten)}\n".encode() + rewritten)
-    chunks.append(b"\n")
-    imported = _git(
-        tracker,
-        "fast-import",
-        "--quiet",
-        "--date-format=raw",
-        input_data=b"".join(chunks),
-        text=False,
-        check=False,
-    )
-    if imported.returncode != 0:
-        stderr = (
-            imported.stderr.decode("utf-8", "replace")
-            if isinstance(imported.stderr, bytes)
-            else imported.stderr
-        )
-        raise ReclaimCollapseError(f"git fast-import failed: {stderr}")
-    return _rev_parse(tracker, ref), rewrite_count
-
-
-def _blob_bytes_for_oid(tracker: Path, oid: str) -> bytes:
-    return _git(tracker, "cat-file", "blob", oid, text=False).stdout
 
 
 def _quote_path(path: bytes) -> bytes:
@@ -443,7 +301,7 @@ def _rewrite_snapshot_blob(
     original_position_map: Mapping[str, str],
     old_to_new: Mapping[str, str],
     boundary: str,
-    tracker: Path,
+    below: AbstractSet[str],
 ) -> tuple[bytes | None, int]:
     try:
         event = json.loads(blob.decode("utf-8"))
@@ -451,7 +309,7 @@ def _rewrite_snapshot_blob(
         return None, 0
     if event.get("event_type") != "SNAPSHOT":
         return None, 0
-    count = _rewrite_ledger_in_event(event, original_position_map, old_to_new, boundary, tracker)
+    count = _rewrite_ledger_in_event(event, original_position_map, old_to_new, boundary, below)
     if count == 0:
         return None, 0
     return json.dumps(event, sort_keys=True, separators=(",", ":")).encode() + b"\n", count
@@ -462,7 +320,7 @@ def _rewrite_ledger_in_event(
     original_position_map: Mapping[str, str],
     old_to_new: Mapping[str, str],
     boundary: str,
-    tracker: Path,
+    below: AbstractSet[str],
 ) -> int:
     ledger = event.get("data", {}).get("compiled_state", {}).get("authorship_ledger")
     if not isinstance(ledger, list):
@@ -476,7 +334,7 @@ def _rewrite_ledger_in_event(
         if not isinstance(position, str):
             continue
         old_commit = original_position_map.get(position) or pos.get("commit_sha")
-        new_commit = _map_old_commit(tracker, old_commit, boundary, old_to_new)
+        new_commit = _map_old_commit(old_commit, boundary, old_to_new, below)
         if new_commit and pos.get("commit_sha") != new_commit:
             pos["commit_sha"] = new_commit
             changed += 1
@@ -484,13 +342,14 @@ def _rewrite_ledger_in_event(
 
 
 def _map_old_commit(
-    tracker: Path, old_commit: object, boundary: str, old_to_new: Mapping[str, str]
+    old_commit: object, boundary: str, old_to_new: Mapping[str, str], below: AbstractSet[str]
 ) -> str | None:
+    """Map an original commit to its rewrite; ``below`` is every ancestor of the boundary."""
     if not isinstance(old_commit, str) or not old_commit:
         return None
     if old_commit in old_to_new:
         return old_to_new[old_commit]
-    if _is_ancestor(tracker, old_commit, boundary):
+    if old_commit in below:
         return old_to_new.get(boundary)
     return None
 
@@ -505,24 +364,6 @@ def _derived_metadata() -> tuple[str, str, str, str, str, str]:
         "rebar@example.invalid",
         now,
     )
-
-
-def _rewritten_parents(
-    tracker: Path,
-    commit: str,
-    boundary: str,
-    current_tip: str,
-    old_to_new: Mapping[str, str],
-) -> tuple[str, ...]:
-    parents = _git(tracker, "show", "-s", "--format=%P", commit).stdout.split()
-    rewritten: list[str] = []
-    for parent in parents:
-        mapped = old_to_new.get(parent)
-        if mapped is None and _is_ancestor(tracker, parent, boundary):
-            mapped = current_tip
-        if mapped is not None and mapped not in rewritten:
-            rewritten.append(mapped)
-    return tuple(rewritten or [current_tip])
 
 
 def _position_commit_map_for_tracker(tracker: Path) -> dict[str, str]:
@@ -558,3 +399,270 @@ def _position_commit_map_for_tracker(tracker: Path) -> dict[str, str]:
             if position:
                 position_map[position] = sha
     return position_map
+
+
+def _rev_list_with_parents(tracker: Path, rev_range: str) -> list[tuple[str, list[str]]]:
+    """Commits of *rev_range* in replay order, each with its original parents."""
+    out = _git(tracker, "rev-list", "--reverse", "--topo-order", "--parents", rev_range).stdout
+    rows: list[tuple[str, list[str]]] = []
+    for line in out.splitlines():
+        shas = line.split()
+        if shas:
+            rows.append((shas[0], shas[1:]))
+    return rows
+
+
+def _is_snapshot_candidate(path: bytes) -> bool:
+    return b"-SNAPSHOT.json" in path.rsplit(b"/", 1)[-1]
+
+
+class _StreamedRewrite:
+    """Write the checkpoint, the ledger anchor and every replayed commit in one stream.
+
+    The output equals the former per-commit writer's: the same parents, metadata and
+    trees. Each replayed commit applies only the paths its original commit changed
+    relative to the source of its rewritten first parent, plus inline overrides for the
+    SNAPSHOTs whose ledger rewrite differs from what that parent already carries.
+    """
+
+    def __init__(
+        self, tracker: Path, ref: str, boundary: str, position_map: Mapping[str, str]
+    ) -> None:
+        self.tracker = tracker
+        self.ref = ref
+        self.boundary = boundary
+        self.position_map = position_map
+        self.below = frozenset(_git(tracker, "rev-list", boundary).stdout.split())
+        self.reader = ObjectReader(tracker)
+        self.old_to_new: dict[str, str] = {}
+        self.map_index: dict[str, int] = {}
+        self.source_of: dict[str, str] = {}
+        self.k_of: dict[str, int] = {}
+        self.snapmaps: dict[str, dict[bytes, tuple[str, str]]] = {}
+        self.refs_of: dict[str, frozenset[str] | None] = {}
+        self.ledger_rewrites = 0
+        self.replayed = 0
+        self.commits_written = 0
+        self.checkpoint_sha = ""
+        self.ledger_anchor_sha = ""
+        self.current_tip = ""
+
+    def close_reader(self) -> None:
+        self.reader.close()
+
+    # raw-git-ok: streams commits only into the safety-checked disposable shadow clone
+    def run(self, commits: list[tuple[str, list[str]]]) -> None:
+        session = FastImportSession(self.tracker)
+        try:
+            self._write_base(session)
+            in_range = {commit for commit, _ in commits}
+            for commit, parents in commits:
+                self._replay(session, commit, parents, in_range)
+            session.close()
+        except BaseException:
+            session.abort()
+            raise
+        self.commits_written = session.commits_written
+
+    def _write_base(self, session: FastImportSession) -> None:
+        boundary = self.boundary
+        author, committer, message = self._raw_commit(boundary)
+        base_tree = b"M 040000 " + self._tree_of(boundary).encode() + b' ""\n'
+        self.checkpoint_sha = session.commit(
+            self.ref,
+            author=author,
+            committer=committer,
+            message=message,
+            parents=(),
+            lines=[base_tree],
+        )
+        snapmap = self._snapshot_paths(boundary)
+        self.source_of[self.checkpoint_sha] = boundary
+        self.k_of[self.checkpoint_sha] = -1
+        self.snapmaps[self.checkpoint_sha] = snapmap
+        self._map(boundary, self.checkpoint_sha)
+
+        derived = _derived_identity()
+        lines = [base_tree]
+        anchor_rewrites = 0
+        for path, (mode, oid) in snapmap.items():
+            rewritten, count = self._rewritten(oid)
+            if rewritten is not None:
+                anchor_rewrites += count
+                lines.append(_inline(mode, path, rewritten))
+        self.ledger_anchor_sha = session.commit(
+            self.ref,
+            author=derived,
+            committer=derived,
+            message=b"rebar reclaim: reconcile authorship ledger\n",
+            parents=(self.checkpoint_sha,),
+            lines=lines,
+        )
+        self.ledger_rewrites += anchor_rewrites
+        self.source_of[self.ledger_anchor_sha] = boundary
+        self.k_of[self.ledger_anchor_sha] = 0
+        self.snapmaps[self.ledger_anchor_sha] = snapmap
+        self.current_tip = self.ledger_anchor_sha
+
+    def _replay(
+        self, session: FastImportSession, commit: str, parents: list[str], in_range: set[str]
+    ) -> None:
+        new_parents: list[str] = []
+        for parent in parents:
+            mapped = self.old_to_new.get(parent)
+            if mapped is None and parent not in in_range:
+                mapped = self.current_tip
+            if mapped is not None and mapped not in new_parents:
+                new_parents.append(mapped)
+        if not new_parents:
+            new_parents = [self.current_tip]
+        first = new_parents[0]
+        snapmap = dict(self.snapmaps[first])
+        lines, changed = self._diff_lines(self.source_of[first], commit, snapmap)
+        k_first = self.k_of[first]
+        for path, (mode, oid) in snapmap.items():
+            if path not in changed and self._latest(oid) <= k_first:
+                continue
+            rewritten, count = self._rewritten(oid)
+            if rewritten is not None:
+                self.ledger_rewrites += count
+                lines.append(_inline(mode, path, rewritten))
+            elif path not in changed:
+                lines.append(f"M {mode} {oid} ".encode() + _quote_path(path) + b"\n")
+        author, committer, message = self._raw_commit(commit)
+        new = session.commit(
+            self.ref,
+            author=author,
+            committer=committer,
+            message=message,
+            parents=new_parents,
+            lines=lines,
+        )
+        self.source_of[new] = commit
+        self.k_of[new] = len(self.map_index) - 1
+        self.snapmaps[new] = snapmap
+        self._map(commit, new)
+        self.current_tip = new
+        self.replayed += 1
+
+    def _diff_lines(
+        self, source: str, commit: str, snapmap: dict[bytes, tuple[str, str]]
+    ) -> tuple[list[bytes], set[bytes]]:
+        out = _git(
+            self.tracker,
+            "diff-tree",
+            "-r",
+            "-z",
+            "--raw",
+            "--no-renames",
+            source,
+            commit,
+            text=False,
+        ).stdout
+        fields = out.split(b"\x00")
+        lines: list[bytes] = []
+        changed: set[bytes] = set()
+        i = 0
+        while i + 1 < len(fields) and fields[i]:
+            meta, path = fields[i], fields[i + 1]
+            i += 2
+            _old_mode, new_mode, _old_oid, new_oid, status = meta.lstrip(b":").split()
+            changed.add(path)
+            if status.startswith(b"D"):
+                lines.append(b"D " + _quote_path(path) + b"\n")
+                snapmap.pop(path, None)
+                continue
+            mode, oid = new_mode.decode(), new_oid.decode()
+            lines.append(f"M {mode} {oid} ".encode() + _quote_path(path) + b"\n")
+            if _is_snapshot_candidate(path) and self._is_snapshot(oid):
+                snapmap[path] = (mode, oid)
+            else:
+                snapmap.pop(path, None)
+        return lines, changed
+
+    def _snapshot_paths(self, commit: str) -> dict[bytes, tuple[str, str]]:
+        out = _git(self.tracker, "ls-tree", "-rz", commit, text=False).stdout
+        snapmap: dict[bytes, tuple[str, str]] = {}
+        for raw in out.split(b"\x00"):
+            if not raw:
+                continue
+            meta, path = raw.split(b"\t", 1)
+            mode, kind, oid = meta.decode().split()
+            if kind == "blob" and _is_snapshot_candidate(path) and self._is_snapshot(oid):
+                snapmap[path] = (mode, oid)
+        return snapmap
+
+    def _is_snapshot(self, oid: str) -> bool:
+        return self._refs(oid) is not None
+
+    def _refs(self, oid: str) -> frozenset[str] | None:
+        """The original commits a SNAPSHOT blob's ledger references (``None``: not one)."""
+        if oid in self.refs_of:
+            return self.refs_of[oid]
+        try:
+            event = json.loads(self.reader.read(oid).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            event = None
+        if not isinstance(event, dict) or event.get("event_type") != "SNAPSHOT":
+            self.refs_of[oid] = None
+            return None
+        ledger = event.get("data", {}).get("compiled_state", {}).get("authorship_ledger")
+        refs: set[str] = set()
+        for entry in ledger if isinstance(ledger, list) else []:
+            pos = entry.get("position") if isinstance(entry, dict) else None
+            if not isinstance(pos, dict):
+                continue
+            position = pos.get("position")
+            if isinstance(position, str):
+                old = self.position_map.get(position) or pos.get("commit_sha")
+                if isinstance(old, str) and old:
+                    refs.add(self.boundary if old in self.below else old)
+        self.refs_of[oid] = frozenset(refs)
+        return self.refs_of[oid]
+
+    def _latest(self, oid: str) -> int:
+        refs = self._refs(oid) or frozenset()
+        return max((self.map_index[r] for r in refs if r in self.map_index), default=-1)
+
+    def _rewritten(self, oid: str) -> tuple[bytes | None, int]:
+        return _rewrite_snapshot_blob(
+            self.reader.read(oid), self.position_map, self.old_to_new, self.boundary, self.below
+        )
+
+    def _map(self, old: str, new: str) -> None:
+        self.old_to_new[old] = new
+        self.map_index[old] = len(self.map_index)
+
+    def _tree_of(self, commit: str) -> str:
+        return _git(self.tracker, "rev-parse", f"{commit}^{{tree}}").stdout.strip()
+
+    def _raw_commit(self, commit: str) -> tuple[bytes, bytes, bytes]:
+        raw = self.reader.read(commit)
+        headers, sep, message = raw.partition(b"\n\n")
+        if not sep:
+            raise ReclaimCollapseError(f"cannot read commit message for {commit}")
+        author = committer = b""
+        for line in headers.split(b"\n"):
+            if line.startswith(b"author "):
+                author = line[len(b"author ") :]
+            elif line.startswith(b"committer "):
+                committer = line[len(b"committer ") :]
+        if not author or not committer:
+            raise ReclaimCollapseError(f"cannot read commit metadata for {commit}")
+        return author, committer, message
+
+
+def _inline(mode: str, path: bytes, data: bytes) -> bytes:
+    return (
+        f"M {mode} inline ".encode()
+        + _quote_path(path)
+        + b"\n"
+        + f"data {len(data)}\n".encode()
+        + data
+        + b"\n"
+    )
+
+
+def _derived_identity() -> bytes:
+    an, ae, ad, _cn, _ce, _cd = _derived_metadata()
+    return f"{an} <{ae}> {ad}".encode()

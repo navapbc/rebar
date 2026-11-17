@@ -483,3 +483,267 @@ def test_cli_dry_run_reports_plan_without_updating_head(tmp_path: Path) -> None:
     assert payload["original_tip"] == tip
     assert payload["checkpoint_sha"]
     assert _git(tracker, "rev-parse", "HEAD") == tip
+
+
+# --- streamed engine (silk-unpleasant-jackal) -------------------------------------------
+
+
+def _ledger_entry(event_uuid: str, timestamp: int, commit_sha: str) -> dict:
+    return {
+        "event_uuid": event_uuid,
+        "content_hash": "h",
+        "signature": "s",
+        "signer_pubkey": None,
+        "position": {"position": f"{timestamp}-{event_uuid}", "commit_sha": commit_sha},
+    }
+
+
+def _snapshot_data(ticket_id: str, ledger: list[dict]) -> dict:
+    return {
+        "compiled_state": {
+            "ticket_id": ticket_id,
+            "ticket_type": "task",
+            "title": "t",
+            "status": "open",
+            "comments": [],
+            "description": "",
+            "tags": [],
+            "authorship_ledger": ledger,
+        },
+        "source_event_uuids": [entry["event_uuid"] for entry in ledger],
+        "compacted_at": 1,
+    }
+
+
+def _build_branchy_store(tmp_path: Path) -> tuple[Path, str, str]:
+    """Below-boundary SNAPSHOT, a side branch forked below and merged above the boundary,
+    a deletion, an event and its SNAPSHOT in one commit, and a retired SNAPSHOT."""
+    tracker = _make_shadow_tracker(tmp_path)
+    old = datetime.now(UTC) - timedelta(days=45)
+    recent = datetime.now(UTC) - timedelta(days=1)
+    t1, t2 = "aaaa-0000-0000-0001", "aaaa-0000-0000-0002"
+    e1 = "a1111111-1111-4111-8111-111111111111"
+    _write_event(tracker, t1, 100, e1, "CREATE", {"ticket_type": "task", "title": "a"})
+    c1 = _commit_all(tracker, "s: create t1", old)
+    _write_event(
+        tracker,
+        t1,
+        101,
+        "a2222222-2222-4222-8222-222222222222",
+        "SNAPSHOT",
+        _snapshot_data(t1, [_ledger_entry(e1, 100, c1)]),
+    )
+    fork = _commit_all(tracker, "s: snapshot t1", old + timedelta(seconds=1))
+    _write_event(tracker, t2, 200, "a3333333-3333-4333-8333-333333333333", "COMMENT", {"b": 1})
+    doomed = _write_event(
+        tracker, t2, 201, "a4444444-4444-4444-8444-444444444444", "COMMENT", {"b": 2}
+    )
+    boundary = _commit_all(tracker, "s: boundary", old + timedelta(seconds=2))
+
+    # Side branch from below the boundary.
+    _git(tracker, "checkout", "-q", "-b", "side", fork)
+    e5 = "a5555555-5555-4555-8555-555555555555"
+    _write_event(tracker, t1, 300, e5, "COMMENT", {"side": True})
+    _write_event(
+        tracker,
+        t1,
+        301,
+        "a6666666-6666-4666-8666-666666666666",
+        "SNAPSHOT",
+        _snapshot_data(t1, [_ledger_entry(e5, 300, "0" * 40)]),
+    )
+    side = _commit_all(tracker, "s: side event and snapshot", recent)
+    _git(tracker, "checkout", "-q", "tickets")
+
+    doomed.unlink()
+    _commit_all(tracker, "s: delete", recent + timedelta(seconds=1))
+    retired = _write_event(
+        tracker,
+        t2,
+        400,
+        "a7777777-7777-4777-8777-777777777777",
+        "SNAPSHOT",
+        _snapshot_data(t2, [_ledger_entry(e1, 100, c1)]),
+    )
+    retired.rename(retired.with_suffix(retired.suffix + ".retired"))
+    _commit_all(tracker, "s: retired snapshot", recent + timedelta(seconds=2))
+    env = subprocess_env(
+        {"GIT_AUTHOR_DATE": recent.isoformat(), "GIT_COMMITTER_DATE": recent.isoformat()}
+    )
+    subprocess.run(
+        ["git", "-C", str(tracker), "merge", "-q", "--no-ff", "-m", "s: merge side", side],
+        check=True,
+        env=env,
+    )
+    tip = _git(tracker, "rev-parse", "HEAD")
+    _set_horizon_ref(tracker, tip)
+    return tracker, boundary, tip
+
+
+def _commits_by_subject(tracker: Path, rev: str) -> dict[str, str]:
+    out = _git(tracker, "log", "--format=%H%x00%s", rev)
+    return {subject: sha for sha, subject in (line.split("\x00") for line in out.splitlines())}
+
+
+def _added_by(tracker: Path, rev: str) -> dict[str, str]:
+    """Event position -> the original commit that added that event file."""
+    out = _git(
+        tracker,
+        "log",
+        "--diff-filter=A",
+        "--full-history",
+        "--no-merges",
+        "--no-renames",
+        "--format=%x1e%H",
+        "--name-only",
+        rev,
+    )
+    positions: dict[str, str] = {}
+    for record in out.split("\x1e"):
+        lines = [line for line in record.split("\n") if line.strip()]
+        if not lines:
+            continue
+        for path in lines[1:]:
+            base = Path(path).name.split(".json")[0]
+            positions[base.rsplit("-", 1)[0]] = lines[0]
+    return positions
+
+
+def _blob_map(tracker: Path, commit: str) -> dict[str, str]:
+    out = _git(tracker, "ls-tree", "-r", commit)
+    return {line.split("\t", 1)[1]: line.split()[2] for line in out.splitlines()}
+
+
+def test_streamed_engine_matches_the_rewrite_oracle(tmp_path: Path) -> None:
+    tracker, boundary, tip = _build_branchy_store(tmp_path)
+    original = _commits_by_subject(tracker, tip)
+    added = _added_by(tracker, tip)
+    below = set(_git(tracker, "rev-list", boundary).split())
+
+    result = _engine().collapse_shadow_tracker(tracker, boundary_commit=boundary, apply=True)
+
+    rewritten = _commits_by_subject(tracker, result.rewritten_tip)
+    old_to_new = {original[s]: rewritten[s] for s in original if s in rewritten}
+    old_to_new[boundary] = result.checkpoint_sha
+    assert result.replayed_commits == 4
+
+    def expected_sha(position: str) -> str:
+        old = added[position]
+        return old_to_new[boundary] if old in below else old_to_new[old]
+
+    for subject, old in original.items():
+        if old in below:
+            continue
+        new = rewritten[subject]
+        old_meta = _git(tracker, "show", "-s", "--format=%an|%ae|%ad|%cn|%ce|%cd|%B", old)
+        assert _git(tracker, "show", "-s", "--format=%an|%ae|%ad|%cn|%ce|%cd|%B", new) == old_meta
+        old_parents = _git(tracker, "show", "-s", "--format=%P", old).split()
+        new_parents = _git(tracker, "show", "-s", "--format=%P", new).split()
+        assert len(new_parents) == len(old_parents)
+        old_blobs, new_blobs = _blob_map(tracker, old), _blob_map(tracker, new)
+        assert set(new_blobs) == set(old_blobs), subject
+        for path, oid in old_blobs.items():
+            try:
+                body = json.loads(_git(tracker, "cat-file", "blob", oid))
+            except json.JSONDecodeError:
+                body = {}
+            if body.get("event_type") != "SNAPSHOT":
+                assert new_blobs[path] == oid, (subject, path)
+                continue
+            new_body = json.loads(_git(tracker, "cat-file", "blob", new_blobs[path]))
+            old_body = body["data"]["compiled_state"]["authorship_ledger"]
+            for entry, before in zip(
+                new_body["data"]["compiled_state"]["authorship_ledger"], old_body, strict=True
+            ):
+                position = entry["position"]["position"]
+                # A commit cannot name its own new SHA, so a self-reference stays as written.
+                want = (
+                    before["position"]["commit_sha"]
+                    if added[position] == old
+                    else expected_sha(position)
+                )
+                assert entry["position"]["commit_sha"] == want, (subject, path)
+    merge = rewritten["s: merge side"]
+    side_new = rewritten["s: side event and snapshot"]
+    assert _git(tracker, "show", "-s", "--format=%P", merge).split()[1] == side_new
+    # The same-commit SNAPSHOT is re-resolved in the first later commit that carries it.
+    merged = json.loads(
+        _git(
+            tracker,
+            "show",
+            f"{merge}:aaaa-0000-0000-0001/301-a6666666-6666-4666-8666-666666666666-SNAPSHOT.json",
+        )
+    )
+    assert merged["data"]["compiled_state"]["authorship_ledger"][0]["position"]["commit_sha"] == (
+        side_new
+    )
+
+
+def test_streamed_engine_runs_one_fast_import_and_one_batch_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker = _make_shadow_tracker(tmp_path)
+    old = datetime.now(UTC) - timedelta(days=45)
+    recent = datetime.now(UTC) - timedelta(days=1)
+    for n in range(200):
+        _write_event(
+            tracker,
+            f"cccc-0000-0000-{n:04d}",
+            n,
+            f"{n:08x}-0000-4000-8000-{n:012x}",
+            "COMMENT",
+            {"n": n},
+        )
+    boundary = _commit_all(tracker, "bulk", old)
+    for n in range(50):
+        _write_event(
+            tracker,
+            "dddd-0000-0000-0000",
+            10_000 + n,
+            f"{n:08x}-1111-4111-8111-{n:012x}",
+            "COMMENT",
+            {"n": n},
+        )
+        _commit_all(tracker, f"replay {n}", recent + timedelta(seconds=n))
+    _set_horizon_ref(tracker, _git(tracker, "rev-parse", "HEAD"))
+
+    engine = _engine()
+    stream = __import__("rebar._commands.reclaim_collapse_stream", fromlist=["x"])
+    spawned: list[list[str]] = []
+    real_popen = subprocess.Popen
+
+    def counting_popen(argv, *args, **kwargs):
+        spawned.append(list(argv))
+        return real_popen(argv, *args, **kwargs)
+
+    git_calls: list[tuple[str, ...]] = []
+    real_git = engine._git
+
+    def counting_git(tracker_path, *args, **kwargs):
+        git_calls.append(args)
+        return real_git(tracker_path, *args, **kwargs)
+
+    monkeypatch.setattr(stream.subprocess, "Popen", counting_popen)
+    monkeypatch.setattr(engine, "_git", counting_git)
+
+    result = engine.collapse_shadow_tracker(tracker, boundary_commit=boundary, apply=True)
+
+    assert result.replayed_commits == 50
+    assert sum("fast-import" in argv for argv in spawned) == 1
+    assert sum("--batch" in argv for argv in spawned) == 1
+    assert not [args for args in git_calls if args[:2] == ("cat-file", "blob")]
+    assert not [args for args in git_calls if args and args[0] == "fast-import"]
+
+
+def test_stream_failure_raises_and_leaves_the_branch_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracker, _ticket_id, boundary, tip = _build_collapsible_store(tmp_path)
+    engine = _engine()
+    monkeypatch.setattr(engine, "_derived_identity", lambda: b"not a valid identity")
+
+    with pytest.raises(engine.ReclaimCollapseError):
+        engine.collapse_shadow_tracker(tracker, boundary_commit=boundary, apply=True)
+
+    assert _git(tracker, "rev-parse", "HEAD") == tip
+    assert _git(tracker, "for-each-ref", "refs/rebar/reclaim-collapse/") == ""
