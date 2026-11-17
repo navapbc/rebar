@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _observability_harness import observability_env, run_observability
+from _observability_harness import SCRIPT_RUN_TIMEOUT, observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -128,7 +128,7 @@ def test_cold_start_publishes_zero_and_seeds_the_offset(
     """A counter's first run must announce 0, not the journal it inherited."""
     env, paths = _environment(tmp_path)
 
-    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
     assert result.returncode == 0
     # 0, NOT the journal's marker count — everything there predates this counter.
@@ -147,11 +147,11 @@ def test_markers_after_initialisation_still_publish(tmp_path: Path) -> None:
     """Seeding must not be sticky: the next genuinely-new marker publishes 1."""
     env, paths = _environment(tmp_path)
 
-    run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
     # One more marker of every kind lands after the counters initialised.
     paths["markers"].write_text(f"{_MARKERS_IN_JOURNAL + 1}\n")
     paths["repl_log"].write_text("[ERROR]\n" * (_MARKERS_IN_JOURNAL + 1))
-    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
     assert second.returncode == 0
     for target, offset_variable, per_interval in _TARGETS:

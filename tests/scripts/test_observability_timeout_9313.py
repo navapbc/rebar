@@ -37,7 +37,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from _observability_harness import observability_env, run_observability
+from _observability_harness import SCRIPT_RUN_TIMEOUT, observability_env, run_observability
 
 pytestmark = pytest.mark.unit
 
@@ -639,7 +639,7 @@ def test_truncation_hook_needs_no_network_when_the_region_is_cached(tmp_path: Pa
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=SCRIPT_RUN_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
     assert _values(aws_log, "probe_truncated") == ["1"], (
@@ -662,7 +662,7 @@ def test_truncation_hook_reports_to_journald_when_no_region_can_be_resolved(
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=SCRIPT_RUN_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
     assert "probe_truncated=1" in log_log.read_text(), (
@@ -683,7 +683,7 @@ def test_truncation_hook_does_not_rerun_the_prologue(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=SCRIPT_RUN_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
     assert _values(aws_log, "probe_truncated") == ["0"]
@@ -937,7 +937,12 @@ def test_overlay2_subtotal_survives_when_it_shares_the_docker_filesystem(
     """The ordinary case, and the control for the test below: same device, subtotal reported."""
     harness, env = _census_env(tmp_path, root_dev="66306", overlay_dev="66306")
     result = subprocess.run(
-        ["bash", str(harness)], env=env, capture_output=True, text=True, timeout=60, check=False
+        ["bash", str(harness)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=SCRIPT_RUN_TIMEOUT,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "total=17000000000 overlay2=16000000000" in result.stdout, result.stdout
@@ -959,7 +964,12 @@ def test_overlay2_subtotal_is_unknown_rather_than_wrong_across_a_mount(tmp_path:
     """
     harness, env = _census_env(tmp_path, root_dev="66306", overlay_dev="66307")
     result = subprocess.run(
-        ["bash", str(harness)], env=env, capture_output=True, text=True, timeout=60, check=False
+        ["bash", str(harness)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=SCRIPT_RUN_TIMEOUT,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "total=17000000000" in result.stdout, (

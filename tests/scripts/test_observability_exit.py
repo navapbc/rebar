@@ -21,7 +21,11 @@ _TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
-from _observability_harness import observability_env, run_observability  # noqa: E402
+from _observability_harness import (  # noqa: E402
+    SCRIPT_RUN_TIMEOUT,
+    observability_env,
+    run_observability,
+)
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -86,7 +90,7 @@ def test_observability_exits_zero_on_healthy_run(healthy_env: dict[str, str]) ->
         env=healthy_env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=SCRIPT_RUN_TIMEOUT,
     )
     assert result.returncode == 0, (
         "observability.sh must exit 0 on a healthy run so the systemd oneshot is "

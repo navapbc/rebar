@@ -24,6 +24,15 @@ from typing import Any
 from _subprocess_env import SubprocessEnv, subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[1] / "infra" / "scripts" / "observability.sh"
+
+# The hang bound for one whole stubbed run of an infra observability script (bug 8613-902c).
+# A run is ~480 short-lived processes: 3-8 s on an idle host, but its wall time scales with CPU
+# contention -- 42-47 s at 24-way contention even with every stub free, and a full suite at
+# 7-8x its nominal speed puts a normal run near 27 s. A fixed 60 s sat inside that range. This
+# tier is ~5x that loaded run, so starvation passes and a real hang still fails well before
+# pytest's 300 s per-test budget, even for a test that runs the script twice (2 x 135 < 300).
+# A code constant, deliberately not an env/config knob (CPython's test.support tiers pattern).
+SCRIPT_RUN_TIMEOUT = 135.0
 HOST_STATE_ROOT = "/var/lib/rebar"
 
 # `NAME="${NAME:-/var/lib/rebar/...}"` — the script's only sanctioned way to name host state.

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 from _journald_stub import JOURNALCTL_EMULATOR, TIMEOUT_STUB
-from _observability_harness import observability_env, run_observability
+from _observability_harness import SCRIPT_RUN_TIMEOUT, observability_env, run_observability
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -124,7 +124,7 @@ def test_shrinking_journal_publishes_zero_not_the_remaining_total(
     """Do not re-announce surviving markers after a vacuum."""
     env, paths = _environment(tmp_path, seeded_offset=99)
 
-    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    result = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
     assert result.returncode == 0
     published = _values(paths["aws_log"], target)
@@ -142,11 +142,11 @@ def test_markers_after_a_rotation_still_publish(tmp_path: Path) -> None:
     """Count new markers after reseeding."""
     env, paths = _environment(tmp_path, seeded_offset=99)
 
-    first = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    first = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
     # Add one new marker after reseeding.
     journal = Path(env["JOURNAL_FILE"])
     journal.write_text(journal.read_text() + 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 2}\n')
-    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=60)
+    second = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
     assert (first.returncode, second.returncode) == (0, 0)
     # The lost-cursor interval is silent; the next counts only the new marker.

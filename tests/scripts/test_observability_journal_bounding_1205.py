@@ -31,7 +31,7 @@ import subprocess
 import textwrap
 from pathlib import Path
 
-from _observability_harness import observability_env, run_observability
+from _observability_harness import SCRIPT_RUN_TIMEOUT, observability_env, run_observability
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "infra" / "scripts" / "observability.sh"
@@ -321,7 +321,12 @@ def _render_units(tmp_path: Path) -> dict[str, str]:
     env = observability_env(tmp_path)
     env.update({"PATH": f"{bin_dir}:{env['PATH']}", "UNIT_DIR": str(unit_dir)})
 
-    result = subprocess.run(["bash", str(INSTALLER)], env=env, timeout=60, check=False)
+    result = subprocess.run(
+        ["bash", str(INSTALLER)],
+        env=env,
+        timeout=SCRIPT_RUN_TIMEOUT,
+        check=False,
+    )
     assert result.returncode == 0, "the installer could not be run with its unit dir redirected"
     return {path.name: path.read_text() for path in unit_dir.iterdir()}
 
