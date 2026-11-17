@@ -806,3 +806,25 @@ def test_enforce_since_enforces_unsigned_replayed_events(tmp_path: Path) -> None
     below = [line for line in lines if "1001-22222222" in line]
     assert replayed and "grandfathered" not in replayed[0], output
     assert below and "grandfathered" in below[0], output
+
+
+def test_streamed_engine_does_not_need_pass_fds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CPython rejects ``pass_fds`` on Windows (sphalerite-demurrable-crossbill); the
+    engine must read fast-import's mark replies without passing an extra descriptor."""
+    tracker, _ticket_id, boundary, _tip = _build_collapsible_store(tmp_path)
+    stream = __import__("rebar._commands.reclaim_collapse_stream", fromlist=["x"])
+    real_popen = subprocess.Popen
+
+    def windows_like_popen(argv, *args, **kwargs):
+        if kwargs.get("pass_fds"):
+            raise AssertionError("pass_fds not supported on Windows.")
+        return real_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(stream.subprocess, "Popen", windows_like_popen)
+
+    result = _engine().collapse_shadow_tracker(tracker, boundary_commit=boundary, apply=True)
+
+    assert result.replayed_commits >= 1
+    assert _git(tracker, "rev-parse", "HEAD") == result.rewritten_tip
