@@ -5,9 +5,9 @@ The collapse writes thousands of commits over a tree of about 221k files. Starti
 impossible to rewrite. This module holds the two long-lived processes that replace them:
 
 * :class:`FastImportSession` streams every commit into one ``git fast-import`` and reads
-  each new commit's SHA back mid-stream with ``get-mark`` over ``--cat-blob-fd``. The
-  collapse needs real SHAs while it is still writing, because later SNAPSHOT ledger
-  rewrites embed them as text.
+  each new commit's SHA back mid-stream with ``get-mark``, whose replies arrive on
+  fast-import's stdout. The collapse needs real SHAs while it is still writing, because
+  later SNAPSHOT ledger rewrites embed them as text.
 * :class:`ObjectReader` serves raw objects from one ``git cat-file --batch`` process,
   caching each object by id.
 
@@ -16,7 +16,6 @@ Both run only inside the shadow clone the collapse has already safety-checked.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -31,25 +30,14 @@ class FastImportSession:
 
     # raw-git-ok: writes objects and a scratch ref only in the safety-checked shadow clone
     def __init__(self, tracker: Path) -> None:
-        read_fd, write_fd = os.pipe()
-        try:
-            self._proc = subprocess.Popen(
-                [
-                    "git",
-                    "-C",
-                    str(tracker),
-                    "fast-import",
-                    "--quiet",
-                    "--date-format=raw",
-                    f"--cat-blob-fd={write_fd}",
-                ],
-                stdin=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                pass_fds=(write_fd,),
-            )
-        finally:
-            os.close(write_fd)
-        self._marks = read_fd
+        # Without --cat-blob-fd, fast-import writes get-mark replies to stdout. That keeps
+        # the session free of extra descriptors, which Windows cannot pass to a child.
+        self._proc = subprocess.Popen(
+            ["git", "-C", str(tracker), "fast-import", "--quiet", "--date-format=raw"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         self._next_mark = 1
         self._mark_of: dict[str, int] = {}
         self.commits_written = 0
@@ -106,7 +94,8 @@ class FastImportSession:
             pass
         stderr = self._proc.stderr.read() if self._proc.stderr is not None else b""
         code = self._proc.wait()
-        os.close(self._marks)
+        if self._proc.stdout is not None:
+            self._proc.stdout.close()
         if code != 0:
             raise StreamError(f"git fast-import failed: {stderr.decode('utf-8', 'replace')}")
 
@@ -119,10 +108,8 @@ class FastImportSession:
             pass
         self._proc.kill()
         self._proc.wait()
-        try:
-            os.close(self._marks)
-        except OSError:
-            pass
+        if self._proc.stdout is not None:
+            self._proc.stdout.close()
 
     def _send(self, data: bytes) -> None:
         stdin = self._proc.stdin
@@ -135,13 +122,13 @@ class FastImportSession:
             raise StreamError(self._failure("git fast-import stopped accepting input")) from err
 
     def _read_sha(self) -> str:
-        buf = b""
-        while not buf.endswith(b"\n"):
-            chunk = os.read(self._marks, 41 - len(buf))
-            if not chunk:
-                raise StreamError(self._failure("git fast-import closed before returning a mark"))
-            buf += chunk
-        sha = buf.strip().decode()
+        stdout = self._proc.stdout
+        if stdout is None:
+            raise StreamError("git fast-import has no stdout")
+        line = stdout.readline()
+        if not line:
+            raise StreamError(self._failure("git fast-import closed before returning a mark"))
+        sha = line.strip().decode()
         if len(sha) != 40:
             raise StreamError(f"git fast-import returned an unexpected mark: {sha!r}")
         return sha
