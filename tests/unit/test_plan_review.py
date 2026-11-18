@@ -869,7 +869,7 @@ def test_move_registry_matches_docs_table() -> None:
     # WS8 AC: docs/plan-review-gate.md's move table mirrors MOVE_REGISTRY id -> template.
     import re
 
-    doc = (REPO_ROOT / "docs" / "plan-review-gate.md").read_text()
+    doc = (REPO_ROOT / "docs" / "plan-review-gate.md").read_text(encoding="utf-8")
     rows = dict(re.findall(r"^\|\s*(\d+)\s*\|[^|]+\|\s*\"(.+?)\"\s*\|$", doc, re.MULTILINE))
     reg = coach_moves.MOVE_REGISTRY
     assert rows, "no move-table rows parsed from the doc"

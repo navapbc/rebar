@@ -142,8 +142,12 @@ def test_without_the_guard_the_void_assertion_passes_vacuously(pytester) -> None
     assert result.ret == 0
 
 
-def test_with_the_guard_the_void_assertion_is_failed_and_named(pytester) -> None:
+def test_with_the_guard_the_void_assertion_is_failed_and_named(
+    pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Same file, guard installed: the run goes RED and blames the test that did it."""
+    # The child prints the guard's em dash; pytester decodes its output as UTF-8.
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
     pytester.makeconftest(_GUARDED_CONFTEST.format(tests_dir=str(_TESTS_DIR)))
     pytester.makepyfile(_POISONED_TESTS)
     result = pytester.runpytest_subprocess("-p", "no:randomly")
@@ -157,8 +161,12 @@ def test_with_the_guard_the_void_assertion_is_failed_and_named(pytester) -> None
     )
 
 
-def test_the_guard_does_not_cascade_onto_an_innocent_later_test(pytester) -> None:
+def test_the_guard_does_not_cascade_onto_an_innocent_later_test(
+    pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Only the source is blamed: the test after the poisoner runs against healthy logging."""
+    # The child prints the guard's em dash; pytester decodes its output as UTF-8.
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
     pytester.makeconftest(_GUARDED_CONFTEST.format(tests_dir=str(_TESTS_DIR)))
     pytester.makepyfile(
         _POISONED_TESTS

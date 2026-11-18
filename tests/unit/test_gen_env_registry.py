@@ -59,7 +59,7 @@ def test_drift_is_detected_for_a_new_read(tmp_path: Path):
     # so the drift gate genuinely detects an un-regenerated addition.
     pkg = tmp_path / "rebar_fake"
     pkg.mkdir()
-    (pkg / "mod.py").write_text('import os\nX = os.environ["REBAR_FAKE_NEW"]\n')
+    (pkg / "mod.py").write_text('import os\nX = os.environ["REBAR_FAKE_NEW"]\n', encoding="utf-8")
     reads, _ = gen.scan(tmp_path)
     assert "REBAR_FAKE_NEW" in reads
 
@@ -81,7 +81,7 @@ def _scan_source(tmp_path: Path, source: str):
     """Scan a one-module synthetic tree and return the generator's ``(reads, dynamic)``."""
     pkg = tmp_path / "rebar_fake"
     pkg.mkdir()
-    (pkg / "mod.py").write_text("import os\n" + source)
+    (pkg / "mod.py").write_text("import os\n" + source, encoding="utf-8")
     return gen.scan(tmp_path)
 
 

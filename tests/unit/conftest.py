@@ -66,8 +66,8 @@ def _isolated_aws_home(tmp_path_factory):
     that has never configured AWS credentials.
     """
     aws_home = tmp_path_factory.mktemp("aws-home")
-    (aws_home / "config").write_text("")
-    (aws_home / "credentials").write_text("")
+    (aws_home / "config").write_text("", encoding="utf-8")
+    (aws_home / "credentials").write_text("", encoding="utf-8")
     return aws_home
 
 

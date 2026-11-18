@@ -140,7 +140,9 @@ def _batch_failure_count(manifest_path) -> int:
     if manifest_path is None:
         return 0
     try:
-        outcomes = json.loads(Path(manifest_path).read_text()).get("mutations", []) or []
+        outcomes = (
+            json.loads(Path(manifest_path).read_text(encoding="utf-8")).get("mutations", []) or []
+        )
     except (OSError, ValueError, AttributeError):
         return 0
     return sum(1 for outcome in outcomes if isinstance(outcome, dict) and outcome.get("error"))
@@ -172,7 +174,7 @@ def derive_pass_tally(nowrite_plan, apply_tally, manifest_path, mutation_count: 
         return tally
     if manifest_path is not None:
         try:
-            manifest_data = json.loads(Path(manifest_path).read_text())
+            manifest_data = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
             # Prefer explicit counts over deriving them from legacy outcomes.
             if "applied_count" in manifest_data:
                 tally["applied"] = int(manifest_data["applied_count"])
@@ -232,7 +234,7 @@ def _emit_mode_manifest(
         try:
             if manifest_path is not None and Path(manifest_path).exists():
                 try:
-                    manifest_data = json.loads(Path(manifest_path).read_text())
+                    manifest_data = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
                     outcomes = manifest_data.get("mutations", []) or []
                     tally = {
                         "applied_count": sum(1 for o in outcomes if not o.get("error")),

@@ -485,6 +485,7 @@ def test_hook_falls_back_to_git_when_env_unset(tmp_path: Path) -> None:
         text=True,
         env=env,
         check=False,
+        encoding="utf-8",
     )
     assert cp.returncode == 0, f"unset-env build must succeed (dev fallback): {cp.stderr[-1500:]}"
     assert _wheel_baked_commit(tmp_path / "d") == short, (

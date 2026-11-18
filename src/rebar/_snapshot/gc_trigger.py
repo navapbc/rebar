@@ -128,7 +128,7 @@ def _spawn_detached_gc(root: Path, repo_root: str | None) -> None:
     from rebar._proc import spawn_detached
 
     try:
-        log_fh = open(_log_path(root), "a")  # noqa: SIM115 — handed to the child
+        log_fh = open(_log_path(root), "a", encoding="utf-8")  # noqa: SIM115 — handed to the child
     except OSError:
         log_fh = subprocess.DEVNULL  # type: ignore[assignment]
     try:

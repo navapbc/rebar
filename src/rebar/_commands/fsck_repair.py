@@ -416,7 +416,7 @@ def _mark_ticket_repaired(marker_dir: str, tid: str) -> None:
     if not marker_dir:
         return
     try:
-        open(os.path.join(marker_dir, tid), "w").close()
+        open(os.path.join(marker_dir, tid), "w", encoding="utf-8").close()
     except OSError:
         pass
 

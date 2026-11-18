@@ -46,6 +46,7 @@ def _build_commit(root: Path) -> str | None:
             ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except OSError:
@@ -63,7 +64,7 @@ def _read_existing_commit(target: Path) -> str | None:
     """
     try:
         text = target.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     try:
         tree = ast.parse(text)
@@ -114,7 +115,8 @@ class CustomBuildHook(BuildHookInterface):
             "Build-baked gate-code commit SHA for non-git (wheel/PyPI) installs; the live\n"
             "checkout SHA still wins when present. See epic jira-reb-596.\n"
             '"""\n\n'
-            f"COMMIT = {commit!r}\n"
+            f"COMMIT = {commit!r}\n",
+            encoding="utf-8",
         )
         # Ensure the generated (git-ignored) file ships in BOTH the wheel and the sdist.
         # `initialize` fires for both targets, so force-including it here gives the sdist a

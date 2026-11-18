@@ -62,7 +62,7 @@ def _present_workflows() -> set[str]:
 def test_workflow_name_matches_locked_table(filename: str, expected: str) -> None:
     path = _WORKFLOWS_DIR / filename
     assert path.exists(), f"expected workflow {filename} is missing"
-    doc = yaml.safe_load(path.read_text())
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert doc.get("name") == expected, (
         f"{filename}: name: is {doc.get('name')!r}, expected {expected!r} "
         f"(update the locked table in this test if the rename is intentional)"
