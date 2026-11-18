@@ -185,7 +185,11 @@ on — a cheap deterministic gate on every PR, expensive LLM scoring off the PR 
 - **Live scoring (manual + weekly, non-blocking)** — the `eval-live` CI job runs
   `run_eval` over the dataset-bearing specs: each case runs the reviewer's *real* op
   (via the eval solver, against a disposable fixture store), the deterministic scorers
-  gate (`at_least(k)` over epochs), and JUnit is emitted. It is deliberately **off the
+  gate (`at_least(k)` over epochs), and JUnit is emitted. `run_eval` runs every case
+  inside a local gate session itself, so the agentic solvers pass the snapshot safeguard on
+  any CI provider or none. A spec whose epoch scored no case at all reports
+  `run_failure: true`; the job prints it as an error, separately from the advisory
+  regression warning, because a run that scored nothing measured nothing. It is deliberately **off the
   PR critical path** (`workflow_dispatch` + a weekly `schedule`), **non-blocking**
   (`continue-on-error`), **concurrency-capped**, and **fork-safe** (same-repo only, so
   forks/Dependabot never spend tokens). Provider spend caps belong at the

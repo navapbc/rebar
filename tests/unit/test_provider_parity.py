@@ -402,9 +402,11 @@ def test_the_corpus_selection_is_deterministic_and_stratified_per_spec() -> None
 
 
 def test_the_isf_finder_spec_is_excluded_because_it_resolves_to_no_arm() -> None:
-    """`plan-review-isf-finder` carries gold-labelled cases but `run_case` has no arm for it
-    (it is neither a criterion id, nor a code-review id, nor one of the agentic three), so it
-    would raise rather than return a verdict. Eligibility is arm RESOLUTION, not merely
+    """`plan-review-isf-finder` carries gold-labelled cases but resolves to no PARITY arm (it is
+    neither a criterion id, nor a code-review id, nor the novelty sub-call). `run_case` does
+    run it, through its dedicated ISF arm over inline `plan`/`log` (bug
+    knightly-salty-orangutan), but `solver_arm` does not classify that arm for the parity
+    corpus, so the spec stays out. Eligibility is parity-arm RESOLUTION, not merely
     "not one of the agentic three"."""
     assert pp.solver_arm("plan-review-isf-finder") is None
     assert pp.solver_arm("plan-review-isf-finder") not in {"criterion", "code-review", "novelty"}

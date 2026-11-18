@@ -277,3 +277,69 @@ def test_code_review_case_without_files_keeps_inline_runner_root(
 
     assert seen["runner_root"] == checkout
     assert seen["request_root"] == checkout
+
+
+# ── PASS-named plan-review specs resolve to a solver (bug knightly-salty-orangutan) ──
+
+
+def _spec_cases(prompt_id: str) -> list[dict]:
+    from rebar.llm.evals import eval as ev
+
+    return list(ev.load_eval_spec(prompt_id)["dataset"])
+
+
+def _firing_runner(criterion: str) -> FakeRunner:
+    return FakeRunner(findings=[{"finding": "gap", "criteria": [criterion], "evidence": ["q"]}])
+
+
+@pytest.mark.parametrize("prompt_id", ["plan-review-finder", "plan-review-container"])
+def test_pass_finder_specs_run_each_case_as_its_named_criterion(prompt_id) -> None:
+    for case in _spec_cases(prompt_id)[:4]:
+        out = eval_solver.run_case(prompt_id, case, runner=_firing_runner(case["criterion"]))
+        assert isinstance(out["findings"], list)
+        assert all(case["criterion"] in f["criteria"] for f in out["findings"])
+
+
+def test_isf_finder_spec_runs_over_inline_plan_and_log() -> None:
+    case = _spec_cases("plan-review-isf-finder")[0]
+    out = eval_solver.run_case("plan-review-isf-finder", case, runner=_firing_runner("ISF"))
+    assert [f["criteria"] for f in out["findings"]] == [["ISF"]]
+    quiet = eval_solver.run_case("plan-review-isf-finder", case, runner=FakeRunner())
+    assert quiet["findings"] == []
+
+
+def test_pass_finder_case_without_a_criterion_raises() -> None:
+    with pytest.raises(ValueError, match="needs a `criterion`"):
+        eval_solver.run_case(
+            "plan-review-finder", {"id": "x", "input": "plan"}, runner=FakeRunner()
+        )
+    with pytest.raises(ValueError, match="needs a `criterion`"):
+        eval_solver.run_case(
+            "plan-review-finder",
+            {"id": "x", "input": "plan", "criterion": "no-such-criterion"},
+            runner=FakeRunner(),
+        )
+
+
+def test_isf_case_without_a_log_raises() -> None:
+    with pytest.raises(ValueError, match="session `log`"):
+        eval_solver.run_case(
+            "plan-review-isf-finder", {"id": "x", "plan": "p"}, runner=FakeRunner()
+        )
+
+
+@pytest.mark.parametrize(
+    "prompt_id", ["plan-review-finder", "plan-review-container", "plan-review-isf-finder"]
+)
+def test_run_eval_scores_every_case_of_the_pass_named_specs(prompt_id) -> None:
+    from rebar.llm.evals import eval as ev
+
+    def solve(pid, case):
+        crit = case.get("criterion") or "ISF"
+        fired = case.get("expect") == "finding"
+        runner = _firing_runner(crit) if fired else FakeRunner()
+        return eval_solver.run_case(pid, case, runner=runner)
+
+    res = ev.run_eval(prompt_id, solve=solve, max_cases=6)
+    assert res["coverage"] == 1.0
+    assert "no eval solver" not in res["junit"]
