@@ -451,9 +451,19 @@ def _drive_on_fresh_thread(raises: bool):
         loop.close()
         asyncio.set_event_loop(None)
 
+    before = set(threading.enumerate())
     thread = threading.Thread(target=worker, name="rebar-test-gate-drive")
     thread.start()
     thread.join()
+    # anyio's WorkerThread holds the loop until its thread exits, which it does on its own
+    # schedule after the root task ends; wait for those workers so a loaded host cannot leave
+    # one alive at gc time (bug unselfish-finnicky-whooper). Keep no reference to them.
+    stragglers = set(threading.enumerate()) - before
+    for straggler in stragglers:
+        straggler.join(timeout=10)
+        assert not straggler.is_alive(), f"{straggler.name} did not exit within 10 s"
+    stragglers.clear()
+    straggler = None
     return refs[0]
 
 
@@ -468,3 +478,23 @@ def test_a_finished_gate_drive_releases_its_event_loop(raises: bool) -> None:
     loop_ref = _drive_on_fresh_thread(raises)
     gc.collect()
     assert loop_ref() is None, "a finished gate drive left its event loop (and its task) alive"
+
+
+def test_a_slow_exiting_anyio_worker_does_not_fail_the_loop_release_check(monkeypatch) -> None:
+    """Bug unselfish-finnicky-whooper: anyio's ``WorkerThread`` holds the loop until its thread
+    exits, which happens after the root task ends. Under host load that exit lagged the test's
+    ``gc.collect()``, so the check failed intermittently. Simulate a descheduled worker."""
+    import gc
+    import time
+
+    backend = pytest.importorskip("anyio._backends._asyncio")
+    original_run = backend.WorkerThread.run
+
+    def lingering_run(self) -> None:
+        original_run(self)
+        time.sleep(0.3)
+
+    monkeypatch.setattr(backend.WorkerThread, "run", lingering_run)
+    loop_ref = _drive_on_fresh_thread(raises=True)
+    gc.collect()
+    assert loop_ref() is None, "the helper returned before the drive's anyio workers exited"
