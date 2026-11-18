@@ -48,3 +48,24 @@ def test_new_spec_dataset_balanced_and_gold_present(prompt_id: str) -> None:
     # balanced across whichever axis the spec uses
     if expects & (sc.FIRE_EXPECTS | sc.NOFIRE_EXPECTS):
         assert expects & sc.FIRE_EXPECTS and expects & sc.NOFIRE_EXPECTS, prompt_id
+
+
+def test_every_packaged_spec_filename_matches_its_prompt_exactly() -> None:
+    """Callers open ``<prompt>.eval.yaml`` by the spec's ``prompt`` id, so a filename that
+    differs from it, even only in letter case, cannot be loaded on a case-sensitive
+    filesystem (bug militant-vixenish-gorilla). Compare the strings directly so the check
+    fails on every host, not only on Linux."""
+    from pathlib import Path
+
+    import yaml
+
+    spec_dir = Path(ev.__file__).resolve().parent.parent / "eval_specs"
+    paths = sorted(spec_dir.glob("*.eval.yaml"))
+    assert paths, f"no packaged eval specs under {spec_dir}"
+    mismatched = {}
+    for path in paths:
+        stem = path.name[: -len(".eval.yaml")]
+        prompt = (yaml.safe_load(path.read_text(encoding="utf-8")) or {}).get("prompt")
+        if prompt != stem:
+            mismatched[path.name] = prompt
+    assert mismatched == {}

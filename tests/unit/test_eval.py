@@ -324,9 +324,9 @@ def test_run_eval_opens_a_gate_session_for_its_solver(monkeypatch) -> None:
     # With the safeguard active and no override, the same solve raises when called bare...
     monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
     with pytest.raises(RuntimeError, match="OUTSIDE the repo-snapshot gate process"):
-        _gated_solve("plan-review-g7", {"expect": "pass"})
+        _gated_solve("plan-review-G7", {"expect": "pass"})
     # ...but run_eval (the call shape the eval-live CI job uses) gates it, so cases score.
-    res = ev.run_eval("plan-review-g7", solve=_gated_solve, max_cases=3)
+    res = ev.run_eval("plan-review-G7", solve=_gated_solve, max_cases=3)
     assert res["coverage"] > 0
     assert res["errored"] == 0
     assert res["run_failure"] is False
@@ -335,7 +335,7 @@ def test_run_eval_opens_a_gate_session_for_its_solver(monkeypatch) -> None:
 
 def test_calibrate_criterion_opens_a_gate_session_for_its_solver(monkeypatch) -> None:
     monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
-    report = ev.calibrate_criterion("necessity", repo_root=".", solve=_gated_solve)
+    report = ev.calibrate_criterion("G7", repo_root=".", solve=_gated_solve)
     assert report["recall"] is not None
 
 
@@ -344,11 +344,11 @@ def test_run_eval_reports_an_all_errored_epoch_as_a_run_failure() -> None:
     def boom(_p, _c):
         raise RuntimeError("no model")
 
-    res = ev.run_eval("plan-review-g7", solve=boom, max_cases=2)
+    res = ev.run_eval("plan-review-G7", solve=boom, max_cases=2)
     assert res["coverage"] == 0.0
     assert res["run_failure"] is True
     assert res["errored"] == res["epochs"] * 2
     # A run that scored its cases but failed them is NOT a run failure.
-    scored = ev.run_eval("plan-review-g7", solve=lambda _p, _c: {"findings": []}, max_cases=2)
+    scored = ev.run_eval("plan-review-G7", solve=lambda _p, _c: {"findings": []}, max_cases=2)
     assert scored["run_failure"] is False
     assert scored["errored"] == 0

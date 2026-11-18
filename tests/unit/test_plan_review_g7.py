@@ -122,7 +122,7 @@ def test_g7_semantic_fixture_cases_cover_the_three_scenarios() -> None:
     parent AC FIRES."""
     from rebar.llm.evals import eval as ev
 
-    spec = ev.load_eval_spec("plan-review-g7")
+    spec = ev.load_eval_spec("plan-review-G7")
     assert ev.validate_eval_spec(spec) == []
     assert spec["prompt"] == "plan-review-G7"
     cases = {c["id"]: c for c in spec["dataset"]}

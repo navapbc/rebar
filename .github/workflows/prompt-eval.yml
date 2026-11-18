@@ -134,7 +134,15 @@ jobs:
                   continue  # gold-only spec — nothing to run live
               pid = spec["prompt"]
               # run_eval opens its own local gate session (in-process, provider-neutral).
-              res = ev.run_eval(pid, max_cases=cap)
+              # One spec that cannot load or run is a broken run for THAT spec only: report
+              # it and keep scoring the rest (the end-of-step check still fails the job).
+              try:
+                  res = ev.run_eval(pid, max_cases=cap)
+              except ev.EvalError as exc:
+                  print(f"::error::eval spec {pid} ({p}) could not run: {exc}")
+                  summary.append(f"{pid}: BROKEN ({exc})")
+                  broken.append(pid)
+                  continue
               (out / f"{pid}.xml").write_text(res["junit"])
               summary.append(
                   f"{pid}: {'PASS' if res['passed'] else 'FAIL'} "
