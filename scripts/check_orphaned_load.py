@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -161,6 +162,29 @@ def is_user_gui_app(command: str) -> bool:
     return command.startswith(_GUI_APP_PREFIXES) and ".app/Contents/MacOS/" in command
 
 
+#: Modules rebar itself hands to ``rebar._proc.spawn_detached``: the compaction sweep, snapshot
+#: GC and async tickets-branch push. They are parented to PID 1 ON PURPOSE so a CLI command can
+#: return while they finish, and they exit on their own (bug 9d13). Kept equal to the source's
+#: ``spawn_detached`` call sites by tests/scripts/test_check_orphaned_load.py.
+REBAR_DETACHED_MODULES = (
+    "rebar._commands.compact_trigger",
+    "rebar._snapshot.gc_trigger",
+    "rebar._store.push",
+)
+
+#: ``spawn_detached`` runs ``python -c "...; import <module>; <module>.<func>(*sys.argv[...])"``,
+#: so the import immediately followed by a call into the same module is its signature. Matching
+#: that pair, not a bare module name, keeps a grep or a test path that merely names the module out.
+_REBAR_WORKER = re.compile(
+    r"\bimport (" + "|".join(re.escape(m) for m in REBAR_DETACHED_MODULES) + r"); \1\.\w+\("
+)
+
+
+def is_rebar_detached_worker(command: str) -> bool:
+    """Is this one of rebar's own detached workers (see :data:`REBAR_DETACHED_MODULES`)?"""
+    return _REBAR_WORKER.search(command) is not None
+
+
 def is_default_suppressed(command: str) -> bool:
     """Is this process launchd/init-owned noise rather than an agent leak?"""
     return is_system_owned(command) or is_user_gui_app(command)
@@ -200,6 +224,12 @@ def _report(flagged: Sequence[ProcessRecord], min_cpu_seconds: float, suppressed
         hours = record.cpu_seconds / 3600
         print(f"  pid={record.pid:<8} cpu={record.cpu_seconds:>12.1f}s ({hours:.1f}h)")
         print(f"    {record.command}")
+        if is_rebar_detached_worker(record.command):
+            print(
+                "    ^ rebar detached worker: rebar parents it to PID 1 by design and it exits "
+                "on its own. This one is CPU-hot, so inspect it; if it must stop, send SIGTERM "
+                "(a compaction sweep then ends at a ticket boundary, losing no data)."
+            )
     print(
         "\nEach of these was spawned by something that has since exited. Confirm "
         "the owning investigation is over, then terminate only the specific pids "

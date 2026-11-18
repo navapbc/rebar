@@ -324,7 +324,10 @@ of `SIGALRM` (exit 142) where `timeout` reports 124; either way the helper is go
 These rules are mandatory:
 
 - A subagent must reap every process it starts before returning, including on error paths.
-- No process you start may reach PPID 1.
+- No process you start may reach PPID 1. Processes rebar itself detaches are exempt: its
+  compaction sweep, snapshot GC and async push (command line contains
+  `import rebar._commands.compact_trigger`, `rebar._snapshot.gc_trigger` or `rebar._store.push`)
+  exit on their own, so leave them to finish; see docs/orphaned-processes.md.
 - Never start an unbounded busy loop such as `while True: pass`, `yes > /dev/null`, or `while :; do :; done` without a wall-clock bound. `nice` is not a bound.
 - Prefer a workload with a fixed end condition.
 - **A bound that is not installed does not bind, and says so only on stderr.** Never write a bare
