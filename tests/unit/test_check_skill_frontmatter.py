@@ -152,3 +152,20 @@ def test_main_scans_directory(tmp_path: Path):
     long_desc = "q" * (chk.DESCRIPTION_MAX_LENGTH + 1)
     _write_skill(tmp_path, "bad2", f"---\nname: bad2\ndescription: {long_desc}\n---\n")
     assert chk.main([str(tmp_path)]) == 1
+
+
+def test_failure_line_names_an_outside_file_by_its_absolute_posix_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A SKILL.md outside the repo is named by its absolute POSIX path, never a relpath.
+
+    ``os.path.relpath`` raises across Windows drives and walks ``..`` elsewhere
+    (bug arctic-unsecular-esok).
+    """
+    long_desc = "z" * (chk.DESCRIPTION_MAX_LENGTH + 1)
+    p = _write_skill(tmp_path, "bad", f"---\nname: bad\ndescription: {long_desc}\n---\n")
+    assert chk.main([str(p), "--github"]) == 1
+    out = capsys.readouterr().out
+    expected = p.resolve().as_posix()
+    assert f"FAIL: {expected}: " in out
+    assert f"::error file={expected}," in out

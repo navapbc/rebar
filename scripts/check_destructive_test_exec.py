@@ -123,7 +123,7 @@ def scan_file(path: Path, rel: Path, root: Path) -> list[Finding]:
             for script_line, target in unguarded_deletions(script.read_text(encoding="utf-8")):
                 findings.append(
                     Finding(
-                        str(rel),
+                        rel.as_posix(),
                         node.lineno,
                         "destructive-test-exec",
                         f"execs {literal} which deletes unguarded target {target!r} "

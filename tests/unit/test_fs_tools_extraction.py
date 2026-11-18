@@ -9,6 +9,8 @@ from __future__ import annotations
 import subprocess
 import sys
 
+from _subprocess_env import minimal_env
+
 
 def test_fs_tools_cluster_is_reused_by_identity_and_drives_discovery(tmp_path) -> None:
     from rebar.llm import fs_tools, pai_tools
@@ -58,11 +60,11 @@ def test_importing_fs_tools_does_not_pull_the_agent_runtime(tmp_path) -> None:
         # REBAR_ROOT is pinned at tmp_path: this hand-built env drops the tier's
         # inherited isolation root, so the child would otherwise resolve its root to
         # the git toplevel of the inherited cwd — the real checkout.
-        env={
-            "PYTHONPATH": "src",
-            "PATH": __import__("os").environ.get("PATH", ""),
-            "REBAR_ROOT": str(tmp_path),
-        },
+        env=minimal_env(
+            PYTHONPATH="src",
+            PATH=__import__("os").environ.get("PATH", ""),
+            REBAR_ROOT=str(tmp_path),
+        ),
         check=False,
     )
     assert cp.returncode == 0, cp.stderr

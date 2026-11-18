@@ -6,6 +6,8 @@ import subprocess
 import sys
 import types
 
+from _subprocess_env import minimal_env
+
 
 def test_setup_tracing_is_noop_without_keys() -> None:
     # No Langfuse keys configured → tracing must be a clean no-op (False), never raising,
@@ -94,11 +96,11 @@ def test_importing_tracing_pulls_no_opentelemetry(tmp_path) -> None:
         # REBAR_ROOT is pinned at tmp_path: this hand-built env drops the tier's
         # inherited isolation root, so the child would otherwise resolve its root to
         # the git toplevel of the inherited cwd — the real checkout.
-        env={
-            "PYTHONPATH": "src",
-            "PATH": __import__("os").environ.get("PATH", ""),
-            "REBAR_ROOT": str(tmp_path),
-        },
+        env=minimal_env(
+            PYTHONPATH="src",
+            PATH=__import__("os").environ.get("PATH", ""),
+            REBAR_ROOT=str(tmp_path),
+        ),
         check=False,
     )
     assert cp.returncode == 0, cp.stderr
