@@ -17,9 +17,11 @@ credentials, acli, and test project. ``scripts/run_live_matrix.py`` runs the who
 
 from __future__ import annotations
 
+import email.message
 import importlib
 import os
 import time
+import urllib.error
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -281,6 +283,19 @@ def test_blast_radius_breaker_via_census():
 # failures and records each artifact whose deletion retries exhaust.
 
 
+PROBE_SUMMARY = f"[rebar probe - safe to delete] {DELETE_ME_MARKER} delete-permission probe"
+PROBE_DESCRIPTION = (
+    "Disposable artifact of rebar's live delete-permission probe "
+    "(tests/integration/test_reconcile_live_e2e.py). It can, and should, be deleted if it is "
+    "still present after testing finishes."
+)
+
+
+def _probe_create_payload() -> dict[str, str]:
+    """The probe's ``create_issue`` input: an issue that names itself as safe to delete."""
+    return {"title": PROBE_SUMMARY, "description": PROBE_DESCRIPTION, "ticket_type": "Task"}
+
+
 @pytest.mark.live
 @_requires_live
 def test_delete_permission_probe(tmp_path):
@@ -301,21 +316,28 @@ def test_delete_permission_probe(tmp_path):
         jira_project=settings.project,
     )
     tracker = ArtifactTracker()
-    summary = f"{DELETE_ME_MARKER} delete-permission probe"
+    payload = _probe_create_payload()
+    summary = payload["title"]
     leaked_log = tmp_path / "leaked.log"
 
     def _delete_jira(key: str) -> None:
         client.delete_issue(key)
 
     try:
-        created = client.create_issue({"title": summary, "ticket_type": "Task"})
+        created = client.create_issue(payload)
         key = tracker.track_jira(created.get("key", ""))
         assert key, "create_issue returned no key"
+        print(f"delete-permission probe created {key}")
 
         # Jira eventual-consistency settle: a create+IMMEDIATE-mutate races the index,
         # so poll until the issue is visible by key before deleting (~10-30s window).
-        visible = _poll_until_visible(client, key, summary)
-        assert visible, f"created issue {key} never became index-visible"
+        # Each attempt's line says whether "not visible" was an empty search or a
+        # rejected one, so a failure names its cause (bug e55c).
+        attempts: list[str] = []
+        visible = _poll_until_visible(client, key, summary, attempts=attempts)
+        assert visible, f"created issue {key} never became index-visible; attempts:\n" + "\n".join(
+            attempts
+        )
 
         # THE delete-permission criterion: a scoped credential returns "deleted"
         # (acli raises a loud PermissionError on a 403 if the token is not
@@ -351,13 +373,38 @@ def _fresh_search(client: Any, jql: str) -> Any:
     return client.search_issues(jql)
 
 
+def _http_error_detail(exc: urllib.error.HTTPError) -> str:
+    """Return the start of an HTTP error's response body, or "" when it has none."""
+    try:
+        body = exc.read() or b""
+    except Exception:  # noqa: BLE001 — the body is diagnostic garnish; its absence is not an error
+        return ""
+    return body.decode("utf-8", "replace").strip()[:200]
+
+
+def _search_outcome(client: Any, jql: str, key: str) -> tuple[bool, str]:
+    """Run one fresh search and report whether it found ``key``, with a note on how it went.
+
+    The note separates a successful search (``ok N hits``) from a rejected one
+    (``error HTTP <code>: <reason>`` for the ``urllib.error.HTTPError`` that
+    ``_direct_rest_post_json`` raises on non-2xx, ``error <ExcType>: <message>`` otherwise),
+    so a failed visibility poll can tell index lag apart from rejected searches (bug e55c).
+    """
+    try:
+        hits = _fresh_search(client, jql) or []
+    except urllib.error.HTTPError as exc:
+        detail = _http_error_detail(exc)
+        note = f"error HTTP {exc.code}: {exc.reason}"
+        return False, f"{note} - {detail}" if detail else note
+    except Exception as exc:  # noqa: BLE001 — any search failure is recorded and means "not visible yet"
+        return False, f"error {type(exc).__name__}: {exc}"
+    return any(h.get("key") == key for h in hits), f"ok {len(hits)} hits"
+
+
 def _issue_exists(client: Any, key: str) -> bool:
     """True if a direct search by key returns the issue (index-visible)."""
-    try:
-        hits = _fresh_search(client, f'key = "{key}"')
-    except Exception:  # noqa: BLE001 — a transient search error means "unknown"; caller treats as not-visible
-        return False
-    return any(h.get("key") == key for h in hits or [])
+    found, _note = _search_outcome(client, f'key = "{key}"', key)
+    return found
 
 
 # Under full-live-group load Jira's index-convergence lag can exceed a flat 30s budget, so
@@ -393,6 +440,7 @@ def _poll_until_visible(
     timeout_s: float | None = None,
     time_fn: Callable[[], float] = time.monotonic,
     sleep_fn: Callable[[float], None] = time.sleep,
+    attempts: list[str] | None = None,
 ) -> bool:
     """Poll fresh key and summary searches until Jira indexes a new issue or time expires.
 
@@ -400,23 +448,29 @@ def _poll_until_visible(
     cap. Injectable time functions keep tests deterministic. Credential-backed calls use the
     monotonic clock and sleep functions.
     Fresh searches prevent a cached initial miss from defeating the retry budget.
+    When ``attempts`` is given, each attempt appends
+    ``t=<s>s key: <note>; summary: <note>`` (see ``_search_outcome``).
     """
     if timeout_s is None:
         timeout_s = _default_index_visibility_timeout()
-    deadline = time_fn() + timeout_s
+    start = time_fn()
+    deadline = start + timeout_s
+    log = attempts if attempts is not None else []
     attempt = 0
     while time_fn() < deadline:
-        if _issue_exists(client, key):
+        elapsed = time_fn() - start
+        found, key_note = _search_outcome(client, f'key = "{key}"', key)
+        summary_note = "not run"
+        if not found:
+            found, summary_note = _search_outcome(client, f'summary ~ "{summary}"', key)
+        log.append(f"t={elapsed:.1f}s key: {key_note}; summary: {summary_note}")
+        if found:
             return True
-        try:
-            hits = _fresh_search(client, f'summary ~ "{summary}"')
-            if any(h.get("key") == key for h in hits or []):
-                return True
-        except Exception:  # noqa: BLE001 — search lag is expected mid-poll; keep polling until the deadline
-            pass
         sleep_fn(min(float(2**attempt), _MAX_INDEX_POLL_INTERVAL_S))
         attempt += 1
-    return _issue_exists(client, key)
+    found, key_note = _search_outcome(client, f'key = "{key}"', key)
+    log.append(f"t={time_fn() - start:.1f}s key: {key_note}; summary: not run (final)")
+    return found
 
 
 class _FakeClock:
@@ -533,6 +587,89 @@ def test_poll_until_visible_requeries_a_real_client_until_the_index_converges():
         f"the key search was issued only {runner.jqls.count(f'key = {key!r}')} time(s); "
         "the poll is re-reading a cached answer instead of re-querying"
     )
+
+
+class _RateLimitedClient:
+    """A fake Jira client whose every search is rejected with HTTP 429."""
+
+    def search_issues(self, _jql: str) -> list[dict[str, str]]:
+        raise urllib.error.HTTPError(
+            "https://example.invalid/rest/api/3/search/jql",
+            429,
+            "Too Many Requests",
+            email.message.Message(),
+            None,
+        )
+
+
+def test_poll_attempts_name_a_rejected_search_with_its_http_status():
+    """A poll that fails because every search is rejected says so on every attempt line,
+    so a failing probe can tell rejected searches apart from index lag (bug e55c)."""
+    clock = _FakeClock()
+    attempts: list[str] = []
+    found = _poll_until_visible(
+        _RateLimitedClient(),
+        "REB-9999",
+        "synthetic summary",
+        timeout_s=10.0,
+        time_fn=clock.monotonic,
+        sleep_fn=clock.sleep,
+        attempts=attempts,
+    )
+    assert found is False
+    assert attempts, "the poll recorded no attempts"
+    for line in attempts:
+        assert "error HTTP 429: Too Many Requests" in line, line
+
+
+def test_poll_attempts_name_an_empty_successful_search():
+    """A poll that fails on index lag records successful searches with zero hits."""
+    clock = _FakeClock()
+    attempts: list[str] = []
+    client = _EventuallyVisibleClient("REB-9999", clock, visible_at=10_000.0)
+    found = _poll_until_visible(
+        client,
+        "REB-9999",
+        "synthetic summary",
+        timeout_s=10.0,
+        time_fn=clock.monotonic,
+        sleep_fn=clock.sleep,
+        attempts=attempts,
+    )
+    assert found is False
+    assert attempts
+    for line in attempts:
+        assert "ok 0 hits" in line, line
+        assert "error" not in line, line
+
+
+def test_poll_attempts_record_eventual_visibility():
+    """An issue that becomes visible at t=60 ends the poll on an attempt line showing the hit."""
+    clock = _FakeClock()
+    attempts: list[str] = []
+    client = _EventuallyVisibleClient("REB-9999", clock, visible_at=60.0)
+    found = _poll_until_visible(
+        client,
+        "REB-9999",
+        "synthetic summary",
+        time_fn=clock.monotonic,
+        sleep_fn=clock.sleep,
+        attempts=attempts,
+    )
+    assert found is True
+    assert len(attempts) > 1
+    assert attempts[-1].startswith("t="), attempts[-1]
+    assert "key: ok 1 hits" in attempts[-1], attempts[-1]
+    assert "ok 0 hits" in attempts[0], attempts[0]
+
+
+def test_probe_issue_is_named_as_a_disposable_artifact():
+    """The probe's Jira issue tells anyone who finds it that it is safe to delete."""
+    payload = _probe_create_payload()
+    assert payload["title"].startswith("[rebar probe - safe to delete]"), payload
+    assert DELETE_ME_MARKER in payload["title"], payload
+    assert "should, be deleted" in payload["description"], payload
+    assert payload["ticket_type"] == "Task", payload
 
 
 def test_c1_conflict_signal(tmp_path):
