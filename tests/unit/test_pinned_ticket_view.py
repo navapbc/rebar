@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import stat
 import subprocess
 import uuid
 from pathlib import Path
@@ -669,9 +670,21 @@ def _assert_blob_unreadable(tracker: str, blob_oid: str) -> None:
     )
 
 
+def _unlink_git_object(path: Path, *, missing_ok: bool = False) -> None:
+    """Delete a git object file. Git writes objects read-only, and Windows refuses to
+    delete a read-only file (WinError 5), so clear that bit first."""
+    try:
+        path.chmod(stat.S_IWRITE | stat.S_IREAD)
+    except FileNotFoundError:
+        if missing_ok:
+            return
+        raise
+    path.unlink()
+
+
 def _drop_loose(tracker: str, object_root: Path, blob_oid: str) -> None:
     """Remove the loose copy of a blob, the shape `_freeze_gc` constructs."""
-    (object_root / blob_oid[:2] / blob_oid[2:]).unlink(missing_ok=True)
+    _unlink_git_object(object_root / blob_oid[:2] / blob_oid[2:], missing_ok=True)
     _assert_blob_unreadable(tracker, blob_oid)
 
 
@@ -698,7 +711,7 @@ def _drop_packed(tracker: str, object_root: Path, blob_oid: str) -> None:
     )
     # An absent loose copy is this route's own premise -- git already packed the blob --
     # rather than a setup failure.
-    (object_root / blob_oid[:2] / blob_oid[2:]).unlink(missing_ok=True)
+    _unlink_git_object(object_root / blob_oid[:2] / blob_oid[2:], missing_ok=True)
     assert _git_rc(tracker, "cat-file", "-e", blob_oid) == 0, "packing lost the blob"
     for idx in sorted(pack_dir.glob("pack-*.idx")):
         oids = _pack_oids(tracker, idx)
@@ -714,7 +727,7 @@ def _drop_packed(tracker: str, object_root: Path, blob_oid: str) -> None:
                 stdin="".join(f"{oid}\n" for oid in sorted(keep)),
             )
         for sibling in pack_dir.glob(f"{idx.stem}.*"):
-            sibling.unlink()
+            _unlink_git_object(sibling)
     _assert_blob_unreadable(tracker, blob_oid)
 
 
@@ -762,7 +775,7 @@ def test_packed_drop_route_survives_a_blob_git_already_packed(repo: Path) -> Non
 
     # Do what a packer does behind the test's back, before the route under test runs.
     _git(tracker, "pack-objects", str(object_root / "pack" / "pack"), stdin=f"{blob_oid}\n")
-    (object_root / blob_oid[:2] / blob_oid[2:]).unlink()
+    _unlink_git_object(object_root / blob_oid[:2] / blob_oid[2:])
     assert _git_rc(tracker, "cat-file", "-e", blob_oid) == 0, "setup did not pack the blob"
 
     _drop_packed(tracker, object_root, blob_oid)

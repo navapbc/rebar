@@ -203,6 +203,11 @@ def test_durable_cwd_of_a_live_store_is_its_repo_root_not_the_tracker(tmp_path: 
     assert detached_child_cwd(tracker) == os.path.realpath(root)
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows refuses to delete a directory that is a process's cwd, so the "
+    "cwd-gone state this test reaches cannot occur there",
+)
 def test_durable_cwd_never_raises_when_the_callers_own_directory_is_gone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

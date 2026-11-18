@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +28,20 @@ def _cleanup_fixture(pytestconfig: pytest.Config):
         if Path(getattr(plugin, "__file__", "")).resolve() == _ROOT_CONFTEST.resolve()
     )
     return root_conftest._remove_readonly_run_snapshots.__wrapped__
+
+
+def _clear_git_readonly_and_retry(func, path: str, exc: BaseException) -> None:
+    """Retry a removal refused for git's own read-only object files, and nothing else.
+
+    Git writes objects read-only and Windows refuses to delete a read-only file, so the
+    nested run's ``repo/.git/objects`` would block a plain ``rmtree`` there. Those files
+    are not what the fixture under test owns: a refusal anywhere outside a ``.git``
+    directory, including the rebar snapshot itself, is re-raised so the test still fails.
+    """
+    if not isinstance(exc, PermissionError) or ".git" not in Path(path).parts:
+        raise exc
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    func(path)
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -76,7 +91,10 @@ def test_completed_snapshot_test_leaves_basetemp_removable(
     if selected_node.endswith("::test_cross_module_snapshot_is_read_only"):
         assert (basetemp / "adjacent.txt").read_text() == "keep\n"
 
-    shutil.rmtree(basetemp)
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(basetemp, onexc=_clear_git_readonly_and_retry)
+    else:  # onexc is 3.12+; onerror passes the exc_info triple instead
+        shutil.rmtree(basetemp, onerror=lambda f, p, ei: _clear_git_readonly_and_retry(f, p, ei[1]))
     assert not basetemp.exists()
 
 

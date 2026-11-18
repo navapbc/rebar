@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -489,6 +490,18 @@ def test_git_failure_surfaces_git_own_diagnostics(tmp_path: Path) -> None:
     assert "1" in rendered, "the exit code must be named"
 
 
+def _unlink_git_object(path: Path, *, missing_ok: bool = False) -> None:
+    """Delete a git object file. Git writes objects read-only, and Windows refuses to
+    delete a read-only file (WinError 5), so clear that bit first."""
+    try:
+        path.chmod(stat.S_IWRITE | stat.S_IREAD)
+    except FileNotFoundError:
+        if missing_ok:
+            return
+        raise
+    path.unlink()
+
+
 def test_a_git_failure_captures_object_store_forensics(tmp_path: Path) -> None:
     """Attach object-store evidence to a failing ``_git`` call.
 
@@ -514,7 +527,7 @@ def test_a_git_failure_captures_object_store_forensics(tmp_path: Path) -> None:
     _git(repo, "commit", "-q", "-m", "mainline")
     blob = _git(repo, "rev-parse", "HEAD:b.json")
     head = _git(repo, "rev-parse", "HEAD")
-    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+    _unlink_git_object(repo / ".git" / "objects" / blob[:2] / blob[2:])
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
         _git(repo, "merge", "-q", "--no-edit", "side")

@@ -26,12 +26,8 @@ from pathlib import Path
 
 from rebar._snapshot import cache as _cache
 from rebar._snapshot.repo_snapshot import store_root, sweep_tmp
+from rebar._store import lock_kernel
 from rebar._store.fsutil import atomic_write
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - platform-dependent
-    fcntl = None  # type: ignore[assignment]
 
 # ── documented default tunables ───────────────────────────────────────────────────────
 DEFAULT_FREE_WATERMARK_BYTES = 2 * 1024 * 1024 * 1024  # reclaim when free disk < 2 GiB
@@ -337,34 +333,20 @@ def run_gc(
     now = time.time() if now is None else now
     lock_path = _gc_lock_path(root)
 
-    # Exclusive, NON-BLOCKING gc interlock (AC7). Without fcntl, fall back to an atomic
-    # mkdir guard so two passes still cannot overlap.
-    if fcntl is not None:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    # Exclusive, NON-BLOCKING gc interlock (AC7). lock_kernel takes flock on POSIX and
+    # msvcrt.locking on Windows, so two passes cannot overlap on either platform.
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
         try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                return GcResult(skipped="locked")
-            return _gc_pass(root, cfg, now, free_bytes)
-        finally:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            finally:
-                os.close(fd)
-    else:  # pragma: no cover - non-POSIX fallback
-        guard = lock_path.with_suffix(".d")
-        try:
-            os.mkdir(str(guard))
-        except FileExistsError:
+            lock_kernel.take_exclusive(fd)
+        except OSError:
             return GcResult(skipped="locked")
         try:
             return _gc_pass(root, cfg, now, free_bytes)
         finally:
-            try:
-                os.rmdir(str(guard))
-            except OSError:
-                pass
+            lock_kernel.release_exclusive(fd)
+    finally:
+        os.close(fd)
 
 
 def _space_thresholds(total: int, cfg: JanitorConfig) -> tuple[int, int]:

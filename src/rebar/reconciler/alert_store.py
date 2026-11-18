@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import json
-import sys
 import time
 from pathlib import Path
 
+from rebar._store.fsutil import sibling_exclusive_lock
 from rebar.reconciler.scratch_retention import alerts_dir
 
-# fcntl is POSIX-only; CI runs on Linux/macOS so we guard the import. On
-# Windows (unsupported by the bridge CI) we fall back to a no-op lock — the
-# caller still gets line-buffered append() semantics, just without the
-# cross-process serialization guarantee.
-if sys.platform != "win32":
-    import fcntl
-else:  # pragma: no cover - Windows fallback, not exercised by CI
-    fcntl = None  # type: ignore[assignment]
+#: The stable sibling every appender serializes on. A dotfile, so retention
+#: (``scratch_retention``) and the dedupe scan, which read ``*.jsonl``, ignore it.
+#: It replaces an in-file fcntl flock that Windows lacks (appends there overwrote each other).
+# mechanism-ok: lock .append.lock — b8dd-85be-1dbb-45b9 portable append serialization
+_APPEND_LOCK_NAME = ".append.lock"
 
 _24H_NS = 24 * 3600 * 1_000_000_000
 
@@ -35,10 +32,10 @@ def _today_file(repo_root: Path) -> Path:
 def append(record: dict, repo_root: Path) -> None:
     """Append a record to today's JSONL alert log.
 
-    Concurrent writers from multiple reconciler instances serialize on an
-    advisory ``fcntl.LOCK_EX`` flock so line boundaries cannot interleave.
-    The lock is released automatically when the file descriptor closes at
-    the end of the ``with`` block (POSIX semantics).
+    Concurrent writers from multiple threads or reconciler instances serialize on
+    an exclusive kernel lock on a sibling lock file (``flock`` on POSIX,
+    ``msvcrt.locking`` on Windows), so records can neither interleave nor, on
+    Windows, where append mode seeks then writes, overwrite each other.
     """
     store_dir = _store_dir(repo_root)
     store_dir.mkdir(parents=True, exist_ok=True)
@@ -48,15 +45,11 @@ def append(record: dict, repo_root: Path) -> None:
     # so the callers that already stamp are unchanged; the ones that never did (e.g.
     # BindingRepository.alert, some fetcher paths) now dedupe correctly.
     record = {"timestamp_ns": time.time_ns(), **record}
-    with today.open("a", encoding="utf-8") as f:
-        if fcntl is not None:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        try:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    with sibling_exclusive_lock(today, lock_name=_APPEND_LOCK_NAME):
+        with today.open("a", encoding="utf-8") as f:
+            f.write(line)
             f.flush()
-        finally:
-            if fcntl is not None:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 def is_deduped(key: str, repo_root: Path, window_ns: int = _24H_NS) -> bool:
