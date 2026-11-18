@@ -420,3 +420,51 @@ def test_ensure_current_event_loop_replaces_a_cleared_or_closed_loop(_isolated_t
     replacement = mc.ensure_current_event_loop()
     assert replacement is not closed and not replacement.is_closed()
     replacement.close()
+
+
+def _drive_on_fresh_thread(raises: bool):
+    """Drive one sync-style run the way a gate daemon does — a fresh thread, a loop installed by
+    ``ensure_current_event_loop``, a coroutine that reaches ``anyio.to_thread.run_sync`` — then
+    close and unset the loop. Returns a weakref to that loop."""
+    import asyncio
+    import threading
+    import weakref
+
+    anyio_to_thread = pytest.importorskip("anyio.to_thread")
+    mc = _mc()
+    refs: list = []
+
+    def worker() -> None:
+        loop = mc.ensure_current_event_loop()
+
+        async def drive() -> bytes:
+            payload = await anyio_to_thread.run_sync(lambda: b"x" * 4096)
+            if raises:
+                raise RuntimeError("provider call failed")  # the 403 shape: a task that errors
+            return payload
+
+        try:
+            loop.run_until_complete(drive())
+        except RuntimeError:
+            pass
+        refs.append(weakref.ref(loop))
+        loop.close()
+        asyncio.set_event_loop(None)
+
+    thread = threading.Thread(target=worker, name="rebar-test-gate-drive")
+    thread.start()
+    thread.join()
+    return refs[0]
+
+
+@pytest.mark.parametrize("raises", [False, True], ids=["completed", "raised"])
+def test_a_finished_gate_drive_releases_its_event_loop(raises: bool) -> None:
+    """Bug waxy-nonspheral-cutworm: with anyio < 4.15 the root task cached in a loop-keyed RunVar
+    kept every per-run loop alive (agronholm/anyio#1203) — and through the task's traceback the
+    Bedrock client and ~18k botocore service-model dicts, ~115k objects per MCP gate run. Pinned
+    against the declared ``anyio>=4.15`` floor: the loop must be collectable once the run ends."""
+    import gc
+
+    loop_ref = _drive_on_fresh_thread(raises)
+    gc.collect()
+    assert loop_ref() is None, "a finished gate drive left its event loop (and its task) alive"

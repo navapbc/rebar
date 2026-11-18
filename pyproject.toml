@@ -81,7 +81,10 @@ Changelog = "https://github.com/navapbc/rebar/blob/main/CHANGELOG.md"
 Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.28.1,<2", "pyjwt[crypto]>=2.10,<3"]
+# anyio floor: below 4.15 every event loop that reaches `anyio.to_thread.run_sync` stays alive
+# with its root task (agronholm/anyio#1203), so each MCP gate run retained ~100k objects
+# (bug waxy-nonspheral-cutworm). Declared here and in `agents`, the two extras that drive loops.
+mcp = ["mcp>=1.28.1,<2", "pyjwt[crypto]>=2.10,<3", "anyio>=4.15"]
 # Review-bot webhook receiver (epic d251 / story S2). OPTIONAL — never required by
 # core rebar. A thin FastAPI ASGI app (src/rebar/review_bot/) that receives Gerrit
 # webhooks and imports the review kernel as a library (see docs/adr/0007). The
@@ -131,6 +134,8 @@ agents = [
     # rather than silently withdrawing the tool — which is exactly the failure 129e fixed. It
     # therefore belongs in `agents` itself, not in an opt-in extra a deployment could forget.
     "pydantic-ai-slim[anthropic,retries,duckduckgo]>=1.107,<2",
+    # Floor >=4.15 (bug waxy-nonspheral-cutworm, agronholm/anyio#1203): see the `mcp` extra.
+    "anyio>=4.15",
     # Direct floor on the anthropic SDK itself: keeps the `--resolution lowest-direct` sweep leg
     # on the first pre-httpx2 SDK version this seam is verified against, while allowing the
     # httpx2-vendoring 1.x line that 2bd6 adapts below; <2 keeps the mirror sweep off the next
