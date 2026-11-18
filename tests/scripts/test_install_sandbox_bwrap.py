@@ -7,9 +7,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
-pytestmark = pytest.mark.scripts
+pytestmark = [pytest.mark.scripts, requires_posix_shell]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "install_sandbox_bwrap.sh"

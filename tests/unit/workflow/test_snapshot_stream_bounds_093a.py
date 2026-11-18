@@ -23,6 +23,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 from rebar.llm.workflow import snapshot as snap
@@ -203,6 +204,7 @@ def test_stderr_flood_does_not_deadlock_the_archive_stream(tmp_path: Path) -> No
 # ── AC2: a stalled child is bounded AND terminated, not orphaned ─────────────
 
 
+@requires_posix_shell
 def test_stalled_archive_is_bounded_and_the_child_is_reaped(tmp_path: Path) -> None:
     """Dead air on stdout must end in a bounded ``SnapshotError``, with no orphan left."""
     repo = _repo(tmp_path)

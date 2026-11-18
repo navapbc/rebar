@@ -20,6 +20,7 @@ from _subprocess_env import subprocess_env
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import _git_floor
+from _sandbox_capabilities import requires_posix_shell
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TESTS_DIR = REPO_ROOT / "tests"
@@ -126,6 +127,7 @@ def test_the_running_git_really_performs_merge_tree_write_tree(tmp_path: Path) -
     assert sorted(listing) == ["base.txt", "main.txt", "side.txt"]
 
 
+@requires_posix_shell
 def test_the_suite_refuses_to_run_on_an_under_floor_git(tmp_path: Path) -> None:
     """End-to-end proof of AC2: with an under-floor ``git`` on PATH the suite FAILS at
     startup with the diagnostic — it does not skip, and it does not run degraded.

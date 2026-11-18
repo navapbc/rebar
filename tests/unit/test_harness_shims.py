@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 import tomllib
+from _sandbox_capabilities import requires_posix_shell
 
 pytestmark = pytest.mark.unit
 
@@ -41,6 +42,7 @@ def test_cursor_environment_json_runs_provenance() -> None:
     assert "cursor-provenance.sh" in data["install"]
 
 
+@requires_posix_shell
 def test_cursor_provenance_valid_and_idempotent(tmp_path) -> None:
     """Valid shell; running it twice leaves EXACTLY ONE `export AI_AGENT=cursor` in EACH of the
     VM profiles it targets (~/.bashrc AND ~/.profile) — no duplicate accumulation."""

@@ -4,6 +4,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,6 +34,7 @@ def test_dependency_advisory_canary_uses_unique_push_error_path() -> None:
     assert "/tmp/push_err" not in text
 
 
+@requires_posix_shell
 def test_push_error_template_is_distinct_per_process(tmp_path: Path) -> None:
     script = (
         "set -euo pipefail\n"

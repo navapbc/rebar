@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 from test_run_reconcile_bridge import run_bridge
 
@@ -215,6 +216,7 @@ def test_reconciler_workflow_commits_and_pushes_strictly(tmp_path: Path) -> None
     assert _git(rejected.tracker, "status", "--porcelain").stdout == ""
 
 
+@requires_posix_shell
 def test_canary_workflow_pushes_ahead_state_and_fails_red_on_rejection(tmp_path: Path) -> None:
     """The exact canary block stays push-only and leaves rejected commits pending."""
     block = _extract_step(CANARY_WORKFLOW, "canary", CANARY_STEP)

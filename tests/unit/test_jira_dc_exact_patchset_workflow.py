@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
@@ -164,6 +165,7 @@ def test_verifies_checked_out_sha_against_the_patchset_revision_input() -> None:
     assert "exit 1" in steps_text, "a SHA mismatch must fail the job, not merely warn"
 
 
+@requires_posix_shell
 def test_checkout_script_leaves_head_at_expected_sha(tmp_path: Path) -> None:
     origin, gerrit_root, _patchset_1, patchset_2 = _patchset_remotes(tmp_path)
     result, workspace = _run_checkout_script(
@@ -178,6 +180,7 @@ def test_checkout_script_leaves_head_at_expected_sha(tmp_path: Path) -> None:
     assert f"verified_sha={patchset_2}" in (tmp_path / "github.env").read_text()
 
 
+@requires_posix_shell
 def test_checkout_script_falls_back_to_gerrit_when_mirror_lacks_refspec(
     tmp_path: Path,
 ) -> None:
@@ -196,6 +199,7 @@ def test_checkout_script_falls_back_to_gerrit_when_mirror_lacks_refspec(
     assert _run(["git", "rev-parse", "HEAD"], workspace).stdout.strip() == patchset_2
 
 
+@requires_posix_shell
 def test_checkout_script_rejects_refspec_revision_mismatch_before_checkout(
     tmp_path: Path,
 ) -> None:
@@ -223,6 +227,7 @@ def test_checkout_script_rejects_refspec_revision_mismatch_before_checkout(
     )
 
 
+@requires_posix_shell
 def test_checkout_script_fails_clearly_when_refspec_cannot_be_fetched(
     tmp_path: Path,
 ) -> None:

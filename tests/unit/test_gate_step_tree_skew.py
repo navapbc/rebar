@@ -16,6 +16,7 @@ from typing import Any, NamedTuple
 
 import pytest
 import yaml
+from _sandbox_capabilities import requires_posix_shell
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
@@ -178,6 +179,7 @@ def tree_without_scripts(tmp_path: Path) -> Path:
     return tree
 
 
+@requires_posix_shell
 @pytest.mark.parametrize("step", GATE_STEPS, ids=str)
 def test_absent_script_does_not_fail_the_build(step: GateStep, tree_without_scripts: Path) -> None:
     """A change branched before the script landed must not be failed by the step."""
@@ -189,6 +191,7 @@ def test_absent_script_does_not_fail_the_build(step: GateStep, tree_without_scri
     )
 
 
+@requires_posix_shell
 @pytest.mark.parametrize("step", GATE_STEPS, ids=str)
 def test_absent_script_skip_is_explained_and_not_an_error(
     step: GateStep, tree_without_scripts: Path
@@ -205,6 +208,7 @@ def test_absent_script_skip_is_explained_and_not_an_error(
     )
 
 
+@requires_posix_shell
 @pytest.mark.parametrize("step", GATE_STEPS, ids=str)
 def test_present_script_is_invoked_and_its_failure_still_fails_the_build(
     step: GateStep, tmp_path: Path

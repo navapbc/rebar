@@ -37,6 +37,22 @@ class CapabilityProbe:
     reason: str = ""
 
 
+def posix_shell_available(sh: str = "/bin/sh") -> bool:
+    """Whether ``sh`` is an executable POSIX shell at that literal path.
+
+    Tests that run ``bash``/``sh`` or execute shebang stubs need a POSIX host. Windows has
+    no ``/bin/sh`` (the path is drive-relative there), so the probe is False on Windows
+    because the file is absent, not because of ``X_OK`` semantics, which Windows ignores
+    (bug citreous-talented-wildebeest)."""
+    return os.access(sh, os.X_OK)
+
+
+requires_posix_shell = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason="needs a POSIX shell at /bin/sh and shebang-script execution; this host has neither",
+)
+
+
 ProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
 SemLockFactory = Callable[[int, int, int, str, bool], object]
 

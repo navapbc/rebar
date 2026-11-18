@@ -7,6 +7,9 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
+
+pytestmark = requires_posix_shell
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "infra" / "gerrit" / "feature-branch-inventory.sh"
