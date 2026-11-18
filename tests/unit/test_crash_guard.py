@@ -232,11 +232,13 @@ def test_single_process_thread_timeout_keeps_pytest_timeouts_own_report(tmp_path
 # execnet's worker bootstrap (``init_popen_io``) applies this only when ``os.name == "nt"``:
 # the real stderr survives solely as the ``sys.stderr`` object and fd 2 becomes the null
 # device. An execnet worker is ``python -c ...``, so ``sys.argv == ["-c"]`` selects workers.
+# On Windows execnet already does it; emulating it there too would stack a second redirect
+# (this runs first, so execnet would then dup the NUL fd 2), so it applies off Windows only.
 _WINDOWS_WORKER_STDERR = """\
 import os
 import sys
 
-if sys.argv[:1] == ["-c"]:
+if os.name != "nt" and sys.argv[:1] == ["-c"]:
     sys.stderr = os.fdopen(os.dup(2), "w", 1)
     _null = os.open(os.devnull, os.O_WRONLY)
     os.dup2(_null, 2)
