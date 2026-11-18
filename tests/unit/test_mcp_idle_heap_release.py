@@ -12,6 +12,7 @@ from __future__ import annotations
 import ctypes
 import random
 import sys
+import sysconfig
 import threading
 
 import pytest
@@ -90,7 +91,16 @@ def _rss_anon_mib() -> int:
     raise AssertionError("RssAnon missing from /proc/self/status")
 
 
+# Free-threaded CPython allocates every object through its bundled mimalloc, not glibc
+# malloc, so ``malloc_trim`` cannot return the strings this test frees: the idle process
+# kept all ~274 MiB on every py3.14t sweep (bug sediment-filched-icefish).
+_FREE_THREADED = bool(sysconfig.get_config_var("Py_GIL_DISABLED"))
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="glibc arena behaviour")
+@pytest.mark.skipif(
+    _FREE_THREADED, reason="free-threaded build: objects live in mimalloc, not glibc arenas"
+)
 def test_finished_background_job_does_not_keep_its_memory():
     """Shape of a gate: a counted worker thread builds and drops large strings while a
     few small results outlive it, which pins the freed pages inside its arena."""
