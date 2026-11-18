@@ -89,7 +89,8 @@ def release_freed_heap() -> bool:
     thread. glibc keeps them in that thread's arena after they are freed, so an idle
     server held more than a gigabyte for hours (bug unmedical-stational-chrysalis).
     The gauge calls this when its count returns to zero; ``malloc_trim(0)`` only
-    releases free pages and never touches live objects.
+    releases free pages and never touches live objects. On free-threaded CPython, Python
+    objects are allocated by its bundled mimalloc, which ``malloc_trim`` does not govern.
     """
     trim = _malloc_trim()
     if trim is None:
