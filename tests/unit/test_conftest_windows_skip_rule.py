@@ -9,6 +9,7 @@ function of the repo-relative path and the platform, so it is pinned here withou
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,8 @@ def _conftest():
     return module
 
 
-rule = _conftest()._linux_host_script_skip_reason
+_ROOT_CONFTEST = _conftest()
+rule = _ROOT_CONFTEST._linux_host_script_skip_reason
 
 
 @pytest.mark.parametrize("path", SKIPPED_PATHS)
@@ -65,3 +67,66 @@ def test_nothing_is_skipped_on_linux_or_macos(path, platform):
 )
 def test_other_tests_are_not_skipped_on_windows(path):
     assert rule(path, "win32") is None
+
+
+# The glue: pytest_collection_modifyitems reads sys.platform, computes the item's
+# repo-relative path and adds the skip marker. These cases drive the hook itself with a
+# fake item, so removing the call fails here even though the pure rule above still passes.
+
+REPO_ROOT = CONFTEST.parents[1]
+
+
+class _Config:
+    def getoption(self, _name, default=None):
+        return default
+
+
+class _LiveJira:
+    @staticmethod
+    def unconfined_live_jira_reason(config, items):
+        return None
+
+
+class _SubprocessIsolation:
+    @staticmethod
+    def unharnessed_subprocess_reason(items):
+        return None
+
+
+class _Item:
+    def __init__(self, path: Path):
+        self.fspath = path
+        self.path = path
+        self.nodeid = f"{path.relative_to(REPO_ROOT).as_posix()}::test_x"
+        self.added = []
+
+    def get_closest_marker(self, _name):
+        return None
+
+    def add_marker(self, marker):
+        self.added.append(marker)
+
+
+def _skip_reasons_after_collection(monkeypatch, platform: str) -> list[str]:
+    item = _Item(REPO_ROOT / "tests" / "scripts" / "test_vartmp_cap.py")
+    monkeypatch.setitem(sys.modules, "_live_jira_confinement", _LiveJira)
+    monkeypatch.setitem(sys.modules, "_subprocess_isolation", _SubprocessIsolation)
+    monkeypatch.setattr(sys, "platform", platform)
+    _ROOT_CONFTEST.pytest_collection_modifyitems(_Config(), [item])
+    monkeypatch.undo()
+    return [
+        marker.mark.kwargs["reason"]
+        for marker in item.added
+        if isinstance(marker, pytest.MarkDecorator) and marker.mark.name == "skip"
+    ]
+
+
+def test_the_collection_hook_skips_a_host_script_test_on_windows(monkeypatch):
+    reasons = _skip_reasons_after_collection(monkeypatch, "win32")
+
+    assert len(reasons) == 1
+    assert TICKET in reasons[0]
+
+
+def test_the_collection_hook_does_not_skip_a_host_script_test_on_linux(monkeypatch):
+    assert _skip_reasons_after_collection(monkeypatch, "linux") == []
