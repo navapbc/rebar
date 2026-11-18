@@ -323,6 +323,60 @@ jobs:
             gh release create "$TAG" --target "$SHA" --title "$TAG" --generate-notes --latest dist/*
           fi
 
+  homebrew_tap:
+    name: Dispatch the Homebrew tap autobump
+    needs: publish
+    runs-on: ubuntu-latest
+    # The tap (navapbc/homebrew-rebar) bumps Formula/rebar.rb to PyPI's latest sdist in its own
+    # autobump.yml. Its schedule alone is not enough: GitHub disables a scheduled workflow after
+    # 60 days with no repository activity, which left the formula two releases behind (bug
+    # hedonistic-historical-graywolf). Dispatching it here ties the bump to the release.
+    if: github.event_name == 'workflow_dispatch'
+    # The job touches only the tap, through HOMEBREW_TAP_TOKEN; it needs no GITHUB_TOKEN scope.
+    permissions: {}
+    steps:
+      # mechanism-ok: ci_gate .github/workflows/release.yml::Dispatch the tap autobump once PyPI serves this version — hedonistic-historical-graywolf: the release triggers the Homebrew bump so the tap no longer depends on its schedule staying enabled.
+      - name: Dispatch the tap autobump once PyPI serves this version
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          TAP_REPO: navapbc/homebrew-rebar
+        run: |
+          set -euo pipefail
+          # The tap bumps to PyPI's reported latest, so wait until that is this version.
+          served=""
+          for attempt in $(seq 1 30); do   # up to 30 x 10s = 5 min
+            served="$(curl -fsS https://pypi.org/pypi/nava-rebar/json \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])' || true)"
+            if [ "$served" = "$VERSION" ]; then
+              break
+            fi
+            echo "  attempt ${attempt}/30: PyPI latest is '${served}', want ${VERSION}; sleeping 10s"
+            sleep 10
+          done
+          if [ "$served" != "$VERSION" ]; then
+            echo "::error::PyPI did not report nava-rebar ${VERSION} as latest within 5 minutes"
+            exit 1
+          fi
+          state="$(gh api "repos/${TAP_REPO}/actions/workflows/autobump.yml" --jq .state)"
+          case "$state" in
+            active) ;;
+            disabled_inactivity)
+              echo "autobump.yml was disabled for inactivity; re-enabling it"
+              gh workflow enable autobump.yml --repo "$TAP_REPO"
+              ;;
+            disabled_manually)
+              echo "::error::${TAP_REPO} autobump.yml was disabled by a person; not re-enabling it"
+              exit 1
+              ;;
+            *)
+              echo "::error::${TAP_REPO} autobump.yml is in unexpected state '${state}'"
+              exit 1
+              ;;
+          esac
+          gh workflow run autobump.yml --repo "$TAP_REPO" --ref main
+          echo "Dispatched ${TAP_REPO} autobump.yml for nava-rebar ${VERSION}"
+
   mcp_verify:
     name: Verify pinned mcp-publisher
     runs-on: ubuntu-latest
