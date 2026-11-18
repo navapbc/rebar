@@ -25,6 +25,7 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from _child_diag import assert_child_was_not_signal_killed  # noqa: E402
+from _sandbox_capabilities import requires_posix_shell  # noqa: E402
 
 pytestmark = pytest.mark.unit
 
@@ -132,6 +133,7 @@ def _gitlab_shell() -> str:
     return "\n".join(str(block) for block in blocks)
 
 
+@requires_posix_shell
 @pytest.mark.parametrize(
     ("provider", "source"),
     [("github", _github_shell), ("jenkins", _jenkins_shell), ("gitlab", _gitlab_shell)],
@@ -228,6 +230,7 @@ _DISABLED_422 = (
 )
 
 
+@requires_posix_shell
 def test_redispatch_treats_a_disabled_workflow_422_as_a_benign_no_op(tmp_path: Path) -> None:
     """A disabled-workflow 422 is benign because the hourly schedule restarts the loop."""
     completed = _run_redispatch(tmp_path, _DISABLED_422)
@@ -238,6 +241,7 @@ def test_redispatch_treats_a_disabled_workflow_422_as_a_benign_no_op(tmp_path: P
     assert "::error::" not in combined
 
 
+@requires_posix_shell
 def test_redispatch_downgrade_survives_a_failing_external_command(tmp_path: Path) -> None:
     """The benign-422 verdict must be decided by BUILTINS, never by a second process.
 
@@ -258,6 +262,7 @@ def test_redispatch_downgrade_survives_a_failing_external_command(tmp_path: Path
     assert "::error::" not in combined
 
 
+@requires_posix_shell
 def test_redispatch_keeps_every_other_failure_fatal(tmp_path: Path) -> None:
     """The downgrade is narrow: a non-disabled-workflow failure still reds the run."""
     completed = _run_redispatch(
@@ -290,6 +295,7 @@ def test_redispatch_requires_both_the_422_and_the_disabled_workflow_signal(
     assert "::warning::" not in completed.stdout + completed.stderr
 
 
+@requires_posix_shell
 def test_redispatch_succeeds_quietly_when_the_dispatch_is_accepted(tmp_path: Path) -> None:
     """The happy path stays a silent success — no warning, no error."""
     completed = _run_redispatch(tmp_path, 'echo "queued"\nexit 0')
@@ -306,6 +312,7 @@ def test_redispatch_succeeds_quietly_when_the_dispatch_is_accepted(tmp_path: Pat
 _DISPATCH_OK = "exit 0"
 
 
+@requires_posix_shell
 def test_pacing_sleeps_for_the_passs_own_elapsed_duration(tmp_path: Path) -> None:
     """A 100-second pass pauses ~100 seconds, so the chain's period is two pass durations."""
     started = int(time.time()) - 100
@@ -317,6 +324,7 @@ def test_pacing_sleeps_for_the_passs_own_elapsed_duration(tmp_path: Path) -> Non
     assert 100 <= slept[0] <= 130, f"pacing sleep {slept[0]}s does not mirror the ~100s pass"
 
 
+@requires_posix_shell
 def test_pacing_is_skipped_once_a_pass_is_already_self_pacing(tmp_path: Path) -> None:
     """Past 1800s the pass paces itself; sleeping would eat the timeout-minutes: 60 budget."""
     started = int(time.time()) - 2000
@@ -327,6 +335,7 @@ def test_pacing_is_skipped_once_a_pass_is_already_self_pacing(tmp_path: Path) ->
     assert "no pacing sleep" in completed.stdout
 
 
+@requires_posix_shell
 def test_pacing_is_skipped_when_the_pass_start_stamp_is_missing(tmp_path: Path) -> None:
     """`set -euo pipefail` + arithmetic on an unset variable would abort the whole step.
 

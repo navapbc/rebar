@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _sandbox_capabilities import requires_posix_shell
 
 pytestmark = pytest.mark.unit
 
@@ -138,6 +139,7 @@ def test_repair_runbook_uses_quarantine_and_post_repair_checks() -> None:
     assert "delete refs/recovery/github/*" in text
 
 
+@requires_posix_shell
 def test_repair_refspec_guard_rejects_direct_branch_destinations() -> None:
     result = subprocess.run(
         ["bash", str(_REFSPEC_GUARD), "+refs/heads/*:refs/heads/*"],
@@ -149,6 +151,7 @@ def test_repair_refspec_guard_rejects_direct_branch_destinations() -> None:
     assert "refs/heads/*" in result.stderr
 
 
+@requires_posix_shell
 def test_repair_refspec_guard_allows_quarantine_destinations() -> None:
     result = subprocess.run(
         ["bash", str(_REFSPEC_GUARD), "refs/heads/main:refs/recovery/github/main"],

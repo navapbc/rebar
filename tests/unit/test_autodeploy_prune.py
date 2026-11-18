@@ -14,6 +14,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+from _sandbox_capabilities import requires_posix_shell
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "infra" / "scripts" / "autodeploy.sh"
 CAP_SCRIPT = REPO_ROOT / "infra" / "scripts" / "docker-storage-cap.sh"
@@ -288,6 +290,7 @@ def test_the_keep_storage_cap_comes_from_the_shared_budget(tmp_path):
     ]
 
 
+@requires_posix_shell
 def test_the_buildkit_cap_is_not_re_spelled_in_autodeploy(tmp_path):
     """A second copy of the number is the drift this indirection exists to remove."""
     cap = _buildkit_cap()

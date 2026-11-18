@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from _nested_pytest import run_nested_pytest
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -213,6 +214,7 @@ def test_module_size_gate_retries_trusted_main_fetch_before_failing_closed() -> 
     )
 
 
+@requires_posix_shell
 def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
     tmp_path: Path,
 ) -> None:
@@ -271,6 +273,7 @@ def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
     assert current.returncode == 17, current.stdout + current.stderr
 
 
+@requires_posix_shell
 def test_degradation_step_runs_only_the_present_test_files(tmp_path: Path) -> None:
     """Each degradation-path test file is guarded on ITS OWN presence (d93e-92ce-e2d0-4033).
 

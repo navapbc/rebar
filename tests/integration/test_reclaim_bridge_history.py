@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 from _git_upkeep import init_bare_remote
+from _sandbox_capabilities import requires_posix_shell
 
 SCRIPT = Path(__file__).parents[2] / "infra" / "scripts" / "reclaim_bridge_history.py"
 PROTECTED_TAG = "refs/tags/pre-heal-a118-20260710T005736Z"
@@ -281,6 +282,7 @@ def test_all_assertions_run_before_success_is_reported(
     assert "DRY RUN SUCCESS" not in completed.stdout
 
 
+@requires_posix_shell
 def test_cli_never_invokes_push_and_leaves_source_refs_exact(
     reclaim_fixture: ReclaimFixture, tmp_path: Path
 ) -> None:

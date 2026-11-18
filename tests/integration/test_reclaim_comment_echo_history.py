@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 import comment_echo_reclaim_manifest as manifest_builder  # noqa: E402
 import prepare_reclaim_backup as backup_builder  # noqa: E402
 import test_comment_echo_reclaim_manifest as manifest_cases  # noqa: E402
+from _sandbox_capabilities import requires_posix_shell  # noqa: E402
 from _subprocess_env import subprocess_env  # noqa: E402
 
 from rebar.reducer import reduce_ticket  # noqa: E402
@@ -324,6 +325,7 @@ def test_rewrite_preserves_graph_metadata_retained_blobs_and_full_replay(
     _git(fixture.repo, "fsck", "--strict", rewritten)
 
 
+@requires_posix_shell
 def test_failed_import_cleans_local_refs_and_retry_succeeds_without_push(
     tmp_path: Path,
 ) -> None:
@@ -416,6 +418,7 @@ def test_manifest_source_and_remote_drift_refuse_without_a_candidate(
         )
 
 
+@requires_posix_shell
 def test_remote_movement_during_rewrite_cleans_candidate_and_map(tmp_path: Path) -> None:
     fixture = manifest_cases._build_fixture(tmp_path / "fixture")
     manifest_cases._build_manifest(fixture)
