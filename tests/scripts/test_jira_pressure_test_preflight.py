@@ -11,6 +11,7 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import SubprocessEnv, subprocess_env
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -308,6 +309,7 @@ def test_each_probe_uses_checkout_tools_after_preflight(tmp_path: Path) -> None:
     assert not failures, "\n".join(failures)
 
 
+@requires_posix_shell
 def test_each_probe_rejects_a_missing_adapter_operation_before_mutation(
     tmp_path: Path,
 ) -> None:

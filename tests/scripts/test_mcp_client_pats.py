@@ -17,6 +17,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 from rebar._mcp_auth import StaticBearerVerifier, _load_static_tokens
@@ -169,6 +170,7 @@ def _run_fetch_secrets(tmp_path: Path, pats: dict[str, str]) -> tuple[Path, Path
 # ─────────────────────────────── oracle 2: materialization ──────────────────
 
 
+@requires_posix_shell
 def test_materialize_pat_into_env_and_tokens_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -204,6 +206,7 @@ def test_materialize_pat_into_env_and_tokens_file(
     assert {v["client_id"] for v in by_digest.values()} == {"copilot", "codex", "claude"}
 
 
+@requires_posix_shell
 def test_materialize_blank_slot_omits_record_but_file_exists(tmp_path: Path) -> None:
     """beb1: the tokens file is ALWAYS created; a blank slot's record is OMITTED so the
     verifier parser never sees an empty token_env; all-blank yields an empty token set."""

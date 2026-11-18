@@ -13,7 +13,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
+
+pytestmark = requires_posix_shell
 
 _SCENARIOS = (
     Path(__file__).resolve().parents[2] / "infra" / "gerrit" / "feature-branch-e2e-scenarios.sh"

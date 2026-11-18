@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from _git_upkeep import assert_no_detached_upkeep, init_bare_remote, missing_upkeep_pins
+from _sandbox_capabilities import requires_posix_shell
 from _topology_template import clone_topology_template
 
 SCRIPT = Path(__file__).parents[2] / "infra" / "scripts" / "prepare_reclaim_backup.py"
@@ -347,6 +348,7 @@ def test_refuses_worktree_gitdir_and_existing_output_destinations(
     assert _helper_refs(fixture.repo) == {}
 
 
+@requires_posix_shell
 def test_records_no_push_and_preserves_exact_remote_snapshot(
     backup_fixture: BackupFixture, tmp_path: Path
 ) -> None:
@@ -387,6 +389,7 @@ def test_records_no_push_and_preserves_exact_remote_snapshot(
     assert _remote_snapshot(fixture.repo) == remote_before
 
 
+@requires_posix_shell
 def test_verification_failure_cleans_owned_state_and_retry_succeeds(
     backup_fixture: BackupFixture, tmp_path: Path
 ) -> None:
@@ -539,6 +542,7 @@ def test_refuses_dirty_and_shallow_clones_before_creating_state(
     assert _helper_refs(shallow_repo) == {}
 
 
+@requires_posix_shell
 def test_remote_snapshot_change_cleans_outputs_and_owned_refs(
     backup_fixture: BackupFixture, tmp_path: Path
 ) -> None:

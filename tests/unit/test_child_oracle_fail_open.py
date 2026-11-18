@@ -15,6 +15,7 @@ import types
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -55,6 +56,7 @@ def _assert_names_the_signal(excinfo: pytest.ExceptionInfo[AssertionError], what
     assert what in message, f"the failure does not say WHAT did not complete; got: {message!r}"
 
 
+@requires_posix_shell
 def test_the_suicide_shim_really_produces_a_signal_killed_child(tmp_path: Path) -> None:
     """Confirm that the fixture exits through ``SIGKILL`` with no captured output."""
     shim = _suicide_shim(tmp_path / "bin", "victim")
@@ -93,6 +95,7 @@ def test_git_floor_gate_skip_oracle_rejects_a_signal_killed_child(
 # ── Site 2 — the reconcile routing oracle ────────────────────────────────────
 
 
+@requires_posix_shell
 def test_reconcile_routing_oracle_rejects_a_signal_killed_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -139,6 +142,7 @@ def test_redispatch_no_warning_oracle_rejects_a_signal_killed_child(
 # ── Site 4 — the pandoc colour oracle (Step-7 construct sibling) ─────────────
 
 
+@requires_posix_shell
 def test_pandoc_colour_oracle_rejects_a_signal_killed_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -225,8 +229,8 @@ def _site5_killed_child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.mark.parametrize(
     "spawn",
     [
-        pytest.param(_site1_killed_child, id="site1-git-floor-gate"),
-        pytest.param(_site3_killed_child, id="site3-redispatch-step"),
+        pytest.param(_site1_killed_child, id="site1-git-floor-gate", marks=requires_posix_shell),
+        pytest.param(_site3_killed_child, id="site3-redispatch-step", marks=requires_posix_shell),
         pytest.param(_site5_killed_child, id="site5-actionlint-recipe"),
     ],
 )
