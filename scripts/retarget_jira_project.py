@@ -36,7 +36,7 @@ _ID_TAG_PATTERN = r'"(dso-id:jira-[a-z]+-\d+)"'
 
 def _load_bindings(path: Path) -> dict:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
 

@@ -62,7 +62,7 @@ def test_new_invalid_name_exits_1(capsys) -> None:
 def test_validate_good_file(tmp_path, capsys) -> None:
     pytest.importorskip("jsonschema")
     f = tmp_path / "good.yaml"
-    f.write_text(scaffold("good"))
+    f.write_text(scaffold("good"), encoding="utf-8")
     rc = main(["workflow", "validate", str(f)])
     assert rc == 0
     assert "is valid" in capsys.readouterr().out
@@ -96,7 +96,7 @@ def test_validate_json_output(tmp_path, capsys) -> None:
 def test_validate_dry_run_banner(tmp_path, capsys) -> None:
     pytest.importorskip("jsonschema")
     f = tmp_path / "good.yaml"
-    f.write_text(scaffold("good"))
+    f.write_text(scaffold("good"), encoding="utf-8")
     rc = main(["workflow", "validate", str(f), "--dry-run"])
     assert rc == 0
     out = capsys.readouterr().out

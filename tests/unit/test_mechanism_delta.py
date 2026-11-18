@@ -324,14 +324,16 @@ def test_update_stale_refuses_to_write_while_a_regression_stands(tmp_path, monke
     """AC11. `--update-stale` is maintenance, never a way to bless a new mechanism."""
     baseline = tmp_path / "mechanism-baseline.json"
     original = ratchet.render_baseline({"lock::a.lock": 1})
-    baseline.write_text(original)
+    baseline.write_text(original, encoding="utf-8")
     monkeypatch.setattr(ratchet, "BASELINE_PATH", str(baseline), raising=False)
     monkeypatch.setattr(
         ratchet, "detect_all", lambda root: {"lock": {"a.lock", "surprise.lock"}}, raising=False
     )
     rc = ratchet.main(["--update-stale"])
     assert rc != 0, "--update-stale must refuse while new>0"
-    assert baseline.read_text() == original, "the baseline must be byte-identical after a refusal"
+    assert baseline.read_text(encoding="utf-8") == original, (
+        "the baseline must be byte-identical after a refusal"
+    )
 
 
 def test_update_stale_drains_while_an_admitted_mechanism_stands(tmp_path, monkeypatch):
@@ -388,7 +390,7 @@ def test_update_stale_refuses_to_write_while_a_marker_reason_is_blank(tmp_path, 
 
 def test_the_committed_baseline_matches_the_live_tree():
     """AC4, from the other side: the baseline is locked to what is actually there."""
-    baseline = ratchet.parse_baseline(BASELINE.read_text())
+    baseline = ratchet.parse_baseline(BASELINE.read_text(encoding="utf-8"))
     live = {f"{k}::{n}" for k, names in ratchet.detect_all(REPO_ROOT).items() for n in names}
     # A marker-admitted mechanism is deliberately NOT in the baseline — the marker carries its
     # justification instead — so the baseline plus the admitted set is what must cover the tree.
@@ -432,7 +434,9 @@ def test_the_shipped_modules_clear_the_complexity_ceiling():
 def test_the_docs_describe_every_kind_and_every_marker_placement():
     """AC13/AC14. A ratchet nobody can satisfy is a ratchet that gets disabled."""
     docs = "\n".join(
-        p.read_text() for p in (REPO_ROOT / "docs").rglob("*.md") if "mechanism" in p.read_text()
+        p.read_text(encoding="utf-8")
+        for p in (REPO_ROOT / "docs").rglob("*.md")
+        if "mechanism" in p.read_text(encoding="utf-8")
     )
     assert docs, "no doc mentions the mechanism ratchet"
     for kind in ratchet.KINDS:

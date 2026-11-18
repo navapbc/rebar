@@ -139,7 +139,7 @@ def _alarm_blocks() -> list[tuple[str, str, str, str]]:
     """Every alarm block as ``(file_name, alarm_label, raw_text, masked_text)``."""
     blocks: list[tuple[str, str, str, str]] = []
     for tf_file in sorted(_TF_DIR.glob("*.tf")):
-        src = tf_file.read_text()
+        src = tf_file.read_text(encoding="utf-8")
         masked = _mask_noncode(src)
         assert len(masked) == len(src), f"mask desynchronised for {tf_file.name}"
         # Match the resource header on the RAW source (masking blanks quoted strings, so the

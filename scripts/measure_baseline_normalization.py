@@ -185,7 +185,7 @@ def _outcomes(
 
 
 def _worker(corpus_path: Path) -> int:
-    corpus = json.loads(corpus_path.read_text())
+    corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
     raw = _outcomes(corpus["raw_store"], corpus["raw_store"], corpus["tickets"])
     normalized = _outcomes(corpus["normalized_store"], corpus["raw_store"], corpus["tickets"])
     all_ids = sorted(set(raw["outcomes"]) | set(normalized["outcomes"]))

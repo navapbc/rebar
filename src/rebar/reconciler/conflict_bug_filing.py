@@ -48,7 +48,9 @@ def _default_runner(argv: list[str]) -> tuple[int, str, str]:
     import subprocess
 
     try:
-        res = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=30)
+        res = subprocess.run(
+            argv, capture_output=True, text=True, encoding="utf-8", check=False, timeout=30
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         return 1, "", repr(exc)
     return res.returncode, res.stdout, res.stderr

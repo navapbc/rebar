@@ -29,9 +29,9 @@ import rebar
 # The heavy optional stacks that must stay lazy. Single-sourced from pyproject.toml, where
 # ruff TID253 bans them at module scope (story fixed-spinulose-hoverfly).
 _HEAVY = tuple(
-    tomllib.loads((Path(__file__).resolve().parents[2] / "pyproject.toml").read_text())["tool"][
-        "ruff"
-    ]["lint"]["flake8-tidy-imports"]["banned-module-level-imports"]
+    tomllib.loads(
+        (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(encoding="utf-8")
+    )["tool"]["ruff"]["lint"]["flake8-tidy-imports"]["banned-module-level-imports"]
 )
 
 _SRC = Path(rebar.__file__).resolve().parent

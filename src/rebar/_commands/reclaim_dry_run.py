@@ -240,6 +240,7 @@ def _bare(repo: Path, *args: str) -> str:
         ["git", "--git-dir", str(repo), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         timeout=_GIT_TIMEOUT_S,
     )
@@ -344,6 +345,7 @@ def _verify_identity(shadow: Path) -> dict[str, Any]:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     output = proc.stdout + proc.stderr

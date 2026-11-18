@@ -62,7 +62,11 @@ __all__ = [
 # ── corpus ───────────────────────────────────────────────────────────────────────
 def load_rows(path: str | Path) -> list[dict[str, Any]]:
     """The verified rows of a replay labels JSONL, oldest review first."""
-    rows = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line)
+        for line in Path(path).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     rows = [r for r in rows if r.get("verified")]
     return sorted(rows, key=lambda r: int(r.get("review_event_ts") or 0))
 
@@ -410,7 +414,7 @@ def _load_resume(out: Path, labels: Path, rows: Sequence[dict[str, Any]]) -> dic
     """The saved run at ``out``; ``SystemExit(2)`` when its header does not match this run."""
     import sys
 
-    saved = json.loads(out.read_text())
+    saved = json.loads(out.read_text(encoding="utf-8"))
     current = {
         "schema_version": SCHEMA_VERSION,
         "corpus": Path(labels).name,

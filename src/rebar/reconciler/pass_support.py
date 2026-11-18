@@ -226,6 +226,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
             [str(cli), "list", "--full"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(repo_root),
             timeout=60,
             env=_env,

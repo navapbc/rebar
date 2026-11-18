@@ -156,7 +156,7 @@ def _launch_lines(tree: ast.AST) -> list[int]:
 
 
 def _unmarked_launches(path: Path) -> list[int]:
-    source = path.read_text()
+    source = path.read_text(encoding="utf-8")
     body = source.splitlines()
     marked = {
         number

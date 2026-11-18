@@ -200,7 +200,7 @@ def compute(tracker: str, epic_id: str, *, limit: int = 0) -> NextBatchResult:
             tb = os.path.join(entry.path, ".tombstone.json")
             if os.path.isfile(tb):
                 try:
-                    with open(tb) as tbf:
+                    with open(tb, encoding="utf-8") as tbf:
                         ts = json.loads(tbf.read())
                     ticket_status_map[entry.name] = str(ts.get("status", "deleted")).lower()
                 except Exception:  # noqa: BLE001 — per-entry tombstone read fail-open: a malformed tombstone defaults to deleted

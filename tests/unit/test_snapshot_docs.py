@@ -13,7 +13,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 
 
 def _read(rel: str) -> str:
-    return (_ROOT / rel).read_text().lower()
+    return (_ROOT / rel).read_text(encoding="utf-8").lower()
 
 
 # AC1 — README (MCP setup) + jira-sync-setup state the private-repo fetch-credential need
