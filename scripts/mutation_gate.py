@@ -587,6 +587,10 @@ def execute_shard(root: Path, shard: Shard, artifact_dir: Path, label: str) -> R
     # Exclude ``sys.prefix`` so mutants cannot write code into the shared environment.
     sandbox_allow = (root, basetemp)
     env = mutation_sandbox.sandbox_env(env)
+    # The sandbox leaves the system temp dir read-only, and ``tempfile.gettempdir()``
+    # then falls back to the working directory: the checkout. Point it at the writable
+    # pytest base instead, so temp files written by shard code stay out of the repo root.
+    env["TMPDIR"] = str(basetemp)
     clean = _run(
         mutation_sandbox.wrap(clean_args, allow=sandbox_allow, profile_dir=artifact_dir, env=env),
         cwd=root,

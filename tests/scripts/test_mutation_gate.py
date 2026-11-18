@@ -1508,3 +1508,33 @@ def test_mutation_testing_docs_define_phased_policy_without_legacy_budgets() -> 
     failures = [description for description, satisfied in requirements.items() if not satisfied]
 
     assert failures == [], "documentation contract violations:\n- " + "\n- ".join(failures)
+
+
+def test_shard_children_get_a_writable_temp_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Shard children must not fall back to the checkout for temp files.
+
+    The sandbox makes the system temp dir read-only, so ``tempfile.gettempdir()`` in
+    the child falls back to the working directory, the repo root, and the repo-root
+    leak guard fails the clean run. Both sandboxed children must see TMPDIR at the
+    writable pytest base.
+    """
+    gate = _load()
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
+    seen: list[dict[str, str]] = []
+
+    def fake_run(argv, *, cwd, env=None):
+        seen.append(dict(env or {}))
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    monkeypatch.setattr(gate, "_run", fake_run)
+    monkeypatch.setattr(gate.mutation_sandbox, "wrap", lambda argv, **_: list(argv))
+    with pytest.raises(gate.GateError):
+        gate.execute_shard(root, _shard(gate), tmp_path / "artifacts", "head")
+    assert seen, "execute_shard never ran the clean tests"
+    basetemp = root / ".mutation-pytest"
+    assert seen[0].get("TMPDIR") == str(basetemp)
+    assert basetemp.is_dir(), "TMPDIR must exist before the child starts"

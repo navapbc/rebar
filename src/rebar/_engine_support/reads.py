@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -190,14 +191,24 @@ def _sync_disabled(root: str | None = None) -> bool:
         return False
 
 
+def sync_marker_path(tracker_abs: str) -> str:
+    """Return the read-fetch throttle marker for ``tracker_abs``.
+
+    The marker lives in the platform temp directory (``tempfile.gettempdir()``), never a
+    literal ``/tmp``: Windows has no ``/tmp``, so a literal path there is drive-relative,
+    the marker is never readable and the throttle is off (bug leafy-gorillian-gnat)."""
+    name = f".ticket-sync-{hashlib.md5(tracker_abs.encode()).hexdigest()[:12]}"
+    return os.path.join(tempfile.gettempdir(), name)
+
+
 def _sync_marker_age(tracker_abs: str, now: int) -> tuple[str, int]:
     """Return the tracker's throttle-marker path and its age in seconds.
 
     The path depends only on ``tracker_abs``, so reading it spawns no process. A
     missing or unreadable marker reports an age past any throttle window."""
-    marker = f"/tmp/.ticket-sync-{hashlib.md5(tracker_abs.encode()).hexdigest()[:12]}"
+    marker = sync_marker_path(tracker_abs)
     try:
-        with open(marker) as fh:
+        with open(marker, encoding="utf-8") as fh:
             return marker, now - int(fh.read().strip() or 0)
     except (OSError, ValueError):
         return marker, 9999
@@ -253,7 +264,7 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False, force: bool = False) ->
         # Write the marker before reconverging so only the first read in a burst
         # waits on the lock. Later reads immediately use consistent snapshots.
         try:
-            with open(marker, "w") as fh:
+            with open(marker, "w", encoding="utf-8") as fh:
                 fh.write(str(now))
         except OSError:
             pass

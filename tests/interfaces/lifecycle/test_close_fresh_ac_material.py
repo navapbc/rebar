@@ -9,7 +9,6 @@ edit arrives on the shared origin from clone A, with B's read throttle marker fr
 
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import time
@@ -23,6 +22,7 @@ from _git_upkeep import init_bare_remote
 import rebar
 import rebar.llm
 from rebar import config as cfg
+from rebar._engine_support.reads import sync_marker_path
 from rebar._store import sync as _store_sync
 
 UNTICKED = "Body.\n\n## Acceptance Criteria\n- [ ] first done\n- [ ] second done\n"
@@ -43,8 +43,8 @@ def _publish(tracker: Path) -> None:
 
 def _stamp_fresh_marker(tracker: Path) -> None:
     """Record a read-time sync moments ago, as on a server other sessions keep reading."""
-    md5 = hashlib.md5(os.path.realpath(str(tracker)).encode()).hexdigest()[:12]
-    Path(f"/tmp/.ticket-sync-{md5}").write_text(str(int(time.time())))
+    marker = Path(sync_marker_path(os.path.realpath(str(tracker))))
+    marker.write_text(str(int(time.time())), encoding="utf-8")
 
 
 def _pass(ticket_id, **kw):
