@@ -127,20 +127,29 @@ jobs:
           from rebar.llm.evals import eval as ev
           cap = int(os.environ.get("REBAR_EVAL_MAX_CASES", "0")) or None
           out = Path("eval-junit"); out.mkdir(exist_ok=True)
-          summary, failed = [], []
+          summary, failed, broken = [], [], []
           for p in sorted(glob.glob("src/rebar/llm/eval_specs/*.eval.yaml")):
               spec = yaml.safe_load(Path(p).read_text())
               if not spec.get("dataset"):
                   continue  # gold-only spec — nothing to run live
               pid = spec["prompt"]
+              # run_eval opens its own local gate session (in-process, provider-neutral).
               res = ev.run_eval(pid, max_cases=cap)
               (out / f"{pid}.xml").write_text(res["junit"])
-              summary.append(f"{pid}: {'PASS' if res['passed'] else 'FAIL'} (coverage {res['coverage']:.2f})")
-              if not res["passed"]:
+              summary.append(
+                  f"{pid}: {'PASS' if res['passed'] else 'FAIL'} "
+                  f"(coverage {res['coverage']:.2f}, errored {res['errored']})"
+              )
+              if res["run_failure"]:
+                  broken.append(pid)  # an epoch scored nothing: the run itself is broken
+              elif not res["passed"]:
                   failed.append(pid)
           print("\n".join(summary) or "no dataset-bearing specs")
           if failed:
               print(f"::warning::live eval regressions (advisory): {failed}")
+          if broken:
+              print(f"::error::live eval RUN FAILURE (an epoch scored no case): {broken}")
+              raise SystemExit(1)
           PY
       - name: Summarize LLM token usage → job summary
         if: ${{ always() }}

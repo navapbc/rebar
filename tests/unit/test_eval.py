@@ -167,7 +167,7 @@ def test_run_eval_runs_offline_with_injected_solve() -> None:
     # injected — a fake that fires on should-fire cases and stays silent on good ones.
     def solve(_prompt, case):
         if case["expect"] == "finding":
-            return {"findings": [{"severity": "high", "dimension": "x", "detail": "d"}]}
+            return {"findings": [{"finding": "d", "criteria": [case["criterion"]]}]}
         return {"findings": []}
 
     res = ev.run_eval("plan-review-finder", solve=solve)
@@ -192,7 +192,7 @@ def test_run_eval_max_cases_caps_the_run() -> None:
         return {
             "findings": []
             if case["expect"] == "pass"
-            else [{"severity": "high", "dimension": "x", "detail": "d"}]
+            else [{"finding": "d", "criteria": [case["criterion"]]}]
         }
 
     ev.run_eval("plan-review-finder", solve=solve, max_cases=2)
@@ -306,3 +306,49 @@ def test_run_eval_live_solver_without_agents_extra_raises_evalerror(monkeypatch)
     monkeypatch.setattr(runner_mod, "get_runner", _boom)
     with pytest.raises(EvalError):
         ev.run_eval("plan-review-finder")
+
+
+# ── the live entry points run inside a gate session (bug dissocial-unpleasant-adouri) ──
+
+
+def _gated_solve(prompt_id, case):
+    """A solve that, like every agentic live solver, demands a gate session."""
+    from rebar.llm.gate_context import assert_gated
+
+    assert_gated("agentic filesystem tools")
+    fired = case.get("expect") == "finding"
+    return {"findings": [{"finding": "x", "criteria": ["G7"]}] if fired else []}
+
+
+def test_run_eval_opens_a_gate_session_for_its_solver(monkeypatch) -> None:
+    # With the safeguard active and no override, the same solve raises when called bare...
+    monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
+    with pytest.raises(RuntimeError, match="OUTSIDE the repo-snapshot gate process"):
+        _gated_solve("plan-review-g7", {"expect": "pass"})
+    # ...but run_eval (the call shape the eval-live CI job uses) gates it, so cases score.
+    res = ev.run_eval("plan-review-g7", solve=_gated_solve, max_cases=3)
+    assert res["coverage"] > 0
+    assert res["errored"] == 0
+    assert res["run_failure"] is False
+    assert "OUTSIDE the repo-snapshot" not in res["junit"]
+
+
+def test_calibrate_criterion_opens_a_gate_session_for_its_solver(monkeypatch) -> None:
+    monkeypatch.delenv("REBAR_GATE_ALLOW_UNGATED", raising=False)
+    report = ev.calibrate_criterion("G7", repo_root=".", solve=_gated_solve)
+    assert report["recall"] is not None
+
+
+def test_run_eval_reports_an_all_errored_epoch_as_a_run_failure() -> None:
+    # Every case raising is a broken RUN, not a scored regression.
+    def boom(_p, _c):
+        raise RuntimeError("no model")
+
+    res = ev.run_eval("plan-review-g7", solve=boom, max_cases=2)
+    assert res["coverage"] == 0.0
+    assert res["run_failure"] is True
+    assert res["errored"] == res["epochs"] * 2
+    # A run that scored its cases but failed them is NOT a run failure.
+    scored = ev.run_eval("plan-review-g7", solve=lambda _p, _c: {"findings": []}, max_cases=2)
+    assert scored["run_failure"] is False
+    assert scored["errored"] == 0

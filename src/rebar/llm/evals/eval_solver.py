@@ -150,6 +150,49 @@ def _run_criterion_case(cid: str, case: dict, *, runner: Runner, repo_root: str 
     return {"findings": list(findings)}
 
 
+def _run_pass_finder_case(
+    prompt_id: str, case: dict, *, runner: Runner, repo_root: str | None
+) -> dict:
+    """Run a case of a PASS-named finder spec (``plan-review-finder`` or
+    ``plan-review-container``) as the criterion the case names in ``criterion``.
+
+    These specs are named after the Pass-1 prompt, not a criterion, so ``_criterion_id``
+    cannot resolve them; each case instead carries the criterion under test. It runs through
+    ``_run_criterion_case``, the same path a criterion spec takes, so container criteria
+    (G3/G4) reach ``pass1_container`` and the rest ``pass1_chunk`` (bug
+    knightly-salty-orangutan). A case with no resolvable criterion raises, so it is a visible
+    run error rather than a silent pass."""
+    named = str(case.get("criterion") or "")
+    cid = _criterion_id(named, repo_root) if named else None
+    if cid is None:
+        raise ValueError(
+            f"{prompt_id} case {case.get('id', '?')!r} needs a `criterion` naming a known "
+            f"plan-review criterion (got {named!r})"
+        )
+    return _run_criterion_case(cid, case, runner=runner, repo_root=repo_root)
+
+
+def _run_isf_case(case: dict, *, runner: Runner, repo_root: str | None) -> dict:
+    """Run the plan-review ISF finder over ONE case's inline ``plan`` and session ``log``.
+
+    ``passes.pass1_isf`` takes exactly that pair (a single structured call, no tools), so the
+    ``plan-review-isf-finder`` spec's inline cases run the production finder directly. An
+    ``input``-only fixture still cannot (no log), which is why ``INLINE_UNADMISSIBLE_CRITERIA``
+    keeps ISF out of the criterion arm. Returns ``{"findings": [...]}``."""
+    from rebar.llm.config import resolve_gate_config
+    from rebar.llm.plan_review import passes
+
+    plan, log = case.get("plan"), case.get("log")
+    if not plan or not log:
+        raise ValueError(
+            f"ISF case {case.get('id', '?')!r} needs both an inline `plan` and a session `log`"
+        )
+    findings, _usage = passes.pass1_isf(
+        runner, resolve_gate_config(repo_root), plan=str(plan), session_log_text=str(log)
+    )
+    return {"findings": list(findings)}
+
+
 def _run_novelty_case(case: dict, *, runner: Runner, repo_root: str | None) -> dict:
     """Run the plan-review Pass-2 NOVELTY sub-call (child 150b) over ONE labeled
     {carryover, novel} case: the case's current ``finding`` is scored against its
@@ -333,9 +376,12 @@ def run_case(
     """Run one reviewer or criterion over one dataset ``case``.
 
     ``runner`` is a ``FakeRunner`` offline or the configured runner in CI. A plan-review
-    criterion reads ``case['input']`` inline. ``plan-review-novelty`` reads the case's finding
-    pair inline. A code-review prompt reads ``case['diff']`` inline and enters a disposable
-    fixture repository only when ``files`` is nonempty. The operation reviewers retain their
+    criterion reads ``case['input']`` inline. ``plan-review-finder`` and
+    ``plan-review-container`` run the criterion each case names in ``criterion``;
+    ``plan-review-isf-finder`` reads the case's inline ``plan`` and ``log``.
+    ``plan-review-novelty`` reads the case's finding pair inline. A code-review prompt reads
+    ``case['diff']`` inline and enters a disposable fixture repository only when ``files`` is
+    nonempty. The operation reviewers retain their
     disposable ticket and repository scaffolding. ``repo_root`` selects the criterion and overlay
     registry. An unknown prompt or criterion raises ``ValueError``.
     """
@@ -364,6 +410,14 @@ def run_case(
     # id match, never mistaken for a criterion.
     if prompt_id == _passes.PASS_VERIFIER:
         return _run_verifier_case(case, runner=runner, repo_root=repo_root)
+
+    # PASS-named finder arms (bug knightly-salty-orangutan): these specs are named after a
+    # Pass-1 prompt rather than a criterion, so they are matched by EXACT id here, before the
+    # criterion arm (which cannot resolve them).
+    if prompt_id in (_passes.PASS_FINDER, _passes.PASS_CONTAINER):
+        return _run_pass_finder_case(prompt_id, case, runner=runner, repo_root=repo_root)
+    if prompt_id == _passes.PASS_ISF:
+        return _run_isf_case(case, runner=runner, repo_root=repo_root)
 
     # Criterion arm (story 55b8): a plan-review criterion is a finder over inline text — no
     # disposable store. Checked before case_store so a criterion id never falls through.
