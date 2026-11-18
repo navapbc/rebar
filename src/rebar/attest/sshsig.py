@@ -22,6 +22,7 @@ API STUB — bodies filled by the implementer.
 from __future__ import annotations
 
 import base64
+import functools
 import os
 import re
 import subprocess
@@ -45,8 +46,14 @@ class SshKeygenUnavailable(Exception):
     """``ssh-keygen`` is absent or too old to provide the SSHSIG trust model."""
 
 
+@functools.lru_cache(maxsize=1)
 def ssh_keygen_version() -> tuple[int, int] | None:
-    """Detected ``(major, minor)`` OpenSSH version, or ``None`` if absent/unparseable."""
+    """Detected ``(major, minor)`` OpenSSH version, or ``None`` if absent/unparseable.
+
+    Probed once per process: every :meth:`verify` consults it, and re-running ``ssh -V`` per
+    signature doubled the subprocess count of a whole-store ``verify-identity`` (bug 84f6).
+    A tool removed after the probe still fails closed, because :meth:`verify` reports a missing
+    ``ssh-keygen`` as ``unavailable``."""
     try:
         proc = subprocess.run(["ssh", "-V"], capture_output=True, text=True, check=False)
     except FileNotFoundError:
@@ -141,24 +148,31 @@ class SshsigScheme:
                 fh.write(allowed_signers)
             with open(sig_path, "wb") as fh:
                 fh.write(signatures[0].sig)
-            proc = subprocess.run(
-                [
-                    "ssh-keygen",
-                    "-Y",
-                    "verify",
-                    "-f",
-                    signers_path,
-                    "-I",
-                    principal,
-                    "-n",
-                    namespace,
-                    "-s",
-                    sig_path,
-                ],
-                input=pae_bytes,
-                capture_output=True,
-                check=False,
-            )
+            try:
+                proc = subprocess.run(
+                    [
+                        "ssh-keygen",
+                        "-Y",
+                        "verify",
+                        "-f",
+                        signers_path,
+                        "-I",
+                        principal,
+                        "-n",
+                        namespace,
+                        "-s",
+                        sig_path,
+                    ],
+                    input=pae_bytes,
+                    capture_output=True,
+                    check=False,
+                )
+            except FileNotFoundError:
+                return registry.Verdict(
+                    verified=False,
+                    verdict="unavailable",
+                    reason="ssh-keygen (OpenSSH) not found; cannot verify SSHSIG",
+                )
 
         if proc.returncode == 0:
             return registry.Verdict(

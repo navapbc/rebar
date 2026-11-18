@@ -18,6 +18,24 @@ from rebar.attest import sshsig
 pytestmark = pytest.mark.unit
 
 
+def _probe() -> tuple[int, int] | None:
+    """Run the once-per-process probe fresh, and leave no faked result cached behind."""
+    sshsig.ssh_keygen_version.cache_clear()
+    try:
+        return sshsig.ssh_keygen_version()
+    finally:
+        sshsig.ssh_keygen_version.cache_clear()
+
+
+def _ensure_available_fresh() -> None:
+    """``ensure_available`` over a fresh probe, leaving no faked result cached behind."""
+    sshsig.ssh_keygen_version.cache_clear()
+    try:
+        sshsig.ensure_available()
+    finally:
+        sshsig.ssh_keygen_version.cache_clear()
+
+
 def _fake_run(*, stdout: str = "", stderr: str = "") -> object:
     def run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(
@@ -43,7 +61,7 @@ def test_the_banner_on_stderr_is_parsed(
 ) -> None:
     monkeypatch.setattr(sshsig.subprocess, "run", _fake_run(stderr=banner))
 
-    assert sshsig.ssh_keygen_version() == expected
+    assert _probe() == expected
 
 
 def test_a_banner_on_stdout_is_used_when_stderr_has_none(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,7 +69,7 @@ def test_a_banner_on_stdout_is_used_when_stderr_has_none(monkeypatch: pytest.Mon
         sshsig.subprocess, "run", _fake_run(stdout="OpenSSH_for_Windows_9.5p1, LibreSSL 3.8.2")
     )
 
-    assert sshsig.ssh_keygen_version() == (9, 5)
+    assert _probe() == (9, 5)
 
 
 def test_a_missing_ssh_binary_reports_no_version(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,7 +78,7 @@ def test_a_missing_ssh_binary_reports_no_version(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(sshsig.subprocess, "run", run)
 
-    assert sshsig.ssh_keygen_version() is None
+    assert _probe() is None
 
 
 def test_windows_openssh_at_the_floor_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,7 +86,7 @@ def test_windows_openssh_at_the_floor_is_available(monkeypatch: pytest.MonkeyPat
         sshsig.subprocess, "run", _fake_run(stderr="OpenSSH_for_Windows_9.5p1, LibreSSL 3.8.2")
     )
 
-    sshsig.ensure_available()
+    _ensure_available_fresh()
 
 
 def test_windows_openssh_below_the_floor_is_refused_with_its_version(
@@ -79,4 +97,4 @@ def test_windows_openssh_below_the_floor_is_refused_with_its_version(
     )
 
     with pytest.raises(sshsig.SshKeygenUnavailable, match=r"8\.1 is too old"):
-        sshsig.ensure_available()
+        _ensure_available_fresh()
