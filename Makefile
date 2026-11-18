@@ -77,7 +77,7 @@ PYTEST_WORKERS ?= 4
 # git-remote-s3 API-surface contract test (bug a54e-4b02-ab42-481f).
 TEST_EXTRAS := reviewbot ui grounding-terraform s3
 
-.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin ensure-pandoc verify-mcp-pin
+.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin ensure-pandoc verify-mcp-pin release-build-check
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -508,6 +508,9 @@ actionlint-bin:  ## Ensure a pinned actionlint is available (repo-local, digest-
 
 verify-mcp-pin:  ## Verify the embedded mcp-publisher SHA-256 matches the live pinned download.
 	python scripts/verify_mcp_publisher_pin.py
+
+release-build-check:  ## Run release.yml's hash-locked --no-isolation build + twine check in a fresh temporary venv (needs network).
+	python scripts/release_build_check.py
 
 ensure-pandoc:  ## Ensure a runnable pandoc exists when the pypandoc wheel bundles one for the wrong architecture.
 	@# Run through the synced venv when there is one. `install` may be invoked without the
