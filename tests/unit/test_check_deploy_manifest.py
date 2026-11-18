@@ -258,3 +258,12 @@ def test_stale_or_reasonless_exclusion_is_flagged(tmp_path: Path, monkeypatch) -
 
 
 # ─────────────────────────── wiring ───────────────────────────
+
+
+def test_repo_relative_paths_are_rendered_with_forward_slashes() -> None:
+    """A Windows path relative to a Windows root renders POSIX (bug arctic-unsecular-esok)."""
+    from pathlib import PureWindowsPath
+
+    root = PureWindowsPath("C:/checkout")
+    script = PureWindowsPath("C:/checkout/infra/scripts/foo.sh")
+    assert gate._repo_relative(script, root) == "infra/scripts/foo.sh"

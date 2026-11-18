@@ -224,7 +224,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(f"comment-hygiene: {len(violations)} rot-prone reference(s) found\n")
     for violation in violations:
-        print(f"  {violation.path}:{violation.line}  [{violation.kind}]  {violation.token}")
+        print(
+            f"  {violation.path.as_posix()}:{violation.line}  [{violation.kind}]  {violation.token}"
+        )
     print(f"\n{_TEACHING}")
     return 1
 

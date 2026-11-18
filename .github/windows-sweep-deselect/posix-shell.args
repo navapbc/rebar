@@ -1,7 +1,0 @@
---deselect=tests/unit/test_check_deploy_manifest.py::test_derivation_covers_every_cap_script
---deselect=tests/unit/test_check_deploy_manifest.py::test_derivation_covers_every_recurrence_class
---deselect=tests/unit/test_check_deploy_manifest.py::test_mutation_reomitting_any_covered_path_returns_to_red[infra/gerrit/materialize-deploy-key.sh]
---deselect=tests/unit/test_check_deploy_manifest.py::test_mutation_reomitting_any_covered_path_returns_to_red[infra/scripts/compose-up.sh]
---deselect=tests/unit/test_check_deploy_manifest.py::test_mutation_reomitting_any_covered_path_returns_to_red[infra/scripts/materialize-mcp-upstream.sh]
---deselect=tests/unit/test_check_deploy_manifest.py::test_red_findings_are_absent_when_complete
---deselect=tests/unit/test_check_deploy_manifest.py::test_resolve_repo_script_normalizes_and_resolves

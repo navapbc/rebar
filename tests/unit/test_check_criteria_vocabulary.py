@@ -395,3 +395,31 @@ def test_long_matching_line_is_truncated(tmp_path: Path) -> None:
     assert "[truncated]" in result.stderr
     assert "A" * 400 not in result.stderr
     assert max(len(line) for line in result.stderr.splitlines()) < 400
+
+
+def _load_vocabulary_module():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "check_criteria_vocabulary.py"
+    spec = importlib.util.spec_from_file_location("check_criteria_vocabulary_seam", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_findings_render_a_windows_relative_path_with_forward_slashes() -> None:
+    """Findings keep one path spelling on every host (bug arctic-unsecular-esok)."""
+    from pathlib import PureWindowsPath
+
+    vocabulary = _load_vocabulary_module()
+    relative = PureWindowsPath("src", "rebar", "live.py")
+    match = vocabulary.VocabularyMatch(relative, 1, "token", "x")
+    allowance_path = PureWindowsPath("tests", "fixture.txt")
+    allowance = vocabulary.Allowance(allowance_path, 2, "reason")
+
+    errors = vocabulary.validate_matches({relative: [match]}, {allowance_path: allowance})
+
+    assert errors[0].startswith("src/rebar/live.py:1: ")
+    assert errors[1].startswith("tests/fixture.txt: allowlist count mismatch")
