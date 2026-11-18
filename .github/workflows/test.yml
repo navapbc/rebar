@@ -284,9 +284,7 @@ jobs:
           '@.github/windows-sweep-deselect/file-locks.args'
           '@.github/windows-sweep-deselect/max-path.args'
           '@.github/windows-sweep-deselect/nested-pytest-plugins.args'
-          '@.github/windows-sweep-deselect/path-separators.args'
           '@.github/windows-sweep-deselect/posix-permissions.args'
-          '@.github/windows-sweep-deselect/posix-shell.args'
           '@.github/windows-sweep-deselect/text-encoding.args'
           '@.github/windows-sweep-deselect/unclassified.args'
 

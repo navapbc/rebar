@@ -286,8 +286,8 @@ def scan_repository(root: Path) -> tuple[dict[Path, list[VocabularyMatch]], list
             # Fail closed for authored text formats; tolerate everything else as binary.
             if _fails_closed_on_decode_error(relative):
                 decode_errors.append(
-                    f"{relative}: is not valid UTF-8, so it cannot be checked for deprecated "
-                    "vocabulary; fix the encoding or rename it out of "
+                    f"{relative.as_posix()}: is not valid UTF-8, so it cannot be checked for "
+                    "deprecated vocabulary; fix the encoding or rename it out of "
                     f"{sorted(SOURCE_TEXT_SUFFIXES)}"
                 )
             continue
@@ -309,15 +309,15 @@ def validate_matches(
     for path, matches in sorted(found.items()):
         if path not in allowances:
             errors.extend(
-                f'{_escape(str(match.path))}:{match.line}: deprecated vocabulary "{match.text}" '
-                f"in {match.excerpt}"
+                f"{_escape(match.path.as_posix())}:{match.line}: "
+                f'deprecated vocabulary "{match.text}" in {match.excerpt}'
                 for match in matches
             )
     for path, allowance in sorted(allowances.items()):
         actual = len(found.get(path, []))
         if actual != allowance.count:
             errors.append(
-                f"{_escape(str(path))}: allowlist count mismatch: "
+                f"{_escape(path.as_posix())}: allowlist count mismatch: "
                 f"expected {allowance.count}, found {actual}"
             )
     return errors

@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import minimal_env
 
 import rebar
 from rebar import schemas
@@ -32,7 +33,7 @@ def test_import_rebar_llm_pulls_no_heavy_deps() -> None:
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": "src", "PATH": __import__("os").environ.get("PATH", "")},
+        env=minimal_env(PYTHONPATH="src", PATH=__import__("os").environ.get("PATH", "")),
         check=False,
     )
     assert cp.returncode == 0, cp.stderr

@@ -33,7 +33,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import re
 from pathlib import Path
 
@@ -125,8 +124,19 @@ def _check_name(data: dict) -> list[str]:
     return problems
 
 
+def _display_path(path: Path) -> str:
+    """Repo-relative POSIX path, or the absolute POSIX path for a file outside the repo.
+
+    ``os.path.relpath`` raises across Windows drives and walks ``..`` elsewhere."""
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
 def _emit_github(path: Path, problem: str) -> str:
-    rel = os.path.relpath(path, REPO_ROOT)
+    rel = _display_path(path)
     msg = problem.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     return f"::error file={rel},title=skill-frontmatter::{msg}"
 
@@ -159,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         checked += 1
         for problem in check_file(path):
             total_problems += 1
-            rel = os.path.relpath(path, REPO_ROOT)
+            rel = _display_path(path)
             print(f"FAIL: {rel}: {problem}")
             if args.github:
                 print(_emit_github(path, problem))
