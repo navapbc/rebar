@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 
 pytestmark = pytest.mark.unit
 
@@ -47,6 +48,7 @@ def _os_path() -> str:
 
 
 # ------------------------------------------------------------------ Claude Code hook
+@requires_posix_shell
 def test_claude_code_hook_is_valid_shell() -> None:
     assert _CLAUDE_HOOK.exists()
     r = subprocess.run(
@@ -55,6 +57,7 @@ def test_claude_code_hook_is_valid_shell() -> None:
     assert r.returncode == 0, r.stderr
 
 
+@requires_posix_shell
 def test_claude_code_hook_exports_session_and_harness(tmp_path) -> None:
     env_file = tmp_path / "env"
     env_file.touch()
@@ -80,6 +83,7 @@ def test_claude_code_hook_idempotent_on_refire(tmp_path) -> None:
     assert "export OTHER_HOOK_VAR=keepme" in text  # other hooks' lines preserved
 
 
+@requires_posix_shell
 def test_claude_code_hook_exit0_on_unwritable_env_file(tmp_path) -> None:
     """A CLAUDE_ENV_FILE that cannot be written (path under a non-existent dir) must NOT block
     the session: the hook still exits 0 (never a non-zero that halts Claude Code startup)."""
@@ -88,6 +92,7 @@ def test_claude_code_hook_exit0_on_unwritable_env_file(tmp_path) -> None:
     assert r.returncode == 0, r.stderr
 
 
+@requires_posix_shell
 def test_claude_code_hook_malformed_json_is_noop(tmp_path) -> None:
     """Unparseable stdin must NOT block the session: no-op, exit 0 (robust parsing)."""
     env_file = tmp_path / "env"
@@ -97,6 +102,7 @@ def test_claude_code_hook_malformed_json_is_noop(tmp_path) -> None:
     assert env_file.read_text(encoding="utf-8") == ""
 
 
+@requires_posix_shell
 def test_claude_code_hook_noop_without_session_id(tmp_path) -> None:
     env_file = tmp_path / "env"
     env_file.touch()
@@ -105,6 +111,7 @@ def test_claude_code_hook_noop_without_session_id(tmp_path) -> None:
     assert env_file.read_text(encoding="utf-8") == ""
 
 
+@requires_posix_shell
 def test_claude_code_hook_noop_without_env_file(tmp_path) -> None:
     import os
 

@@ -16,6 +16,7 @@ import unicodedata as _ud
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 
 pytestmark = pytest.mark.unit
 
@@ -712,6 +713,7 @@ def test_scanner_check_rejects_missing_binaries(tmp_path):
         mod.check_scanners(entry, tmp_path / "missing-prefix")
 
 
+@requires_posix_shell
 def test_scanner_check_rejects_wrong_gitleaks_version(tmp_path):
     mod = _load_review_scanners()
     entry = mod.selected_entry("linux/amd64")
@@ -864,6 +866,7 @@ def test_review_scanner_cli_check_only_without_archive_checks_installed_binaries
     assert calls == [("check", entry, tmp_path / "custom")]
 
 
+@requires_posix_shell
 def test_review_scanner_relative_prefix_creates_executable_semgrep_link(tmp_path, monkeypatch):
     mod = _load_review_scanners()
     entry = mod.selected_entry("linux/amd64")

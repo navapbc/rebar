@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 from rebar.attest import trusted_env
@@ -225,6 +226,7 @@ def test_materialize_script_present_and_wired() -> None:
     assert idx_mat < idx_up, "materialize must run BEFORE docker compose up"
 
 
+@requires_posix_shell
 def test_materialize_script_renders_guard_from_ssm_stub(tmp_path: Path) -> None:
     """AC3 (hermetic behavior): with a STUB `aws` on PATH returning a fixture, the script writes
     the exact one-line nginx map entry `"<value>" 1;` and lands REBAR_OPCERT_GUARD in the .env —

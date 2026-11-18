@@ -6,6 +6,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 DOCKERFILE = Path(__file__).resolve().parents[2] / "infra" / "compose" / "Dockerfile.reviewbot"
@@ -27,6 +28,7 @@ def _materialize_entrypoint(tmp_path: Path) -> Path:
     return entrypoint
 
 
+@requires_posix_shell
 def test_generated_entrypoint_runs_ensure_without_tickets_pat(tmp_path: Path) -> None:
     entrypoint = _materialize_entrypoint(tmp_path)
     bin_dir = tmp_path / "bin"
