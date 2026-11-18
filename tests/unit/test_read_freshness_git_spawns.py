@@ -13,7 +13,6 @@ calling frame, against a real two-repository store.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import os
 import subprocess
@@ -95,9 +94,7 @@ def _build_store(tmp_path: Path, tracker_branch: str) -> types.SimpleNamespace:
     _git(tracker, "fetch", "-q", "origin", "tickets")
     _git(tracker, "reset", "-q", "--hard", "origin/tickets")
     _commit_ticket(origin, NEW_ID)  # remote-only until a fetch adopts it
-    marker = (
-        "/tmp/.ticket-sync-" + (hashlib.md5(os.path.realpath(tracker).encode()).hexdigest()[:12])
-    )
+    marker = ticket_reads.sync_marker_path(os.path.realpath(tracker))
     return types.SimpleNamespace(repo_root=repo_root, tracker=tracker, marker=Path(marker))
 
 
