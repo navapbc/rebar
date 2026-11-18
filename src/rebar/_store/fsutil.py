@@ -24,10 +24,46 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-__all__ = ["atomic_write", "sibling_exclusive_lock"]
+__all__ = ["atomic_write", "replace_with_retry", "sibling_exclusive_lock"]
+
+#: Windows ``os.replace`` is ``MoveFileEx(MOVEFILE_REPLACE_EXISTING)``, which fails with
+#: ``ERROR_ACCESS_DENIED`` (``PermissionError``) while another rename onto the same target
+#: is in flight or another handle holds it open. POSIX ``rename(2)`` never fails that way,
+#: so the retry below runs only here (bug sporting-feudalist-bluet).
+_RETRY_CONTENDED_REPLACE = os.name == "nt"
+#: How long a contended Windows replace keeps retrying before the error surfaces. The
+#: competing rename or handle finishes within milliseconds; the window only has to outlast it.
+_REPLACE_RETRY_DEADLINE_S = 2.0
+_REPLACE_RETRY_FIRST_SLEEP_S = 0.01
+_REPLACE_RETRY_MAX_SLEEP_S = 0.1
+
+
+def replace_with_retry(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+    """``os.replace(src, dst)``, retrying a transient Windows ``PermissionError``.
+
+    On Windows a ``PermissionError`` is retried with a short doubling backoff until
+    :data:`_REPLACE_RETRY_DEADLINE_S` has passed, then the last error is re-raised. On
+    every other platform this is exactly ``os.replace``. Any other ``OSError`` propagates
+    at once everywhere: only the contended-target failure is transient.
+    """
+    if not _RETRY_CONTENDED_REPLACE:
+        os.replace(src, dst)
+        return
+    deadline = time.monotonic() + _REPLACE_RETRY_DEADLINE_S
+    sleep_s = _REPLACE_RETRY_FIRST_SLEEP_S
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+        time.sleep(sleep_s)
+        sleep_s = min(sleep_s * 2, _REPLACE_RETRY_MAX_SLEEP_S)
 
 
 @contextmanager
@@ -116,7 +152,7 @@ def atomic_write(
                     fh.flush()
                     os.fsync(fh.fileno())
         os.chmod(tmp, permissions if permissions is not None else _umask_mode())
-        os.replace(tmp, path)  # atomic on the same filesystem (same dir = same fs)
+        replace_with_retry(tmp, path)  # atomic on the same filesystem (same dir = same fs)
     except BaseException:
         # The publish never happened → drop the temp and re-raise (incl. Keyboard-
         # Interrupt / SystemExit): the target is left untouched, never half-written.

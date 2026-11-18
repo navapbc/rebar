@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib
 import itertools
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -1312,16 +1313,19 @@ def test_concurrent_save_checkpoint_same_digest_loses_no_writer(
         )
 
     barrier = threading.Barrier(2, timeout=30)
-    real_replace = Path.replace
+    real_replace = os.replace
+    seen = threading.local()
 
-    def barriered_replace(self, target):
+    def barriered_replace(src, dst, *args, **kwargs):
         # Gate only the checkpoint's own final <digest>.json write, so unrelated replaces
-        # (e.g. the temp-dir setup) never block.
-        if str(target).endswith(f"{digest}.json"):
+        # (e.g. the temp-dir setup) never block. Wait once per thread: a retried Windows
+        # replace (fsutil.replace_with_retry) must not wait for a partner again.
+        if str(dst).endswith(f"{digest}.json") and not getattr(seen, "waited", False):
+            seen.waited = True
             barrier.wait()
-        return real_replace(self, target)
+        return real_replace(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "replace", barriered_replace)
+    monkeypatch.setattr(os, "replace", barriered_replace)
 
     results: dict[str, bool] = {}
 

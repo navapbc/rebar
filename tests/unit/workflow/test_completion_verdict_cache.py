@@ -507,10 +507,17 @@ def test_concurrent_persist_for_same_criterion_loses_no_writer(
 
     barrier = threading.Barrier(2, timeout=30)
     real_replace = cvc.os.replace
+    seen = threading.local()
 
     def barriered_replace(src, dst, *args, **kwargs):
         # Only gate the cache's own final write, so unrelated os.replace calls never block.
-        if str(dst).endswith(".json") and "completion_verdicts" in str(dst):
+        # Wait once per thread: a retried Windows replace must not wait for a partner again.
+        if (
+            str(dst).endswith(".json")
+            and "completion_verdicts" in str(dst)
+            and not getattr(seen, "waited", False)
+        ):
+            seen.waited = True
             barrier.wait()
         return real_replace(src, dst, *args, **kwargs)
 

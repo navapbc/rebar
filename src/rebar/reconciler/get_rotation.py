@@ -13,6 +13,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from rebar._store.fsutil import replace_with_retry
+
 _VERSION = 1
 
 
@@ -102,7 +104,7 @@ def save(path: Path, stamps: dict[str, str]) -> bool:
                 sort_keys=True,
             )
             file.write("\n")
-        os.replace(temporary, path)
+        replace_with_retry(temporary, path)
         return True
     except OSError:
         try:

@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from rebar._store.fsutil import replace_with_retry
 from rebar.reconciler import get_rotation
 
 __all__ = ["BindingRepository"]
@@ -76,7 +77,7 @@ def _write_json_atomically(path: Path, payload: Any, *, prefix: str) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")
-        os.replace(tmp, str(path))
+        replace_with_retry(tmp, str(path))
     except BaseException:
         try:
             os.unlink(tmp)

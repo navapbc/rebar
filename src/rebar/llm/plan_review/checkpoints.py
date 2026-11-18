@@ -20,6 +20,7 @@ import hashlib
 import tempfile
 from pathlib import Path
 
+from rebar._store.fsutil import replace_with_retry
 from rebar.llm.review_kernel import (
     CheckpointEnvelope,
     DiscoveryStagePlan,
@@ -135,7 +136,7 @@ def save_checkpoint(ctx: PlanContext, envelope: CheckpointEnvelope) -> bool:
         try:
             with open(fd, "w", encoding="utf-8") as handle:
                 handle.write(envelope.to_json())
-            Path(tmp).replace(d / f"{envelope.digest}.json")
+            replace_with_retry(tmp, d / f"{envelope.digest}.json")
         except Exception:
             Path(tmp).unlink(missing_ok=True)
             raise
