@@ -33,6 +33,9 @@ No separate accounts; everything rides on GitHub.
   runs an env-preflight that **fails the release closed** if either is missing (drift
   is caught at release time, not silently). See "Release-source authorization".
 - The Homebrew tap repo exists and is public.
+- Actions secret **`HOMEBREW_TAP_TOKEN`** in `navapbc/rebar` (classic token, `repo` scope;
+  copy in SSM at `/rebar/prod/homebrew-tap-token`). The release's `homebrew_tap` job uses it
+  to dispatch the tap's autobump (step 3).
 - MCP Registry publishing authenticates in CI via GitHub Actions OIDC
   (`mcp-publisher login github-oidc`); the `io.github.navapbc/*` namespace is
   authorized by the workflow running in `navapbc/rebar`. See step 4 (manual
@@ -412,19 +415,35 @@ curl -s https://pypi.org/pypi/nava-rebar/json | python3 -c "import json,sys;prin
 ```
 (Full install + probe of the published artifact is step 5 below.)
 
-### 3. Update the Homebrew tap — automated (scheduled self-bump)
+### 3. Update the Homebrew tap — automated (the release dispatches the tap's autobump)
 **No manual step in the normal path.** The tap repo `navapbc/homebrew-rebar`
-carries a self-bump workflow (`.github/workflows/autobump.yml`) that runs on a
-schedule (every 6h) plus `workflow_dispatch`. It polls PyPI for the latest
-`nava-rebar` and, if newer than the formula, updates `Formula/rebar.rb`'s `url` +
-`sha256` and commits with the tap's **own** `GITHUB_TOKEN` — there is **no stored
-cross-repo token**, matching the OIDC/no-stored-token posture of the PyPI and MCP
-registry steps. Because it polls on a schedule, it **self-heals a missed release**:
-if a release goes out and nothing triggers the bump, the next scheduled run picks
-it up automatically.
+carries a self-bump workflow (`.github/workflows/autobump.yml`). It reads PyPI's latest
+`nava-rebar` and, if that is newer than the formula, updates `Formula/rebar.rb`'s `url` +
+`sha256` and commits with the tap's **own** `GITHUB_TOKEN`. It is a no-op when the formula
+already matches PyPI.
 
-A maintainer can trigger it immediately after a release instead of waiting for the
-schedule: `gh workflow run autobump.yml --repo navapbc/homebrew-rebar`.
+**The release triggers it.** After `publish` succeeds, release.yml's `homebrew_tap` job
+waits until PyPI reports the dispatched version as latest, then runs
+`gh workflow run autobump.yml --repo navapbc/homebrew-rebar --ref main`. It authenticates
+with the Actions secret **`HOMEBREW_TAP_TOKEN`** (a classic token with `repo` scope; a copy
+is in SSM at `/rebar/prod/homebrew-tap-token`). This is the one stored cross-repo token in the
+release path: the built-in `GITHUB_TOKEN` cannot start a workflow in another repository,
+and there is no OIDC route for it. Rotate it by updating both the secret and the SSM copy.
+
+The tap's 6-hourly schedule stays as a backstop, but it is **not** self-healing on its own:
+**GitHub disables a scheduled workflow after 60 days with no repository activity**, and the
+tap only commits when a bump happens. That disable left the formula at 0.13.1 while 0.14.0
+and 0.15.0 were on PyPI (bug `hedonistic-historical-graywolf`). The `homebrew_tap` job
+handles it: if `autobump.yml` is `disabled_inactivity` it re-enables it before dispatching.
+If a person disabled it (`disabled_manually`), the job fails instead of overriding that.
+
+**Recovery** when the job fails, or to bump by hand:
+```bash
+gh api repos/navapbc/homebrew-rebar/actions/workflows/autobump.yml --jq .state
+gh workflow enable autobump.yml --repo navapbc/homebrew-rebar   # if disabled_inactivity
+gh workflow run autobump.yml --repo navapbc/homebrew-rebar --ref main
+gh run list --repo navapbc/homebrew-rebar --workflow autobump.yml -L1   # expect success
+```
 
 The formula installs the base package (zero pip deps → no `resource` blocks). The
 MCP server (`rebar-mcp`) needs the `mcp` extra; brew users get it via

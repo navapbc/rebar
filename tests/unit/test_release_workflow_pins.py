@@ -420,3 +420,30 @@ def test_pin_regex_rejects_sha_where_legacy_token_extractor_would_wrongly_pass()
 def test_pin_regex_accepts_full_sha_with_readable_comment() -> None:
     line = "        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0\n"
     assert _FULL_PIN_LINE_RE.search(line) is not None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Bug hedonistic-historical-graywolf — the release dispatches the Homebrew tap
+# ══════════════════════════════════════════════════════════════════════════════
+def test_homebrew_tap_dispatch_job() -> None:
+    """After publish, release.yml dispatches the tap's autobump with HOMEBREW_TAP_TOKEN.
+
+    The tap's schedule alone left the formula two releases behind once GitHub disabled it
+    for inactivity, so the release triggers the bump itself.
+    """
+    job = _job("homebrew_tap")
+    needs = job.get("needs", [])
+    needs = [needs] if isinstance(needs, str) else needs
+    assert "publish" in needs, "homebrew_tap must run only after `publish` succeeds"
+    assert job.get("if") == "github.event_name == 'workflow_dispatch'"
+    assert job.get("permissions") == {}, "homebrew_tap needs no GITHUB_TOKEN scope"
+    (step,) = [s for s in job["steps"] if "run" in s]
+    assert step["env"]["GH_TOKEN"] == "${{ secrets.HOMEBREW_TAP_TOKEN }}"
+    assert step["env"]["TAP_REPO"] == "navapbc/homebrew-rebar"
+    run = step["run"]
+    assert 'gh workflow run autobump.yml --repo "$TAP_REPO" --ref main' in run
+    # The inactivity disable is the failure this job exists for: re-enable it.
+    assert 'gh workflow enable autobump.yml --repo "$TAP_REPO"' in run
+    # A deliberate human disable is not overridden: that branch fails the job.
+    manual = run.split("disabled_manually)", 1)[1].split(";;", 1)[0]
+    assert "exit 1" in manual and "workflow enable" not in manual
