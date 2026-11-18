@@ -13,11 +13,11 @@ import signal
 import subprocess
 import sys
 import time
-import types
 from pathlib import Path
 
 import pytest
 
+from rebar._store import lock_kernel
 from rebar.llm import gate_admission as ga
 
 pytestmark = pytest.mark.unit
@@ -161,37 +161,29 @@ def test_the_refusal_returns_immediately_rather_than_waiting_for_a_holder(gate_h
     host cannot fake or break it (bug quasiempty-snug-phoenix): one attempt per slot, each
     non-blocking, means it neither waited on the holder nor polled for the slot.
     """
-    real_fcntl = ga.fcntl
-    if real_fcntl is None:
-        pytest.skip("no fcntl: admission is disarmed, so there is no lock call to observe")
-    lock_flags: list[int] = []
+    attempts: list[int] = []
+    real_take = lock_kernel.take_exclusive
 
-    def _spy_flock(fd: int, operation: int) -> None:
-        lock_flags.append(operation)
-        if not operation & real_fcntl.LOCK_NB:
-            # Delegating would block this thread on the holder below; fail instead.
-            pytest.fail(f"admission asked for a blocking lock (flags {operation:#x})")
-        real_fcntl.flock(fd, operation)
+    def _spy_take(fd: int) -> None:
+        # take_exclusive is the NON-blocking primitive on both legs (flock LOCK_NB on POSIX,
+        # msvcrt LK_NBLCK on Windows); counting its calls is the proof nothing waited.
+        attempts.append(fd)
+        real_take(fd)
 
-    spy = types.SimpleNamespace(
-        LOCK_EX=real_fcntl.LOCK_EX,
-        LOCK_NB=real_fcntl.LOCK_NB,
-        LOCK_UN=real_fcntl.LOCK_UN,
-        flock=_spy_flock,
-    )
+    def _no_blocking_lock(fd: int, **_kw: object) -> None:
+        pytest.fail("admission asked for a blocking lock")
+
     limit = 1
     root = gate_host(limit)
     with ga.gate_admission("plan_review", "t-1", root):
-        # Spy only the refused attempt: t-1's acquire and release use the real module.
-        ga.fcntl = spy
-        try:
+        # Spy only the refused attempt: t-1's acquire and release use the real primitive.
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(lock_kernel, "take_exclusive", _spy_take)
+            mp.setattr(lock_kernel, "take_blocking_exclusive", _no_blocking_lock)
             with pytest.raises(ga.GateCongestedError):
                 with ga.gate_admission("plan_review", "t-2", root):
                     pass
-        finally:
-            ga.fcntl = real_fcntl
-    assert len(lock_flags) == limit, f"refusal made {len(lock_flags)} lock attempts: {lock_flags}"
-    assert all(flags & real_fcntl.LOCK_NB for flags in lock_flags), lock_flags
+    assert len(attempts) == limit, f"refusal made {len(attempts)} lock attempts"
 
 
 # ── AC3: the refusal is actionable and is NOT a verdict ──────────────────────────────
@@ -478,14 +470,19 @@ def test_the_scratch_refusal_is_retryable_over_mcp(monkeypatch):
     assert "verdict" not in result
 
 
-def test_a_platform_without_flock_admits_and_announces_the_disarm(gate_host, monkeypatch, capsys):
+def test_a_platform_without_any_lock_leg_admits_and_announces_the_disarm(
+    gate_host, monkeypatch, capsys
+):
+    """Neither fcntl (POSIX) nor msvcrt (Windows): no slot can be held, so the cap is off and
+    the run says so. Windows itself is NOT this case; it holds slots through msvcrt."""
     root = gate_host(1)
-    monkeypatch.setattr(ga, "fcntl", None)
+    monkeypatch.setattr(lock_kernel, "fcntl", None)
+    monkeypatch.setattr(lock_kernel, "msvcrt", None)
     with ga.gate_admission("plan_review", "t-1", root):
         pass
     lines = _disarm_markers(capsys.readouterr().err)
     assert len(lines) == 1, lines
-    assert "fcntl" in lines[0]
+    assert "fcntl or msvcrt" in lines[0]
 
 
 def test_the_operator_off_switch_is_not_reported_as_a_disarm(gate_host, capsys):

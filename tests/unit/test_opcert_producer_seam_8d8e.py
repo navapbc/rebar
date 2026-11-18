@@ -514,9 +514,10 @@ def test_orchestrator_degrade_key_unregenerable_records_unsigned(
     monkeypatch.setattr(gate_dispatch, "produce_plan_review_verdict", _pass_verdict(tid))
 
     tracker = _tracker(store)
-    if os.geteuid() == 0:
+    if not hasattr(os, "geteuid") or os.geteuid() == 0:
         # Running as root defeats a real chmod (root ignores mode bits and mkdtemp would still
-        # succeed), so simulate the regeneration failure at its actual failure point instead.
+        # succeed), and Windows has no geteuid and ignores a directory's mode bits, so
+        # simulate the regeneration failure at its actual failure point instead.
         import rebar._opcert_signing as _ocs
 
         def _boom(key_path: str) -> None:

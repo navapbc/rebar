@@ -25,6 +25,12 @@ from _child_diag import assert_child_ran_clean  # noqa: E402
 _SUICIDE = "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"
 
 
+#: Death by signal is POSIX-only: Windows has no SIGKILL and no negative returncodes.
+_SIGNAL_DEATH = pytest.mark.skipif(
+    not hasattr(signal, "SIGKILL"), reason="signal death is POSIX-only (no SIGKILL on Windows)"
+)
+
+
 def _killed_child() -> subprocess.CompletedProcess[str]:
     """Really run and really kill a child -- do not fake the CompletedProcess.
 
@@ -43,6 +49,7 @@ def _killed_child() -> subprocess.CompletedProcess[str]:
     return proc
 
 
+@_SIGNAL_DEATH
 def test_a_signal_killed_pass_cannot_satisfy_the_pass_health_oracle() -> None:
     """The fail-open itself: empty stderr must NOT read as a healthy pass."""
     proc = _killed_child()
@@ -53,6 +60,7 @@ def test_a_signal_killed_pass_cannot_satisfy_the_pass_health_oracle() -> None:
     assert "inbound pass" in str(excinfo.value)
 
 
+@_SIGNAL_DEATH
 def test_the_failure_names_the_signal_that_killed_the_child() -> None:
     """AC2: after the fix the message must NAME the signal, not just fail.
 

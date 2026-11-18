@@ -64,7 +64,8 @@ def test_fcntl_available_here_control() -> None:
     normally through the real module — the fix must not change supported-platform behavior."""
     import importlib
 
-    fcntl = importlib.import_module("fcntl")
+    # The control's premise is a POSIX host; Windows has no fcntl to be present.
+    fcntl = pytest.importorskip("fcntl", reason="fcntl is POSIX-only; this is the POSIX control")
     assert hasattr(fcntl, "flock")
     for module in FCNTL_LOCK_MODULES:
         importlib.import_module(module)

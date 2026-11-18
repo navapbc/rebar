@@ -1,10 +1,11 @@
 """Fast-fail shared concurrency admission for plan-review and completion gates.
 
 ADR 0112 bounds live snapshot bytes and gate RSS before store materialization.
-Both CLI and MCP entry points share flocked slots in the snapshot lock directory;
+Both CLI and MCP entry points share kernel-locked slots in the snapshot lock directory;
 kernel release on close/crash avoids stale leases. A full set raises retryable
 ``GateCongestedError`` (CLI exit 11), not a verdict, without queueing request
-threads. Missing fcntl or an unusable individual slot admits with a
+threads. A platform with no exclusive file-lock primitive (neither fcntl nor msvcrt)
+or an unusable individual slot admits with a
 ``GATE_ADMISSION_DISARMED`` marker. An unreachable or declared-but-unmounted
 scratch volume fails closed before store access; its root directory alone
 cannot prove the volume is mounted."""
@@ -20,18 +21,14 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
+from rebar._store import lock_kernel
 from rebar.llm.errors import GateCongestedError, GateScratchUnavailableError
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - platform-dependent (absent on Windows)
-    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
 #: The module's public surface: the context manager, the resolved cap and its default, and
 #: the two marker tokens an observability probe anchors on. Everything else — the slot files,
-#: the ``flock`` wrapper, the marker emitters — is underscore-prefixed and PRIVATE
+#: the lock wrapper, the marker emitters — is underscore-prefixed and PRIVATE
 #: (``docs/api-stability.md``): it is mechanism, and binding to it would make a future change
 #: to how slots are counted a compatibility break.
 __all__ = [
@@ -232,7 +229,10 @@ def _slot_dir() -> Path:
 
 
 def _open_slot(path: Path) -> int | None:
-    """Open ``path`` and take its exclusive non-blocking ``flock``, or return ``None``.
+    """Open ``path`` and take its exclusive non-blocking lock, or return ``None``.
+
+    The lock is :func:`rebar._store.lock_kernel.take_exclusive`: ``flock`` on POSIX and
+    ``msvcrt.locking`` on Windows, never waiting on either.
 
     ``None`` means "another holder has it" — the whole point is that this NEVER waits. An
     ``OSError`` from the open itself is deliberately NOT swallowed into ``None``: an
@@ -241,7 +241,7 @@ def _open_slot(path: Path) -> int | None:
     """
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_kernel.take_exclusive(fd)
     except OSError:
         os.close(fd)
         return None
@@ -264,10 +264,10 @@ def _acquire_slot(limit: int, directory: Path) -> int | None:
 
 
 def _release_slot(fd: int) -> None:
-    """Drop a held slot. Closing the fd alone releases the ``flock``; the explicit unlock
+    """Drop a held slot. Closing the fd alone releases the lock; the explicit unlock
     is kept so the release is visible at the call site and does not depend on close order."""
     try:
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        lock_kernel.release_exclusive(fd)
     except OSError:  # pragma: no cover - the close below still releases it
         logger.debug("gate admission slot unlock failed", exc_info=True)
     with contextlib.suppress(OSError):
@@ -318,7 +318,7 @@ def gate_admission(
     failures this bound exists for — gives its slot back; a leak on the error path would
     degrade the cap into a deadlock that only a reboot clears.
     """
-    # BEFORE every other branch, including the operator's `0` off-switch and the fcntl
+    # BEFORE every other branch, including the operator's `0` off-switch and the no-lock
     # disarm: those disarm the CONCURRENCY bound, which is a different question from whether
     # gate bytes are about to land on the root filesystem. A host that turned the counter off
     # did not thereby consent to losing its scratch volume silently.
@@ -330,8 +330,10 @@ def gate_admission(
     if limit <= 0:
         yield  # the operator's explicit off switch — a choice, not a fault: no marker
         return
-    if fcntl is None:
-        _emit_admission_disarmed(gate, ticket_id, "advisory locking (fcntl) unavailable")
+    if lock_kernel.leg_name() == "none":
+        _emit_admission_disarmed(
+            gate, ticket_id, "no exclusive file-lock primitive (fcntl or msvcrt) available"
+        )
         yield
         return
     try:

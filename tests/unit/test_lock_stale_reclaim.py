@@ -87,9 +87,12 @@ def test_acquire_does_not_reclaim_foreign_host_owner(tmp_path):
 
 
 def _raise_errno(err: int):
-    """A fake ``fcntl.flock`` that always raises ``OSError(err, …)``."""
+    """A fake exclusive-lock primitive that always raises ``OSError(err, …)``.
 
-    def _flock(fd, op):
+    Patched over ``lock_kernel.take_exclusive`` (the seam both the fcntl and msvcrt legs
+    share), so the contention handling under test runs on every platform."""
+
+    def _flock(fd, *_rest):
         raise OSError(err, os.strerror(err))
 
     return _flock
@@ -99,10 +102,10 @@ def test_acquire_fcntl_contention_waits_then_returns_minus_one(tmp_path, monkeyp
     """EAGAIN contention: retry until the deadline, then return -1 (unchanged behavior)."""
     lock_path = os.path.join(str(tmp_path), "wl")
 
-    def _always_eagain(fd, op):
+    def _always_eagain(fd, *_rest):
         raise OSError(_errno.EAGAIN, "resource temporarily unavailable")
 
-    monkeypatch.setattr(_kernel.fcntl, "flock", _always_eagain)
+    monkeypatch.setattr(_kernel, "take_exclusive", _always_eagain)
     deadline = _time.monotonic() + 0.15
     fd = _lock._acquire_fcntl(lock_path, deadline)
     assert fd == -1, "sustained contention past the deadline returns the -1 sentinel"
@@ -119,7 +122,7 @@ def test_acquire_fcntl_treats_eacces_as_contention_too(tmp_path, monkeypatch):
     story ``friendless-alabaster-cub``). It is pinned here, beside its EAGAIN sibling.
     """
     lock_path = os.path.join(str(tmp_path), "wl")
-    monkeypatch.setattr(_kernel.fcntl, "flock", _raise_errno(_errno.EACCES))
+    monkeypatch.setattr(_kernel, "take_exclusive", _raise_errno(_errno.EACCES))
     fd = _lock._acquire_fcntl(lock_path, _time.monotonic() + 0.15)
     assert fd == -1, "EACCES is contention: wait out the deadline, then the -1 sentinel"
 
@@ -127,7 +130,7 @@ def test_acquire_fcntl_treats_eacces_as_contention_too(tmp_path, monkeypatch):
 def test_busy_probe_reports_busy_for_an_eacces_contended_leg(tmp_path, monkeypatch):
     """The advisory probe reads the same contention set, so EACCES must mean BUSY there
     too — reporting a held store free would let optional work run against a live writer."""
-    monkeypatch.setattr(_kernel.fcntl, "flock", _raise_errno(_errno.EACCES))
+    monkeypatch.setattr(_kernel, "take_exclusive", _raise_errno(_errno.EACCES))
     assert _lock.write_lock_is_busy(str(tmp_path)) is True
 
 
@@ -135,10 +138,10 @@ def test_acquire_fcntl_unexpected_errno_raises_immediately(tmp_path, monkeypatch
     """A non-contention errno (ENOLCK) is re-raised at once with its errno, NOT masked as -1."""
     lock_path = os.path.join(str(tmp_path), "wl")
 
-    def _enolck(fd, op):
+    def _enolck(fd, *_rest):
         raise OSError(_errno.ENOLCK, "no locks available")
 
-    monkeypatch.setattr(_kernel.fcntl, "flock", _enolck)
+    monkeypatch.setattr(_kernel, "take_exclusive", _enolck)
     # A far-future deadline: the OLD code would wait ~here for it; the fix raises promptly.
     deadline = _time.monotonic() + 30
     t0 = _time.monotonic()
@@ -159,7 +162,7 @@ def test_acquire_fcntl_closes_fd_on_timeout(tmp_path, monkeypatch):
         closed.append(fd)
         real_close(fd)
 
-    monkeypatch.setattr(_kernel.fcntl, "flock", _raise_errno(_errno.EAGAIN))
+    monkeypatch.setattr(_kernel, "take_exclusive", _raise_errno(_errno.EAGAIN))
     monkeypatch.setattr(_lock.os, "close", _spy_close)
     fd = _lock._acquire_fcntl(lock_path, _time.monotonic() + 0.1)
     assert fd == -1
@@ -176,7 +179,7 @@ def test_acquire_fcntl_closes_fd_on_unexpected_errno(tmp_path, monkeypatch):
         closed.append(fd)
         real_close(fd)
 
-    monkeypatch.setattr(_kernel.fcntl, "flock", _raise_errno(_errno.EIO))
+    monkeypatch.setattr(_kernel, "take_exclusive", _raise_errno(_errno.EIO))
     monkeypatch.setattr(_lock.os, "close", _spy_close)
     with pytest.raises(OSError):
         _lock._acquire_fcntl(lock_path, _time.monotonic() + 30)

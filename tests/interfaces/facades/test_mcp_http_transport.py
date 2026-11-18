@@ -815,6 +815,11 @@ def test_shutdown_grace_constant_is_positive_and_bounded():
     assert DEFAULT_UVICORN_BACKSTOP_SECONDS == 30
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows os.kill(pid, SIGTERM) is TerminateProcess (exit 15): no Python handler "
+    "runs, so there is no grace to observe. The grace serves `docker stop` on the Linux host",
+)
 def test_sigterm_grace_subprocess_waits_for_inflight_then_exits_zero():
     """End-to-end SIGTERM grace in a real subprocess: with one op in flight, a
     SIGTERM does NOT exit immediately — the process waits until the gauge drains

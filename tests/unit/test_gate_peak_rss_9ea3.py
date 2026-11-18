@@ -51,7 +51,7 @@ def test_the_two_platform_families_disagree_by_exactly_1024() -> None:
 
 def test_peak_rss_bytes_reads_the_live_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """The live read routes through the same conversion, keyed on the running platform."""
-    import resource
+    resource = pytest.importorskip("resource", reason="resource is Unix-only")
 
     class _Usage:
         ru_maxrss = 5000
@@ -120,7 +120,7 @@ def test_measurement_failure_never_breaks_the_gate(
     def _boom(_who: object) -> object:
         raise OSError("rusage unavailable")
 
-    import resource
+    resource = pytest.importorskip("resource", reason="resource is Unix-only")
 
     monkeypatch.setattr(resource, "getrusage", _boom)
 
