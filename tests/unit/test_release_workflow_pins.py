@@ -420,3 +420,45 @@ def test_pin_regex_rejects_sha_where_legacy_token_extractor_would_wrongly_pass()
 def test_pin_regex_accepts_full_sha_with_readable_comment() -> None:
     line = "        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0\n"
     assert _FULL_PIN_LINE_RE.search(line) is not None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Bug hedonistic-historical-graywolf — the release dispatches the Homebrew tap
+# ══════════════════════════════════════════════════════════════════════════════
+def test_homebrew_tap_dispatch_job() -> None:
+    """After publish, release.yml dispatches the tap's autobump with HOMEBREW_TAP_TOKEN.
+
+    The tap's schedule alone left the formula two releases behind once GitHub disabled it
+    for inactivity, so the release triggers the bump itself.
+    """
+    job = _job("homebrew_tap")
+    needs = job.get("needs", [])
+    needs = [needs] if isinstance(needs, str) else needs
+    assert "publish" in needs, "homebrew_tap must run only after `publish` succeeds"
+    assert job.get("if") == "github.event_name == 'workflow_dispatch'"
+    assert job.get("permissions") == {}, "homebrew_tap needs no GITHUB_TOKEN scope"
+    (step,) = [s for s in job["steps"] if "run" in s]
+    assert step["env"]["GH_TOKEN"] == "${{ secrets.HOMEBREW_TAP_TOKEN }}"
+    assert step["env"]["TAP_REPO"] == "navapbc/homebrew-rebar"
+    run = step["run"]
+    dispatch = 'gh workflow run autobump.yml --repo "$TAP_REPO" --ref main'
+    assert dispatch in run
+    # The tap bumps to PyPI's latest, so the job must not dispatch before PyPI serves this
+    # version: a failed wait exits before the dispatch.
+    wait_fail = run.split('if [ "$served" != "$VERSION" ]; then', 1)[1].split("fi", 1)[0]
+    assert "exit 1" in wait_fail
+    assert run.index('if [ "$served" != "$VERSION" ]; then') < run.index(dispatch)
+    # Each workflow state routes on its own branch, and the dispatch follows the `case`.
+    case = run.split('case "$state" in', 1)[1].split("esac", 1)[0]
+    branches = {
+        label: case.split(f"{label})", 1)[1].split(";;", 1)[0]
+        for label in ("active", "disabled_inactivity", "disabled_manually", "*")
+    }
+    assert branches["active"].strip() == ""
+    # The inactivity disable is the failure this job exists for: re-enable it.
+    assert 'gh workflow enable autobump.yml --repo "$TAP_REPO"' in branches["disabled_inactivity"]
+    # A deliberate human disable, or an unknown state, is not overridden: it fails the job.
+    for label in ("disabled_manually", "*"):
+        assert "exit 1" in branches[label] and "workflow enable" not in branches[label]
+    assert run.count("gh workflow enable") == 1
+    assert run.index("esac") < run.index(dispatch)
