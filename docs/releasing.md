@@ -339,8 +339,12 @@ git push gerrit HEAD:refs/for/main
 # submit with scripts/gerrit_safe_submit.py <change> --revision <current-full-sha>
 # Do not re-push after votes are green: a new patch set marks them Outdated.
 ```
-(Local sanity before pushing: `make lint && make typecheck && make test`, and
-`python -m build && python -m twine check dist/*`.) The release is dispatched from
+(Local sanity before pushing: `make verify`, and `make release-build-check`, which
+repeats release.yml's `build` job in a fresh temporary venv: the hash-locked toolchain,
+the ambient-package guard, `python -m build --no-isolation` and `twine check`. Do not use
+a bare `python -m build && twine check`: the isolated build resolves the newest hatchling,
+whose Metadata-Version 2.5 the release-pinned twine 6.2.0 rejects, and it builds different
+bytes than the release publishes.) The release is dispatched from
 `main` **only after this commit has landed** (step 2).
 
 ### 1a. Update CHANGELOG.md (before tagging)
