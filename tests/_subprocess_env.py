@@ -35,3 +35,16 @@ class SubprocessEnv(dict[str, str]):
 def subprocess_env(overrides: Mapping[str, str] | None = None, /, **kwargs: str) -> SubprocessEnv:
     """Copy the ambient environment into a representation-safe mapping."""
     return SubprocessEnv(os.environ).with_overrides(overrides, **kwargs)
+
+
+def minimal_env(overrides: Mapping[str, str] | None = None, /, **kwargs: str) -> SubprocessEnv:
+    """A from-scratch child environment that still starts on every host.
+
+    Only ``SYSTEMROOT`` is carried from the ambient environment, and only when it is
+    set: Windows cannot load Winsock without it, so ``import asyncio`` in the child would
+    fail with ``OSError: [WinError 10106]`` (bug arctic-unsecular-esok).
+    """
+    base = SubprocessEnv()
+    if "SYSTEMROOT" in os.environ:
+        base["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+    return base.with_overrides(overrides, **kwargs)

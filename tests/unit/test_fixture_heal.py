@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _subprocess_env import minimal_env
 
 import rebar
 from rebar.llm.criteria.ids import criterion_prompt_id
@@ -317,13 +318,15 @@ def test_cli_dry_run_reports_attempt_list_with_cleared_env(store) -> None:
     assert expected, "fixture: the packaged gate must route at least one gap criterion"
 
     rebar_bin = str(Path(sys.executable).parent / "rebar")
-    cleared_env = {
-        "PATH": os.path.dirname(sys.executable) + os.pathsep + "/usr/bin:/bin",
-        "HOME": os.environ.get("HOME", str(store)),
-        "REBAR_ROOT": str(store),
-        "REBAR_SYNC_PULL": "off",
-        "REBAR_SYNC_PUSH": "off",
-    }
+    cleared_env = minimal_env(
+        {
+            "PATH": os.path.dirname(sys.executable) + os.pathsep + "/usr/bin:/bin",
+            "HOME": os.environ.get("HOME", str(store)),
+            "REBAR_ROOT": str(store),
+            "REBAR_SYNC_PULL": "off",
+            "REBAR_SYNC_PUSH": "off",
+        }
+    )
     result = subprocess.run(
         [rebar_bin, "criteria", "heal", "--dry-run"],
         env=cleared_env,

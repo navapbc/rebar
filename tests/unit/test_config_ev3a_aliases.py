@@ -6,6 +6,7 @@ policy: only REBAR_COMPACT_THRESHOLD and REBAR_SCRATCH_BASE_DIR are honored.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -97,7 +98,7 @@ def test_scratch_base_dir_consumer(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     p = _proj(tmp_path)
     # default: <root>/.rebar/scratch
-    assert scratch.base_dir(repo_root=str(p)).endswith("/.rebar/scratch")
+    assert scratch.base_dir(repo_root=str(p)).endswith(os.path.join("", ".rebar", "scratch"))
     # canonical override
     monkeypatch.setenv("REBAR_SCRATCH_BASE_DIR", str(tmp_path / "sx"))
     cfg.reset_config_cache()
@@ -105,7 +106,7 @@ def test_scratch_base_dir_consumer(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("REBAR_SCRATCH_BASE_DIR")
     monkeypatch.setenv("SCRATCH_BASE_DIR", str(tmp_path / "sy"))
     cfg.reset_config_cache()
-    assert scratch.base_dir(repo_root=str(p)).endswith("/.rebar/scratch")
+    assert scratch.base_dir(repo_root=str(p)).endswith(os.path.join("", ".rebar", "scratch"))
 
 
 # ── mcp.allow_jira_sync gate ──────────────────────────────────────────────────

@@ -418,10 +418,14 @@ def test_the_installed_pandoc_matches_the_legacy_fixture_provenance() -> None:
     """Each gating platform must match its exact pinned Pandoc binary."""
     import pypandoc
 
+    platform_key = _GENERATOR.current_platform_key()
+    if platform_key not in _GENERATOR.ACCEPTED_PANDOC_BINARY_SHA256:
+        pytest.skip(f"no Pandoc binary is pinned for {platform_key}")
+
     expected = _LEGACY_FIXTURE.get("pandoc")
     _GENERATOR.validate_pandoc_provenance(
         expected,
-        platform_key=_GENERATOR.current_platform_key(),
+        platform_key=platform_key,
         version=str(pypandoc.get_pandoc_version()),
         binary_sha256=_binary_sha256(Path(str(_PANDOC))),
     )
