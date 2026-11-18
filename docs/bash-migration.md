@@ -306,7 +306,7 @@ whole system has ONE lock implementation when this tier completes.
   non-fast-forward (fetch → guard check → `merge --no-edit` →
   stash/retry/pop on "would be overwritten"); `async` detaches and survives
   parent exit; `fsck` reports `PUSH_PENDING` when ahead of origin.
-- Reconverge: ≤1/min throttle via the shared `/tmp/.ticket-sync-<repo_md5>`
+- Reconverge: ≤1/min throttle via the shared `.ticket-sync-<repo_md5>` (platform temp directory)
   marker; merge-as-union; UUID-deterministic STATUS fork resolution
   (replayed identically by every clone, I8).
 

@@ -8,7 +8,6 @@ the write and sync invariants through Git subprocesses rather than a simulation.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -25,6 +24,7 @@ from _topology_template import clone_topology_template
 
 from rebar import _engine
 from rebar._commands import fsck
+from rebar._engine_support.reads import sync_marker_path
 from rebar._store import push
 
 pytestmark = pytest.mark.integration
@@ -86,9 +86,8 @@ def _expire_sync_marker(tracker: Path) -> None:
     The realpath hash namespaces the marker per test and worker. No global fallback path is
     touched, avoiding races with unrelated trackers.
     """
-    h = hashlib.md5(str(tracker).encode()).hexdigest()[:12]
     try:
-        os.unlink(f"/tmp/.ticket-sync-{h}")
+        os.unlink(sync_marker_path(str(tracker)))
     except FileNotFoundError:
         pass
 

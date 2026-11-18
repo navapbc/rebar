@@ -152,8 +152,8 @@ comment triage (path — one-line why):
 - `_engine_support/field_reads.py` output-contract bullets (spaced vs compact `json.dumps`,
   silent `[]` on miss, exact error strings + streams + exit codes) — measured external-API facts.
   Kept; only the "byte-parity with the dispatcher" framing was reworded to "byte-pinned by tests".
-- `_engine_support/reads.py` the `/tmp/.ticket-sync-<md5>` throttle-marker description — documents
-  CURRENT runtime behavior (the code builds that exact path). Kept; only the dead `ticket-sync.sh`/
+- `_engine_support/reads.py` the `.ticket-sync-<md5>` throttle-marker description — documents
+  CURRENT runtime behavior (`sync_marker_path()` builds it in `tempfile.gettempdir()`). Kept; only the dead `ticket-sync.sh`/
   `_ensure_initialized` citations were corrected to `rebar._store.sync`.
 - `_commands/leaf.py` module docstring "option-looking token / surplus positional is a loud usage
   error; `--` ends option parsing" — live arg-parsing invariant. Kept (CORRECT-IN-PLACE elsewhere).

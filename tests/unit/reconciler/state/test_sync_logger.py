@@ -168,4 +168,4 @@ def test_non_serializable_values(sl_mod: ModuleType, tmp_path: Path) -> None:
     logger.close()
 
     parsed = json.loads(log_file.read_text().strip())
-    assert "/tmp/foo" in parsed["some_path"]
+    assert str(Path("/tmp/foo")) in parsed["some_path"]
