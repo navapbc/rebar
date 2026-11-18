@@ -16,6 +16,16 @@ Three consequences of that guidance are worth stating here, because each one is 
 
 Prefer a bounded workload with a fixed end condition. Never start an unbounded busy loop such as `while True: pass`, `yes > /dev/null`, or `while :; do :; done` without a wall-clock bound. Lowering process priority with `nice` does not provide a bound.
 
+## rebar's own detached workers
+
+rebar itself parents three workers to PID 1 on purpose, through `rebar._proc.spawn_detached`, so a command can return while they finish. They are not leaked helpers, and the "No process you start may reach PPID 1" rule in AGENTS.md exempts them. Each runs as `python -c "import sys; ...; import <module>; <module>.<function>(...)"`, so `ps -o pid=,ppid=,command= -p <pid>` identifies it:
+
+- `rebar._commands.compact_trigger` (`run_detached_sweep`): the compaction sweep that folds ticket event logs into snapshots. It holds the store's write lock while it works.
+- `rebar._snapshot.gc_trigger` (`run_detached`): snapshot garbage collection.
+- `rebar._store.push` (`push_tickets_branch`): the asynchronous push of the tickets branch.
+
+Leave them to finish; they exit on their own, usually within a minute or two. A compaction sweep is optional housekeeping and is safe to interrupt: terminating it loses no data, because the events stay live and the next trigger re-folds them. This is the same advice rebar prints when a blocked writer's lock timeout names a sweep. If one must stop, send SIGTERM rather than SIGKILL, so the sweep ends at its next ticket boundary. The detector below labels these workers, and still reports one that crosses its CPU threshold.
+
 ## Bounded gate operations
 
 Do not apply a wall-clock bound to `review-plan`, `verify-completion`, a completion-verifier-gated close, `make verify`, or another LLM gate operation that terminates with a verdict. Truncating a gate wastes the billable run and can make an imposed timeout appear to be a gate failure. Use the asynchronous MCP starter and status tools when a gate can outlast a client request.

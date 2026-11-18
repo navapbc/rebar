@@ -146,3 +146,49 @@ def test_doc_retains_the_incident_evidence_and_recovery() -> None:
     assert "## Read-only detection" in body
     assert "scripts/check_orphaned_load.py" in body
     assert "## Operator recovery" in body
+
+
+# -- rebar's own detached workers are carved out of the PPID 1 rule (bug 9d13) ----------------
+
+
+def _spawn_detached_modules() -> set[str]:
+    """Every module rebar hands to ``spawn_detached`` — the processes it parents to PID 1 on
+    purpose. Read from the source so a new spawn site without guidance fails the tests below."""
+    found: set[str] = set()
+    pattern = re.compile(r"spawn_detached\(\s*\"(rebar\.[\w.]+)\"")
+    for path in (ROOT / "src" / "rebar").rglob("*.py"):
+        found.update(pattern.findall(path.read_text(encoding="utf-8")))
+    return found
+
+
+def test_the_source_still_has_detached_workers_to_name() -> None:
+    """Guard the guard: an empty census would make the naming tests vacuous."""
+    assert {
+        "rebar._commands.compact_trigger",
+        "rebar._snapshot.gc_trigger",
+        "rebar._store.push",
+    } <= _spawn_detached_modules()
+
+
+@pytest.mark.parametrize("source", ["AGENTS.md", "docs/orphaned-processes.md"])
+def test_guidance_names_every_spawn_detached_worker(source: str) -> None:
+    body = (ROOT / source).read_text(encoding="utf-8")
+    missing = sorted(m for m in _spawn_detached_modules() if m not in body)
+    assert not missing, f"{source} does not name rebar's detached worker(s): {missing}"
+
+
+def test_agents_ppid1_rule_carves_out_rebars_own_workers() -> None:
+    rule = next(
+        line for line in _agents().splitlines() if "No process you start may reach PPID 1" in line
+    )
+    assert "rebar itself detaches" in rule, "the PPID 1 bullet must state the carve-out in place"
+
+
+def test_doc_agrees_with_lock_owner_that_a_sweep_is_safe_to_interrupt() -> None:
+    """``lock_owner._INTERRUPTIBLE_REMEDIES['compact-sweep']`` tells a blocked writer the sweep is
+    safe to interrupt and loses no data; the doc must not contradict rebar's own runtime advice."""
+    body = _doc()
+    assert "safe to interrupt" in body
+    assert "loses no data" in body
+    assert "SIGTERM" in body
+    assert "must not be killed" not in body

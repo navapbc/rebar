@@ -304,3 +304,72 @@ def test_user_gui_apps_do_not_hide_real_leaks(
     assert code == 1
     assert "watch-tracker.sh" in out
     assert "Caffeine.app" not in out
+
+
+# -- rebar's own detached workers (bug 9d13) ------------------------------------------------
+
+_PY = "/Users/x/rebar/.venv/bin/python"
+
+
+def _spawn_line(module: str, func: str, *args: str) -> str:
+    """The exact ``ps`` command line ``rebar._proc.spawn_detached`` produces."""
+    n = len(args)
+    code = (
+        f"import sys; sys.path.insert(0, sys.argv[{n + 1}]); "
+        f"import {module}; {module}.{func}(*sys.argv[1:{n + 1}])"
+    )
+    return " ".join([_PY, "-c", code, *args, "/Users/x/rebar/src"])
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        _spawn_line("rebar._commands.compact_trigger", "run_detached_sweep", "/r/.tickets-tracker"),
+        _spawn_line("rebar._snapshot.gc_trigger", "run_detached", "/tmp/snap", "/r"),
+        _spawn_line("rebar._store.push", "push_tickets_branch", "/r"),
+    ],
+    ids=["compaction-sweep", "snapshot-gc", "async-push"],
+)
+def test_recognises_rebars_detached_workers(gate: ModuleType, command: str) -> None:
+    assert gate.is_rebar_detached_worker(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'python -c "while True: pass"',
+        "python -m pytest tests/unit/test_rebar._store.push.py",
+        "/usr/bin/grep rebar._commands.compact_trigger",
+        "rebar transition my-ticket in_progress closed",
+    ],
+)
+def test_does_not_mistake_other_processes_for_rebar_workers(gate: ModuleType, command: str) -> None:
+    assert not gate.is_rebar_detached_worker(command)
+
+
+def test_a_hot_rebar_worker_is_still_reported_and_labelled(
+    gate: ModuleType, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A runaway worker is a real problem, so recognition labels it rather than hiding it."""
+    worker = gate.ProcessRecord(
+        pid=5151,
+        ppid=1,
+        cpu_seconds=7200.0,
+        command=_spawn_line(
+            "rebar._commands.compact_trigger", "run_detached_sweep", "/r/.tickets-tracker"
+        ),
+    )
+    assert gate.main([], lister=lambda: [worker]) == 1
+    out = capsys.readouterr().out
+    assert "pid=5151" in out
+    assert "rebar detached worker" in out
+
+
+def test_worker_modules_match_the_sources_spawn_detached_sites(gate: ModuleType) -> None:
+    """A new ``spawn_detached`` caller must be taught to the detector too."""
+    import re
+
+    src = Path(__file__).resolve().parents[2] / "src" / "rebar"
+    pattern = re.compile(r"spawn_detached\(\s*\"(rebar\.[\w.]+)\"")
+    found = {m for p in src.rglob("*.py") for m in pattern.findall(p.read_text(encoding="utf-8"))}
+    assert set(gate.REBAR_DETACHED_MODULES) == found
