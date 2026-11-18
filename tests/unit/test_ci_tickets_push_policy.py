@@ -49,7 +49,7 @@ def _on(path: Path) -> dict[str, Any]:
     PyYAML resolves the bare key ``on`` to the boolean ``True`` (YAML 1.1 truthy), so read
     both spellings rather than assuming either.
     """
-    data = yaml.safe_load(path.read_text())
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(data, dict), f"{path.name} did not parse to a mapping"
     block = data.get("on", data.get(True))
     assert isinstance(block, dict), f"{path.name} has no mapping-shaped `on:` block"

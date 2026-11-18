@@ -74,7 +74,7 @@ def _write_json_atomically(path: Path, payload: Any, *, prefix: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=prefix, suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")
         replace_with_retry(tmp, str(path))

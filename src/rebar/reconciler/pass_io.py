@@ -183,7 +183,7 @@ def _load_mapping(mapping_path: Path) -> dict:
     """
     if mapping_path.exists():
         try:
-            data = json.loads(mapping_path.read_text())
+            data = json.loads(mapping_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {}
         if not isinstance(data, dict):

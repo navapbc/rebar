@@ -455,7 +455,7 @@ def test_write_baseline_injected_replace_failure(tmp_path, monkeypatch):
 
 def _write_committed_style_baseline(path: Path, ceilings: dict[str, int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(ccb.render_baseline(ceilings), encoding="utf-8")
+    path.write_text(ccb.render_baseline(ceilings), encoding="utf-8", newline="\n")
 
 
 def test_update_stale_drains_stale_entries(tmp_path, monkeypatch):

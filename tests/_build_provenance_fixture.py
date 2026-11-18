@@ -47,4 +47,5 @@ def materialize_build_hook_package(source_repo: Path, dest: Path) -> str:
         capture_output=True,
         text=True,
         check=True,
+        encoding="utf-8",
     ).stdout.strip()

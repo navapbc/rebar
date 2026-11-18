@@ -142,7 +142,7 @@ def test_no_reconciler_code_creates_a_jira_version() -> None:
     hits = [
         f"{p.relative_to(root)}:{n}"
         for p in sorted(root.rglob("*.py"))
-        for n, line in enumerate(p.read_text().splitlines(), 1)
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
         if create.search(line)
     ]
     assert hits == []

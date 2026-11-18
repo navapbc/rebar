@@ -29,7 +29,7 @@ class SyncLogger:
     def __init__(self, log_path: Path) -> None:
         self._path = log_path
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._f = open(log_path, "a")  # noqa: SIM115
+        self._f = open(log_path, "a", encoding="utf-8")  # noqa: SIM115
 
     def log(self, event_type: str, **kwargs: Any) -> None:
         """Write a structured JSON log line.

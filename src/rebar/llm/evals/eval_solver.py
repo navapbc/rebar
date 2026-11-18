@@ -37,7 +37,7 @@ def _git_init(d: str) -> None:
     subprocess.run(["git", "init", "-q", d], check=True)
     subprocess.run(["git", "-C", d, "config", "user.email", "eval@rebar.local"], check=True)
     subprocess.run(["git", "-C", d, "config", "user.name", "rebar-eval"], check=True)
-    pathlib.Path(d, "README.md").write_text("eval fixture\n")
+    pathlib.Path(d, "README.md").write_text("eval fixture\n", encoding="utf-8")
     subprocess.run(["git", "-C", d, "add", "-A"], check=True)
     subprocess.run(["git", "-C", d, "commit", "-q", "-m", "init"], check=True)
 
@@ -49,7 +49,7 @@ def _write_files(root: str, files: dict | None) -> None:
     for rel, content in files.items():
         p = pathlib.Path(root, rel)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content)
+        p.write_text(content, encoding="utf-8")
     subprocess.run(["git", "-C", root, "add", "-A"], check=True)
     subprocess.run(["git", "-C", root, "commit", "-q", "-m", "fixture"], check=True)
 

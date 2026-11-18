@@ -153,7 +153,7 @@ def test_unwritable_dir_still_raises_the_original_parse_error(tmp_path) -> None:
 def test_config_key_is_documented_with_default_and_rotation(tmp_path) -> None:
     """docs/config.md documents the key, its default (off), and the rotation behavior."""
     root = Path(__file__).resolve().parents[2]
-    doc = (root / "docs" / "config.md").read_text()
+    doc = (root / "docs" / "config.md").read_text(encoding="utf-8")
     assert "parse_failure_artifact_dir" in doc
     # Names both the default-off posture and the rotation cap.
     lowered = doc.lower()

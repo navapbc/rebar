@@ -18,7 +18,7 @@ from typing import Any
 def _read_json(path: Path) -> dict[str, Any] | None:
     """Read a JSON file, returning None on any parse or IO error."""
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001 - helper fail-open: any parse/IO error yields None
         return None
 
