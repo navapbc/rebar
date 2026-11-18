@@ -22,6 +22,7 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from _child_diag import assert_child_was_not_signal_killed  # noqa: E402
+from _sandbox_capabilities import requires_posix_shell  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
@@ -93,6 +94,7 @@ def _stub_git(directory: Path, version: str) -> Path:
 # ── the skew case: a tree that predates the gate ─────────────────────────────
 
 
+@requires_posix_shell
 def test_absent_floor_file_does_not_fail_the_build(tree_without_floor_file: Path) -> None:
     """A change branched before the gate landed must not be failed by the gate."""
     result = _run_gate(tree_without_floor_file)
@@ -128,6 +130,7 @@ def test_absent_floor_file_emits_no_workflow_error(tree_without_floor_file: Path
 # ── the enforcing case: a tree that carries the floor file ───────────────────
 
 
+@requires_posix_shell
 def test_present_floor_file_passes_on_an_adequate_git(tree_with_floor_file: Path) -> None:
     """With the file present and a Git above the floor, the gate passes and reports both."""
     result = _run_gate(tree_with_floor_file, git_version="2.99.0")
@@ -146,6 +149,7 @@ def test_present_floor_file_still_fails_an_under_floor_git(tree_with_floor_file:
     )
 
 
+@requires_posix_shell
 def test_under_floor_diagnostic_names_version_and_upgrade_path(tree_with_floor_file: Path) -> None:
     """The under-floor failure must name required version, installed version and the fix."""
     result = _run_gate(tree_with_floor_file, git_version="2.30.2")

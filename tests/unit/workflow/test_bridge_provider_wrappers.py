@@ -14,6 +14,7 @@ from types import ModuleType
 import jsonschema
 import pytest
 import yaml
+from _sandbox_capabilities import requires_posix_shell
 
 pytestmark = pytest.mark.unit
 
@@ -136,6 +137,7 @@ def _shell_bodies() -> list[tuple[str, str]]:
     return bodies
 
 
+@requires_posix_shell
 def test_pinned_shellcheck_lints_all_provider_shell_bodies_without_skips(tmp_path: Path) -> None:
     binary = shutil.which("shellcheck")
     assert binary is not None, "shellcheck-py is a required test dependency, not an optional skip"
@@ -161,6 +163,7 @@ def test_pinned_shellcheck_lints_all_provider_shell_bodies_without_skips(tmp_pat
         assert completed.returncode == 0, f"{name}:\n{completed.stdout}{completed.stderr}"
 
 
+@requires_posix_shell
 @pytest.mark.parametrize(
     ("provider", "vendor_env"),
     [

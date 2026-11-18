@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 import rebar
@@ -166,6 +167,7 @@ def test_library_override_is_required_for_unreachable_remote(tmp_path: Path) -> 
     assert (repo / ".tickets-tracker").is_dir()
 
 
+@requires_posix_shell
 def test_force_cannot_override_an_advertised_branch_fetch_failure(
     tmp_path: Path,
 ) -> None:

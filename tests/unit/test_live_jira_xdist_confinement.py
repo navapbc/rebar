@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from _nested_pytest import run_nested_pytest
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -158,6 +159,7 @@ def _collect(tmp_path: Path, *dist_args: str, live_env: bool) -> subprocess.Comp
     )
 
 
+@requires_posix_shell
 def test_parallel_without_loadgroup_is_rejected_when_live_jira_env_is_present(
     tmp_path: Path,
 ) -> None:

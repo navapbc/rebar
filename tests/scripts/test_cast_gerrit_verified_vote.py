@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.scripts
@@ -97,6 +98,7 @@ def _run(
     )
 
 
+@requires_posix_shell
 def test_closed_change_is_a_successful_noop(tmp_path: Path) -> None:
     result = _run(tmp_path, mode="closed")
 
@@ -105,6 +107,7 @@ def test_closed_change_is_a_successful_noop(tmp_path: Path) -> None:
     assert "fatal: change is closed" in result.stderr
 
 
+@requires_posix_shell
 def test_other_vote_failures_still_fail(tmp_path: Path) -> None:
     result = _run(tmp_path, mode="fail")
 
@@ -112,6 +115,7 @@ def test_other_vote_failures_still_fail(tmp_path: Path) -> None:
     assert "permission denied" in result.stderr
 
 
+@requires_posix_shell
 def test_success_vote_uses_the_verified_label_and_run_url(tmp_path: Path) -> None:
     result = _run(tmp_path)
 
@@ -124,6 +128,7 @@ def test_success_vote_uses_the_verified_label_and_run_url(tmp_path: Path) -> Non
     assert "SUCCESS: https://github.example/repo/actions/runs/33580445347" in argv
 
 
+@requires_posix_shell
 def test_failure_vote_uses_verified_minus_one(tmp_path: Path) -> None:
     result = _run(tmp_path, VOTE_TYPE="failure")
 
@@ -133,6 +138,7 @@ def test_failure_vote_uses_verified_minus_one(tmp_path: Path) -> None:
     assert "FAILURE: https://github.example/repo/actions/runs/33580445347" in argv
 
 
+@requires_posix_shell
 def test_cancelled_vote_posts_no_verdict_label(tmp_path: Path) -> None:
     result = _run(tmp_path, VOTE_TYPE="cancelled")
 
@@ -162,6 +168,7 @@ def test_invalid_change_and_patchset_numbers_fail_before_ssh(tmp_path: Path) -> 
         assert not (case_dir / "ssh-argv.txt").exists()
 
 
+@requires_posix_shell
 def test_ssh_secret_files_are_chmod_600_and_removed_after_vote(tmp_path: Path) -> None:
     result = _run(tmp_path)
 

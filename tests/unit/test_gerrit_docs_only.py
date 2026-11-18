@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 import yaml
+from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
@@ -92,6 +93,7 @@ def test_docs_only_lane_keeps_documentation_guards_and_contract_tests() -> None:
     assert "pre-commit run check-added-large-files --all-files" in action
 
 
+@requires_posix_shell
 def test_documentation_contract_selector_keeps_unmarked_integration_modules(
     tmp_path: Path,
 ) -> None:
