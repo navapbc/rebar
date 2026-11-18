@@ -25,6 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from rebar._store.fsutil import replace_with_retry
 from rebar.reconciler.inbound_translate import _jira_key_to_local_id
 from rebar.reconciler.scratch_retention import snapshots_dir
 
@@ -343,7 +344,7 @@ def _emit_mode_manifest(
     try:
         with os.fdopen(fd, "w") as tmp_f:
             json.dump(rendered_with_meta, tmp_f, indent=2)
-        os.replace(tmp_path, str(manifest_path))
+        replace_with_retry(tmp_path, str(manifest_path))
     except BaseException:
         # Clean up the temp file on any failure.
         with contextlib.suppress(OSError):

@@ -11,6 +11,7 @@ from typing import Any
 
 import yaml
 
+from rebar._store.fsutil import replace_with_retry
 from rebar.llm.criteria.ids import criterion_prompt_id
 from rebar.llm.evals import fixture_emit
 from rebar.llm.evals.eval import validate_eval_spec
@@ -434,7 +435,7 @@ def _write_spec_atomic(path: Path, spec: dict[str, Any]) -> None:
     try:
         with tmp.open("w", encoding="utf-8") as stream:
             yaml.safe_dump(spec, stream, sort_keys=True)
-        os.replace(tmp, path)
+        replace_with_retry(tmp, path)
     except Exception:
         try:
             tmp.unlink()

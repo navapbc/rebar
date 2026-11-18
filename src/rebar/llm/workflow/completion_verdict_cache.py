@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar._config_sources import repo_root as _resolve_root
+from rebar._store.fsutil import replace_with_retry
 
 from .completion_banking import _MANIFEST_TEXT_CAP
 from .completion_prefetch import _normalize_impact
@@ -214,7 +215,7 @@ def persist_pass_verdicts(
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
                     handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-                os.replace(tmp, directory / f"{key}.json")
+                replace_with_retry(tmp, directory / f"{key}.json")
             except Exception:
                 with contextlib.suppress(OSError):
                     os.unlink(tmp)

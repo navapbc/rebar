@@ -22,6 +22,8 @@ from pathlib import Path
 from time import sleep as _sleep
 from typing import Any
 
+from rebar._store.fsutil import replace_with_retry
+
 SCHEMA_VERSION = 2
 # Older witnesses (schema 1, before the additive disposition block) still validate and
 # read — the additive fields default to null rather than failing an older reader.
@@ -282,7 +284,7 @@ def _write_detail(repo_root: Path, record: dict[str, Any], detail: dict[str, Any
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(document, stream, sort_keys=True, indent=2)
             stream.write("\n")
-        os.replace(temporary, path)
+        replace_with_retry(temporary, path)
     except BaseException:
         try:
             os.unlink(temporary)

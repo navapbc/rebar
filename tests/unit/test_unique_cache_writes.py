@@ -118,14 +118,21 @@ def _barriered_replace(monkeypatch, parties: int):
     writers have written the same pathname by the time the barrier releases, so the first
     replace consumes it and the rest raise FileNotFoundError. With unique temps every
     writer still owns its own file and all of them publish.
+
+    Each thread waits only on its FIRST publish attempt. On Windows the losing replace is
+    retried (``fsutil.replace_with_retry``); a retry that waited again would find no
+    partner and break the barrier.
     """
     from rebar._store import fsutil
 
     barrier = threading.Barrier(parties, timeout=30)
     real_replace = os.replace
+    seen = threading.local()
 
     def replace(src, dst):
-        barrier.wait()
+        if not getattr(seen, "waited", False):
+            seen.waited = True
+            barrier.wait()
         return real_replace(src, dst)
 
     monkeypatch.setattr(fsutil.os, "replace", replace)
@@ -165,8 +172,11 @@ def test_concurrent_cursor_writes_never_report_a_write_error(tmp_path, monkeypat
     never fire."""
     from rebar.review_bot import reconcile
 
-    emitted: list[str] = []
-    monkeypatch.setattr(reconcile, "_emit", lambda name, **kw: emitted.append(name), raising=True)
+    # Keep each event's kwargs: a failure must print the OSError text, not just the name.
+    emitted: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        reconcile, "_emit", lambda name, **kw: emitted.append((name, kw)), raising=True
+    )
     _barriered_replace(monkeypatch, 2)
 
     target = tmp_path / "cursor"
@@ -179,7 +189,7 @@ def test_concurrent_cursor_writes_never_report_a_write_error(tmp_path, monkeypat
     for t in threads:
         t.join(timeout=60)
 
-    assert "reconcile_cursor_write_error" not in emitted, (
+    assert "reconcile_cursor_write_error" not in [name for name, _kw in emitted], (
         f"a concurrent cursor write was silently dropped: {emitted!r}"
     )
     assert target.read_text(encoding="utf-8") in {"100", "200"}
