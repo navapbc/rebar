@@ -580,14 +580,20 @@ does not execute them.)
 
 ## Release-policy decisions (1.0)
 
-### Tag signing — SKIPPED (annotated tags + attestations instead)
-We do **not** GPG/sign release tags. Rationale: the 2026 peer baseline
-(CPython/pip/ruff/uv/pytest/httpx) signs zero new release tags — CPython dropped
-GPG at 3.14 (PEP 761); ruff/uv/httpx use lightweight tags — and artifact
-provenance is already covered by **PEP 740 attestations** + GitHub immutable
-releases (see "Supply-chain attestations" above). We keep **annotated** tags and
-immutable releases on. Revisit triggers: a workflow compromise entering the threat
-model, or a downstream consumer asking to cryptographically verify tags.
+### Tag signing — SKIPPED (lightweight tags + attestations instead)
+Release tags are **lightweight**: `release.yml`'s `github_release` job runs
+`gh release create "v<version>" --target <released SHA>`, which creates a lightweight tag
+pointing straight at the released commit (v0.13.1 through v0.16.0 are all lightweight). We
+do **not** GPG/sign release tags, and we do not create annotated ones. Rationale: the 2026
+peer baseline (CPython/pip/ruff/uv/pytest/httpx) signs zero new release tags — CPython
+dropped GPG at 3.14 (PEP 761); ruff/uv/httpx use lightweight tags — and artifact
+provenance is already covered by **PEP 740 attestations** + GitHub immutable releases (see
+"Supply-chain attestations" above). An *unsigned* annotated tag would add only a tagger
+name, date and message written by the workflow's own bot identity, which nothing can
+verify, so it adds no provenance while needing an extra privileged git-objects write in the
+post-publish job. If tags ever need to be verifiable they must be **signed**; annotation
+alone does not help. Revisit triggers: a workflow compromise entering the threat model, or
+a downstream consumer asking to cryptographically verify tags.
 
 ### Release candidates — SKIPPED (with an RC-safety constraint on release.yml)
 We do **not** ship `rc` release trains. Rationale: an RC only yields signal if
@@ -596,13 +602,15 @@ de-facto rc. Peers agree (pydantic v2 went beta→final in 13 days with zero rcs
 attrs/structlog skipped 1.0 entirely). Revisit trigger: an external adopter
 volunteering to test a pre-release.
 
-> **RC-safety constraint (today's automation is RC-unsafe).** `release.yml` fires
-> on **all** `v*` tags, passes `--latest` unconditionally to `gh release create`,
-> and runs the MCP-registry publish job. So a hypothetical **`v1.0.0rc1`** tag
-> would be marked *Latest* **and** published to the MCP registry — wrong for a
-> pre-release. **No rc-form tag may be pushed** unless `release.yml` first gains a
-> prerelease guard: detect `rc` in the tag → pass `--prerelease` (not `--latest`)
-> and skip the MCP-registry job. Use PEP 440 spelling (`1.0.0rc1`, not `-rc.1`).
+> **RC-safety constraint (today's automation is RC-unsafe).** The release is
+> dispatch-only: `release.yml` takes the version from the dispatch input
+> (`inputs.version`), passes `--latest` unconditionally to `gh release create`, and runs
+> the MCP-registry publish job. So dispatching an rc-form version
+> (`gh workflow run release.yml --ref main -f version=1.0.0rc1`) would mark it *Latest*
+> **and** publish it to the MCP registry — wrong for a pre-release. **No rc-form version
+> may be dispatched** unless `release.yml` first gains a prerelease guard: detect `rc` in
+> `inputs.version` → pass `--prerelease` (not `--latest`) and skip the MCP-registry job.
+> Use PEP 440 spelling (`1.0.0rc1`, not `-rc.1`).
 
 ### Deferrals (non-goals for now)
 - **SBOM / license-scan tooling** beyond GitHub's dependency-graph export — post-1.0.

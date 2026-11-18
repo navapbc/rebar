@@ -462,3 +462,24 @@ def test_homebrew_tap_dispatch_job() -> None:
         assert "exit 1" in branches[label] and "workflow enable" not in branches[label]
     assert run.count("gh workflow enable") == 1
     assert run.index("esac") < run.index(dispatch)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Bug inner-benign-sable — the docs describe the tag type the workflow creates
+# ══════════════════════════════════════════════════════════════════════════════
+def test_docs_tag_type_matches_workflow() -> None:
+    """`gh release create` makes a lightweight tag, and the release is dispatch-only.
+
+    docs/releasing.md claimed annotated tags and described the RC rule in terms of tag
+    pushes; both must match what release.yml does.
+    """
+    run = "\n".join(s.get("run", "") for s in _job("github_release")["steps"])
+    assert "gh release create" in run
+    assert "git tag -a" not in _text(), "release.yml now creates annotated tags; fix the doc"
+    doc = RELEASING_DOC.read_text(encoding="utf-8")
+    assert "### Tag signing — SKIPPED (lightweight tags + attestations instead)" in doc
+    assert "keep **annotated** tags" not in doc
+    for stale in ("fires on **all** `v*` tags", "No rc-form tag may be pushed"):
+        assert stale not in doc, (
+            f"docs/releasing.md still describes a tag-triggered release: {stale!r}"
+        )
