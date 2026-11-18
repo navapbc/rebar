@@ -87651,6 +87651,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:03Z"
     },
+    "c691-bbc1-4217-4cf4": {
+      "created_at": "2026-11-18T02:33:05Z",
+      "jira_id": "4599424",
+      "jira_key": "REB-7272",
+      "state": "confirmed",
+      "updated_at": "2026-11-18T02:33:09Z"
+    },
     "c6bd-b10e-74f1-407f": {
       "baseline": {
         "assignee": {
@@ -101638,10 +101645,24 @@
     },
     "e55c-20d8-c5de-4ac1": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\n\nOn 2026-11-04 a local run of the integration tier (`pytest -m integration -n 4 --dist loadgroup --max-worker-restart=0`, the second half of `make test`) on macOS at load average 25-40 failed 1 test, with 202 passed and 3 skipped in 8 min 29 s:\n\n`tests/integration/test_reconcile_live_e2e.py::test_delete_permission_probe@live_reconcile_e2e` -> `AssertionError: created issue REB-6995 never became index-visible`.\n\nThis is the same symptom as the closed bug dutiable-shaded-honeyeater (`d30c-f491-395f-432e`), fixed by Gerrit 1914 (`09abac969c`), which made the visibility poll re-query Jira instead of returning a cached miss. The symptom recurs after that fix.\n\nThe test's teardown writes `leaked.log` only when the delete fails; no `leaked.log` exists for this run, so by the teardown's own accounting REB-6995 was deleted. That was not checked in Jira.\n\nA related observation: the live tests self-skip in CI, but they run, and write to the live Jira project, in any local `make test` whose environment sets `JIRA_URL`, `JIRA_USER` and `JIRA_API_TOKEN`. Agent shells on this host set all 3, so the `make verify` that AGENTS.md requires before every push creates and deletes live REB issues.\n\nDiscovered while verifying subsolar-sonorous-puppy, whose change touches only the importer and its test.\n\n## Next check\n\nTime the visibility poll on a failing run (attempts made, and elapsed time against the poll budget), and query REB-6995 read-only to confirm it is gone. That tests whether the poll is exhausting its budget under host load or is ending early.\n\n## Acceptance Criteria\n\n- [ ] The cause of the recurrence is identified from a timed failing run.\n- [ ] `test_delete_permission_probe` passes in the full integration tier under host load, or the tier no longer runs live-Jira writes by default in local `make test`, with the chosen behaviour recorded.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nOn 2026-11-04, a local integration-tier run on macOS at load 25-40 failed `tests/integration/test_reconcile_live_e2e.py::test_delete_permission_probe` with `AssertionError: created issue REB-6995 never became index-visible`. This is the same symptom as the closed bug dutiable-shaded-honeyeater, which Gerrit 1914 fixed.\n\nThe cause of the recurrence is unknown, and the test cannot reveal it. `_issue_exists` and `_poll_until_visible` (tests/integration/test_reconcile_live_e2e.py:354-419) treat every search exception as \"not visible\". A failing run therefore cannot tell 120 s of index lag apart from 120 s of rejected searches.\n\nEstablished 2026-11-17 PST:\n- REB-6995 is gone from Jira.\n- The probe is `@pytest.mark.live`, so it is out of `make test`/CI (bug 5f29).\n- 3 timed rounds (REB-7248, REB-7249, REB-7250) were each visible on the first attempt.\n\nThe operator decided on 2026-11-17 (see comment) to land poll logging and disposable naming, then run the probe repeatedly in production Jira, then clean up every probe-created issue from Jira and rebar before closing.\n\n## Approach\n1. **Per-attempt logging in the poll (test code only).**\n   - Add `_search_outcome(client, jql, key) -> tuple[bool, str]`. It runs the fresh search and returns `(found, note)`. The note is one of:\n     - `\"ok N hits\"` for a successful search;\n     - `\"error HTTP <code>: <reason/message>\"` for a `urllib.error.HTTPError`, which is what `_direct_rest_post_json` raises on non-2xx (`src/rebar/reconciler/adapters/jira/acli_rest.py:282-289`);\n     - `\"error <ExcType>: <message>\"` for any other exception.\n   - `_issue_exists` and `_poll_until_visible` use it.\n   - `_poll_until_visible` gains an optional `attempts: list[str] | None` argument. Each attempt appends `t=<s>s key: <note>; summary: <note>`. The return type stays `bool`, so the existing callers and tests keep working.\n   - The probe passes a list, and its \"never became index-visible\" assertion message includes every attempt line.\n   - No config key, env var or flag.\n2. **Disposable naming (probe inputs only).** The probe's `create_issue` input becomes:\n   - summary `\"[rebar probe - safe to delete] DELETE-ME-d01e delete-permission probe\"`, keeping the existing `DELETE_ME_MARKER`, whose only use is this line (`:304`);\n   - description `\"Disposable artifact of rebar's live delete-permission probe (tests/integration/test_reconcile_live_e2e.py). It can, and should, be deleted if it is still present after testing finishes.\"`.\n   - `AcliClient.create_issue` already forwards `title`/`description` (`src/rebar/reconciler/adapters/jira/acli.py:337-355`). No shared create code changes.\n3. After the change merges, from a worktree at origin/main:\n   - Run `pytest -m live tests/integration/test_reconcile_live_e2e.py::test_delete_permission_probe` up to 20 times, one at a time, stopping at the first failure.\n   - Record each created key (from the log) and each failure's attempt lines on this ticket.\n   - Then delete any surviving probe issue from Jira, and archive any rebar copy found by key or by prefix search. This includes REB-7248, REB-7249 and REB-7250.\n   - Record per-key confirmation from both systems on this ticket.\n\n## Scope\n- `tests/integration/test_reconcile_live_e2e.py`: `_search_outcome`, the `_issue_exists`/`_poll_until_visible` changes, the probe's summary, description and assertion message, and new offline tests.\n\n## Testing\n- New offline tests, with fake clients and the existing `_FakeClock`:\n  - A client whose search raises `urllib.error.HTTPError(\u2026, 429, \"Too Many Requests\", \u2026)` makes `_poll_until_visible` return False. Every attempt line contains `error HTTP 429: Too Many Requests`.\n  - A client returning `[]` records `ok 0 hits`.\n  - A client visible at t=60 returns True, and its last attempt line shows `ok 1 hits`.\n- A test asserts the probe's create payload summary starts with `[rebar probe - safe to delete]` and its description contains `should, be deleted`. It does this by extracting the probe's constants, so no live call is made.\n- The existing poll tests still pass.\n\n## Acceptance Criteria\n- [ ] Each poll attempt records whether \"not visible\" came from a successful empty search or from a search error with its HTTP status and message, and a failed probe's assertion message includes those lines. Checked by the new offline tests.\n- [ ] Probe-created issues carry the disposable prefix and deletion note. Checked by the new test.\n- [ ] `make verify` exits 0, and the change merges with LLM-Review +1 and Verified +1.\n- [ ] After the merge, up to 20 live probe runs are recorded on this ticket, with every created key and any failure's attempt lines.\n- [ ] Every probe-created key (including REB-7248, REB-7249 and REB-7250) is confirmed absent from Jira and from the rebar store, recorded per key on this ticket.\n- [ ] The cause of the recurrence is identified from a logged failing run and fixed in a follow-up change. If no failure occurs in the bounded runs, this box stays open and so does the bug.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Live delete-permission probe flake recurs after the visibility-poll fix"
       },
       "created_at": "2026-11-04T15:33:35Z",
@@ -113465,6 +113486,7 @@
       "updated_at": "2026-08-15T15:16:38Z"
     },
     "jira-reb-1936": {
+      "absent_404_count": 1,
       "baseline": {
         "assignee": null,
         "description": "",
@@ -113476,7 +113498,7 @@
       "jira_key": "REB-1981",
       "peer_parent": "",
       "state": "confirmed",
-      "updated_at": "2026-08-15T15:16:39Z"
+      "updated_at": "2026-11-18T02:33:02Z"
     },
     "jira-reb-2372": {
       "baseline": {
@@ -119101,7 +119123,9 @@
     "1794952768516291628": "__rebar_unknown_comment_id__",
     "1794957663618378961": "__rebar_unknown_comment_id__",
     "1794958893154907161": "__rebar_unknown_comment_id__",
-    "1794962969575015811": "__rebar_unknown_comment_id__"
+    "1794962969575015811": "__rebar_unknown_comment_id__",
+    "1794968612349616009": "__rebar_unknown_comment_id__",
+    "1794968632497096221": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -124706,6 +124730,7 @@
     "REB-7251": "567b-e8a3-7db6-4404",
     "REB-726": "a5df-978c-f034-431e",
     "REB-727": "aa7b-2cb7-9031-49a5",
+    "REB-7272": "c691-bbc1-4217-4cf4",
     "REB-728": "c672-5111-8201-4fa7",
     "REB-729": "cc7f-612b-cac1-4831",
     "REB-73": "3156-9092-1967-4367",
