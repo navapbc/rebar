@@ -49,17 +49,25 @@ def hangs_forever() -> None:
         time.sleep(3600)
 
 
-def hard_crash() -> None:
-    """Die on a signal, standing in for a segfaulting C-extension parse.
+#: The exit status Windows gives a process killed by an access violation
+#: (STATUS_ACCESS_VIOLATION, 0xC0000005), as the signed int ``os._exit`` accepts.
+_WINDOWS_ACCESS_VIOLATION_EXIT = -1073741819
 
-    Sends SIGKILL to itself so the worker dies with a negative exitcode (which the
-    harness maps to abstain(parse_error)) WITHOUT the faulthandler C-traceback dump
-    an os.abort()/SIGSEGV would spew into captured test output. The harness maps any
-    signal death identically, so the choice of signal is immaterial to what's tested
-    — a hard crash in an in-process binding must never take down the host.
+
+def hard_crash() -> None:
+    """Die the way a segfaulting C-extension parse dies, on this platform.
+
+    POSIX: SIGKILL to itself, so the worker dies with a negative exitcode WITHOUT the
+    faulthandler C-traceback dump an os.abort()/SIGSEGV would spew into captured test
+    output; the harness maps any signal death identically. Windows has no signal death:
+    a native crash ends the process with its NTSTATUS code, which is the only thing the
+    parent observes, so the worker exits with the access-violation status. Either way the
+    harness must map it to abstain(parse_error) and the host must survive.
     """
     import signal
 
     faulthandler = __import__("faulthandler")
     faulthandler.disable()
+    if not hasattr(signal, "SIGKILL"):  # Windows
+        os._exit(_WINDOWS_ACCESS_VIOLATION_EXIT)
     os.kill(os.getpid(), signal.SIGKILL)

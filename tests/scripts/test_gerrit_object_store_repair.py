@@ -61,6 +61,11 @@ def test_gerrit_config_accepts_thin_pack_bases_outside_the_reachability_walk() -
     assert jgit.returncode == 1, "the key belongs in gerrit.config only"
 
 
+@pytest.mark.skipif(
+    not hasattr(os, "getuid"),
+    reason="the materializer chowns the Gerrit site to a POSIX uid:gid on the Linux host; "
+    "Windows has no uid, and Linux CI gates this script",
+)
 def test_jgit_materializer_seeds_and_validates_the_receive_section(tmp_path: Path) -> None:
     site = tmp_path / "site"
     subprocess.run(

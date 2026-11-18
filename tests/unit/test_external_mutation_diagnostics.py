@@ -7,9 +7,12 @@ is distinguishable from a product failure."""
 
 from __future__ import annotations
 
+import signal
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(_TESTS_DIR) not in sys.path:
@@ -73,6 +76,9 @@ def test_head_move_message_does_not_assert_the_test_committed():
     assert "outside" in lowered or "external" in lowered
 
 
+@pytest.mark.skipif(
+    not hasattr(signal, "SIGKILL"), reason="signal death is POSIX-only (no SIGKILL on Windows)"
+)
 def test_child_failure_detail_names_the_signal_for_a_killed_child():
     """`kill -9` on a browser probe yielded `produced no output; stderr:` with an
     EMPTY stderr and no other information — returncode was -9 and never reported

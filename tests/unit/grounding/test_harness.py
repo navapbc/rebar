@@ -160,14 +160,49 @@ def test_worker_hang_is_reaped_and_maps_to_timeout() -> None:
 
 
 def test_worker_hard_crash_maps_to_parse_error_not_host_crash() -> None:
-    # os.abort() in the worker (SIGABRT) stands in for a segfaulting C-extension
-    # parse. The host must survive and record a parse_error abstain.
+    # wp.hard_crash dies as a segfaulting C-extension parse would on this platform
+    # (signal death on POSIX, an NTSTATUS exit on Windows). The host must survive and
+    # record a parse_error abstain.
     r = harness.run_in_worker(wp.hard_crash, backend="tree-sitter")
     assert r.abstained and r.abstain_reason == "parse_error"
     ev.validate(r.as_abstain(job=ev.JOB_SMELL, provenance_tier=ev.TIER_T1))
     # Prove the host is unharmed: a subsequent worker call still works.
     again = harness.run_in_worker(wp.returns_value, 5, backend="ts")
     assert again.completed and again.value == 10
+
+
+@pytest.mark.parametrize(
+    ("exitcode", "os_name", "expected"),
+    [
+        (-9, "posix", "killed by SIGKILL"),
+        (-9, "nt", "killed by SIGKILL"),
+        (0xC0000005, "nt", "crashed with NTSTATUS 0xc0000005"),
+        (0xC0000409, "nt", "crashed with NTSTATUS 0xc0000409"),
+    ],
+)
+def test_a_crash_exit_is_described_on_both_platforms(
+    exitcode: int, os_name: str, expected: str
+) -> None:
+    """Signal death (POSIX) and a native-exception exit (Windows NTSTATUS error severity)
+    are both crashes, so both reach parse_error. Pure, so it runs on every platform."""
+    assert harness._crash_description(exitcode, os_name) == expected
+
+
+@pytest.mark.parametrize(
+    ("exitcode", "os_name"),
+    [
+        (None, "posix"),
+        (0, "nt"),
+        (3, "nt"),
+        (3, "posix"),
+        (0x7FFFFFFF, "nt"),
+        (0xC0000005, "posix"),
+    ],
+)
+def test_an_ordinary_exit_is_not_a_crash(exitcode: int | None, os_name: str) -> None:
+    """A plain positive exit (os.abort()'s 3 on Windows, a sys.exit) stays `other`; an
+    NTSTATUS-looking code means nothing off Windows."""
+    assert harness._crash_description(exitcode, os_name) is None
 
 
 def test_worker_large_result_does_not_deadlock_into_a_false_timeout() -> None:

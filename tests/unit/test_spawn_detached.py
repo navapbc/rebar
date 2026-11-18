@@ -70,6 +70,12 @@ class _CapturedSpawn:
         self.kwargs: dict | None = None
 
 
+def _stub_subprocess(popen: object) -> types.SimpleNamespace:
+    """The real module's attributes with ``Popen`` swapped, so platform constants the
+    detach kwargs read (``DETACHED_PROCESS``/``CREATE_NO_WINDOW`` on Windows) stay real."""
+    return types.SimpleNamespace(**{**vars(subprocess), "Popen": popen})
+
+
 @pytest.fixture
 def captured(monkeypatch: pytest.MonkeyPatch) -> _CapturedSpawn:
     """Capture the Popen call by patching the module's OWN `subprocess` reference — never the
@@ -80,11 +86,7 @@ def captured(monkeypatch: pytest.MonkeyPatch) -> _CapturedSpawn:
         cap.argv, cap.kwargs = argv, kwargs
         return object()
 
-    monkeypatch.setattr(
-        _proc,
-        "subprocess",
-        types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
-    )
+    monkeypatch.setattr(_proc, "subprocess", _stub_subprocess(_fake_popen))
     return cap
 
 
@@ -120,8 +122,13 @@ def test_spawn_detached_builds_the_bare_python_reentry(
     assert captured.kwargs["stdin"] == subprocess.DEVNULL
     assert captured.kwargs["stdout"] == subprocess.DEVNULL
     assert captured.kwargs["stderr"] == subprocess.DEVNULL
-    assert captured.kwargs["start_new_session"] is True  # POSIX CI
-    assert captured.kwargs["close_fds"] is True
+    if os.name == "nt":
+        assert captured.kwargs["creationflags"] == (
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        )
+    else:
+        assert captured.kwargs["start_new_session"] is True
+        assert captured.kwargs["close_fds"] is True
 
 
 def test_spawn_detached_hands_every_argument_to_the_entry_point(
@@ -194,11 +201,7 @@ def test_spawn_detached_reraises_so_each_caller_keeps_its_own_catch(
     def _boom(argv: list[str], **kwargs: object) -> object:
         raise OSError("no such executable")
 
-    monkeypatch.setattr(
-        _proc,
-        "subprocess",
-        types.SimpleNamespace(Popen=_boom, DEVNULL=subprocess.DEVNULL),
-    )
+    monkeypatch.setattr(_proc, "subprocess", _stub_subprocess(_boom))
 
     with pytest.raises(OSError, match="no such executable"):
         _proc.spawn_detached(

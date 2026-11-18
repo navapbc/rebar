@@ -88,7 +88,7 @@ def test_probe_fails_open_on_an_unexpected_error(tmp_path, monkeypatch):
     def enolck(*_a, **_kw):
         raise OSError(errno.ENOLCK, "no locks available")
 
-    monkeypatch.setattr(_kernel.fcntl, "flock", enolck)
+    monkeypatch.setattr(_kernel, "take_exclusive", enolck)
     assert _lock.write_lock_is_busy(str(tmp_path)) is False
 
 
@@ -107,7 +107,7 @@ def test_probe_reports_busy_for_a_contended_fcntl_leg(tmp_path, monkeypatch):
     def eagain(*_a, **_kw):
         raise OSError(errno.EAGAIN, "would block")
 
-    monkeypatch.setattr(_kernel.fcntl, "flock", eagain)
+    monkeypatch.setattr(_kernel, "take_exclusive", eagain)
     assert _lock.write_lock_is_busy(str(tmp_path)) is True
 
 

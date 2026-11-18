@@ -198,7 +198,9 @@ def test_a_real_timeout_leaves_neither_the_child_nor_its_grandchild(
         (1, "BRIDGE_STATE: in-flight\n", ("operational_failure", 1)),
         (3, "", ("operational_failure", 1)),
         (75, "", ("operational_failure", 1)),
-        (-signal.SIGKILL, "", ("operational_failure", 1)),
+        # -9 is a SIGKILLed child's returncode; a literal keeps this module collectable on
+        # Windows, which has no signal.SIGKILL.
+        (-9, "", ("operational_failure", 1)),
     ],
 )
 def test_the_runner_names_the_state_without_recanonicalising_the_exit(

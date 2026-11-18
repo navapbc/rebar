@@ -383,15 +383,14 @@ def run_in_worker(
         exitcode = proc.exitcode
 
         if payload is None:
-            if exitcode is not None and exitcode < 0:
-                signame = _signal_name(-exitcode)
+            crash = _crash_description(exitcode, os.name)
+            if crash is not None:
                 return RunResult(
                     backend=backend,
                     completed=False,
                     abstain_reason="parse_error",
                     version=version,
-                    detail=f"{backend} worker killed by {signame} "
-                    "(in-process binding crashed or was killed)",
+                    detail=f"{backend} worker {crash} (in-process binding crashed or was killed)",
                 )
             return RunResult(
                 backend=backend,
@@ -432,6 +431,29 @@ def _reap_worker(proc: Any) -> None:
         proc.join(_DRAIN_SECONDS)
         if proc.is_alive():
             logger.warning("grounding worker PID %s survived SIGKILL (leaked)", proc.pid)
+
+
+#: Windows reports a process killed by an unhandled native exception (access violation,
+#: stack overrun, fail-fast) with the exception's NTSTATUS code as its exit code. Error
+#: severity sets both top bits, so every such exit is at least this value. POSIX reports
+#: the same event as a negative exit code (signal death).
+_NTSTATUS_ERROR_SEVERITY = 0xC0000000
+
+
+def _crash_description(exitcode: int | None, os_name: str) -> str | None:
+    """Describe a worker exit that means it crashed or was killed, else ``None``.
+
+    POSIX: a negative exit code is death by signal ``-exitcode``. Windows: an exit code
+    with NTSTATUS error severity is death by that native exception. Any other exit
+    (including a plain positive code such as 3) is not a crash.
+    """
+    if exitcode is None:
+        return None
+    if exitcode < 0:
+        return f"killed by {_signal_name(-exitcode)}"
+    if os_name == "nt" and exitcode >= _NTSTATUS_ERROR_SEVERITY:
+        return f"crashed with NTSTATUS {exitcode:#010x}"
+    return None
 
 
 def _signal_name(signum: int) -> str:
