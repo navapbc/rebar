@@ -14,13 +14,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from rebar._store import lock_kernel
 from rebar._store.git_outcome import is_ref_cas_mismatch, is_watchdog_timeout
 from rebar._store.gitutil import fetch_coordination_lock, run_git_bounded
-
-try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
-    import fcntl
-except ImportError:  # pragma: no cover - platform-dependent
-    fcntl = None  # type: ignore[assignment]
 
 # stderr fragments that mean "the remote rejected us for AUTH reasons" — surfaced as a
 # credential error with an actionable remedy rather than a raw git dump.
@@ -60,36 +56,20 @@ class SnapshotRefError(SnapshotError):
 
 @contextmanager
 def interprocess_lock(lock_path: Path) -> Iterator[None]:
-    """Hold an exclusive process lock via ``flock`` or atomic-``mkdir`` fallback.
+    """Hold an exclusive cross-process lock on ``lock_path``, waiting until it is free.
 
-    The fallback may permit redundant work but cannot change correctness."""
+    :mod:`rebar._store.lock_kernel` takes ``flock`` on POSIX and ``msvcrt.locking`` on
+    Windows. The kernel releases it if the holder dies, so a crash never strands it."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    if fcntl is not None:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        lock_kernel.take_blocking_exclusive(fd)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
             yield
         finally:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            finally:
-                os.close(fd)
-        return
-    # Fallback: atomic mkdir spin-lock.
-    mkdir_lock = lock_path.with_suffix(lock_path.suffix + ".d")
-    while True:
-        try:
-            os.mkdir(str(mkdir_lock))
-            break
-        except FileExistsError:
-            time.sleep(0.02)
-    try:
-        yield
+            lock_kernel.release_exclusive(fd)
     finally:
-        try:
-            os.rmdir(str(mkdir_lock))
-        except OSError:  # pragma: no cover - best effort
-            pass
+        os.close(fd)
 
 
 # In-process fetch coalescing: at most one fetch per repo at a time within this process

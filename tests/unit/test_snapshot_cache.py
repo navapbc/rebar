@@ -152,16 +152,28 @@ def test_open_reader_survives_eviction_then_relookup_misses(store, repo):
 
     # Reader opens the file up front (holds an fd).
     fh = cache.open_in_snapshot(h, "f.txt", "rb")
+    trash = store / "trash-x"
     try:
         # Janitor-style eviction: rename away (atomic disappearance) THEN rmtree — never
         # an in-place delete of a live entry.
-        trash = store / "trash-x"
-        os.rename(dest, trash)
-        shutil.rmtree(trash)
-        # The open fd still reads the evicted content (POSIX delete-on-last-close).
-        assert fh.read() == b"content\n"
+        if os.name == "nt":
+            # Windows refuses to rename a directory holding an open file. The janitor's
+            # _evict treats that OSError as "nothing reclaimed" and keeps the entry, so
+            # the live reader is protected by the refusal instead of by delete-on-close.
+            with pytest.raises(PermissionError):
+                os.rename(dest, trash)
+            assert fh.read() == b"content\n"
+        else:
+            os.rename(dest, trash)
+            shutil.rmtree(trash)
+            # The open fd still reads the evicted content (POSIX delete-on-last-close).
+            assert fh.read() == b"content\n"
     finally:
         fh.close()
+    if os.name == "nt":
+        # With the reader gone the same eviction proceeds.
+        os.rename(dest, trash)
+        shutil.rmtree(trash)
 
     # The entry is gone from the canonical path; a new lookup cleanly misses + re-heals.
     assert not dest.exists()

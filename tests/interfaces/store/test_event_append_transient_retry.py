@@ -8,6 +8,7 @@ non-transient failures must still surface immediately.
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -310,6 +311,18 @@ def _loose_object_path(tracker: str, relpath: str) -> Path:
     return Path(op) if os.path.isabs(op) else Path(tracker) / op
 
 
+def _unlink_git_object(path: Path, *, missing_ok: bool = False) -> None:
+    """Delete a git object file. Git writes objects read-only, and Windows refuses to
+    delete a read-only file (WinError 5), so clear that bit first."""
+    try:
+        path.chmod(stat.S_IWRITE | stat.S_IREAD)
+    except FileNotFoundError:
+        if missing_ok:
+            return
+        raise
+    path.unlink()
+
+
 def _plant_poison(tracker: str, path: str = "tk-poison/evt.json") -> str:
     """Stage ``path`` then DELETE its loose object — an index entry whose object VANISHED,
     exactly as a gc repack / partial write under pressure leaves it. Left staged, it poisons
@@ -318,7 +331,7 @@ def _plant_poison(tracker: str, path: str = "tk-poison/evt.json") -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text('{"poison":1}')
     subprocess.run(["git", "-C", tracker, "add", "--", path], check=True)
-    _loose_object_path(tracker, path).unlink()
+    _unlink_git_object(_loose_object_path(tracker, path))
     return path
 
 

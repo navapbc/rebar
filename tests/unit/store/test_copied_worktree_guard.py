@@ -162,6 +162,9 @@ def test_copy_whose_original_now_uses_another_gitdir_is_not_judged(tmp_path: Pat
     _, wt = _repo_with_worktree(root)
     copy = root / "copy"
     shutil.copytree(wt, copy, symlinks=True)
+    # Git for Windows marks a worktree's .git file hidden, and Windows refuses to open a
+    # hidden file for overwrite (CREATE_ALWAYS), so replace the file rather than rewrite it.
+    (wt / ".git").unlink()
     (wt / ".git").write_text(f"gitdir: {root / 'elsewhere'}\n", encoding="utf-8")
     assert StorePaths(str(copy)).copied_worktree_origin() is None
 

@@ -281,7 +281,6 @@ jobs:
           uv run --no-sync pytest -m "not integration and not external"
           -n 4 --dist worksteal -q -p no:cacheprovider
           --timeout=600 --timeout-method=thread
-          '@.github/windows-sweep-deselect/file-locks.args'
           '@.github/windows-sweep-deselect/hardcoded-tmp.args'
           '@.github/windows-sweep-deselect/max-path.args'
           '@.github/windows-sweep-deselect/nested-pytest-plugins.args'
