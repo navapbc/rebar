@@ -52,4 +52,4 @@ def test_a_second_call_does_not_stack_the_shim_entry() -> None:
     once = child_env({}, hlc_now=7)
     twice = child_env(once, rename_barrier=Path("/tmp/barrier"))
     assert twice["PYTHONPATH"].split(os.pathsep) == [str(SHIM_DIR)]
-    assert twice[RENAME_BARRIER_ENV] == "/tmp/barrier"
+    assert twice[RENAME_BARRIER_ENV] == str(Path("/tmp/barrier"))

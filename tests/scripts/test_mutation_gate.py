@@ -1508,3 +1508,58 @@ def test_mutation_testing_docs_define_phased_policy_without_legacy_budgets() -> 
     failures = [description for description, satisfied in requirements.items() if not satisfied]
 
     assert failures == [], "documentation contract violations:\n- " + "\n- ".join(failures)
+
+
+def _tmpdir_root(tmp_path: Path) -> Path:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
+    return root
+
+
+def test_shard_children_get_a_writable_temp_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Shard children must not fall back to the checkout for temp files.
+
+    The sandbox makes the system temp dir read-only, so ``tempfile.gettempdir()`` in
+    the child falls back to the working directory, the repo root, and the repo-root
+    leak guard fails the clean run. Both sandboxed children (the clean test run and
+    the mutmut run) must see TMPDIR at the writable pytest base.
+    """
+    gate = _load()
+    root = _tmpdir_root(tmp_path)
+    seen: list[dict[str, str]] = []
+
+    def fake_run(argv, *, cwd, env=None):
+        seen.append(dict(env or {}))
+        # Pass the clean run so execute_shard reaches the mutmut run, then stop there.
+        return subprocess.CompletedProcess(argv, 0 if len(seen) == 1 else 1, "", "")
+
+    monkeypatch.setattr(gate, "_run", fake_run)
+    monkeypatch.setattr(gate.mutation_sandbox, "wrap", lambda argv, **_: list(argv))
+    with pytest.raises(gate.GateError, match="mutmut run exited"):
+        gate.execute_shard(root, _shard(gate), tmp_path / "artifacts", "head")
+    basetemp = root / ".mutation-pytest"
+    assert [env.get("TMPDIR") for env in seen] == [str(basetemp)] * 2
+    assert basetemp.is_dir(), "TMPDIR must exist before the child starts"
+
+
+def test_survivor_diagnosis_gets_a_writable_temp_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The survivor re-run executes mutated code in the same sandbox, so it needs the
+    same writable TMPDIR as execute_shard's children."""
+    gate = _load()
+    root = _tmpdir_root(tmp_path)
+    seen: list[dict[str, str]] = []
+
+    def fake_run(argv, *, cwd, env=None):
+        seen.append(dict(env or {}))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(gate, "_run", fake_run)
+    monkeypatch.setattr(gate.mutation_sandbox, "wrap", lambda argv, **_: list(argv))
+    gate._diagnose_non_killed(root, _run(gate, {"m.x_f__mutmut_1": "survived"}), tmp_path)
+    assert seen, "survivor diagnosis never re-ran the mutant"
+    assert seen[0].get("TMPDIR") == str(root / ".mutation-pytest")
