@@ -167,6 +167,37 @@ def _schema_review_result(_case: dict, out: dict) -> ScoreResult:
         return ScoreResult(True, False, str(exc))
 
 
+def _schema_plan_review_findings(_case: dict, out: dict) -> ScoreResult:
+    """A plan-review criterion output must satisfy the ``plan_review_findings`` contract --
+    the Pass-1 shape (``finding``, ``criteria``, ``evidence``, ...) the criterion arm returns,
+    NOT ``review_result`` (whose findings require ``dimension``; scoring Pass-1 output against
+    it failed every fired case -- bug newborn-advanced-hoopoe).
+
+    The contract registers on import of ``plan_review.passes``; registering here (idempotent)
+    keeps ``response_model_for`` from silently falling back to the review_result model. The
+    solver normalizes a missing ``finding`` to ``""``, so an empty claim also fails."""
+    from pydantic import BaseModel, ValidationError
+
+    from rebar.llm import contracts
+    from rebar.llm.plan_review import passes
+
+    if not isinstance(out, dict):
+        return ScoreResult(True, False, "output is not a dict")
+    findings = out.get("findings")
+    if not isinstance(findings, list):
+        return ScoreResult(True, False, "plan-review output has no `findings` list")
+    passes.register_contracts()
+    try:
+        model: type[BaseModel] = contracts.response_model_for("plan_review_findings")
+        model.model_validate(out)
+    except ValidationError as exc:
+        return ScoreResult(True, False, f"plan_review_findings contract: {exc}")
+    for f in findings:
+        if not str(f.get("finding") or "").strip():
+            return ScoreResult(True, False, "a finding has an empty `finding` claim")
+    return ScoreResult(True, True)
+
+
 def _schema_verdict(_case: dict, out: dict) -> ScoreResult:
     """completion_verdict contract: verdict in {PASS,FAIL}; FAIL<=>findings; every
     FAIL finding carries at least one citation (the source-citation contract)."""
@@ -294,6 +325,10 @@ def _attributes_criterion(case: dict, out: dict) -> ScoreResult:
         return _NA
     needle = str(crit).lower()
     for f in _findings(out):
+        # A Pass-1 finding carries its attribution in the `criteria` LIST: exact element match,
+        # so G3 never credits G33 (bug newborn-advanced-hoopoe).
+        if needle in {str(c).lower() for c in (f.get("criteria") or [])}:
+            return ScoreResult(True, True)
         hay = " ".join(str(f.get(k, "")) for k in ("criterion", "dimension", "title", "detail"))
         if needle in hay.lower():
             return ScoreResult(True, True)
@@ -422,7 +457,7 @@ def _no_sycophancy(case: dict, out: dict) -> ScoreResult:
 REGISTRY: dict[str, Scorer] = {
     # schema / contract
     "emits_valid_review_result": _schema_review_result,
-    "emits_valid_findings": _schema_review_result,
+    "emits_valid_findings": _schema_plan_review_findings,
     "emits_valid_verdict": _schema_verdict,
     "emits_valid_verification": _schema_verification,
     # code-review (story f93a): findings-based, NOT the FAIL/BLOCK verdict path

@@ -5,7 +5,10 @@ strict validator is stdlib + the registry."""
 from __future__ import annotations
 
 import glob
+import subprocess
+import sys
 
+import pytest
 import yaml
 
 from rebar.llm.evals import eval as ev
@@ -292,3 +295,117 @@ def test_extra_findings_do_not_break_a_full_cover() -> None:
     out = {"findings": [{"criterion": "AC1"}, {"criterion": "AC2"}, {"criterion": "AC9 noise"}]}
     r = sc.score("enumerates_all_unmet_criteria", _TWO, out)
     assert r.applicable is True and r.passed is True
+
+
+# ── emits_valid_findings scores the plan_review_findings contract (bug newborn-advanced-hoopoe) ──
+
+_CRITERION_ID_SPECS = {
+    "plan-review-G7",
+    "plan-review-ac-process-gate",
+    "plan-review-asserted-capability",
+    "plan-review-decomp-shape",
+    "plan-review-evidence-kind",
+    "plan-review-necessity",
+    "plan-review-no-file-impact",
+}
+
+
+def _criterion_id_specs_using_emits_valid_findings() -> dict[str, dict]:
+    from rebar.llm.evals import eval_solver
+
+    found: dict[str, dict] = {}
+    for p in sorted(glob.glob("src/rebar/llm/eval_specs/*.eval.yaml")):
+        with open(p) as fh:
+            spec = yaml.safe_load(fh.read())
+        names = {s.get("name") for s in spec.get("scorers", [])}
+        prompt = spec["prompt"]
+        if "emits_valid_findings" in names and eval_solver._criterion_id(prompt, ".") is not None:
+            found[prompt] = spec
+    return found
+
+
+def test_the_criterion_id_specs_using_emits_valid_findings_are_the_expected_set() -> None:
+    assert set(_criterion_id_specs_using_emits_valid_findings()) == _CRITERION_ID_SPECS
+
+
+@pytest.mark.parametrize("prompt_id", sorted(_CRITERION_ID_SPECS))
+def test_a_fired_criterion_arm_finding_is_a_valid_plan_review_finding(prompt_id) -> None:
+    from rebar.llm.evals import eval_solver
+    from rebar.llm.runner import FakeRunner
+
+    spec = _criterion_id_specs_using_emits_valid_findings()[prompt_id]
+    case = next(c for c in spec["dataset"] if c.get("expect") == "finding")
+    cid = eval_solver._criterion_id(prompt_id, ".")
+    fake = FakeRunner(findings=[{"finding": "gap", "criteria": [cid], "evidence": ["q"]}])
+    out = eval_solver.run_case(prompt_id, case, runner=fake, repo_root=".")
+    assert out["findings"], "the fake finding must survive the solver"
+    res = sc.score("emits_valid_findings", case, out)
+    assert res.passed is True, res.detail
+    assert "dimension" not in res.detail
+    assert sc.score("emits_valid_findings", case, {"findings": []}).passed is True
+
+
+def test_emits_valid_findings_registers_its_contract_in_a_fresh_interpreter() -> None:
+    # `import rebar` already imports plan_review.passes (which registers the contract), so the
+    # fresh interpreter UNREGISTERS it first: the scorer must then register it itself rather
+    # than fall back to the review_result model, which would reject the missing `dimension`.
+    script = (
+        "from rebar.llm import contracts\n"
+        "from rebar.llm.evals import eval_scorers as sc\n"
+        "contracts._CONTRACTS.pop('plan_review_findings')\n"
+        "r = sc.score('emits_valid_findings', {}, "
+        "{'findings': [{'finding': 'x', 'criteria': ['G7']}]})\n"
+        "assert r.passed, r.detail\n"
+        "assert 'plan_review_findings' in contracts._CONTRACTS\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False
+    )
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.parametrize(
+    "out",
+    [
+        {"findings": [{"severity": "high", "dimension": "x", "detail": "d"}]},
+        {"findings": [{"finding": "  ", "criteria": ["G7"]}]},
+        {"findings": "not a list"},
+        {},
+        "not a dict",
+    ],
+)
+def test_emits_valid_findings_rejects_malformed_plan_review_output(out) -> None:
+    assert sc.score("emits_valid_findings", {}, out).passed is False
+
+
+def test_attributes_g3_vs_g4_credits_a_container_arm_finding() -> None:
+    from rebar.llm.evals import eval as ev
+    from rebar.llm.evals import eval_solver
+    from rebar.llm.runner import FakeRunner
+
+    spec = ev.load_eval_spec("plan-review-container")
+    case = next(
+        c for c in spec["dataset"] if c.get("criterion") == "G3" and c.get("expect") == "finding"
+    )
+    fake = FakeRunner(findings=[{"finding": "gap", "criteria": ["G3"], "evidence": ["q"]}])
+    out = eval_solver.run_case("G3", case, runner=fake, repo_root=".")
+    assert out["findings"]
+    assert sc.score("attributes_g3_vs_g4", case, out).passed is True
+
+
+@pytest.mark.parametrize(
+    ("case_criterion", "finding_criteria", "credited"),
+    [
+        ("G3", ["G4"], False),
+        ("G3", ["G3", "G4"], True),
+        ("G4", ["G3", "G4"], True),
+        ("G3", ["G33"], False),
+        ("G3", ["g3"], True),
+    ],
+)
+def test_attributes_g3_vs_g4_matches_the_criteria_list_exactly(
+    case_criterion, finding_criteria, credited
+) -> None:
+    case = {"expect": "finding", "criterion": case_criterion}
+    out = {"findings": [{"finding": "x", "criteria": finding_criteria}]}
+    assert sc.score("attributes_g3_vs_g4", case, out).passed is credited

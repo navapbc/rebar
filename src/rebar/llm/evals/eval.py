@@ -437,6 +437,7 @@ def calibrate_criterion(
         )
     if solve is None:
         solve = _criterion_solver(repo_root=repo_root, runner=runner)
+    solve = _gated(solve, repo_root=repo_root)
 
     # RUN the finder over EVERY case (must-fire / must-not-fire AND the discrimination axis
     # cases execute live), but the calibration VIEW (recall/false-accept/κ/agreement) is
@@ -496,6 +497,28 @@ def calibrate_criterion(
         "stability_mean": sum(stabilities) / len(stabilities),
         "cases": per_case,
     }
+
+
+def _gated(solve, *, repo_root):
+    """Return ``solve`` wrapped so every case runs inside a LOCAL gate session.
+
+    The live solvers drive tool-using agents, and ``assert_gated`` (epic raze-vet-ditch,
+    ``rebar.llm.gate_context``) fails closed when such an agent runs outside a gate session.
+    An eval deliberately evaluates the DIRTY working tree, so the explicit source mode is
+    ``SOURCE_LOCAL`` -- the gate session marks that deliberate choice. Doing it HERE, in-process,
+    gives every caller (the CI job, the CLI, a project on another CI provider or none) the same
+    behaviour; without it every live case errored and coverage read 0.0 (bug
+    dissocial-unpleasant-adouri). The handle resolves once, before any case, so a resolution
+    error fails the run up front instead of being recorded as an unscored case."""
+    from rebar.llm import gate_source
+
+    handle = gate_source.resolve_gate_handle(None, gate_source.SOURCE_LOCAL, repo_root, fetch=False)
+
+    def gated(prompt_id: str, case: dict):
+        with gate_source.gate_read_root(handle):
+            return solve(prompt_id, case)
+
+    return gated
 
 
 def _criterion_solver(*, repo_root, runner):
@@ -643,9 +666,12 @@ def run_eval(
 
     ``solve(prompt_id, case) -> output`` defaults to :func:`_live_solver` (the real op
     via :mod:`rebar.llm.evals.eval_solver`, needing the ``agents`` extra); it is injectable
-    so the whole aggregation path is offline-testable. Returns ``{prompt, epochs,
-    gate, passed, coverage, epoch_pass, junit}``. Raises :class:`EvalError` if the spec
-    is invalid or has no dataset to run."""
+    so the whole aggregation path is offline-testable. Every case runs inside a local gate
+    session (:func:`_gated`), so an agentic solver passes the snapshot safeguard. Returns
+    ``{prompt, epochs, gate, passed, coverage, epoch_pass, errored, run_failure, junit}``:
+    ``errored`` counts case-runs that raised, and ``run_failure`` is True when any epoch
+    scored none of its cases -- a broken run, distinct from cases that scored and failed.
+    Raises :class:`EvalError` if the spec is invalid or has no dataset to run."""
     spec = load_eval_spec(prompt_id, repo_root=repo_root)
     dataset = spec.get("dataset") or []
     if not dataset:
@@ -661,10 +687,13 @@ def run_eval(
     ]
     if solve is None:
         solve = _live_solver(repo_root=repo_root, runner=runner)
+    solve = _gated(solve, repo_root=repo_root)
 
     epoch_pass: list[bool] = []
     junit_cases: list[dict] = []
     coverages: list[float] = []
+    errored = 0
+    run_failure = False
     for e in range(epochs):
         outputs: list[tuple[dict, dict | None]] = []
         for case in dataset:
@@ -672,6 +701,7 @@ def run_eval(
                 out: dict | None = solve(prompt_id, case)
             except Exception as exc:  # noqa: BLE001 — a failed run is an UNSCORED case, not a crash
                 out = None
+                errored += 1
                 junit_cases.append(
                     {
                         "name": f"{case.get('id', '?')}::run::e{e}",
@@ -682,6 +712,9 @@ def run_eval(
                 )
             outputs.append((case, out))
         scored = sum(1 for _, o in outputs if o is not None)
+        # An epoch that scored NOTHING is a run failure (every case errored), not a scored
+        # regression -- report it distinctly so a total failure cannot pass as advisory.
+        run_failure = run_failure or scored == 0
         coverages.append(coverage(scored, len(dataset)))
         epoch_ok = coverage_ok(spec, scored, len(dataset))
         for name in gating:
@@ -697,5 +730,7 @@ def run_eval(
         "passed": at_least_passes(epoch_pass, k),
         "coverage": min(coverages) if coverages else 0.0,
         "epoch_pass": epoch_pass,
+        "errored": errored,
+        "run_failure": run_failure,
         "junit": to_junit(prompt_id, junit_cases),
     }
