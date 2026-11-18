@@ -8,7 +8,6 @@ local reads after fetch failure.
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import io
 import json
 import os
@@ -135,8 +134,7 @@ def spy(monkeypatch: pytest.MonkeyPatch) -> _FetchSpy:
 
 # ── throttle-marker helpers ──────────────────────────────────────────────────
 def _marker_path(tracker: Path) -> str:
-    md5 = hashlib.md5(os.path.realpath(str(tracker)).encode()).hexdigest()[:12]
-    return f"/tmp/.ticket-sync-{md5}"
+    return ticket_reads.sync_marker_path(os.path.realpath(str(tracker)))
 
 
 def _expire_marker(tracker: Path) -> None:

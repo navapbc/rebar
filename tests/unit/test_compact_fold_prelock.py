@@ -13,7 +13,6 @@ Every probe observes STATE (is the store lock dir present at the call?) rather t
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -29,6 +28,7 @@ import rebar
 from rebar._commands import _seam, identity
 from rebar._commands import compact as _compact
 from rebar._commands import compact_txn as _compact_txn
+from rebar._engine_support.reads import sync_marker_path
 from rebar.attest import authorship, sshsig
 
 pytestmark = pytest.mark.unit
@@ -149,7 +149,7 @@ def _expire_freshness_throttle(repo: Path) -> None:
     """Remove the at-most-once-per-minute read-sync marker, so a freshness read inside the
     fold would really fetch — otherwise setup writes leave it fresh and the probe is blind."""
     tracker_abs = os.path.realpath(_tracker(repo))
-    marker = f"/tmp/.ticket-sync-{hashlib.md5(tracker_abs.encode()).hexdigest()[:12]}"
+    marker = sync_marker_path(tracker_abs)
     try:
         os.remove(marker)
     except FileNotFoundError:

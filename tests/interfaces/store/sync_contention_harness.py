@@ -8,7 +8,6 @@ supplies the bare-origin topology used by the bare-import fixture in ``conftest.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import subprocess
 import sys
@@ -17,6 +16,7 @@ from pathlib import Path
 from _subprocess_env import subprocess_env
 
 import rebar
+from rebar._engine_support.reads import sync_marker_path
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -42,8 +42,7 @@ def _rebar_cli(*args: str, repo: Path, push: str, timeout: int = 60) -> subproce
 
 def _clear_sync_throttle(tracker: Path) -> None:
     tracker_abs = os.path.realpath(str(tracker))
-    md5_12 = hashlib.md5(tracker_abs.encode()).hexdigest()[:12]
-    marker = f"/tmp/.ticket-sync-{md5_12}"
+    marker = sync_marker_path(tracker_abs)
     try:
         os.unlink(marker)
     except OSError:
