@@ -1,5 +1,12 @@
 {
   "retired": {
+    "REB-1981": {
+      "absent_404_count": 3,
+      "last_jira_key": "REB-1981",
+      "local_id": "jira-reb-1936",
+      "reason": "confirmed_404",
+      "retired_at": "2026-11-18T04:33:18Z"
+    },
     "REB-4603": {
       "absent_404_count": 0,
       "last_jira_key": "REB-4603",
