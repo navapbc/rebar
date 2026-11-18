@@ -210,3 +210,13 @@ def test_a_seam_named_only_in_a_trailing_comment_does_not_clear(tmp_path):
         '#!/bin/sh\ndir="$SOME"\nrm -rf "${dir}"/*  # TODO use "${RM_CMD:-rm}"\n',
     )
     assert len(chk.find_violations(repo)) >= 1
+
+
+def test_finding_path_uses_forward_slashes_for_a_windows_relative_path(tmp_path):
+    """A Windows ``relative_to`` result still reports ``tests/x.py`` (bug arctic-unsecular-esok)."""
+    from pathlib import PureWindowsPath
+
+    repo = _repo(tmp_path, VULNERABLE)
+    rel = PureWindowsPath("tests", "test_thing.py")
+    findings = chk.scan_file(repo / "tests" / "test_thing.py", rel, repo)
+    assert [f.path for f in findings] == ["tests/test_thing.py"]

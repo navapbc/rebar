@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import re
-from pathlib import Path
+from pathlib import Path, PurePath
 
 REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 
@@ -96,12 +96,17 @@ def _resolve_repo_script(raw: str, repo_root: Path) -> str | None:
         # against the checkout; a generated-in-image script (no repo source) resolves to
         # nothing and is correctly skipped.
         matches = sorted(
-            str(p.relative_to(repo_root))
+            _repo_relative(p, repo_root)
             for p in repo_root.glob("infra/**/" + Path(raw).name)
             if p.is_file()
         )
         return matches[0] if len(matches) == 1 else None
     return raw if (repo_root / raw).is_file() else None
+
+
+def _repo_relative(path: PurePath, repo_root: PurePath) -> str:
+    """Repo-relative path with ``/`` on every host, the spelling the manifest records."""
+    return path.relative_to(repo_root).as_posix()
 
 
 def _iter_sh_tokens(value: str) -> list[str]:
@@ -111,7 +116,7 @@ def _iter_sh_tokens(value: str) -> list[str]:
 
 def _derive_from_dockerfile(path: Path, repo_root: Path) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         upper = stripped.upper()
         if upper.startswith("COPY "):
@@ -132,7 +137,7 @@ def _derive_from_dockerfile(path: Path, repo_root: Path) -> list[tuple[str, str]
 
 def _derive_from_compose(path: Path, repo_root: Path) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if stripped.startswith("#"):
             continue
@@ -157,7 +162,7 @@ def _derive_from_conventions(repo_root: Path) -> list[tuple[str, str]]:
         label = "glob:" + pattern.split("/")[-1]
         for match in repo_root.glob(pattern):
             if match.is_file():
-                found.append((str(match.relative_to(repo_root)), label))
+                found.append((_repo_relative(match, repo_root), label))
     return found
 
 
@@ -244,7 +249,7 @@ def check_text(manifest_text: str, repo_root: Path = REPO_ROOT) -> list[str]:
 
 def check(repo_root: Path = REPO_ROOT) -> list[str]:
     """Return diagnostics (empty == clean) for the deploy-manifest completeness gate."""
-    return check_text(_autodeploy_path(repo_root).read_text(), repo_root)
+    return check_text(_autodeploy_path(repo_root).read_text(encoding="utf-8"), repo_root)
 
 
 def main(argv: list[str] | None = None) -> int:

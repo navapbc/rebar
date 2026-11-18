@@ -341,7 +341,7 @@ def test_adjacent_tickets_shas_reuse_unchanged_blobs(tmp_path):
     for i, sha in enumerate(shas):
         root = store / f"tickets-{sha}" / ".tickets-tracker"
         listed = _git(repo, "ls-tree", "-r", "--name-only", sha).splitlines()
-        on_disk = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+        on_disk = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
         assert on_disk == sorted(listed), f"entry {i} tree does not match {sha[:8]}"
         for rel in listed:
             want = _git(repo, "show", f"{sha}:{rel}")
@@ -385,7 +385,7 @@ def test_donor_untracked_files_do_not_leak_into_a_new_entry(tmp_path):
 
     listed = sorted(_git(repo, "ls-tree", "-r", "--name-only", sha).splitlines())
     root = second / ".tickets-tracker"
-    on_disk = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+    on_disk = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
     assert on_disk == listed, (
         "the new entry must contain exactly its committed tree; untracked donor files leaked"
     )
@@ -502,7 +502,7 @@ def test_adjacent_code_shas_reuse_unchanged_blobs(tmp_path):
     for i, sha in enumerate(shas):
         root = store / sha
         listed = _git(repo, "ls-tree", "-r", "--name-only", sha).splitlines()
-        on_disk = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+        on_disk = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
         assert on_disk == sorted(listed), f"entry {i} tree does not match {sha[:8]}"
         for rel in listed:
             want = _git(repo, "show", f"{sha}:{rel}")

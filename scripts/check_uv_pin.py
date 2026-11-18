@@ -225,7 +225,7 @@ def _check_local_setup_uv_inputs(
         if name in inputs:
             findings.append(
                 Finding(
-                    f"{path.relative_to(root)} ({step.get('name') or uses})",
+                    f"{path.relative_to(root).as_posix()} ({step.get('name') or uses})",
                     f"local setup-uv step sets '{name}: {inputs[name]}'. That would override "
                     "the single source in [tool.uv] required-version; remove the input",
                 )
@@ -246,7 +246,9 @@ def check_workflows(root: Path) -> list[Finding]:
         try:
             document = yaml.safe_load(path.read_text(encoding="utf-8"))
         except yaml.YAMLError as exc:  # pragma: no cover - actionlint owns parse errors
-            findings.append(Finding(str(path.relative_to(root)), f"could not be parsed: {exc}"))
+            findings.append(
+                Finding(path.relative_to(root).as_posix(), f"could not be parsed: {exc}")
+            )
             continue
 
         for step in _steps(document):
@@ -257,7 +259,7 @@ def check_workflows(root: Path) -> list[Finding]:
             if action == SETUP_UV_ACTION:
                 findings.append(
                     Finding(
-                        f"{path.relative_to(root)} ({step.get('name') or uses})",
+                        f"{path.relative_to(root).as_posix()} ({step.get('name') or uses})",
                         f"uses {SETUP_UV_ACTION}, which fetches the uv manifest. Use "
                         f"{LOCAL_SETUP_UV_ACTION} instead",
                     )
@@ -269,7 +271,7 @@ def check_workflows(root: Path) -> list[Finding]:
 
 def _load_action(root: Path) -> tuple[dict[str, Any] | None, str, list[Finding]]:
     action_path = root / LOCAL_SETUP_UV_ACTION_FILE
-    location = str(LOCAL_SETUP_UV_ACTION_FILE)
+    location = LOCAL_SETUP_UV_ACTION_FILE.as_posix()
     if not action_path.is_file():
         return None, "", [Finding(location, "missing — workflows cannot install uv locally")]
 
@@ -349,7 +351,7 @@ def check_local_action(root: Path) -> list[Finding]:
     if document is None:
         return findings
 
-    location = str(LOCAL_SETUP_UV_ACTION_FILE)
+    location = LOCAL_SETUP_UV_ACTION_FILE.as_posix()
     inputs = document.get("inputs")
     if not isinstance(inputs, dict) or "enable-cache" not in inputs:
         findings.append(Finding(location, "must define the enable-cache input used by workflows"))
@@ -392,7 +394,7 @@ def _below_floor(version: str, floor: str | None) -> bool:
 
 def _check_action_version(root: Path, env: dict[str, str]) -> list[Finding]:
     """Assert the action installs the release its checksums belong to, at or above the floor."""
-    location = str(LOCAL_SETUP_UV_ACTION_FILE)
+    location = LOCAL_SETUP_UV_ACTION_FILE.as_posix()
     version = env.get("UV_VERSION")
     if version is None:
         return [Finding(location, "missing UV_VERSION env entry — CI has no uv release to install")]
@@ -565,7 +567,7 @@ def check_dockerfiles(root: Path) -> list[Finding]:
     floor = _uv_floor(root)
     findings: list[Finding] = []
     for path in _dockerfiles(root):
-        relative = path.relative_to(root)
+        relative = path.relative_to(root).as_posix()
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             match = DOCKERFILE_IMAGE_PATTERN.match(line)
             if match is None:
@@ -584,7 +586,7 @@ def check_compose_images(root: Path) -> list[Finding]:
     floor = _uv_floor(root)
     findings: list[Finding] = []
     for path in _compose_files(root):
-        relative = path.relative_to(root)
+        relative = path.relative_to(root).as_posix()
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             match = COMPOSE_IMAGE_PATTERN.match(line)
             if match is None:
