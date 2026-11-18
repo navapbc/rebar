@@ -119,7 +119,9 @@ def _is_archived_ticket(ticket_dir: str) -> bool:
         return False
 
 
-def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=None) -> str:
+def _verify_signed(
+    ev: _ScopedEvent, tracker: str, repo_root, position_resolver=None, is_ancestor=None
+) -> str:
     """Classify a signed event as ``verified``, ``key_not_valid_at_era``,
     ``bad-signature``, or ``unknown-author``.
 
@@ -200,6 +202,7 @@ def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=
             ev.position,
             repo_root=repo_root,
             position_resolver=position_resolver,
+            is_ancestor=is_ancestor,
         )
         if v.verified:
             return VERIFIED
@@ -217,12 +220,16 @@ def _verify_signed(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=
     return KEY_NOT_VALID_AT_ERA
 
 
-def _classify(ev: _ScopedEvent, tracker: str, repo_root, position_resolver=None) -> str:
+def _classify(
+    ev: _ScopedEvent, tracker: str, repo_root, position_resolver=None, is_ancestor=None
+) -> str:
     """Classify one in-scope event. Order matters: a missing signature is ``unsigned``
     (even when the author is also unknown), matching the gate's user-facing vocabulary."""
     if not ev.author_sig:
         return UNSIGNED
-    return _verify_signed(ev, tracker, repo_root, position_resolver=position_resolver)
+    return _verify_signed(
+        ev, tracker, repo_root, position_resolver=position_resolver, is_ancestor=is_ancestor
+    )
 
 
 def _display_group(verdict: str) -> str:
@@ -419,6 +426,43 @@ def _collect_range(tracker: str, base: str) -> list[_ScopedEvent]:
     return events
 
 
+def _batched_resolvers(tracker: str, repo_root):
+    """Per-run lookups for the enforced scan: ``(commit_map, resolve_position, is_ancestor)``.
+
+    The path→commit map (bug 1cc0) and the position→commit map come from the batched
+    builders; the position map also counts ``.json.retired`` adds, so a reclaimed history's
+    below-checkpoint ledger and keyring positions resolve without a per-position walk
+    (bug 84f6). A position the map
+    lacks is looked up once by the per-position resolver and memoized, hit or miss. The
+    ancestry oracle answers era checks from one in-memory graph; ``None`` (graph unreadable)
+    keeps the per-check ``git merge-base`` subprocess."""
+    from rebar.attest import authorship
+
+    # Two public builders (each one walk) so tests and callers can substitute either map.
+    commit_map = authorship.build_introducing_commit_map(repo_root=repo_root)
+    position_map = authorship.build_position_commit_map(repo_root=repo_root)
+    looked_up: dict[str, str | None] = {}
+
+    def resolve_position(position: str) -> str | None:
+        """Resolve a position through the batched map, then at most one history lookup.
+
+        Empty or unresolved positions return ``None``. An unresolved raw event remains
+        nonverified. A snapshot-ledger event can still pass when its signature matches a key
+        recorded for the identity."""
+        if not position:
+            return None
+        hit = position_map.get(position)
+        if hit is not None:
+            return hit
+        if position not in looked_up:
+            looked_up[position] = authorship.resolve_position_commit(
+                position, tracker, repo_root=repo_root
+            )
+        return looked_up[position]
+
+    return commit_map, resolve_position, authorship.build_ancestry_oracle(tracker)
+
+
 # Registry-routed CLI handler with top-level help served from committed bytes.
 
 
@@ -468,28 +512,7 @@ def cli(argv: list[str]) -> int:
         )
         return 0
 
-    # Resolve every event's introducing commit in ONE git-log pass instead of one subprocess
-    # per event (bug 1cc0). _resolve_commit looks each event up here and only falls back to the
-    # per-event resolver for a path the map lacks (fail-closed).
-    from rebar.attest import authorship
-
-    commit_map = authorship.build_introducing_commit_map(repo_root=args.root)
-    # Resolve ledger positions in one full-history pass. Map hits avoid per-entry history
-    # walks and survive topology changes. Misses use the fallback below.
-    position_map = authorship.build_position_commit_map(repo_root=args.root)
-
-    def _resolve_position(position: str) -> str | None:
-        """Resolve a position through the batched map, then one history lookup.
-
-        Empty or unresolved positions return ``None``. An unresolved raw event remains
-        nonverified. A snapshot-ledger event can still pass when its signature matches a key
-        recorded for the identity."""
-        if not position:
-            return None
-        hit = position_map.get(position)
-        if hit is not None:
-            return hit
-        return authorship.resolve_position_commit(position, tracker, repo_root=args.root)
+    commit_map, _resolve_position, is_ancestor = _batched_resolvers(tracker, args.root)
 
     counts = {
         VERIFIED: 0,
@@ -509,7 +532,13 @@ def cli(argv: list[str]) -> int:
             resolved_sha = _resolve_position(ev.position)
             if resolved_sha is not None:
                 ev.commit_sha = resolved_sha
-        cls = _classify(ev, tracker, args.root, position_resolver=_resolve_position)
+        cls = _classify(
+            ev,
+            tracker,
+            args.root,
+            position_resolver=_resolve_position,
+            is_ancestor=is_ancestor,
+        )
         counts[cls] = counts.get(cls, 0) + 1
         if cls == VERIFIED:
             continue

@@ -27,6 +27,12 @@ from typing import cast
 
 from rebar.attest import dsse, registry, sshsig
 from rebar.attest.authorship_resolution import (
+    build_ancestry_oracle as build_ancestry_oracle,
+)
+from rebar.attest.authorship_resolution import (
+    build_event_commit_maps as build_event_commit_maps,
+)
+from rebar.attest.authorship_resolution import (
     build_introducing_commit_map as build_introducing_commit_map,
 )
 from rebar.attest.authorship_resolution import (
@@ -208,6 +214,7 @@ def verify_authorship_at_commit(
     *,
     repo_root: str | None = None,
     position_resolver: Callable[[str], str | None] | None = None,
+    is_ancestor: Callable[[str, str], bool] | None = None,
 ) -> registry.Verdict:
     """Verify ``envelope`` against ONLY the keys valid for the event at ``event_commit``
     (epic gnu-whale-ichor — the git-commit-ancestry validity model).
@@ -227,6 +234,11 @@ def verify_authorship_at_commit(
     behavior-preserving: the batched map resolves each position to the SAME oldest-add commit as
     :func:`resolve_event_commit` (positions are globally unique; validated 0-mismatch), and a
     ``None`` resolver preserves the exact per-record behavior for every other caller.
+
+    ``is_ancestor`` (``(ancestor, descendant) -> bool``), when given, replaces the per-check
+    ``git merge-base --is-ancestor`` subprocess. The whole-store gate passes
+    :func:`build_ancestry_oracle` (one in-memory graph per run, bug 84f6); ``None`` keeps the
+    subprocess for every other caller.
 
     Intra-commit refinement: ``merge-base --is-ancestor(C, C)`` is true, so when a key's
     add/revoke commit EQUALS ``event_commit`` and ``event_position`` is given, the two are
@@ -266,7 +278,7 @@ def verify_authorship_at_commit(
             event_commit,
             event_position,
             resolve=_resolve,
-            is_ancestor=_is_ancestor,
+            is_ancestor=is_ancestor if is_ancestor is not None else _is_ancestor,
         )
     except Exception:  # noqa: BLE001 — ANY git/lookup failure → non-verified, never raise (fail-closed)
         return registry.Verdict(
