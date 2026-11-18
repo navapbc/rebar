@@ -142,6 +142,7 @@ def test_rebar_explain_plan_cli_renders_t15_guidance() -> None:
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert completed.returncode == 0, completed.stderr
     assert "T15" in completed.stdout
@@ -155,6 +156,7 @@ def test_rebar_explain_plan_cli_explains_out_of_loop_proof_move() -> None:
         check=False,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert completed.returncode == 0, completed.stderr
     rendered = re.sub(r"\s+", " ", completed.stdout)

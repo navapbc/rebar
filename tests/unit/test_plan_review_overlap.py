@@ -467,6 +467,7 @@ def test_ratchets_exit_zero(script):
         text=True,
         cwd=repo,
         check=False,
+        encoding="utf-8",
     )
     assert proc.returncode == 0, f"{script} failed:\n{proc.stdout}\n{proc.stderr}"
 

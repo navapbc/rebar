@@ -135,6 +135,7 @@ def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) ->
             [str(cli), "show", "--include-provenance", local_id],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(repo_root),
             timeout=30,
             env=_env,

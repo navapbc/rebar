@@ -21,7 +21,7 @@ def _marker_lock(lock_path: str) -> Iterator[None]:
         take_blocking_exclusive,
     )
 
-    with open(lock_path, "a") as lock_fd:
+    with open(lock_path, "a", encoding="utf-8") as lock_fd:
         locked = False
         try:
             take_blocking_exclusive(lock_fd.fileno())
@@ -50,7 +50,7 @@ def write_marker(ticket_dir: str) -> None:
     try:
         with _marker_lock(lock_path):
             # Create the marker (open with 'a' is idempotent)
-            with open(marker_path, "a"):
+            with open(marker_path, "a", encoding="utf-8"):
                 pass
     except OSError:
         logger.warning(

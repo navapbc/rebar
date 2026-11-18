@@ -69,7 +69,7 @@ def derive_json_summary(junit_path: Path, json_path: Path) -> dict[str, object]:
         "tests": tests,
     }
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(summary, indent=2) + "\n")
+    json_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return summary
 
 

@@ -82,7 +82,7 @@ _INTENTIONAL_SCRIPT_ASYMMETRIES: set[str] = {
 
 def _read(path: Path) -> str:
     assert path.exists(), f"workflow not found: {path}"
-    return path.read_text()
+    return path.read_text(encoding="utf-8")
 
 
 def _historical_c57057f41_workflows() -> tuple[str, str]:

@@ -278,4 +278,4 @@ def _write_prev_snapshot_key_set(prev_path: Path, curr_snapshot: Mapping[str, An
     this module is now the canonical owner.
     """
     key_set: dict[str, dict[str, Any]] = {jira_key: {} for jira_key in sorted(curr_snapshot)}
-    prev_path.write_text(json.dumps(key_set, separators=(",", ":")) + "\n")
+    prev_path.write_text(json.dumps(key_set, separators=(",", ":")) + "\n", encoding="utf-8")

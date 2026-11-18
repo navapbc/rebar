@@ -303,6 +303,24 @@ def _dispatch_route(sub: str, rest: list[str]) -> int:
     return _execute.execute(sub, rest)
 
 
+def _use_utf8_stdio() -> None:
+    """Make the CLI's stdin, stdout and stderr UTF-8 on every host.
+
+    Windows defaults piped stdio to the ANSI code page (cp1252), which cannot encode
+    much of rebar's output (``rebar explain`` raised ``UnicodeEncodeError``) and decodes
+    a sibling rebar's UTF-8 differently (bug obtuse-phenocryst-verdin). Streams that are
+    not a ``TextIOWrapper`` (pytest capture, ``StringIO``) are left as they are."""
+    import io
+
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, name)
+        if isinstance(stream, io.TextIOWrapper) and stream.encoding.lower() not in (
+            "utf-8",
+            "utf8",
+        ):
+            stream.reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     """rebar CLI entry. Returns the process exit code.
 
@@ -315,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     # ``print(json.dumps(...))`` is a machine contract. See ``rebar._logging``.
     from rebar._logging import install_stderr_handler
 
+    _use_utf8_stdio()
     install_stderr_handler("rebar")
 
     argv = list(sys.argv[1:] if argv is None else argv)
