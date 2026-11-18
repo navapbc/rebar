@@ -30,6 +30,7 @@ def _build(tree: Path, outdir: Path, env_extra: dict) -> subprocess.CompletedPro
         text=True,
         env=env,
         check=False,
+        encoding="utf-8",
     )
 
 

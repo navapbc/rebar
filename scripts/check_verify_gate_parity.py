@@ -83,7 +83,7 @@ EXCLUDED_JOBS = frozenset(
 
 
 def load_yaml(path: Path) -> dict:
-    data = yaml.safe_load(path.read_text())
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise SystemExit(f"{path}: not a mapping (could not parse workflow)")
     return data

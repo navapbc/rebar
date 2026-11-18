@@ -261,10 +261,11 @@ def test_generators_not_stale_and_include_new_keys():
             capture_output=True,
             text=True,
             check=False,
+            encoding="utf-8",
         )
         assert r.returncode == 0, f"{script} --check stale:\n{r.stdout}{r.stderr}"
-    ref = (REPO_ROOT / "docs" / "mcp-reference.md").read_text()
-    env = (REPO_ROOT / "docs" / "env-vars.md").read_text()
+    ref = (REPO_ROOT / "docs" / "mcp-reference.md").read_text(encoding="utf-8")
+    env = (REPO_ROOT / "docs" / "env-vars.md").read_text(encoding="utf-8")
     for var in NEW_ENV_VARS:
         assert var in ref, f"{var} missing from docs/mcp-reference.md"
         assert var in env, f"{var} missing from docs/env-vars.md"

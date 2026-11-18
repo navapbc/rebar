@@ -50,7 +50,7 @@ def _review_bot_environment() -> dict[str, str]:
 
 
 def _bedrock_toml_class_models() -> dict[str, str]:
-    table = tomllib.loads(_BEDROCK_TOML.read_text())["llm"]["model_classes"]
+    table = tomllib.loads(_BEDROCK_TOML.read_text(encoding="utf-8"))["llm"]["model_classes"]
     return {cls: str(slot["model"]) for cls, slot in table.items()}
 
 
@@ -87,7 +87,9 @@ def test_compose_review_bot_sets_no_deprecated_bare_model_var() -> None:
 
 def test_bedrock_alarm_watches_exactly_the_model_ids_the_bot_invokes() -> None:
     """CloudWatch watches exactly the three provider profiles invoked by the bot."""
-    sources = [p for p in sorted(_TERRAFORM.glob("*.tf")) if _ALARM_NAME in p.read_text()]
+    sources = [
+        p for p in sorted(_TERRAFORM.glob("*.tf")) if _ALARM_NAME in p.read_text(encoding="utf-8")
+    ]
     assert len(sources) == 1, (
         f"expected exactly one .tf file declaring the {_ALARM_NAME} alarm, found "
         f"{[p.name for p in sources]}"
@@ -100,7 +102,9 @@ def test_bedrock_alarm_watches_exactly_the_model_ids_the_bot_invokes() -> None:
         model.split(":", 1)[1] if ":" in model else model
         for model in _bedrock_toml_class_models().values()
     }
-    declared = set(re.findall(r"ModelId\s*=\s*\"([^\"]+)\"", sources[0].read_text()))
+    declared = set(
+        re.findall(r"ModelId\s*=\s*\"([^\"]+)\"", sources[0].read_text(encoding="utf-8"))
+    )
 
     assert declared == expected_model_ids, (
         f"{sources[0].name}'s ModelId dimensions and the bot's model-class ids disagree: "

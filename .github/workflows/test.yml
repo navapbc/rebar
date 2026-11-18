@@ -298,7 +298,6 @@ jobs:
           '@.github/windows-sweep-deselect/max-path.args'
           '@.github/windows-sweep-deselect/nested-pytest-plugins.args'
           '@.github/windows-sweep-deselect/openssh-key-acl.args'
-          '@.github/windows-sweep-deselect/text-encoding.args'
           '@.github/windows-sweep-deselect/unclassified.args'
 
   # Scheduled full macOS default suite catches platform regressions outside Verified's reduced

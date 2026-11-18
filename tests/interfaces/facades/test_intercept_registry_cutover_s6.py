@@ -26,6 +26,7 @@ def _run(
         cwd=str(cwd),
         env=env,
         check=False,
+        encoding="utf-8",
     )
 
 

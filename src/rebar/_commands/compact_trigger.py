@@ -137,7 +137,9 @@ def _open_worker_log(tracker: str, sweep_log: SweepLog) -> int | IO[str]:
         return 2
     try:
         os.makedirs(os.path.dirname(_trigger_log_path(tracker)), exist_ok=True)
-        return open(_trigger_log_path(tracker), "a")  # handed to the child as its stderr
+        return open(
+            _trigger_log_path(tracker), "a", encoding="utf-8"
+        )  # handed to the child as its stderr
     except OSError:
         return subprocess.DEVNULL
 
