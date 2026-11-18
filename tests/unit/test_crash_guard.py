@@ -227,3 +227,52 @@ def test_single_process_thread_timeout_keeps_pytest_timeouts_own_report(tmp_path
     assert completed.returncode != 0, combined
     # pytest-timeout's own banner (terminal.sep("+", "Timeout")) reaches the real terminal.
     assert re.search(r"\+{3,} Timeout \+{3,}", combined), combined
+
+
+# execnet's worker bootstrap (``init_popen_io``) applies this only when ``os.name == "nt"``:
+# the real stderr survives solely as the ``sys.stderr`` object and fd 2 becomes the null
+# device. An execnet worker is ``python -c ...``, so ``sys.argv == ["-c"]`` selects workers.
+_WINDOWS_WORKER_STDERR = """\
+import os
+import sys
+
+if sys.argv[:1] == ["-c"]:
+    sys.stderr = os.fdopen(os.dup(2), "w", 1)
+    _null = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(_null, 2)
+    os.close(_null)
+"""
+
+
+@pytest.mark.timeout(180)
+def test_xdist_timeout_banner_survives_windows_worker_stderr(tmp_path: Path) -> None:
+    """On Windows a worker's fd 2 is NUL; the banner must use ``sys.stderr`` (bug c691-bbc1)."""
+    site = tmp_path / "windows_worker_site"
+    site.mkdir()
+    (site / "sitecustomize.py").write_text(_WINDOWS_WORKER_STDERR, encoding="utf-8")
+    project = tmp_path / "timeout_probe"
+    project.mkdir()
+    (project / "test_hangs.py").write_text(_HANGING_MODULE, encoding="utf-8")
+    env = _env_with_tests_on_path()
+    env["PYTHONPATH"] = os.pathsep.join([str(site), env["PYTHONPATH"]])
+    completed = run_nested_pytest(
+        tmp_path / "nested",
+        "-q",
+        "-n",
+        "2",
+        "-p",
+        "_crash_guard",
+        "-o",
+        "timeout=2",
+        "-o",
+        "timeout_method=thread",
+        "test_hangs.py",
+        env=env,
+        cwd=project,
+        timeout=120,
+    )
+    combined = completed.stdout + completed.stderr
+    assert completed.returncode != 0, combined
+    assert any("Timeout" in line and _HANGING_NODE_ID in line for line in combined.splitlines()), (
+        combined
+    )

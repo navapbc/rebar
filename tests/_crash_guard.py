@@ -1,17 +1,16 @@
 """Escalate xdist worker crashes into an explicit pytest failure.
 
-It also makes a pytest-timeout expiry in an xdist worker name itself. With the thread method
-(pyproject.toml), pytest-timeout writes its banner and stack dump through the terminal writer,
-which in a worker is fd 1 -- and execnet points every worker's fd 1 at /dev/null. The worker
-then ``os._exit(1)``s, and the controller reports only an unexplained worker loss
-(bug d1de-f99f-f638-4b27). The worker's fd 2 reaches the controller, so the announcement and
-the thread stacks go there before pytest-timeout's own exit path runs.
+It also makes a pytest-timeout expiry in an xdist worker name itself (bug d1de-f99f). With the
+thread method, pytest-timeout writes its dump to fd 1, which execnet points at /dev/null in every
+worker, then ``os._exit(1)``s. The announcement and thread stacks go to the worker's
+``sys.stderr`` instead: fd 2 on POSIX, a dup on Windows, where execnet points fd 2 at NUL
+(bug c691-bbc1-4217-4cf4).
 """
 
 from __future__ import annotations
 
 import faulthandler
-import os
+import sys
 import threading
 from typing import Any
 
@@ -74,12 +73,14 @@ def _announce_then_expire(item: pytest.Item, settings: Any) -> None:
         return
     capman = item.config.pluginmanager.getplugin("capturemanager")
     if capman is not None:
-        capman.suspend_global_capture(item)  # restores the worker's real fd 2
+        capman.suspend_global_capture(item)  # restores the worker's own sys.stderr
     worker_id = item.config.workerinput.get("workerid")  # type: ignore[attr-defined]
     message = (
         f"\n+++ Timeout +++ pytest-timeout expired after {settings.timeout}s in "
         f"{item.nodeid} (xdist worker {worker_id}); the worker exits now\n"
     )
-    os.write(2, message.encode("utf-8", "replace"))
-    faulthandler.dump_traceback(file=2, all_threads=True)
+    stream = sys.stderr  # execnet's controller-connected stream on every platform
+    stream.write(message)
+    stream.flush()
+    faulthandler.dump_traceback(file=stream, all_threads=True)
     pytest_timeout.timeout_timer(item, settings)
