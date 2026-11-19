@@ -146,6 +146,14 @@ def _ticket_dirs(tracker: str, *, include_archived: bool = False) -> list[str]:
     return [d for d in dirs if not _dir_is_archived(os.path.join(tracker, d))]
 
 
+# git writes data (log output, paths, object content) as UTF-8 by default, so text mode names
+# that codec instead of the locale's (cp1252 on Windows garbles or rejects it; bug 39d8). One
+# error handler covers both streams, and stderr is gettext-translated in the user's locale, so
+# an undecodable byte becomes U+FFFD rather than hiding git's diagnostic behind a decode error.
+_GIT_ENCODING = "utf-8"
+_GIT_ERRORS = "replace"
+
+
 # raw-git-ok: locked store seam internal
 def run_git(
     cwd: str | os.PathLike[str] | None,
@@ -201,6 +209,8 @@ def run_git(
         check=check,
         capture_output=capture_output,
         text=text,
+        encoding=_GIT_ENCODING if text else None,
+        errors=_GIT_ERRORS if text else None,
         timeout=timeout,
         env=env,
         input=input_data,
@@ -232,6 +242,8 @@ def _run_in_group(
         stdout=pipe,
         stderr=pipe,
         text=text,
+        encoding=_GIT_ENCODING if text else None,
+        errors=_GIT_ERRORS if text else None,
         env=env,
         start_new_session=(os.name == "posix"),
     )

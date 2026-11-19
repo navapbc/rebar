@@ -55,7 +55,14 @@ def ssh_keygen_version() -> tuple[int, int] | None:
     A tool removed after the probe still fails closed, because :meth:`verify` reports a missing
     ``ssh-keygen`` as ``unavailable``."""
     try:
-        proc = subprocess.run(["ssh", "-V"], capture_output=True, text=True, check=False)
+        proc = subprocess.run(
+            ["ssh", "-V"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",  # never the locale codec (bug 39d8); only _VERSION_RE reads it
+            errors="replace",
+            check=False,
+        )
     except FileNotFoundError:
         return None
     # OpenSSH prints its banner to stderr; fall back to stdout defensively.
