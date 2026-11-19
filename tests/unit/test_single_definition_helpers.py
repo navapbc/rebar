@@ -23,7 +23,7 @@ def _definitions(name: str) -> list[str]:
     for module in parsed_python_files(_SRC):
         for node in ast.walk(module.tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name:
-                found.append(f"{module.path.relative_to(_SRC.parent)}:{node.lineno}")
+                found.append(f"{module.path.relative_to(_SRC.parent).as_posix()}:{node.lineno}")
     return found
 
 

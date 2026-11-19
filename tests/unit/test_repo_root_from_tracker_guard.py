@@ -252,7 +252,7 @@ def test_no_config_root_site_is_deferred_behind_a_sanction() -> None:
             if gate.BARE_MARKER in line
         ]
         if lines:
-            marked[str(path.relative_to(_REPO_ROOT))] = lines
+            marked[path.relative_to(_REPO_ROOT).as_posix()] = lines
     assert "src/rebar/_commands/compact_trigger.py" not in marked, (
         "the detached compaction sweep is sanctioned again — it must RESOLVE its code root "
         f"(config.repo_root_or_none()), not compose it from the store: {marked}"
@@ -276,7 +276,7 @@ def test_exactly_one_shared_store_root_seam_exists() -> None:
             if "# repo-root-seam" in line
         ]
         if lines:
-            seam_files[str(path.relative_to(_REPO_ROOT))] = lines
+            seam_files[path.relative_to(_REPO_ROOT).as_posix()] = lines
     assert set(seam_files) == {"src/rebar/_proc.py"}, (
         f"the shared store-root seam must be the single site in _proc.py: {sorted(seam_files)}"
     )

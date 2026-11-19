@@ -188,7 +188,8 @@ def _tracker_sibling_offenders() -> list[str]:
         for lineno, line in enumerate(module.source.splitlines(), start=1):
             why = _offending_line(line)
             if why:
-                offenders.append(f"{module.path.relative_to(_SRC_REBAR.parent)}:{lineno}: {why}")
+                where = module.path.relative_to(_SRC_REBAR.parent).as_posix()
+                offenders.append(f"{where}:{lineno}: {why}")
     return offenders
 
 
@@ -205,7 +206,7 @@ def test_exactly_one_rebar_dir_definition_under_src() -> None:
     """The story's first acceptance criterion, asserted rather than left to a manual grep:
     ``grep -rn "def _rebar_dir" src/rebar`` returns only ``_store/paths.py``."""
     found = [
-        f"{module.path.relative_to(_SRC_REBAR.parent)}:{lineno}"
+        f"{module.path.relative_to(_SRC_REBAR.parent).as_posix()}:{lineno}"
         for module in parsed_python_files(_SRC_REBAR)
         for lineno, line in enumerate(module.source.splitlines(), start=1)
         if line.startswith("def _rebar_dir")

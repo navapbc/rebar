@@ -213,7 +213,7 @@ def test_the_only_sanctioned_site_is_the_resolver_seam() -> None:
                 continue
             window = " ".join(lines[max(0, idx - 1) : idx + 1])
             if gate.BARE_MARKER in window or "# pkg-root-seam" in window:
-                sanctioned_files.add(str(path.relative_to(_REPO_ROOT)))
+                sanctioned_files.add(path.relative_to(_REPO_ROOT).as_posix())
     assert sanctioned_files == {"src/rebar/config.py"}, (
         f"unexpected sanctioned package-location site(s): {sorted(sanctioned_files)}"
     )
