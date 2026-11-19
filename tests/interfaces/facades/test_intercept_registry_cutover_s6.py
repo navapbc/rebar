@@ -45,7 +45,6 @@ _NO_STORE_CASES = [
     ("explain", ("explain", "plan"), 0, "plan"),
     ("verify-identity", ("verify-identity", "--help"), 0, "rebar verify-identity"),
     ("verify-opcert", ("verify-opcert", "--help"), 0, "rebar verify-opcert"),
-    ("trusted-env", ("trusted-env", "--help"), 0, "rebar trusted-env"),
     ("remote-cert", ("remote-cert", "--help"), 0, "rebar remote-cert"),
     ("workflow", ("workflow", "--help"), 0, "rebar workflow"),
     ("llm", ("llm", "--help"), 0, "rebar llm"),
@@ -173,3 +172,14 @@ def test_identity_child_help_is_store_free(child: str, tmp_path: Path) -> None:
     assert cp.stdout.splitlines()[0].startswith(f"usage: rebar identity {child}")
     assert cp.stderr == ""
     assert list(root.iterdir()) == []
+
+
+def test_trusted_env_command_is_removed(tmp_path: Path) -> None:
+    """``rebar trusted-env`` left with the repository op-cert pin file (ADR 0125): it is not a
+    registered route, and invoking it fails as an unknown command."""
+    from rebar._cli import _registry
+
+    assert _registry.route_for("trusted-env") is None
+    assert "trusted-env" not in _registry._CORE_FACTORIES
+    cp = _run("trusted-env", "--help", cwd=tmp_path, env_overrides={"REBAR_ROOT": str(tmp_path)})
+    assert cp.returncode != 0, cp.stdout + cp.stderr

@@ -2,7 +2,7 @@
 
 NO real AWS / network / terraform apply. These pin the Terraform SOURCE, the compose/nginx
 wiring, the guard materialize script (exercised with a STUB `aws` on PATH returning a fixture),
-and the trusted-environment pinning — the offline half of ACs 1-4 (the live half, AC5, is the
+and the MCP op-cert trust list — the offline half of ACs 1-4 (the live half, AC5, is the
 operator's, gated by infra/terraform/opcert-plan-assertions.sh which needs real AWS creds).
 """
 
@@ -19,8 +19,6 @@ import yaml
 from _sandbox_capabilities import requires_posix_shell
 from _subprocess_env import subprocess_env
 
-from rebar.attest import trusted_env
-
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -31,7 +29,6 @@ _COMPOSE = _REPO / "infra" / "compose" / "docker-compose.yml"
 _NGINX = _REPO / "infra" / "nginx" / "rebar.conf.template"
 _MATERIALIZE = _REPO / "infra" / "scripts" / "materialize-opcert-guard.sh"
 _COMPOSE_UP = _REPO / "infra" / "scripts" / "compose-up.sh"
-_TRUSTED_ENV = _REPO / ".rebar" / "trusted_environments.yaml"
 
 
 # --------------------------------------------------------------------------- Terraform source
@@ -285,39 +282,6 @@ def test_materialize_script_fails_closed_on_empty_guard(tmp_path: Path) -> None:
     )
     assert res.returncode != 0
     assert not (tmp_path / "map.conf").exists(), "no map file must be written on a failed fetch"
-
-
-# --------------------------------------------------------------------------- trusted-env pin
-
-
-def test_trusted_env_pins_deployed_environment_log_position_form() -> None:
-    """AC4: the trusted-env entry parses via the real loader, uses the LOG-POSITION era form
-    (not the superseded added_at_commit main-SHA form), and its env_id matches the compose
-    service's REBAR_OPCERT_ENV_ID."""
-    # log-position era form only — the legacy main-SHA field is rejected by the loader.
-    # Scan the NON-COMMENT body (the docstring/comments explain the legacy field by name).
-    body = "\n".join(
-        line for line in _TRUSTED_ENV.read_text().splitlines() if not line.lstrip().startswith("#")
-    )
-    assert "added_at_log_position" in body
-    assert "added_at_commit" not in body
-
-    # parses via the production loader (which also enforces the schema)
-    data = trusted_env.load_trusted_environments(str(_REPO))
-    assert data is not None
-    envs = data["environments"]
-    assert len(envs) >= 1
-    pinned = envs[0]
-    keyring = pinned["keys"]
-    assert keyring and keyring[0]["added_at_log_position"]
-    assert keyring[0]["public_key"].startswith("ssh-ed25519 ")
-
-    # env_id matches the compose service default REBAR_OPCERT_ENV_ID
-    compose = yaml.safe_load(_COMPOSE.read_text())
-    raw_env_id = compose["services"]["opcert"]["environment"]["REBAR_OPCERT_ENV_ID"]
-    m = re.search(r":-([^}]+)}", raw_env_id)  # ${REBAR_OPCERT_ENV_ID:-<default>}
-    compose_env_id = m.group(1) if m else raw_env_id
-    assert pinned["env_id"] == compose_env_id
 
 
 # --------------------------------------------------------------------------- helpers

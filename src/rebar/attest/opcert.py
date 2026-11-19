@@ -9,9 +9,12 @@ against that environment's **out-of-band-pinned** public key. Orthogonal to auth
 
 Distinct from authorship in two ways the design turns on:
 
-* **Out-of-band keys, era at the STORAGE ANCHOR (story 4214 — Option B).** Environment keys live
-  in a review-gated config (``.rebar/trusted_environments.yaml``), NOT on the auto-pushed tickets
-  branch. Each key record carries explicit ``added_at_log_position``/``revoked_at_log_position``
+* **Out-of-band keys, era at the STORAGE ANCHOR (story 4214 — Option B).** Environment keys are
+  never read from the auto-pushed tickets branch. (Rebar itself no longer pins them in the
+  repository: ADR 0125 moves trust to each verifying environment's ``verify.trusted_opcert_keys``
+  list; :func:`verify_opcert` remains the library primitive for callers that keep keyed eras.)
+  Each key record passed to :func:`verify_opcert` carries explicit
+  ``added_at_log_position``/``revoked_at_log_position``
   TICKETS-BRANCH log positions (``{timestamp}-{uuid}`` event-position strings; the revoke may be
   ``null``). A key's era-validity is evaluated at the certificate's STORAGE ANCHOR ``S`` — the
   tickets-branch commit that introduced the terminal envelope-bearing ``SIGNATURE`` event — NOT at
