@@ -6677,6 +6677,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-31T23:30:51Z"
     },
+    "0e48-b2df-17eb-407d": {
+      "created_at": "2026-11-19T15:31:31Z",
+      "jira_id": "4599507",
+      "jira_key": "REB-7294",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T15:31:56Z"
+    },
     "0e59-9be5-b86d-4e0b": {
       "created_at": "2026-08-15T14:52:07Z",
       "jira_key": "REB-813",
@@ -27863,6 +27870,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T01:06:13Z"
+    },
+    "3d9f-3788-87f7-45f6": {
+      "created_at": "2026-11-19T15:32:04Z",
+      "jira_id": "4599508",
+      "jira_key": "REB-7295",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T15:32:51Z"
     },
     "3da4-47c0-e355-4e77": {
       "baseline": {
@@ -120000,7 +120014,19 @@
     "1795087532857129675": "__rebar_unknown_comment_id__",
     "1795087543244584943": "__rebar_unknown_comment_id__",
     "1795088490999579522": "__rebar_unknown_comment_id__",
-    "1795093853457151716": "__rebar_unknown_comment_id__"
+    "1795093853457151716": "__rebar_unknown_comment_id__",
+    "1795095066869845912": "__rebar_unknown_comment_id__",
+    "1795095439145506545": "__rebar_unknown_comment_id__",
+    "1795097382089264276": "__rebar_unknown_comment_id__",
+    "1795097688681913555": "__rebar_unknown_comment_id__",
+    "1795101315218561033": "__rebar_unknown_comment_id__",
+    "1795101322844611560": "__rebar_unknown_comment_id__",
+    "1795101462920684741": "__rebar_unknown_comment_id__",
+    "1795101485897494067": "__rebar_unknown_comment_id__",
+    "1795101494707770268": "__rebar_unknown_comment_id__",
+    "1795101502689936376": "__rebar_unknown_comment_id__",
+    "1795101506724683520": "__rebar_unknown_comment_id__",
+    "1795101649020380416": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -125628,6 +125654,8 @@
     "REB-7291": "3e8c-b2fc-d34e-4a36",
     "REB-7292": "513b-5241-456e-4d7a",
     "REB-7293": "e816-b30a-6a5c-4ae4",
+    "REB-7294": "0e48-b2df-17eb-407d",
+    "REB-7295": "3d9f-3788-87f7-45f6",
     "REB-73": "3156-9092-1967-4367",
     "REB-730": "e534-5154-2401-40fb",
     "REB-731": "eced-c6b8-7461-48a0",
