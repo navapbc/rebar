@@ -335,7 +335,7 @@ jobs:
     # The job touches only the tap, through HOMEBREW_TAP_TOKEN; it needs no GITHUB_TOKEN scope.
     permissions: {}
     steps:
-      # mechanism-ok: ci_gate .github/workflows/release.yml::Dispatch the tap autobump once PyPI serves this version — hedonistic-historical-graywolf: the release triggers the Homebrew bump so the tap no longer depends on its schedule staying enabled.
+      # mechanism-ok: ci_gate .github/workflows/release.yml::Dispatch the tap autobump once PyPI serves this version — 0344-6d97-3cc2-4c7b (standing admission, chevrette-stony-camel): the release triggers the Homebrew bump so the tap no longer depends on its schedule staying enabled.
       - name: Dispatch the tap autobump once PyPI serves this version
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
