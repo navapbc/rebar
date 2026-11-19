@@ -964,3 +964,111 @@ def test_gate_running_roster_covers_every_billable_llm_tool():
     }
     unclassified = billable - _GATE_RUNNING_TOOLS - set(_NOT_GATE_SURFACES)
     assert not unclassified, f"classify these billable tools for the cb1b invariant: {unclassified}"
+
+
+# ── Cross-process owner lock (bug digestive-greasy-kingsnake) ─────────────────────
+#
+# After a blue-green cutover the new MCP container polls a job whose daemon still runs in
+# the draining container. Its in-memory registry has no entry for that job, so the poll
+# used to write ``failed / daemon-stopped`` into the shared index. The owner lock is held
+# by the process that runs the job and released by the kernel when that process dies.
+
+_HOLD_OWNER_LOCK = (
+    "import os, sys\n"
+    "from rebar._store import lock_kernel\n"
+    "fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)\n"
+    "lock_kernel.take_exclusive(fd)\n"
+    "print('held', flush=True)\n"
+    "sys.stdin.read()\n"
+)
+
+
+def _record_stale_running(job_id: str) -> None:
+    gate_runs.record_gate_run(
+        {
+            "job_id": job_id,
+            "ticket_id": "d80d",
+            "gate_type": "plan_review",
+            "status": "running",
+            "started_at": time.time() - (gate_runs._STALE_GRACE_SECONDS + 1.0),
+        }
+    )
+
+
+def test_gate_status_keeps_a_job_whose_owner_in_another_process_is_alive(store):
+    import sys
+
+    inflight.reset_registry()
+    job_id = "owned-elsewhere"
+    _record_stale_running(job_id)
+    index_file = store / ".rebar" / "gate_runs" / job_id
+    before = index_file.read_bytes()
+    owner = subprocess.Popen(
+        [sys.executable, "-c", _HOLD_OWNER_LOCK, str(gate_runs.owner_lock_path(job_id))],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert owner.stdout is not None and owner.stdout.readline().strip() == "held"
+
+        out = gate_runs.gate_run_status(job_id)
+
+        assert out["status"] == "running", out
+        assert index_file.read_bytes() == before, "the poll rewrote a live owner's index"
+    finally:
+        assert owner.stdin is not None
+        owner.stdin.close()
+        try:
+            owner.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            owner.kill()
+            owner.wait(timeout=30)
+
+    # The owner is gone and the kernel released its lock: the job is now stranded.
+    out = gate_runs.gate_run_status(job_id)
+    assert out["status"] == "failed"
+    assert out["verdict"] == "daemon-stopped"
+    persisted = gate_runs.read_gate_run(job_id)
+    assert persisted is not None and persisted["status"] == "failed"
+
+
+def test_review_plan_start_holds_the_owner_lock_until_the_terminal_record(store, monkeypatch):
+    import os
+
+    from rebar._store import lock_kernel
+
+    def _lock_is_free(job_id: str) -> bool:
+        fd = os.open(gate_runs.owner_lock_path(job_id), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            lock_kernel.take_exclusive(fd)
+        except OSError as exc:
+            if not lock_kernel.is_contention(exc):
+                raise
+            return False
+        finally:
+            os.close(fd)
+        return True
+
+    inflight.reset_registry()
+    fake = _BlockingReviewPlan(hold=60)
+    import rebar.llm
+
+    monkeypatch.setattr(rebar.llm, "review_plan", fake)
+    mcp = _server_with_llm_tools()
+
+    started, _gate_finished = _start_review_plan_and_check_gate(mcp, fake)
+    job_id = started["job_id"]
+    assert fake.started.wait(timeout=5)
+    assert not _lock_is_free(job_id), "the running job does not hold its owner lock"
+    fake.release.set()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if gate_runs.gate_run_status(job_id)["status"] != "running":
+            break
+        time.sleep(0.02)
+    assert gate_runs.gate_run_status(job_id)["status"] == "passed"
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and gate_runs.owner_lock_path(job_id).exists():
+        time.sleep(0.02)
+    assert not gate_runs.owner_lock_path(job_id).exists() or _lock_is_free(job_id)

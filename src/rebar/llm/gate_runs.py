@@ -31,8 +31,10 @@ new event type: the AUTHORITATIVE verdict is always the durable attestation.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
@@ -97,6 +99,78 @@ def record_gate_run(record: dict[str, Any], *, repo_root: str | None = None) -> 
         atomic_write(d / job_id, json.dumps(record))
     except OSError:
         logger.warning("gate_runs: could not record run %s", job_id, exc_info=True)
+
+
+# Per-job owner lock (bug digestive-greasy-kingsnake): lets a poller in another process or
+# container tell a live owner from a dead one.
+_OWNER_LOCK_SUFFIX = ".lock"
+
+
+def owner_lock_path(job_id: str, *, repo_root: str | None = None) -> Path:
+    """The per-job owner lock file beside the job's index record."""
+    return _index_dir(repo_root) / f"{job_id}{_OWNER_LOCK_SUFFIX}"
+
+
+def hold_owner_lock(job_id: str, *, repo_root: str | None = None) -> int | None:
+    """Take the job's owner lock and return its fd, or ``None`` when it cannot be taken.
+
+    The process running a job holds this for the job's lifetime. The kernel drops the lock
+    when that process dies (``flock`` on POSIX, ``msvcrt.locking`` on Windows, via
+    :mod:`rebar._store.lock_kernel`), and the lock is visible to every process on the same
+    kernel that opens the shared index, including another container mounting the volume.
+    Best-effort: on failure the job still runs and pollers fall back to the registry rule."""
+    from rebar._store import lock_kernel
+
+    try:
+        d = _index_dir(repo_root)
+        d.mkdir(parents=True, exist_ok=True)
+        fd = os.open(owner_lock_path(job_id, repo_root=repo_root), os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError:
+        logger.warning("gate_runs: could not open owner lock for %s", job_id, exc_info=True)
+        return None
+    try:
+        lock_kernel.take_exclusive(fd)
+    except (OSError, lock_kernel.NoExclusiveLegError):
+        logger.warning("gate_runs: could not take owner lock for %s", job_id, exc_info=True)
+        os.close(fd)
+        return None
+    return fd
+
+
+def release_owner_lock(fd: int | None, job_id: str, *, repo_root: str | None = None) -> None:
+    """Release a lock from :func:`hold_owner_lock` and best-effort remove its file.
+
+    Call only after the terminal index record is written: a poller that sees the lock free
+    re-reads the record before declaring the job stranded."""
+    if fd is None:
+        return
+    with contextlib.suppress(OSError):
+        os.close(fd)
+    with contextlib.suppress(OSError):
+        owner_lock_path(job_id, repo_root=repo_root).unlink()
+
+
+def _owner_lock_held(job_id: str, repo_root: str | None) -> bool:
+    """Whether another live process holds ``job_id``'s owner lock.
+
+    Opens the existing file without creating it. A missing file (a job started before owner
+    locks existed, or one already released) or a lock that can be taken means no live owner;
+    so does any probe failure, which keeps the registry rule as the fallback."""
+    from rebar._store import lock_kernel
+
+    try:
+        fd = os.open(owner_lock_path(job_id, repo_root=repo_root), os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        lock_kernel.take_exclusive(fd)
+    except OSError as exc:
+        return lock_kernel.is_contention(exc)
+    except lock_kernel.NoExclusiveLegError:
+        return False
+    finally:
+        os.close(fd)
+    return False
 
 
 def read_gate_run(job_id: str, *, repo_root: str | None = None) -> dict[str, Any] | None:
@@ -290,14 +364,18 @@ def _review_result_status(
     return out
 
 
-def _running_record_is_stale(rec: dict[str, Any]) -> bool:
-    """Whether a ``running`` index record has lost its daemon past the grace window."""
+def _running_record_is_stale(rec: dict[str, Any], repo_root: str | None = None) -> bool:
+    """Whether a ``running`` index record has lost its daemon past the grace window.
+
+    A job is live when this process's registry knows it or when another process holds its
+    owner lock (a draining container after a blue-green cutover, bug
+    digestive-greasy-kingsnake)."""
 
     recorded = str(rec.get("status") or "running")
     if recorded != "running":
         return False
     job_id = str(rec.get("job_id") or "")
-    if _inflight.is_job_active(job_id):
+    if _inflight.is_job_active(job_id) or _owner_lock_held(job_id, repo_root):
         return False
     started = rec.get("started_at")
     if isinstance(started, (int, float)) and (time.time() - started) < _STALE_GRACE_SECONDS:
@@ -352,7 +430,7 @@ def gate_run_status(job_id: str, *, repo_root: str | None = None) -> dict[str, A
         if _inflight.is_job_active(job_id):
             return {"job_id": job_id, "status": "attaching"}
         return {"job_id": job_id, "status": "unknown"}
-    if _running_record_is_stale(rec):
+    if _running_record_is_stale(rec, repo_root):
         rec = _materialize_stale_running(rec, repo_root=repo_root)
     status = str(rec.get("status") or "running")
     out: dict[str, Any] = {
