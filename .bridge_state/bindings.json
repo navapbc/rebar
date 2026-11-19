@@ -49495,10 +49495,24 @@
     },
     "70d0-4528-d074-40d3": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\nAfter the code stories of epic nonblack-brigandish-guillemot land, user docs and runbooks still describe the repo-pinned trust file `.rebar/trusted_environments.yaml`, `rebar trusted-env`, pinned-key trust bases and log-position key eras. The files that name it on main today are `docs/concurrency.md`, `docs/exit-codes.md`, `docs/llm-framework.md`, `docs/manifest-signing.md`, `docs/mcp-auth.md`, `docs/plan-review-gate.md`, `docs/repo-snapshot-gates.md`, `docs/migrations/hmac-opcert-removal.md` and `infra/runbooks/mcp-opcert-enforcement-flip.md` (from `git grep -l trusted_environments`). `AGENTS.md` (\"Certified ops\" paragraph) describes the enforcement flip as setting `verify.require_environment` + `verify.opcert_enforce_since` only. Sequencing: built on the removal story's merged commit.\n\n## Approach\nRewrite each passage to ADR 0125's model: validity-only by default (signature valid under its embedded key, subject bound, result reports `signing_key` and environment); optional `verify.trusted_opcert_keys` in the verifying environment's own config with the `untrusted` verdict; `verify.require_environment` requires a trust list; signing is never gated. Replace instructions that edit the pin file or run `rebar trusted-env` with the trust-list equivalent (env var `REBAR_VERIFY_TRUSTED_OPCERT_KEYS` in a deployment, or the user config `~/.config/rebar/config.toml`). In `infra/runbooks/mcp-opcert-enforcement-flip.md`, the preconditions name the MCP deployment's trust list (`infra/compose/docker-compose.yml` and `infra/scripts/autodeploy.sh`) instead of the pin file, the flip sets `require_environment`, `opcert_enforce_since` and a `trusted_opcert_keys` list in the gating environment's config (CI or the verifying clone), and rollback unsets them. Update the AGENTS.md sentence to name the trust list as part of the flip. Add a `docs/release-notes.md` entry: `rebar trusted-env` and `.rebar/trusted_environments.yaml` removed; new `verify.trusted_opcert_keys`; new verdict `untrusted`; `trust_basis` values now `envelope_key` and `trust_list`; new `signing_key` field. Historical ADRs (0049, 0098, 0100, 0104) are records and keep their text.\n\n## Scope\n- `docs/concurrency.md`, `docs/exit-codes.md`, `docs/llm-framework.md`, `docs/manifest-signing.md`, `docs/mcp-auth.md`, `docs/plan-review-gate.md`, `docs/repo-snapshot-gates.md`, `docs/migrations/hmac-opcert-removal.md`, `docs/release-notes.md`\n- `infra/runbooks/mcp-opcert-enforcement-flip.md`, `AGENTS.md`\nOut of scope: code, ADRs, eval corpora and test fixtures that quote the old filename as data.\n\n## Testing\nDocumentation-only; no new testable behavior. Docs drift and link tests run under `make verify`. Portability: Markdown only.\n\n## Acceptance Criteria\n- [ ] `git grep -nE 'trusted_environments|trusted-env' -- docs infra AGENTS.md ':!docs/adr' ':!docs/release-notes.md'` prints no hits (release notes may name the removed items).\n- [ ] `infra/runbooks/mcp-opcert-enforcement-flip.md` describes the flip and rollback with `verify.trusted_opcert_keys` and names the MCP deployment's list in compose and autodeploy (checked by reading the merged file).\n- [ ] `docs/release-notes.md` records the removal, the new key, the `untrusted` verdict, the `trust_basis` change and `signing_key`.\n- [ ] `make verify` is green, and the change lands through Gerrit with LLM-Review +1 and Verified +1.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nAfter the code stories of epic nonblack-brigandish-guillemot land, user docs and runbooks still describe the repo-pinned trust file `.rebar/trusted_environments.yaml`, the `rebar trusted-env` command, pinned-key trust bases and log-position key eras. On main today `git grep -l trusted_environments -- docs infra AGENTS.md ':!docs/adr'` lists `docs/concurrency.md`, `docs/exit-codes.md`, `docs/llm-framework.md`, `docs/manifest-signing.md`, `docs/mcp-auth.md`, `docs/plan-review-gate.md`, `docs/repo-snapshot-gates.md`, `docs/migrations/hmac-opcert-removal.md`, `docs/release-notes.md`, `docs/cli-reference.md` and `infra/runbooks/mcp-opcert-enforcement-flip.md`. Two of those are already handled by the code stories: `docs/cli-reference.md` is regenerated from CLI help by the validity-only and removal stories, and the removal story deletes the `trusted-env` row of `docs/exit-codes.md`. `AGENTS.md` (\"Certified ops\" paragraph) describes the enforcement flip as setting `verify.require_environment` + `verify.opcert_enforce_since` only. Sequencing: built on the removal story's merged commit.\n\n## Approach\nRewrite each remaining passage to ADR 0125's model: validity-only by default (signature valid under its embedded key, subject bound, result reports `signing_key` and environment); optional `verify.trusted_opcert_keys` in the verifying environment's own config with the `untrusted` verdict; `verify.require_environment` requires a trust list; signing is never gated; trust bases `envelope_key` and `trust_list` only (no `own_key`, `pinned_environment`, or pin-file key eras). Replace instructions that edit the pin file or run `rebar trusted-env` with the trust-list equivalent (env var `REBAR_VERIFY_TRUSTED_OPCERT_KEYS` in a deployment or CI job, or the user config `~/.config/rebar/config.toml`). In `infra/runbooks/mcp-opcert-enforcement-flip.md`, the preconditions name the MCP deployment's trust list (`infra/compose/docker-compose.yml` and `infra/scripts/autodeploy.sh`) instead of the pin file; the flip sets `require_environment`, `opcert_enforce_since` and a `trusted_opcert_keys` list in the gating environment (for this repository's CI, `.github/workflows/verify-identity.yml` runs `rebar verify-opcert`, so the list is supplied there as `REBAR_VERIFY_TRUSTED_OPCERT_KEYS` from the CI provider's protected variables rather than committed); rollback unsets them. Update the AGENTS.md \"Certified ops\" sentence to name `verify.trusted_opcert_keys` as part of the flip. Add a `docs/release-notes.md` entry: `rebar trusted-env` and `.rebar/trusted_environments.yaml` removed; new `verify.trusted_opcert_keys`; new verdict `untrusted`; `trust_basis` values now `envelope_key` and `trust_list`; new `signing_key` field. Before editing, re-derive the inventory with `git grep -nE 'trusted_environments|rebar trusted-env|trusted-env\\`|pinned_environment|own_key|added_at_log_position' -- docs infra AGENTS.md ':!docs/adr'` and cover every prose hit. Historical ADRs (0049, 0098, 0100, 0104) are records and keep their text. The phrase \"trusted-environment\" naming the remote op-cert gate service (remote-cert help, the compose `opcert` service comment) describes that service, not the pin file, and stays.\n\n## Scope\n- `docs/concurrency.md`, `docs/llm-framework.md`, `docs/manifest-signing.md`, `docs/mcp-auth.md`, `docs/plan-review-gate.md`, `docs/repo-snapshot-gates.md`, `docs/migrations/hmac-opcert-removal.md`, `docs/release-notes.md`, `docs/reuse-surface.md` (check only; its verdict table and trust-basis prose were updated by the code stories)\n- `infra/runbooks/mcp-opcert-enforcement-flip.md`, `AGENTS.md`\nOut of scope: code, generated `docs/cli-reference.md`, ADRs, eval corpora and test fixtures that quote the old filename as data.\n\n## Testing\nDocumentation-only; no new testable behavior. Docs drift and link tests run under `make verify`. Portability: Markdown only.\n\n## Acceptance Criteria\n- [ ] `git grep -nF trusted_environments -- docs infra AGENTS.md ':!docs/adr' ':!docs/release-notes.md'` prints no hits.\n- [ ] `git grep -nF 'rebar trusted-env' -- docs infra AGENTS.md ':!docs/adr' ':!docs/release-notes.md'` prints no hits.\n- [ ] `git grep -nE 'pinned_environment|own_key' -- docs ':!docs/adr' ':!docs/release-notes.md'` prints no hits.\n- [ ] `git grep -n trusted_opcert_keys -- infra/runbooks/mcp-opcert-enforcement-flip.md` and `git grep -n trusted_opcert_keys -- AGENTS.md` each print at least one hit.\n- [ ] `docs/release-notes.md` names `trusted-env`, `verify.trusted_opcert_keys`, `untrusted`, `trust_list` and `signing_key` (checked: `git grep -c -e trusted_opcert_keys -e untrusted -e trust_list -e signing_key -- docs/release-notes.md`).\n- [ ] `make verify` is green, and the change lands through Gerrit with LLM-Review +1 and Verified +1.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Docs and runbooks describe per-environment op-cert trust lists instead of the repo pin file"
       },
       "created_at": "2026-11-19T18:36:45Z",
@@ -56700,10 +56714,24 @@
     },
     "8145-b4c2-29f8-4012": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nAfter the sibling story \"validity-only by default; no code path reads the repo-pinned trust file\" lands, no verification, signing, health or merge-gate path reads `.rebar/trusted_environments.yaml`. The file, its loader `src/rebar/attest/trusted_env.py`, and the `rebar trusted-env` command (`src/rebar/_commands/trusted_env_cmd.py`, parser factory `build_trusted_env` in `src/rebar/_cli/_parsers/advanced/certs.py`, registry rows at `src/rebar/_cli/_registry.py` lines 304 and 326, help `src/rebar/_cli/help/trusted-env.txt`) still exist. ADR 0125 removes them so no op-cert keys are pinned in the repository. Sequencing: built on the validity-only story's merged commit, which already deletes `tests/unit/test_opcert_public_counterpart_guard_879b.py` (the module that monkeypatches `rebar.attest.trusted_env`).\n\n## Approach\n1. Delete `.rebar/trusted_environments.yaml`, `src/rebar/attest/trusted_env.py`, `src/rebar/_commands/trusted_env_cmd.py`, `src/rebar/_cli/help/trusted-env.txt`, and `tests/unit/test_trusted_env.py`.\n2. Remove `build_trusted_env` from `src/rebar/_cli/_parsers/advanced/certs.py` (keep the `remote-cert` factory; update the module docstring), the two `trusted-env` rows from `src/rebar/_cli/_registry.py`, the `trusted-env` line from `src/rebar/_cli/help/overview.txt`, and the `trusted-env` row from `docs/exit-codes.md` (line 220; `tests/interfaces/lifecycle/test_exit_codes.py` pairs every documented row with a live route). In `.gitignore`: delete line 26 (`!.rebar/trusted_environments.yaml`), drop the \"but TRACK the out-of-band trusted-environment pin\" clause from the comment at lines 20-22, and reword the comment at lines 27-28 without the pin file.\n3. Tests: in `tests/interfaces/facades/test_intercept_registry_cutover_s6.py`, replace the `trusted-env` row of the registered-command table with an explicit absence test: `\"trusted-env\"` is in neither registry map of `src/rebar/_cli/_registry.py`, and `rebar trusted-env --help` exits non-zero as an unknown command. Delete `test_trusted_env_preserves_explicit_multiline_usage` (`tests/unit/test_gen_cli_help.py` line 102) and drop `trusted-env` from the tables in `tests/interfaces/contracts/test_cli_help_writing_guidelines_jerboa.py`. In `tests/unit/test_opcert_deploy_infra.py`, remove `test_trusted_env_pins_deployed_environment_log_position_form` (line 293), the module-level `from rebar.attest import trusted_env` (line 22), the `_TRUSTED_ENV` constant (line 34), its section banner, and the pinning mention in the module docstring. In `tests/unit/test_verify_opcert_ac_coverage.py`, delete section \"3. trusted-env helper\" (`test_trusted_env_add_and_revoke_stamp_tip_position`, lines 328-375) and helpers only it uses. Replace the pin-file fixture in `tests/unit/test_bugfix_size_gate_ad0d.py` (lines 444-553) with the trust-list form where the test still needs trust.\n4. Regenerate `docs/cli-reference.md` (`scripts/gen_cli_reference.py`) and help artifacts (`scripts/gen_cli_help.py`), plus any census a failing drift test names. If the mechanism ratchet reports removed mechanisms as stale, run `python scripts/check_mechanism_delta.py --update-stale` and commit the shrunk baseline.\n5. Update the docstring of `src/rebar/attest/opcert.py` (line 13), which names the pin file.\nBefore committing, re-derive the reference set with Serena `find_referencing_symbols` on `trusted_env` symbols plus `git grep -nF` for `rebar.attest.trusted_env`, `trusted_env`, `trusted-env` and `trusted_environments`, and handle any site not listed here.\n\n## Scope\n- Deleted: `.rebar/trusted_environments.yaml`, `src/rebar/attest/trusted_env.py`, `src/rebar/_commands/trusted_env_cmd.py`, `src/rebar/_cli/help/trusted-env.txt`, `tests/unit/test_trusted_env.py`\n- Edited: `src/rebar/_cli/_parsers/advanced/certs.py`, `src/rebar/_cli/_registry.py`, `src/rebar/_cli/help/overview.txt`, `.gitignore`, `src/rebar/attest/opcert.py`, `docs/exit-codes.md`, `docs/cli-reference.md`, `.github/mechanism-baseline.json` (only via `--update-stale`)\n- Tests: `tests/interfaces/facades/test_intercept_registry_cutover_s6.py`, `tests/unit/test_gen_cli_help.py`, `tests/interfaces/contracts/test_cli_help_writing_guidelines_jerboa.py`, `tests/unit/test_opcert_deploy_infra.py`, `tests/unit/test_verify_opcert_ac_coverage.py`, `tests/unit/test_bugfix_size_gate_ad0d.py`\nOut of scope: prose docs and runbooks (docs sibling); historical ADRs 0049, 0098, 0100, 0104 keep their text; eval corpora and fixtures under `evals/` and `tests/fixtures/` that quote the filename as data.\n\n## Testing\nRemoval only; the behaviour change already landed. The new absence test in `test_intercept_registry_cutover_s6.py` fails on the parent commit (command registered) and passes after the deletion. Help and reference artifacts regenerate without `trusted-env`; `make verify` passes. Portability: deletions and a pure-Python registry assertion.\n\n## Acceptance Criteria\n- [ ] `git ls-files .rebar/trusted_environments.yaml src/rebar/attest/trusted_env.py src/rebar/_commands/trusted_env_cmd.py src/rebar/_cli/help/trusted-env.txt tests/unit/test_trusted_env.py` prints nothing.\n- [ ] `git grep -nF trusted_environments -- src` and `git grep -nF trusted_env -- src` print no hits.\n- [ ] The absence test passes: `trusted-env` is not in the CLI registry and `rebar trusted-env --help` exits non-zero (checked: `pytest tests/interfaces/facades/test_intercept_registry_cutover_s6.py -q`).\n- [ ] `python scripts/check_mechanism_delta.py --check` exits 0.\n- [ ] `make verify` is green, and the change lands through Gerrit with LLM-Review +1 and Verified +1.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Remove .rebar/trusted_environments.yaml, attest/trusted_env.py and the rebar trusted-env command"
       },
       "created_at": "2026-11-19T18:36:49Z",
@@ -67895,6 +67923,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:19Z"
+    },
+    "97f7-b448-9cdb-47ce": {
+      "created_at": "2026-11-19T22:31:17Z",
+      "jira_id": "4599566",
+      "jira_key": "REB-7306",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T22:31:29Z"
     },
     "97fc-e843-ac6f-47bc": {
       "baseline": {
@@ -107546,6 +107581,13 @@
       "state": "confirmed",
       "updated_at": "2026-11-12T06:40:11Z"
     },
+    "f04e-82d4-e955-4932": {
+      "created_at": "2026-11-19T22:31:30Z",
+      "jira_id": "4599567",
+      "jira_key": "REB-7307",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T22:31:38Z"
+    },
     "f059-cb55-6b6e-47a7": {
       "baseline": {
         "assignee": null,
@@ -120397,7 +120439,18 @@
     "1795119623116035883": "__rebar_unknown_comment_id__",
     "1795122483319321001": "__rebar_unknown_comment_id__",
     "1795122507107752001": "__rebar_unknown_comment_id__",
-    "1795123638091397001": "__rebar_unknown_comment_id__"
+    "1795123638091397001": "__rebar_unknown_comment_id__",
+    "1795124045173138001": "__rebar_unknown_comment_id__",
+    "1795124336113966001": "__rebar_unknown_comment_id__",
+    "1795124373009646001": "__rebar_unknown_comment_id__",
+    "1795124656836205001": "__rebar_unknown_comment_id__",
+    "1795124724011829001": "__rebar_unknown_comment_id__",
+    "1795124781697402001": "__rebar_unknown_comment_id__",
+    "1795124838479780001": "__rebar_unknown_comment_id__",
+    "1795124888607021001": "__rebar_unknown_comment_id__",
+    "1795124947622340001": "__rebar_unknown_comment_id__",
+    "1795125034987430001": "__rebar_unknown_comment_id__",
+    "1795125087700020001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -126039,6 +126092,8 @@
     "REB-7303": "387c-d59c-7854-40b2",
     "REB-7304": "6f5a-b6e4-327e-46b4",
     "REB-7305": "d4f1-da58-0748-4e1a",
+    "REB-7306": "97f7-b448-9cdb-47ce",
+    "REB-7307": "f04e-82d4-e955-4932",
     "REB-731": "eced-c6b8-7461-48a0",
     "REB-732": "f5d7-b2f2-1d70-4156",
     "REB-733": "edf7-946e-84be-48b3",
