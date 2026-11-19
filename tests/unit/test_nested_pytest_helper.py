@@ -184,8 +184,13 @@ def _win_pin(args: list[str]) -> list[str]:
         args,
         _WIN_REPO,
         pathmod=ntpath,
-        exists=lambda p: p in _WIN_EXISTING or p.startswith(_WIN_REPO),
-        isdir=lambda p: not p.endswith(".py"),
+        # Windows paths are case-insensitive, so existence is too; otherwise a case-changed
+        # argument would read as missing and never reach the under-cwd check.
+        exists=lambda p: (
+            ntpath.normcase(p) in {ntpath.normcase(e) for e in _WIN_EXISTING}
+            or ntpath.normcase(p).startswith(ntpath.normcase(_WIN_REPO))
+        ),
+        isdir=lambda p: not p.lower().endswith(".py"),
     )
 
 
@@ -201,6 +206,13 @@ def test_a_node_id_pins_the_directory_of_its_file() -> None:
 
 def test_a_directory_argument_pins_itself() -> None:
     assert _win_pin(["-q", _WIN_DIR]) == ["--rootdir", _WIN_DIR]
+
+
+def test_a_case_changed_argument_still_counts_as_existing() -> None:
+    """Guards the fake above: the case-changed under-cwd argument must reach ``_is_within``."""
+    upper = _WIN_TEST.upper()
+
+    assert _win_pin(["-q", upper]) == ["--rootdir", ntpath.dirname(upper)]
 
 
 def test_an_option_value_that_is_not_a_path_is_ignored() -> None:
@@ -225,6 +237,7 @@ def test_an_option_value_that_is_not_a_path_is_ignored() -> None:
         pytest.param(["--config-file=C:\\x\\pytest.ini", _WIN_TEST], id="config-file"),
         pytest.param(["--confcutdir", "C:\\x", _WIN_TEST], id="confcutdir"),
         pytest.param([_WIN_TEST, "E:\\other\\test_y.py"], id="two-drives"),
+        pytest.param([_WIN_TEST, f"{_WIN_REPO}\\tests\\test_x.py"], id="mixed-in-and-out"),
     ],
 )
 def test_the_pin_is_left_out_when_pytest_already_roots_the_session_correctly(
