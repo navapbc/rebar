@@ -341,3 +341,51 @@ def test_non_infra_exception_writes_no_gate_error(store):
     assert not _gate_errors_heldout(tid, store, "REVIEW_RESULT"), (
         "a non-infra exception must not write a gate_error record"
     )
+
+
+# ── alias callers (bug illtimed-sharpcut-ray) ───────────────────────────────────────
+
+
+def _event_files(store: str, dir_name: str, suffix: str) -> list[str]:
+    from rebar import config as _config
+
+    ticket_dir = os.path.join(str(_config.tracker_dir(store)), dir_name)
+    if not os.path.isdir(ticket_dir):
+        return []
+    return [f for f in os.listdir(ticket_dir) if f.endswith(f"-{suffix}.json")]
+
+
+def test_a_failing_gate_called_by_alias_writes_into_the_canonical_directory(store):
+    from rebar import config as _config
+    from rebar.llm.workflow import gate_dispatch
+
+    created = rebar.create_ticket(
+        "task",
+        "work ticket",
+        description="A well-formed ticket.\n\n## Acceptance Criteria\n- [ ] x",
+        repo_root=store,
+        return_alias=True,
+    )
+    tid, alias = created["id"], created["alias"]
+
+    with pytest.raises(LLMUnavailableError):
+        gate_dispatch.produce_completion_verdict(
+            alias,
+            graph=False,
+            repo_root=store,
+            cfg=LLMConfig.from_env(repo_root=store),
+            runner=_OutageRunner_heldout(),
+        )
+
+    tracker = str(_config.tracker_dir(store))
+    assert not os.path.exists(os.path.join(tracker, alias)), "an alias-named directory appeared"
+    assert _event_files(store, tid, "COMPLETION_VERDICT"), "no sidecar in the canonical directory"
+    assert _gate_errors_heldout(alias, store, "COMPLETION_VERDICT"), "alias no longer resolves"
+
+
+def test_gate_error_for_an_unknown_ticket_writes_nothing(store):
+    from rebar import config as _config
+    from rebar.llm.gate_error_sidecar import emit_gate_error
+
+    assert emit_gate_error("no-such-ticket", "completion", cause="x", repo_root=store) is False
+    assert not os.path.exists(os.path.join(str(_config.tracker_dir(store)), "no-such-ticket"))
