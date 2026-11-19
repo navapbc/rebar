@@ -66,7 +66,9 @@ def test_run_git_decodes_a_non_ascii_subject(repo: Path, timeout: int | None) ->
 
 @pytest.mark.parametrize("timeout", [None, 30], ids=["subprocess-run", "process-group"])
 def test_run_git_encodes_str_stdin_as_utf8(repo: Path, timeout: int | None) -> None:
-    text = _SUBJECT + "\n"
+    # No line ending: on Windows, text-mode stdin turns "\n" into "\r\n", which is newline
+    # translation, not the codec this test pins (bug 3e8c-b2fc-d34e-4a36).
+    text = _SUBJECT
     expected = (
         subprocess.run(
             ["git", "-C", str(repo), "hash-object", "--stdin"],
