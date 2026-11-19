@@ -13,13 +13,15 @@ acknowledges it, and ``fsck`` reports the divergence store-wide however it arose
 
 They also pin the two false-positive boundaries the first cut got wrong. A second clone
 mounting a shared tickets branch is a FIRST-CLASS workflow, so the mint must not be
-refused; and such a store legitimately holds several env ids, so the detector is scoped
-by AUTHOR — one author under two identities — rather than firing on every healthy
-multi-clone store.
+refused; and such a store legitimately holds several env ids, so the detector reports only
+ONE env id signed by two keys at once — never several env ids, and never one author under
+several env ids, which is how two services sharing a bot account look.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -29,6 +31,7 @@ import rebar
 from rebar._commands import fsck as _fsck
 from rebar._commands.fsck_authorship import EnvAuthorshipTally
 from rebar._store import env_identity
+from rebar.attest import dsse
 
 _OTHER_ENV = "ade0f2ef-51cc-45a2-bb97-c09846cd3df5"
 
@@ -184,224 +187,194 @@ def test_unreadable_events_do_not_crash_the_scan(rebar_repo: Path) -> None:
 
 # ── the fsck detector ────────────────────────────────────────────────────────
 #
-# The detector compares each author's event time span under this environment with the same
-# author's span under every other env id, and reports only spans that OVERLAP (bug
-# disruptive-breezy-esok, operator decision 2026-11-03). Spans that do not overlap are
-# successive re-clones of one store, which is accepted and not reported.
+# Environments are told apart by the authorship signing key embedded in each event's
+# `author_sig`, not by author (operator decision on placid-dreary-zethuswasp, 2026-11-18):
+# each environment signs with its own key, and checkouts in one environment may share it.
+# One env id signed by 2 or more keys during OVERLAPPING periods means its `.env-id` was
+# copied into another environment. Sequential keys are a rotation. The line is report-only.
+
+_KEY_A = b"\x11" * 32
+_KEY_B = b"\x22" * 32
 
 
-def _restamp_ticket(tracker: Path, ticket_id: str, env_id: str, *, author: str) -> int:
-    """Rewrite one ticket's events as if another environment had written them."""
-    count = 0
-    for event in (tracker / ticket_id).glob("*.json"):
-        payload = json.loads(event.read_text(encoding="utf-8"))
-        payload["env_id"] = env_id
-        payload["author"] = author
-        event.write_text(json.dumps(payload), encoding="utf-8")
-        count += 1
-    return count
+def _ssh_string(raw: bytes) -> bytes:
+    return len(raw).to_bytes(4, "big") + raw
 
 
-def _same_author_under_two_ids(repo: Path) -> tuple[Path, str, str]:
-    """A store where THIS environment's author also wrote under ``_OTHER_ENV`` during the
-    same period: ``_OTHER_ENV`` writes the first and the last ticket, and this environment
-    writes the one in between, so the two spans interleave."""
-    first = rebar.create_ticket("task", "written by the other clone", repo_root=str(repo))
-    rebar.create_ticket("task", "written here meanwhile", repo_root=str(repo))
-    last = rebar.create_ticket("task", "written by the other clone again", repo_root=str(repo))
-    tracker = _tracker(repo)
-    author = _sole_author(tracker)
-    for ticket_id in (first, last):
-        assert _restamp_ticket(tracker, ticket_id, _OTHER_ENV, author=author) > 0
-    current = env_identity.read_env_id(tracker)
-    assert current and current != _OTHER_ENV
-    return tracker, current, author
+def _author_sig(key: bytes) -> str:
+    """A DSSE ``author_sig`` whose SSHSIG carries ``key`` as its embedded ed25519 key.
+
+    Only the embedded public key matters to the detector, so the signature bytes are
+    filler; building it by hand keeps the test free of ``ssh-keygen``."""
+    pubkey = _ssh_string(b"ssh-ed25519") + _ssh_string(key)
+    blob = b"SSHSIG" + (1).to_bytes(4, "big") + _ssh_string(pubkey) + _ssh_string(b"rebar")
+    blob += _ssh_string(b"") + _ssh_string(b"sha512") + _ssh_string(b"\x00" * 16)
+    armored = (
+        "-----BEGIN SSH SIGNATURE-----\n"
+        + base64.b64encode(blob).decode("ascii")
+        + "\n-----END SSH SIGNATURE-----\n"
+    ).encode("ascii")
+    return dsse.encode(
+        "application/vnd.rebar.authorship.v1+json", b"{}", [{"keyid": "someone", "sig": armored}]
+    )
 
 
-def _sequential_reclone(repo: Path) -> Path:
-    """A store where ``_OTHER_ENV`` stopped writing before this environment started."""
-    rebar.create_ticket("task", "written before the re-clone", repo_root=str(repo))
-    tracker = _tracker(repo)
-    _restamp_events(tracker, _OTHER_ENV, author=_sole_author(tracker))
-    rebar.create_ticket("task", "written after the re-clone", repo_root=str(repo))
-    return tracker
+def _fingerprint(key: bytes) -> str:
+    pubkey = _ssh_string(b"ssh-ed25519") + _ssh_string(key)
+    digest = base64.b64encode(hashlib.sha256(pubkey).digest()).decode("ascii")
+    return "SHA256:" + digest.rstrip("=")
 
 
-def _sole_author(tracker: Path) -> str:
-    authors = {author for _, author in _identity_spans(tracker)}
-    assert len(authors) == 1, f"fixture expected one author, got {authors}"
-    return authors.pop()
+def _event(env: str, key: bytes | None, ts: int, *, author: str = "Rebar Bot") -> dict:
+    event: dict = {"env_id": env, "author": author, "timestamp": ts}
+    if key is not None:
+        event["author_sig"] = _author_sig(key)
+    return event
 
 
-def _identity_spans(tracker: Path) -> dict[tuple[str, str], tuple[int, int] | None]:
-    """The store's ``(env_id, author)`` spans, via the production collector."""
+def _report(*events: dict) -> str | None:
     tally = EnvAuthorshipTally()
-    for ticket_dir in tracker.iterdir():
-        if ticket_dir.name.startswith(".") or not ticket_dir.is_dir():
-            continue
-        for event in ticket_dir.glob("*.json"):
-            tally.observe(event.name, json.loads(event.read_text(encoding="utf-8")))
-    return tally.identity_spans()
+    for index, event in enumerate(events):
+        tally.observe(f"{index}-COMMENT.json", event)
+    return env_identity.divergence_report(tally.key_spans())
 
 
-def test_fsck_reports_env_id_divergence(
-    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Overlapping writes by one author under two identities are detected store-wide."""
-    _tracker_path, current, _author = _same_author_under_two_ids(rebar_repo)
-
-    rc = _fsck.fsck_cli([], repo_root=str(rebar_repo))
-    out = capsys.readouterr().out
-
-    assert "ENV_ID_MISMATCH" in out, "fsck did not report the environment-identity change"
-    assert _OTHER_ENV in out and current in out, "the report does not name both ids"
-    assert rc == 1, "the divergence was not counted as an integrity issue"
-
-
-def test_fsck_json_carries_the_finding(
-    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _same_author_under_two_ids(rebar_repo)
-
-    _fsck.fsck_cli(["--output", "json"], repo_root=str(rebar_repo))
-    payload = json.loads(capsys.readouterr().out)
-
-    kinds = [issue["kind"] for issue in payload["issues"]]
-    assert "env_id_mismatch" in kinds, f"not in --output json: {kinds}"
+def test_one_env_id_under_two_overlapping_keys_is_reported() -> None:
+    line = _report(
+        _event(_OTHER_ENV, _KEY_A, 100),
+        _event(_OTHER_ENV, _KEY_A, 300),
+        _event(_OTHER_ENV, _KEY_B, 200),
+        _event(_OTHER_ENV, _KEY_B, 400),
+    )
+    assert line is not None and line.startswith("ENV_ID_MISMATCH:")
+    assert _OTHER_ENV in line
+    assert _fingerprint(_KEY_A) in line and _fingerprint(_KEY_B) in line
+    assert ".env-id" in line, "the remedy does not name the file to remove"
 
 
-def test_fsck_does_not_report_a_sequential_reclone(
-    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The accepted trade-off: a clone retired and then replaced is not reported."""
-    _sequential_reclone(rebar_repo)
-
-    rc = _fsck.fsck_cli([], repo_root=str(rebar_repo))
-    out = capsys.readouterr().out
-
-    assert "ENV_ID_MISMATCH" not in out, out
-    assert rc == 0, out
-
-
-def test_a_shared_store_with_several_clones_is_not_reported(rebar_repo: Path) -> None:
-    """The false-positive boundary: several env ids is the HEALTHY multi-clone topology.
-
-    A detector that fired here would fire on every well-formed team store, and a line
-    that is always present is a line nobody reads."""
-    rebar.create_ticket("task", "mine", repo_root=str(rebar_repo))
-    tracker = _tracker(rebar_repo)
-    current = env_identity.read_env_id(tracker)
-    peer = {(_OTHER_ENV, "a different agent"): (0, 2**62)}
-
-    assert env_identity.divergence_report(current, _identity_spans(tracker) | peer) is None
-
-
-def test_single_identity_store_is_clean(rebar_repo: Path) -> None:
-    rebar.create_ticket("task", "native", repo_root=str(rebar_repo))
-    tracker = _tracker(rebar_repo)
-
+def test_a_key_rotation_is_not_reported() -> None:
     assert (
-        env_identity.divergence_report(env_identity.read_env_id(tracker), _identity_spans(tracker))
+        _report(
+            _event(_OTHER_ENV, _KEY_A, 100),
+            _event(_OTHER_ENV, _KEY_A, 200),
+            _event(_OTHER_ENV, _KEY_B, 300),
+            _event(_OTHER_ENV, _KEY_B, 400),
+        )
         is None
     )
 
 
-def test_divergence_report_is_silent_without_a_current_identity() -> None:
-    """No ``.env-id`` yet is the mint warning's business, not the detector's — reporting
-    "everything is foreign" there would be noise on a store that has not been identified."""
-    assert env_identity.divergence_report("", {(_OTHER_ENV, "someone"): (1, 2)}) is None
+def test_a_shared_boundary_timestamp_counts_as_overlap() -> None:
+    assert _report(_event(_OTHER_ENV, _KEY_A, 100), _event(_OTHER_ENV, _KEY_B, 100)) is not None
 
 
-# ── the overlap rule, on spans ───────────────────────────────────────────────
-
-_HERE = "492a5c71-6cda-48a6-8134-02ff6a672739"
-
-
-def _report(here: tuple[int, int] | None, other: tuple[int, int] | None) -> str | None:
-    return env_identity.divergence_report(
-        _HERE, {(_HERE, "Joe Oakhart"): here, (_OTHER_ENV, "Joe Oakhart"): other}
+def test_checkouts_sharing_one_key_are_not_reported() -> None:
+    """Several env ids under one key are checkouts of one environment."""
+    here = "492a5c71-6cda-48a6-8134-02ff6a672739"
+    assert (
+        _report(
+            _event(here, _KEY_A, 100),
+            _event(_OTHER_ENV, _KEY_A, 150),
+            _event(here, _KEY_A, 200),
+        )
+        is None
     )
 
 
-def test_sequential_spans_are_successive_reclones() -> None:
-    assert _report((300, 400), (100, 200)) is None
-    assert _report((100, 200), (300, 400)) is None
+def test_two_environments_with_their_own_keys_are_not_reported() -> None:
+    """The server's case: the MCP server and the review bot both commit as "Rebar Bot",
+    interleaved in time, each under its own env id and key."""
+    review_bot = "ad49f17f-0000-4000-8000-000000000000"
+    assert (
+        _report(
+            _event(_OTHER_ENV, _KEY_A, 100),
+            _event(review_bot, _KEY_B, 150),
+            _event(_OTHER_ENV, _KEY_A, 200),
+            _event(review_bot, _KEY_B, 250),
+        )
+        is None
+    )
 
 
-def test_overlapping_spans_are_reported() -> None:
-    line = _report((100, 300), (200, 400))
-    assert line is not None and line.startswith("ENV_ID_MISMATCH:")
-    assert _OTHER_ENV in line and _HERE in line
+def test_unsigned_and_unparseable_events_carry_no_key() -> None:
+    garbled = _event(_OTHER_ENV, None, 150)
+    garbled["author_sig"] = "not a dsse envelope"
+    assert (
+        _report(
+            _event(_OTHER_ENV, _KEY_A, 100),
+            _event(_OTHER_ENV, None, 150),
+            garbled,
+            _event(_OTHER_ENV, _KEY_A, 200),
+        )
+        is None
+    )
 
 
-def test_divergence_report_says_old_attestations_still_certify() -> None:
-    line = _report((100, 300), (200, 400))
-
-    assert line is not None
-    _assert_states_the_current_attestation_policy(line)
-
-
-def test_a_span_nested_inside_the_other_is_reported() -> None:
-    assert _report((200, 200), (100, 300)) is not None
-
-
-def test_a_shared_boundary_timestamp_counts_as_overlap() -> None:
-    """Closed intervals: a successor writes strictly after its predecessor's last write,
-    so two clones stamping the same nanosecond were writing at the same time."""
-    assert _report((200, 300), (100, 200)) is not None
-    assert _report((100, 200), (200, 300)) is not None
-
-
-def test_the_live_aug_9_handover_is_sequential() -> None:
-    """One author's spans under the retiring clone and its successor, as measured on the
-    live store (bug disruptive-breezy-esok): the last write under the retiring clone was
-    2026-08-09 19:51:58 PDT and the first under the successor 20:44:59 PDT."""
-    retiring = (1783645828503751001, 1786330318582256001)
-    successor = (1786333499117087001, 1789063639233958001)
-    assert _report(successor, retiring) is None
-
-
-def test_a_pair_without_timestamps_is_still_reported() -> None:
-    """Order cannot be established without a timestamp, so succession is not assumed."""
-    assert _report(None, (100, 200)) is not None
-    assert _report((100, 200), None) is not None
-
-
-def test_another_authors_overlap_does_not_count() -> None:
-    spans = {
-        (_HERE, "Joe Oakhart"): (300, 400),
-        (_OTHER_ENV, "Joe Oakhart"): (100, 200),
-        (_OTHER_ENV, "someone else"): (300, 400),
-    }
-    assert env_identity.divergence_report(_HERE, spans) is None
-
-
-# ── the span collector ───────────────────────────────────────────────────────
-
-
-def test_tally_records_each_authors_first_and_last_timestamp() -> None:
+def test_tally_records_each_keys_first_and_last_timestamp() -> None:
     tally = EnvAuthorshipTally()
-    for name, env, author, ts in (
-        ("a-CREATE.json", "env-1", "Ann", 500),
-        ("b-COMMENT.json", "env-1", "Ann", 100),
-        ("c-COMMENT.json", "env-1", "Ann", 300),
-        ("d-COMMENT.json", "env-1", "Bob", 50),
-        ("e-COMMENT.json", "env-2", "Ann", 900),
-        ("f-SNAPSHOT.json", "env-1", "Ann", 10_000),
+    for name, event in (
+        ("a-CREATE.json", _event("env-1", _KEY_A, 500)),
+        ("b-COMMENT.json", _event("env-1", _KEY_A, 100)),
+        ("c-COMMENT.json", _event("env-1", _KEY_B, 50)),
+        ("d-COMMENT.json", _event("env-2", _KEY_A, 900)),
+        ("e-COMMENT.json", {**_event("env-2", _KEY_B, 0), "timestamp": "soon"}),
+        ("f-SNAPSHOT.json", _event("env-1", _KEY_B, 10_000)),
     ):
-        tally.observe(name, {"env_id": env, "author": author, "timestamp": ts})
+        tally.observe(name, event)
 
-    assert tally.identity_spans() == {
-        ("env-1", "Ann"): (100, 500),
-        ("env-1", "Bob"): (50, 50),
-        ("env-2", "Ann"): (900, 900),
+    assert tally.key_spans() == {
+        ("env-1", _fingerprint(_KEY_A)): (100, 500),
+        ("env-1", _fingerprint(_KEY_B)): (50, 50),
+        ("env-2", _fingerprint(_KEY_A)): (900, 900),
     }
 
 
-def test_tally_ignores_non_integer_timestamps() -> None:
-    tally = EnvAuthorshipTally()
-    tally.observe("a-CREATE.json", {"env_id": "env-1", "author": "Ann", "timestamp": "soon"})
-    tally.observe("b-CREATE.json", {"env_id": "env-2", "author": "Ann"})
-    tally.observe("c-COMMENT.json", {"env_id": "env-2", "author": "Ann", "timestamp": 70})
+def _restamp_signed(tracker: Path, ticket_id: str, env_id: str, key: bytes, ts: int) -> None:
+    for event in (tracker / ticket_id).glob("*.json"):
+        payload = json.loads(event.read_text(encoding="utf-8"))
+        payload.update(_event(env_id, key, ts))
+        event.write_text(json.dumps(payload), encoding="utf-8")
 
-    assert tally.identity_spans() == {("env-1", "Ann"): None, ("env-2", "Ann"): (70, 70)}
+
+def _store_with_a_copied_env_id(repo: Path) -> Path:
+    tracker = _tracker(repo)
+    for index, key in enumerate((_KEY_A, _KEY_B, _KEY_A)):
+        ticket_id = rebar.create_ticket("task", f"written by key {index}", repo_root=str(repo))
+        _restamp_signed(tracker, ticket_id, _OTHER_ENV, key, 100 + index)
+    return tracker
+
+
+def test_fsck_reports_a_copied_env_id_without_failing(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Report-only: spans cover all history and events are never rewritten, so a counted
+    overlap could never stop counting (operator decision, 2026-11-18)."""
+    _store_with_a_copied_env_id(rebar_repo)
+
+    rc = _fsck.fsck_cli([], repo_root=str(rebar_repo))
+    out = capsys.readouterr().out
+
+    assert "ENV_ID_MISMATCH" in out and _OTHER_ENV in out, out
+    assert rc == 0, out
+
+
+def test_fsck_json_marks_the_finding_uncounted(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _store_with_a_copied_env_id(rebar_repo)
+
+    _fsck.fsck_cli(["--output", "json"], repo_root=str(rebar_repo))
+    payload = json.loads(capsys.readouterr().out)
+
+    found = [issue for issue in payload["issues"] if issue["kind"] == "env_id_mismatch"]
+    assert found and found[0]["counted"] is False, payload["issues"]
+
+
+def test_fsck_is_clean_for_a_native_store(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rebar.create_ticket("task", "native", repo_root=str(rebar_repo))
+
+    _fsck.fsck_cli([], repo_root=str(rebar_repo))
+
+    assert "ENV_ID_MISMATCH" not in capsys.readouterr().out

@@ -1161,22 +1161,22 @@ only one of them is a fault:
 
 Set `REBAR_ALLOW_ENV_REIDENTIFY=1` to acknowledge the situation and quieten the warning.
 
-`fsck` reports the condition independently and store-wide: an `ENV_ID_MISMATCH` finding
-means **this environment's own author(s) have also written events under a different env
-id during an overlapping period** — a second clone writing while the first was still
-active. It is deliberately scoped by author rather than simply "the store holds more than
-one env id", because a healthy store shared by several clones always holds several; a
-check that fired there would fire on every well-formed team store until nobody read it.
-It is also scoped by time: for each shared author, fsck compares the first and last event
-timestamps under each env id, and env ids whose ranges do not overlap are treated as
-successive re-clones of one store and not reported. Ranges are closed, so a shared
-boundary timestamp counts as overlap, and a range with no timestamp counts as
-overlapping. The accepted trade-off (bug `bbd4-cec2-ecdb-46d9`) is that a clone retired
-and then replaced, the ordinary re-clone, is **not** flagged by fsck; the mint warning
-above is the signal for that case. It is a counted integrity issue because two live
-clones writing as one author split that author's audit trail while both keep writing. Prior
-events are **not** rewritten — they are correctly stamped with whichever environment
-actually wrote them.
+`fsck` reports a related condition independently and store-wide: an `ENV_ID_MISMATCH` note
+means **one env id's events are signed by two or more authorship keys during overlapping
+periods** — a `.env-id` copied into another environment. fsck tells environments apart by the
+signing key embedded in each event's `author_sig` (bug `placid-dreary-zethuswasp`, operator
+decision 2026-11-18): each environment signs with its own key, and checkouts in one environment
+may share that key. So several env ids under one key are checkouts of one environment and are
+not reported, and neither are two environments whose writers share an author name (the MCP
+server and the review bot both commit as "Rebar Bot"). For each env id, fsck compares the first
+and last event timestamps under each key; keys whose ranges do not overlap are a rotation and
+are not reported. Ranges are closed, so a shared boundary timestamp counts as overlap. Unsigned
+events and signatures whose key cannot be parsed carry no key, so they neither cause nor hide a
+report. The note is **report-only** (`counted: false` in `--output json`, no effect on the exit
+status): ranges cover all history and events are never rewritten, so a counted overlap could
+never clear. The remedy is to delete `.env-id` in the checkout that should not carry the id so
+it mints its own; prior events are **not** rewritten — they are correctly stamped with
+whichever environment actually wrote them.
 
 A re-clone no longer invalidates op-cert attestations: the signing environment is not a gate
 (bug `c21f-6f29-5d2d-4a5a`), and an SSHSIG blob carries the public half it was made with, so a

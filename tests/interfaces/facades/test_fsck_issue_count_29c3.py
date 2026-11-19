@@ -31,6 +31,10 @@ _COUNTED = "MISSING_CREATE: aaaa-bbbb-cccc-dddd — no CREATE event found"
 
 # One representative text line per never-counted kind (is_issue=False).
 _NEVER_COUNTED = {
+    "env_id_mismatch": (
+        "ENV_ID_MISMATCH: 1 environment id(s) signed by two or more keys during overlapping "
+        "periods: e (SHA256:a 2026-01-01T00:00:00Z..2026-01-02T00:00:00Z)."
+    ),
     "push_pending": (
         "PUSH_PENDING: local 'tickets' branch is ahead of origin/tickets by 2 "
         "commit(s) — push pending"
@@ -225,6 +229,7 @@ def test_never_counted_kinds_is_exactly_scan_plus_dirty_components() -> None:
     # The scan/health kinds are the known inline is_issue=False decisions; a NEW one added
     # at a production site without updating this set is exactly the drift this pins against.
     assert fsck_mod._NEVER_COUNTED_SCAN_KINDS == {
+        "env_id_mismatch",
         "push_pending",
         "status_fork_resolved",
         "uncertified_close",

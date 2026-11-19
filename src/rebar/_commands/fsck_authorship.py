@@ -6,12 +6,19 @@ only environments whose newest event is at least as recent as the earliest signe
 excludes dormant pre-signing writers while detecting active writers without usable identities.
 
 The tally checks only whether ``author_sig`` is present. ``rebar verify-identity`` performs
-cryptographic verification.
+cryptographic verification. It also records, per ``(env_id, signing key)``, the first and last
+event timestamp, read from the public key embedded in each ``author_sig`` SSHSIG, for the
+environment-identity check (:func:`rebar._store.env_identity.divergence_report`).
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+
 from rebar._store.env_identity import Span
+from rebar.attest import dsse
+from rebar.attest.sshsig import embedded_public_key
 
 # Snapshots are derived projections, not appended events: a SNAPSHOT carries no independent
 # authorship of its own, so folding it into a writer's tally would double-count the events it
@@ -24,26 +31,47 @@ _SNAPSHOT_SUFFIX = "-SNAPSHOT.json"
 _UNKNOWN_AUTHORS = frozenset({"", "unknown"})
 
 
-def _widen(span: Span, ts: int | None) -> Span:
-    """``span`` extended to cover ``ts``; an unstamped event leaves it unchanged."""
-    if ts is None:
-        return span
+def _widen(span: Span | None, ts: int) -> Span:
+    """``span`` extended to cover ``ts``."""
     if span is None:
         return (ts, ts)
     return (min(span[0], ts), max(span[1], ts))
 
 
-class _EnvRow:
-    """Mutable per-env accumulator (events, signed, unattributed, latest timestamp)."""
+def signer_key_id(author_sig: object) -> str | None:
+    """The ``SHA256:`` fingerprint (as ``ssh-keygen -l`` prints it) of the key that made
+    ``author_sig``, or ``None`` when the envelope or its SSHSIG cannot be parsed.
 
-    __slots__ = ("authors", "events", "last_ts", "signed", "unattributed")
+    The key is the public half embedded in the SSHSIG; this establishes which key signed,
+    not that the signature verifies (that is ``rebar verify-identity``'s job)."""
+    if not isinstance(author_sig, str):
+        return None
+    try:
+        signatures = dsse.decode(author_sig).signatures
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not signatures:
+        return None
+    public_key = embedded_public_key(signatures[0].sig)
+    if public_key is None:
+        return None
+    blob = base64.b64decode(public_key.split(" ", 1)[1])
+    digest = base64.b64encode(hashlib.sha256(blob).digest()).decode("ascii")
+    return "SHA256:" + digest.rstrip("=")
+
+
+class _EnvRow:
+    """Mutable per-env accumulator (events, signed, unattributed, latest timestamp, and each
+    signing key's time span)."""
+
+    __slots__ = ("events", "keys", "last_ts", "signed", "unattributed")
 
     def __init__(self) -> None:
         self.events = 0
         self.signed = 0
         self.unattributed = 0
         self.last_ts = 0
-        self.authors: dict[str, Span] = {}
+        self.keys: dict[str, Span] = {}
 
 
 class EnvAuthorshipTally:
@@ -80,25 +108,28 @@ class EnvAuthorshipTally:
         stamped = raw_ts if isinstance(raw_ts, int) and not isinstance(raw_ts, bool) else None
         row.last_ts = max(row.last_ts, ts)
 
-        if payload.get("author_sig"):
+        author_sig = payload.get("author_sig")
+        if author_sig:
             row.signed += 1
             if self._first_signed_ts is None or ts < self._first_signed_ts:
                 self._first_signed_ts = ts
+            # An unstamped event cannot be placed in time, and an unparseable signature names
+            # no key, so neither can create or hide an overlap.
+            key = signer_key_id(author_sig) if stamped is not None else None
+            if key is not None and stamped is not None:
+                row.keys[key] = _widen(row.keys.get(key), stamped)
 
         author = payload.get("author")
         if not isinstance(author, str) or author.strip().lower() in _UNKNOWN_AUTHORS:
             row.unattributed += 1
-        elif author.strip():
-            name = author.strip()
-            row.authors[name] = _widen(row.authors.get(name), stamped)
 
-    def identity_spans(self) -> dict[tuple[str, str], Span]:
-        """Return each ``(env_id, author)`` pair's event time span for identity-divergence
-        checks (:func:`rebar._store.env_identity.divergence_report`)."""
+    def key_spans(self) -> dict[tuple[str, str], Span]:
+        """Return each ``(env_id, signing-key fingerprint)`` pair's event time span for the
+        identity check (:func:`rebar._store.env_identity.divergence_report`)."""
         return {
-            (env_id, author): span
+            (env_id, key): span
             for env_id, row in self._envs.items()
-            for author, span in row.authors.items()
+            for key, span in row.keys.items()
         }
 
     def findings(self) -> list[str]:
