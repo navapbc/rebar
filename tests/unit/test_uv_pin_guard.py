@@ -21,7 +21,8 @@ GATE = REPO_ROOT / "scripts" / "check_uv_pin.py"
 #: The one Dockerfile every skew test mutates, and the line its uv reference sits on. Skew
 #: assertions bind to this exact `path:line` so they name the offender rather than matching
 #: the always-emitted trailer summary, which mentions every failure mode by construction.
-SVC_DOCKERFILE = Path("infra") / "compose" / "Dockerfile.svc"
+# The location check_uv_pin prints: repo-relative, always in POSIX form.
+SVC_DOCKERFILE = "infra/compose/Dockerfile.svc"
 COMPOSE_FILE = Path("docker-compose.yml")
 UV_LINE = 3
 COMPOSE_IMAGE_LINE = 3
