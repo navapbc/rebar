@@ -160,6 +160,87 @@ def _rotated_own_key_verdict(envelope, principal: str, repo_root):
     return retry if retry.verified else None
 
 
+def _signing_key_sha256(public_key: str | None) -> str | None:
+    """``SHA256:`` fingerprint of an OpenSSH public-key line, as ``ssh-keygen -l`` prints it."""
+    import base64
+    import binascii
+    import hashlib
+
+    parts = public_key.split() if public_key else []
+    if len(parts) < 2:
+        return None
+    try:
+        blob = base64.b64decode(parts[1], validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode("ascii").rstrip("=")
+
+
+def _embedded_signer_key(envelope) -> str | None:
+    """The public key carried inside the envelope's SSHSIG, or ``None`` when unreadable."""
+    from rebar.attest import sshsig
+
+    sigs = list(envelope.signatures) if envelope is not None else []
+    return sshsig.embedded_public_key(sigs[0].sig) if sigs else None
+
+
+def trusted_opcert_pairs(repo_root) -> frozenset[tuple[str, str]] | None:
+    """The ``(env_id, "<key-type> <base64>")`` pairs in ``verify.trusted_opcert_keys``.
+
+    ``None`` means no list is configured (validity decides). A configuration that cannot be
+    read raises :class:`rebar.config.ConfigError`; callers fail closed rather than reading
+    a broken configuration as "no list" (ADR 0125)."""
+    entries = config.compose_config(root=repo_root).verify.trusted_opcert_keys
+    if not entries:
+        return None
+    return frozenset((p[0], f"{p[1]} {p[2]}") for p in (e.split() for e in entries))
+
+
+def _trust_list_verdict(base: dict, principal: str, signer_key: str | None, repo_root) -> dict:
+    """Judge an already-valid, correctly bound certificate against the trust list.
+
+    Returns the final result: ``certified`` with trust basis ``trust_list`` when the
+    ``(principal, key)`` pair is listed, otherwise ``untrusted``. An unreadable list fails
+    closed as ``untrusted``."""
+    from rebar._opcert_signing import _ssh_pub_body
+
+    fingerprint = base.get("signing_key")
+    try:
+        pairs = trusted_opcert_pairs(repo_root) or frozenset()
+    except Exception as exc:  # noqa: BLE001 — an unreadable trust list never certifies
+        return {
+            **base,
+            "verified": False,
+            "verdict": "untrusted",
+            "reason": f"verify.trusted_opcert_keys could not be read ({exc})",
+        }
+    if (principal, _ssh_pub_body(signer_key)) in pairs:
+        return {
+            **base,
+            "trust_basis": "trust_list",
+            "verified": True,
+            "verdict": "certified",
+            "reason": f"signed by {fingerprint}, listed for environment {principal!r}",
+        }
+    return {
+        **base,
+        "verified": False,
+        "verdict": "untrusted",
+        "reason": (
+            f"op-cert is validly signed by key {fingerprint} for environment {principal!r}, "
+            "but that pair is not in verify.trusted_opcert_keys"
+        ),
+    }
+
+
+def _trust_list_configured(repo_root) -> bool:
+    """True when a trust list is set, or when the configuration cannot be read (fail closed)."""
+    try:
+        return trusted_opcert_pairs(repo_root) is not None
+    except Exception:  # noqa: BLE001 — unreadable config is judged by _trust_list_verdict
+        return True
+
+
 def verify_opcert_record(
     record: dict, ticket_id: str, *, kind: str | None = None, repo_root=None
 ) -> dict:
@@ -214,6 +295,8 @@ def verify_opcert_record(
         # Expose own, pinned, or embedded-key trust; the last does not establish
         # a known environment and must remain visible to audit readers.
         "trust_basis": None,
+        # Which key signed (its SHA256 fingerprint), whatever the verdict (ADR 0125).
+        "signing_key": _signing_key_sha256(_embedded_signer_key(envelope)),
     }
 
     if envelope is None:
@@ -248,9 +331,28 @@ def verify_opcert_record(
             ),
         }
 
-    keys, trust_basis = _opcert_trust_root(
-        principal, own_principal, tracker, envelope, repo_root, required_env
-    )
+    signer_key = _embedded_signer_key(envelope)
+    with_list = _trust_list_configured(repo_root)
+    keys: list[str]
+    trust_basis: str | None
+    if with_list:
+        # A configured trust list replaces every other trust root: the signature must hold
+        # under its own embedded key, and the (environment, key) pair must be listed.
+        if not signer_key:
+            return {
+                **base,
+                "verified": False,
+                "verdict": "mismatch",
+                "reason": (
+                    f"the signature of {principal!r} carries no readable public key, so it "
+                    "cannot verify (corrupted or not an SSHSIG signature)"
+                ),
+            }
+        keys, trust_basis = [signer_key], "envelope_key"
+    else:
+        keys, trust_basis = _opcert_trust_root(
+            principal, own_principal, tracker, envelope, repo_root, required_env
+        )
     base = {**base, "trust_basis": trust_basis}
     if not keys:
         return {
@@ -284,6 +386,8 @@ def verify_opcert_record(
     binding_error = _opcert_subject_binding_error(envelope, bound, ticket_id, expected_kind)
     if binding_error is not None:
         return {**base, **binding_error}
+    if with_list:
+        return _trust_list_verdict(base, principal, signer_key, repo_root)
 
     return {
         **base,

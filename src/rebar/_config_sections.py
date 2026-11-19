@@ -14,6 +14,7 @@ from rebar._config_coercion import (
     _as_str_list,
     _as_str_tuple,
     _as_tracker_dir,
+    _as_trusted_key_list,
     _src,
     _warn_unknown,
 )
@@ -28,6 +29,7 @@ _EMPTY_ENV_FAULT_KEYS = frozenset(
     {
         ("verify", "require_environment"),
         ("verify", "opcert_enforce_since"),
+        ("verify", "trusted_opcert_keys"),
         ("identity", "enforce_since"),
         ("mcp", "auth_required_scopes"),
         ("mcp", "auth_jwt_expected_typ"),
@@ -77,6 +79,8 @@ _SECTIONS: dict[str, dict] = {
         "comment_trail_xcheck_active": lambda v, k: _as_bool(v, k),
         "require_environment": lambda v, k: _as_str(v, k),
         "opcert_enforce_since": lambda v, k: _as_str(v, k),
+        # mechanism-ok: config_key verify.trusted_opcert_keys — 0dd0-cecb-3932-4c90 (ADR 0125)
+        "trusted_opcert_keys": lambda v, k: _as_trusted_key_list(v, k),
         "opcert_remote_url": lambda v, k: _as_str(v, k),
     },
     "identity": {

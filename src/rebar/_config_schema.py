@@ -165,6 +165,11 @@ class VerifyConfig:
         None,
         "Restricts operation certificates to the trusted environment with this identifier.",
     )
+    trusted_opcert_keys: tuple[str, ...] = _documented(
+        (),
+        "Lists the environment and public key pairs whose operation certificates this "
+        "environment trusts; empty means signature validity alone decides (ADR 0125).",
+    )
     opcert_enforce_since: str | None = _documented(
         None,
         "Limits operation-certificate checks to closure commits at this ref or descendants.",

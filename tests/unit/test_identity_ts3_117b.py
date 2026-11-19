@@ -527,6 +527,7 @@ def test_verify_signature_schema_includes_key_not_valid_at_era() -> None:
         "unavailable",
         "unknown_kind",
         "unknown_scheme",
+        "untrusted",
     }
 
 

@@ -210,6 +210,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_VERIFY_REQUIRE_PLAN_REVIEW_FOR_CLOSE` | `src/rebar/_config_sections.py (canonical env name of verify.require_plan_review_for_close)` |  |
 | `REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT` | `src/rebar/_config_sections.py (canonical env name of verify.require_ticket_for_commit)` |  |
 | `REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS` | `src/rebar/_config_sections.py (canonical env name of verify.suggest_duplicate_tickets)` |  |
+| `REBAR_VERIFY_TRUSTED_OPCERT_KEYS` | `src/rebar/_config_sections.py (canonical env name of verify.trusted_opcert_keys)` |  |
 | `REBAR_VERIFY_VERIFY_WINDOW_HEADROOM` | `src/rebar/_config_sections.py (canonical env name of verify.verify_window_headroom)` |  |
 | `REBAR_WARNINGS_CROSS_SESSION` | `src/rebar/_config_sections.py (canonical env name of warnings.cross_session)` |  |
 | `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_resolvers.py` |  |
@@ -228,7 +229,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_215 variables._
+_216 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
