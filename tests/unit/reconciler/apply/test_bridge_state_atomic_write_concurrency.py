@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -43,6 +44,14 @@ def _save_in_threads(stores: list[Any], final_path: Path) -> list[BaseException]
                 try:
                     payload = json.loads(final_path.read_text(encoding="utf-8"))
                     assert isinstance(payload, dict)
+                except PermissionError as exc:
+                    # Windows refuses to open a file while a replace onto it is in flight
+                    # (POSIX never does). A refused open is not a torn read, so retry.
+                    if os.name == "nt":
+                        continue
+                    read_errors.append(exc)
+                    stop.set()
+                    return
                 except BaseException as exc:  # noqa: BLE001 — surfaced to the caller
                     read_errors.append(exc)
                     stop.set()
