@@ -78,13 +78,20 @@ def emit_gate_error(
     """Append a ``gate_error_v1`` sidecar record for ``ticket_id`` onto ``gate``'s host event
     stream. Returns True on success, False on any failure — best-effort observability, so a
     failed emit must NEVER change the gate's outcome (the caller degrades / re-raises
-    regardless). Broad-but-logged, mirroring the verdict sidecars' emit posture."""
+    regardless). Broad-but-logged, mirroring the verdict sidecars' emit posture.
+
+    ``ticket_id`` may be any id form a gate accepts (alias, short id); it is resolved to the
+    canonical directory first, because ``append_event`` writes to whatever directory it is
+    named and would otherwise create one named after the alias (bug illtimed-sharpcut-ray).
+    An id that resolves to no ticket writes nothing and returns False."""
     from rebar import config as _config
     from rebar._commands._seam import append_event
+    from rebar._ids import resolve_ticket_dir_name
 
     try:
         event_type = _GATE_EVENT_TYPE[gate]
         tracker = _config.tracker_dir(repo_root)
+        ticket_id = resolve_ticket_dir_name(ticket_id, str(tracker))
         material_fingerprint = None
         material_basis = None
         version = None

@@ -169,6 +169,8 @@ def test_completion_gate_error_emit_enriches_only_completion_records(monkeypatch
     )
     monkeypatch.setattr(completion_sidecar, "verifier_version", lambda repo_root=None: _version())
     monkeypatch.setattr("rebar.config.tracker_dir", lambda repo_root=None: ".")
+    # No real store here: the emitter resolves ids before writing (bug illtimed-sharpcut-ray).
+    monkeypatch.setattr("rebar._ids.resolve_ticket_dir_name", lambda ticket_id, tracker: ticket_id)
     monkeypatch.setattr(
         "rebar._commands._seam.append_event",
         lambda ticket_id, event_type, payload, tracker, repo_root=None: captured.append(payload),
