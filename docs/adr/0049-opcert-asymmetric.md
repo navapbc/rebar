@@ -1,6 +1,6 @@
 # ADR 0049 — Operation certificates: asymmetric, environment-attributed, optionally required
 
-- **Status:** Accepted
+- **Status:** Accepted; repository key pinning superseded by ADR 0125
 - **Date:** 2026-07-14
 - **Relates to:** ADR 0044 (asymmetric attestation substrate), ADR 0045 (authenticated
   identity), ADR 0046 (security posture and accepted limitations), ADR 0043
