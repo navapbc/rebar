@@ -1,7 +1,7 @@
 """The read-fetch throttle marker lives in the platform temp directory (bug leafy-gorillian-gnat).
 
 ``ensure_fresh`` throttles its best-effort fetch to once a minute per tracker with a marker
-file. The marker used to sit at the literal ``/tmp/.ticket-sync-<md5>``, which on Windows is
+file. The marker used to sit in a literal ``/tmp`` directory, which on Windows is
 the drive-relative ``\\tmp\\...``: the directory does not exist, every marker read failed and
 every read fetched. These tests pin the marker to ``tempfile.gettempdir()`` by redirecting the
 stdlib temp directory, which a literal ``/tmp`` path ignores, so they fail on any host while
