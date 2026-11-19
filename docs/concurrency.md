@@ -1133,7 +1133,7 @@ git-ignored, live only on disk, and are never in any clone:
 | File | What it is | What breaks without it |
 |---|---|---|
 | `.env-id` | this environment's identity, **stamped into every event** and the `principal` of every op-cert attestation | a new identity is minted, so events and attestations split across two identities. Existing attestations still certify (the signing environment is not a gate — bug `c21f-6f29-5d2d-4a5a`), but the audit trail is no longer one identity, so carry the old id over |
-| `.opcert-key` | the op-cert signing key (mode `0600`) | under the old `.env-id`, the first op-cert this clone signs mints a new key, and attestations the old key signed then fail as `mismatch` unless that key is pinned in `.rebar/trusted_environments.yaml` |
+| `.opcert-key` | the op-cert signing key (mode `0600`) | under the old `.env-id`, the first op-cert this clone signs mints a new key; attestations the old key signed still verify (by their embedded key, ADR 0125), but an environment whose `verify.trusted_opcert_keys` lists only the old key reports the new ones `untrusted` |
 | `.opcert-key.pub` | the op-cert public key the verifier reads (or re-derives from the private key) | verification cannot find a key to check against |
 | `.ensure-applied` | the ensure-registry marker | harmless: every unit simply re-runs and re-converges |
 
@@ -1155,9 +1155,10 @@ only one of them is a fault:
   environment's audit trail and lost the ability to sign as it; its attestations still
   certify (see the paragraph after the `fsck` one below). Recover by copying the four files
   above out of the old tracker and re-running the command — but only if the old tracker
-  still exists. Restore `.env-id` together with `.opcert-key`, never alone: with the old id
-  but a newly minted key, a cert the old key signed is checked against the new key and
-  fails as `mismatch` unless the old key is pinned in `.rebar/trusted_environments.yaml`.
+  still exists. Restore `.env-id` together with `.opcert-key`, never alone: certificates the
+  old key signed still verify (verification uses the key embedded in each signature, ADR 0125),
+  but new ones would be attributed to the old id under a different key, and any environment
+  whose `verify.trusted_opcert_keys` lists only the old key reports them `untrusted`.
 
 Set `REBAR_ALLOW_ENV_REIDENTIFY=1` to acknowledge the situation and quieten the warning.
 

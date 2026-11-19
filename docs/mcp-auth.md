@@ -302,8 +302,8 @@ duplicate PATs anywhere else. A `mcp-static-tokens.json` with a record per popul
 
 **Certified ops on the box.** The two op-cert kinds minted via MCP — **plan-review** (claim)
 and **completion-verifier** (close) — are signed under the box's **existing** opcert signing
-environment (`REBAR_OPCERT_ENV_ID`, the UUID already pinned in
-`.rebar/trusted_environments.yaml`); no new `env_id` and no change to the single-valued
+environment (`REBAR_OPCERT_ENV_ID`, the UUID the MCP deployment lists, with its keys, in its own
+`verify.trusted_opcert_keys` trust list, ADR 0125); no new `env_id` and no change to the single-valued
 `verify.require_environment` gate (ADR 0104 decision 3). So a cert minted through MCP is
 **enforceable-when-enabled** via that trusted environment. Enabling enforcement is a
 **deferred, human operator step** — set `verify.require_environment` +

@@ -8,6 +8,32 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+
+## Unreleased: op-cert trust moves to each verifying environment (ADR 0125)
+
+**Contract change for any client that verifies operation certificates or runs `rebar
+trusted-env`.**
+
+- **Removed:** the repository pin file `.rebar/trusted_environments.yaml` and the
+  `rebar trusted-env` command. No code reads a repository-pinned op-cert trust file.
+- **Default verification is validity-only.** An op-cert verifies when its SSHSIG signature
+  holds under the key embedded in it, for its principal, and its signed subject binds the
+  ticket and kind. `trust_basis` is now `envelope_key` or `trust_list`; `own_key` and
+  `pinned_environment` are gone.
+- **New config key `verify.trusted_opcert_keys`** (env `REBAR_VERIFY_TRUSTED_OPCERT_KEYS`,
+  comma-separated): entries `<env_id> <key-type> <base64> [comment]`, set in the verifying
+  environment's own configuration. With it set, a valid certificate from an unlisted
+  (environment, key) pair gets the new verdict **`untrusted`** in `verify_signature_result`
+  and `plan_review_status`; a listed pair reads `trust_basis: trust_list`.
+- **New result field `signing_key`:** the SHA256 fingerprint of the key that signed the
+  op-cert, reported whatever the verdict.
+- `verify.require_environment` now requires a trust list; without one verification refuses
+  with `foreign_key` and `rebar verify-opcert` exits 2.
+- Signing is never gated on an allowed key: the sign-time refusal of a key not pinned for its
+  principal is removed.
+- The MCP `/health` `opcert` field compares the bound signer with the deployment's trust list
+  and adds `trust_source`.
+
 ## 0.16.0: plan review gains a selectable `engine`
 
 **Contract change for any agent or client that starts a plan review or reads plan-review

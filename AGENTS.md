@@ -176,7 +176,8 @@ operation-certificate kinds (ADR 0049): **plan-review** (at claim) and **complet
 trusted signing environment, so a project **can enforce** that a certified op was produced there.
 That enforcement is **enableable but currently deferred**: turning it on is a human operator step
 (set `verify.require_environment` + `verify.opcert_enforce_since` **together** at a deploy
-boundary) documented in `infra/runbooks/mcp-opcert-enforcement-flip.md`; the committed
+boundary, with the gating environment's own `verify.trusted_opcert_keys` list — ADR 0125: the
+repository pins no op-cert keys) documented in `infra/runbooks/mcp-opcert-enforcement-flip.md`; the committed
 `rebar.toml` sets neither today, so environment-binding is **advisory**, not live (ADR 0104
 decision 3). **Code review is NOT an op-cert.** The certified code review is the Gerrit
 **`LLM-Review`** vote cast by the review-bot (a merge-gate vote — see the Git-workflow section),

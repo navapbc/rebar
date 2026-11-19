@@ -1433,32 +1433,30 @@ rebar sign-review <id>                 # only if the review PASSED but no attest
 git commit --amend --no-edit && git push gerrit HEAD:refs/for/main
 ```
 
-**The gate asks whether an attested plan review was COMPLETED — never which environment certified
-it** (current policy, bug `846b`). It does not consult `.rebar/trusted_environments.yaml`. That
-distinction is what makes the remedy above executable: a review run on your own machine signs with
-*your* environment id as the DSSE principal, and a contributor cannot pin their own environment
-(the pin file is CODEOWNERS-protected on the code branch), so a source-gated check rejected
-genuinely passing, genuinely signed reviews purely on provenance and could not be satisfied by
-anyone. Lifecycle and freshness still bind normally: `certified` / `stale-code` / `stale-head` are
-accepted (the plan *was* reviewed; the trunk moved on), while `stale-material` — you attested and
-then edited the plan — still blocks, so the gate is not bypassable by editing after signing.
+**The gate asks whether an attested plan review COMPLETED — never which environment certified
+it** (current policy, bug `846b`). Any environment may sign a plan review (ADR 0125: signing is
+never gated on an allowed key), and a review run on your own machine signs with *your*
+environment id as the DSSE principal. A source-gated check would reject genuinely passing,
+genuinely signed reviews purely on provenance. Lifecycle and freshness still bind normally:
+`certified` / `stale-code` / `stale-head` are accepted (the plan *was* reviewed; trunk moved
+on), while `stale-material` — you attested and then edited the plan — still blocks, so the gate
+is not bypassable by editing after signing. An environment that sets its own
+`verify.trusted_opcert_keys` list (rebar's MCP server does) reads certificates from unlisted
+keys as `untrusted`; a review signed elsewhere is then re-run there.
 
 **Subject binding is still enforced**, because it asks *what* the attestation covers rather than
 *who* signed it: a cert bound to another ticket, or of another kind, classifies `wrong-kind` and
 blocks — read from the SIGNED payload, so a lying plaintext mirror on the record buys nothing.
 
-**The security posture, stated plainly.** This argument once read: "`.rebar/trusted_environments.yaml`
-is the only trust root, so an unpinned principal has no key to verify against — there is no coherent
-middle where signatures are checked but unpinned signers are waved through." That names a real
-trade-off, but it is **no longer current policy** and it was never quite right about the mechanics:
-an SSHSIG blob carries the public half it was made with, so an unpinned signer's signature *can* be
-checked for self-consistency — full signature, namespace and principal binding — just not tied to a
-*known* environment. Bug `c21f-6f29-5d2d-4a5a` took the middle deliberately, on the operator's ruling that *"any
-certification is as good as any other certification right now — limited to a trusted set of
-environments is a future feature, but not currently in use."* The
-verifier reports which key certified in `trust_basis`, so the weaker `envelope_key` basis is visible
-rather than silent, and restricting the trusted set again is the opt-in `verify.require_environment`
-feature. The conclusion below is unchanged.
+**The security posture, stated plainly.** An SSHSIG blob carries the public half it was made
+with, so any signer's signature can be checked for self-consistency — full signature, namespace
+and principal binding — without a pinned key; that check just does not tie the key to a *known*
+environment. ADR 0125 makes this validity check the default (the repository pins no keys), and
+the verifier reports which key signed in `signing_key` and the basis in `trust_basis`
+(`envelope_key`, or `trust_list` when the verifying environment's `verify.trusted_opcert_keys`
+lists the pair). Restricting the trusted set is a per-environment choice: set the list in that
+environment's own configuration, and optionally `verify.require_environment`. The conclusion
+below is unchanged.
 
 Dropping provenance makes this criterion an **anti-sloppiness gate**
 ("did you write and review a plan before shipping 150+ non-test lines under a bug label?"), not an
@@ -1906,7 +1904,7 @@ reason: "derived plan-review health unavailable"}` — and never change a gate d
 normal freshness profile; close uses its close profile (implementation code may advance), but
 both retain material, phase, and enabled-pin checks.
 
-`rebar verify-signature <ticket>` locally certifies a DSSE envelope by verifying its SSHSIG signature against the signer's Ed25519 public key. The signing environment is not itself a gate (bug `c21f-6f29-5d2d-4a5a`), so a certificate minted elsewhere certifies here when its signature verifies; the result's `trust_basis` names which key was used. A CI process that requires a named trusted environment uses `rebar verify-opcert` with the public key pinned in `.rebar/trusted_environments.yaml`. A certified current plan-review certificate records that the plan passed review. A claimed ticket without that certificate records that the review was bypassed. The completion close gate uses the corresponding distinction between a certified completion-verifier record and a close without one.
+`rebar verify-signature <ticket>` locally certifies a DSSE envelope by verifying its SSHSIG signature under the public key carried in the signature (ADR 0125). The signing environment is not itself a gate, so a certificate minted elsewhere certifies when its signature verifies and binds the ticket; the result names the key in `signing_key` and the basis in `trust_basis`. A CI process that requires a named trusted environment runs `rebar verify-opcert` with `verify.require_environment` and a `verify.trusted_opcert_keys` list supplied by the CI job. A certified current plan-review certificate records that the plan passed review. A claimed ticket without a certificate records that review was bypassed. The completion close gate uses the corresponding distinction between a certified completion-verifier record and a close without one.
 
 ### Multiple attestation kinds + how a CI gate reads them
 
@@ -1918,7 +1916,12 @@ Read the map through these interfaces:
 - **All kinds.** `rebar.signing.verify_attestations(ticket)` returns `{kind: verdict}`. `rebar show` also exposes the `attestations` map.
 - **Certification and validity.** Cryptographic certification does not establish current applicability. A reopened ticket, code drift, a material edit, or stale related-ticket pins can invalidate a certified record. `plan_review.attest.compute_validity` performs these checks on read.
 
-> A CI verifier needs the trusted environment's Ed25519 public key, not its private key or a shared HMAC secret. `.rebar/trusted_environments.yaml` pins that key and environment principal. `rebar verify-opcert` walks the merged ticket log, resolves each certificate's storage anchor, and verifies the DSSE envelope's SSHSIG signature. Without required-environment configuration, the certificate remains a local process record.
+> A CI verifier needs only the trusted environment's Ed25519 public key, not its private key or
+> a shared HMAC secret, and it holds that key in its own `verify.trusted_opcert_keys` (environment
+> id plus key), not in the repository (ADR 0125). `rebar verify-opcert` walks the merged ticket log
+> and verifies each completion certificate's SSHSIG signature, its binding, and that its
+> (environment, key) pair is listed. Without a required-environment configuration a certificate
+> remains a local process record.
 
 ## End-to-end latency before work begins
 
