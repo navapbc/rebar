@@ -140,7 +140,8 @@ def _drive_outbound_create(handler, applier, mut_mod, repo_root):
     mut = _mk(mut_mod, "outbound", "create", target="LOCAL-A", payload=payload)
     result = handler(mut, client=client, repo_root=repo_root)
     assert client.create_issue.call_count == 1
-    assert client.create_issue.call_args.args == (dict(payload),)
+    # The identity label rides the create (bug highbred-fabled-lobo).
+    assert client.create_issue.call_args.args == ({**payload, "labels": ["rebar-id:LOCAL-A"]},)
     client.delete_issue.assert_not_called()  # never delete a created issue (bug 387d)
     assert result.payload["coordinated"] is True
     assert result.payload["known_key"] == "PROJ-1"

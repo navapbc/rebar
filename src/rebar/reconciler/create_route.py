@@ -246,9 +246,22 @@ class _CoordinatedSeams:
                 self.capture.persist_error = err
                 raise err from exc
 
+    def create_payload(self) -> dict:
+        """The create payload with the ``rebar-id:`` identity label added, so a create whose
+        response is lost can still be found by label (bug highbred-fabled-lobo)."""
+        if not self.local_id:
+            return self.ticket_data
+        identity = f"rebar-id:{self.local_id}"
+        # Only plain-string labels are Jira labels; a typed create payload carries label
+        # operations (dicts), which the create never applied and still does not.
+        labels = [label for label in self.ticket_data.get("labels") or [] if isinstance(label, str)]
+        if identity not in labels:
+            labels.append(identity)
+        return {**self.ticket_data, "labels": labels}
+
     def create_execute(self, _plan):
         try:
-            result = self.client.create_issue(self.ticket_data)
+            result = self.client.create_issue(self.create_payload())
         except (TimeoutError, self._errors.RetryExhaustedError) as exc:  # ambiguous — re-observe
             return CreateSignal(status="timeout", diagnostic=str(exc))
         except ConnectionError as exc:  # ambiguous — re-observe

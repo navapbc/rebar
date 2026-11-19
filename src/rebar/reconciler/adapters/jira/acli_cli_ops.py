@@ -244,6 +244,10 @@ def _create_issue_no_json(
     for field in ("description", "assignee"):
         if field in kwargs and kwargs[field] is not None:
             cmd.extend([f"--{field}", str(kwargs[field])])
+    # Labels ride the create itself so the rebar-id identity label exists even when the
+    # create's response is lost (bug highbred-fabled-lobo).
+    if kwargs.get("labels"):
+        cmd.extend(["--label", ",".join(str(label) for label in kwargs["labels"])])
     # Parent sync (ticket 8b25): ACLI ``workitem create`` DOES accept
     # ``--parent <key>`` for parent attachment at create time (live-proven).
     # Previously the parent was dropped silently on the create path.
@@ -351,6 +355,8 @@ def _create_issue_from_json(
         payload["description"] = _text_to_adf(str(kwargs["description"]))
     if kwargs.get("assignee"):
         payload["assignee"] = str(kwargs["assignee"])
+    if kwargs.get("labels"):
+        payload["labels"] = [str(label) for label in kwargs["labels"]]
 
     result = _create_from_json_payload(payload, acli_cmd=acli_cmd, call_timeout=call_timeout)
 
