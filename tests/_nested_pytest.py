@@ -10,8 +10,9 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -58,6 +59,68 @@ def _child_env(
     return child
 
 
+#: Options with which a caller already decides where the child's rootdir and conftest walk stop.
+_ROOTDIR_OPTIONS = ("--rootdir", "--config-file", "--confcutdir")
+
+
+def _pins_rootdir(arg: str) -> bool:
+    if arg.startswith("-c"):  # ``-c FILE`` and ``-cFILE``; pytest has no other ``-c...`` option
+        return True
+    return any(arg == opt or arg.startswith(f"{opt}=") for opt in _ROOTDIR_OPTIONS)
+
+
+def _is_within(path: str, base: str, pathmod: Any) -> bool:
+    path, base = pathmod.normcase(path), pathmod.normcase(base)
+    try:
+        return bool(pathmod.commonpath([path, base]) == base)
+    except ValueError:  # different drives share no directory
+        return False
+
+
+def _rootdir_pin(
+    args: Sequence[str],
+    cwd: str | os.PathLike[str] | None,
+    *,
+    pathmod: Any = os.path,
+    exists: Callable[[str], bool] = os.path.exists,
+    isdir: Callable[[str], bool] = os.path.isdir,
+) -> list[str]:
+    """``["--rootdir", <dir>]`` when every path argument lies outside *cwd*, else ``[]``.
+
+    With no ini file, pytest roots the session at the common ancestor of the cwd and the
+    arguments' directories, unless that ancestor is a filesystem root, in which case it uses
+    the arguments' directory. On Windows a cwd on ``D:`` and a tmp_path test file on ``C:``
+    share no ancestor, so pytest keeps the cwd as rootdir and confcutdir. Every ancestor of
+    the test file then counts as inside confcutdir, collection scans each of them from
+    ``C:\\`` down, and on win32 it lstats every entry of the shared ``%TEMP%``, so a
+    directory another process removes fails the child's collection (bug
+    refractive-hasty-iguanodon). Pinning the arguments' directory gives every platform the
+    rootdir a macOS run already gets.
+
+    Path arguments are picked the way pytest's ``get_dirs_from_args`` picks them: each
+    non-option argument, cut at ``::``, that exists on disk; a directory stands for itself
+    and a file for its parent. Relative arguments, arguments under *cwd*, and callers that
+    pass ``--rootdir``, ``-c``/``--config-file`` or ``--confcutdir`` keep pytest's choice.
+    """
+    if any(_pins_rootdir(arg) for arg in args):
+        return []
+    base = os.fspath(cwd) if cwd is not None else os.getcwd()
+    dirs: list[str] = []
+    for arg in args:
+        path = arg.split("::", 1)[0]
+        if arg.startswith("-") or not pathmod.isabs(path) or not exists(path):
+            continue
+        if _is_within(path, base, pathmod):
+            return []
+        dirs.append(path if isdir(path) else pathmod.dirname(path))
+    if not dirs:
+        return []
+    try:
+        return ["--rootdir", pathmod.commonpath(dirs)]
+    except ValueError:  # arguments on different drives: no single directory contains them
+        return []
+
+
 def run_nested_pytest(
     tmp_path: Path,
     *args: str,
@@ -77,7 +140,7 @@ def run_nested_pytest(
     command = [sys.executable, "-m", "pytest"]
     if no_cacheprovider:
         command += ["-p", "no:cacheprovider"]
-    command += [*args, BASETEMP_FLAG, str(nested_basetemp(tmp_path))]
+    command += [*args, *_rootdir_pin(args, cwd), BASETEMP_FLAG, str(nested_basetemp(tmp_path))]
     return subprocess.run(
         command,
         cwd=cwd,
