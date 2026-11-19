@@ -216,15 +216,22 @@ def _gate_sidecar_fields(gate_type: str, result: Any) -> dict[str, Any]:
 
 
 def _spawn_gate_daemon(
-    handle: GateJobHandle, gate_type: str, ticket_id: str, work: Callable[[], Any]
+    handle: GateJobHandle,
+    gate_type: str,
+    ticket_id: str,
+    work: Callable[[], Any],
+    owner_lock: int | None = None,
 ) -> None:
     """Run gate work on a daemon and always settle its index and followers.
 
     ``spawn_context_daemon`` carries the bound signer context. The daemon cannot
     survive process exit; ``gate_status`` converts a stranded running index to failure,
-    while any signed gate attestation remains authoritative.
+    while any signed gate attestation remains authoritative. ``owner_lock`` is the job's
+    owner-lock fd from :func:`rebar.llm.gate_runs.hold_owner_lock`, released after the
+    terminal record is written.
     """
     import rebar.llm
+    from rebar.llm import gate_runs
 
     def _bg() -> None:
         result: Any = None
@@ -247,6 +254,9 @@ def _spawn_gate_daemon(
             }
             record.update(_gate_sidecar_fields(gate_type, result))
             rebar.llm.record_gate_run(record)
+            # Release only after the terminal record: a poller that finds the lock free
+            # re-reads the record before declaring the job stranded.
+            gate_runs.release_owner_lock(owner_lock, handle.job_id)
             handle.complete(result=result, error=error)
 
     # Context-propagating spawn: a bare threading.Thread would drop the op-cert signer
@@ -271,6 +281,7 @@ def _start_gate_job(
     duplicate starts attach to its ID without launching another billable run.
     """
     import rebar.llm
+    from rebar.llm import gate_runs
 
     handle = begin_gate_job(
         gate_type,
@@ -284,6 +295,9 @@ def _start_gate_job(
     # Followers neither spawn nor rewrite the last-writer-wins index, which could replace
     # an already-terminal leader record with a fresh running value.
     if handle.is_new:
+        # Held for the job's lifetime so a poller in another process or container (a
+        # blue-green cutover) sees a live owner (bug digestive-greasy-kingsnake).
+        owner_lock = gate_runs.hold_owner_lock(handle.job_id)
         rebar.llm.record_gate_run(
             {
                 "job_id": handle.job_id,
@@ -293,7 +307,7 @@ def _start_gate_job(
                 "started_at": time.time(),
             }
         )
-        _spawn_gate_daemon(handle, gate_type, ticket_id, work)
+        _spawn_gate_daemon(handle, gate_type, ticket_id, work, owner_lock)
     return {
         "job_id": handle.job_id,
         "ticket_id": ticket_id,
