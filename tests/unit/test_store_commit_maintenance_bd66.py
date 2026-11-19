@@ -16,7 +16,9 @@ import hashlib
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from _git_upkeep import _trace_events
@@ -30,6 +32,8 @@ pytestmark = pytest.mark.unit
 # Comfortably past git's default gc.auto (~6700) so the create commit triggers a foreground
 # repack when the suppression is absent.
 _LOOSE = 20000
+# Hash in equal chunks so a stall is attributable to one chunk (bug 80f4-1d94).
+_CHUNKS = 10
 
 
 def _git(d: str, *a: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -51,26 +55,38 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return r
 
 
-def _fill_loose(tracker: str, n: int) -> None:
-    """Write *n* distinct loose objects into the tracker's (shared) object DB in ONE git
-    process, so the next commit crosses git's gc.auto threshold and triggers a repack.
+def _fill_loose(tracker: str, n: int, timed: Callable[..., Any]) -> None:
+    """Write *n* distinct loose objects into the tracker's (shared) object DB, so the next
+    commit crosses git's gc.auto threshold and triggers a repack.
 
     ``git hash-object --stdin-paths`` reads a newline-separated list of file PATHS and writes
-    one loose object per file, all within a single git invocation."""
+    one loose object per file. Each phase is timed through ``_ci_timed_call``, and the hashing
+    runs in equal chunks, so a Windows sweep log shows per-object cost and whether git
+    progresses evenly or stalls on one chunk (bug 80f4-1d94)."""
     d = Path(tracker) / ".bd66_loose"
     d.mkdir(exist_ok=True)
-    paths = []
-    for i in range(n):
-        p = d / f"b{i}"
-        p.write_text(f"bd66-loose-{i}-{os.urandom(8).hex()}\n")
-        paths.append(str(p))
-    subprocess.run(
-        ["git", "-C", tracker, "hash-object", "-w", "--stdin-paths"],
-        input="\n".join(paths) + "\n",
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+
+    def write_paths() -> list[str]:
+        paths = []
+        for i in range(n):
+            p = d / f"b{i}"
+            p.write_text(f"bd66-loose-{i}-{os.urandom(8).hex()}\n")
+            paths.append(str(p))
+        return paths
+
+    paths = timed("repo", "write_paths", write_paths)
+    for k in range(_CHUNKS):
+        chunk = paths[k * len(paths) // _CHUNKS : (k + 1) * len(paths) // _CHUNKS]
+        timed(
+            "repo",
+            f"hash_object[{k}]",
+            subprocess.run,
+            ["git", "-C", tracker, "hash-object", "-w", "--stdin-paths"],
+            input="\n".join(chunk) + "\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        )
 
 
 # Commands that make up the O(store) work the suppression keeps out of a bounded commit.
@@ -177,16 +193,20 @@ def _assert_foreground_maintenance(tracker: str) -> None:
     assert _git(tracker, "config", "--get", "maintenance.autoDetach").stdout.strip() == "false"
 
 
-def _cross_the_maintenance_threshold(repo: Path) -> str:
+def _cross_the_maintenance_threshold(repo: Path, timed: Callable[..., Any]) -> str:
     tracker = str(tracker_dir(str(repo)))
     _assert_foreground_maintenance(tracker)
 
-    _fill_loose(tracker, _LOOSE)
+    _fill_loose(tracker, _LOOSE, timed)
     # Clean up the scratch worktree files so they don't become tracked noise; the loose objects
     # they created remain in the object DB.
-    for p in (Path(tracker) / ".bd66_loose").glob("b*"):
-        p.unlink()
-    (Path(tracker) / ".bd66_loose").rmdir()
+
+    def unlink_paths() -> None:
+        for p in (Path(tracker) / ".bd66_loose").glob("b*"):
+            p.unlink()
+        (Path(tracker) / ".bd66_loose").rmdir()
+
+    timed("repo", "unlink_paths", unlink_paths)
     assert int(_git(tracker, "count-objects").stdout.split()[0]) >= 6700
     # The gc strategy samples objects/17 against ceil(6700/256) = 27; the geometric strategy
     # counts all loose objects against 6700 (the count-objects check above).
@@ -255,11 +275,21 @@ def _create_two_tickets_traced(
 
 
 def test_write_survives_foreground_maintenance_repack(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    _ci_timed_call: Callable[..., Any],
 ) -> None:
-    _cross_the_maintenance_threshold(repo)
+    _cross_the_maintenance_threshold(repo, _ci_timed_call)
 
-    commits, offenders = _create_two_tickets_traced(repo, monkeypatch, tmp_path / "trace.json")
+    commits, offenders = _ci_timed_call(
+        "repo",
+        "create_tickets",
+        _create_two_tickets_traced,
+        repo,
+        monkeypatch,
+        tmp_path / "trace.json",
+    )
 
     assert commits >= 2, f"the trace must contain the ticket-create commits (saw {commits})"
     assert not offenders, (
