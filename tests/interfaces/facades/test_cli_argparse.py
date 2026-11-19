@@ -7,6 +7,7 @@ without byte-for-byte help snapshots.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -102,6 +103,53 @@ def test_unknown_subcommand_streams(capsys: pytest.CaptureFixture[str]) -> None:
     assert code == 1
     assert cap.err == "Error: unknown subcommand 'frobnicate'\n"
     assert cap.out == _help.overview()
+
+
+def _expected_version_line() -> str:
+    import importlib
+    import importlib.metadata
+
+    try:  # generated at build time; a bare source tree may lack it
+        commit = importlib.import_module("rebar._build_info").COMMIT or "unknown"
+    except ImportError:
+        commit = "unknown"
+    return f"rebar {importlib.metadata.version('nava-rebar')} ({commit})\n"
+
+
+def test_version_flag_prints_version_and_commit(capsys: pytest.CaptureFixture[str]) -> None:
+    """``rebar --version`` (bug coltish-serious-kestrel): the installed version and the
+    build-baked commit on stdout, exit 0, instead of the unknown-subcommand error."""
+    code = main(["--version"])
+    cap = capsys.readouterr()
+    assert code == 0
+    assert cap.out == _expected_version_line()
+    assert cap.err == ""
+
+
+def test_version_flag_after_config_prefix(capsys: pytest.CaptureFixture[str]) -> None:
+    """A leading ``-c SECTION.KEY=VALUE`` prefix does not hide ``--version``."""
+    code = main(["-c", "ticket.default_assignee=probe@example.com", "--version"])
+    cap = capsys.readouterr()
+    assert code == 0
+    assert cap.out == _expected_version_line()
+
+
+def test_version_flag_without_build_info_or_metadata(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A source tree with no generated ``_build_info`` and no installed distribution still
+    answers, with ``unknown`` in place of each missing value."""
+    import importlib.metadata
+
+    def _missing(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setitem(sys.modules, "rebar._build_info", None)  # import raises ImportError
+    monkeypatch.setattr(importlib.metadata, "version", _missing)
+    code = main(["--version"])
+    cap = capsys.readouterr()
+    assert code == 0
+    assert cap.out == "rebar unknown (unknown)\n"
 
 
 def test_help_unknown_streams_all_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:

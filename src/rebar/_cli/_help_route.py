@@ -9,6 +9,8 @@ forms. It leaves nested child help and executable commands for dispatch.
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.metadata
 import sys
 
 from rebar._cli import _help
@@ -159,8 +161,25 @@ def _emit_removed_alias_invalid_choice(sub: str) -> int:
     return code
 
 
+def _version_line() -> str:
+    """``rebar <version> (<commit>)``: the installed distribution's version and the commit
+    baked into the build (bug coltish-serious-kestrel). Either is ``unknown`` when absent,
+    so a bare source tree still answers."""
+    try:
+        version = importlib.metadata.version("nava-rebar")
+    except importlib.metadata.PackageNotFoundError:
+        version = "unknown"
+    try:
+        # Dynamic import: _build_info.py is generated at build time (git-ignored), so it is
+        # absent from the source tree that mypy type-checks against.
+        commit = getattr(importlib.import_module("rebar._build_info"), "COMMIT", None)
+    except ImportError:
+        commit = None
+    return f"rebar {version} ({commit or 'unknown'})\n"
+
+
 def pre_scan(argv: list[str]) -> int | None:
-    """Serve help, overview, or unknown forms before stateful work.
+    """Serve help, overview, ``--version``, or unknown forms before stateful work.
 
     Return their exit code, or ``None`` for commands and nested child help that must
     dispatch.
@@ -173,6 +192,9 @@ def pre_scan(argv: list[str]) -> int | None:
         return 1
 
     first = residual[0]
+    if first == "--version":
+        sys.stdout.write(_version_line())
+        return 0
     if first in ("help", "--help", "-h"):
         if len(residual) >= 2:
             return emit_subcommand_help(residual[1])

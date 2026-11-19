@@ -218,6 +218,11 @@ jobs:
           python -c "import rebar"
           rebar --help
           rebar-mcp --help
+          # `rebar --version` names the installed version and the baked build commit.
+          got="$(rebar --version)"
+          want="$(python -c "import importlib.metadata as m; from rebar import _build_info as b; print(f'rebar {m.version(\"nava-rebar\")} ({b.COMMIT})')")"
+          echo "rebar --version: ${got}"
+          [ "$got" = "$want" ] || { echo "::error::rebar --version printed '${got}', want '${want}'"; exit 1; }
           # Every packaged JSON schema loads (proves the data files shipped + parse).
           python -c "import importlib.resources as r, json, rebar; fs=[f for f in r.files('rebar').rglob('*.json')]; assert fs; [json.loads(f.read_text()) for f in fs]"
           # The build-baked provenance SHA survived the sdist→wheel path (not None).
