@@ -358,7 +358,8 @@ def _verify_identity(shadow: Path) -> dict[str, Any]:
 
 _COUNT_RE = re.compile(
     r"verify-identity: (\d+) verified, (\d+) unsigned, (\d+) unknown-author, "
-    r"(\d+) bad-signature, (\d+) key-not-valid-at-era \((\d+) event"
+    r"(\d+) bad-signature, (\d+) key-not-valid-at-era, (\d+) signer-not-on-keyring "
+    r"\((\d+) event"
 )
 _COUNT_KEYS = (
     "verified",
@@ -366,6 +367,7 @@ _COUNT_KEYS = (
     "unknown_author",
     "bad_signature",
     "key_not_valid_at_era",
+    "signer_not_on_keyring",
     "in_scope",
 )
 

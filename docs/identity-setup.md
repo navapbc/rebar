@@ -138,7 +138,8 @@ rebar verify-identity               # emits a "verified" verdict for signed even
 ```
 The repo-wide CI merge-gate is `rebar verify-identity` (mount the ticket store first if your
 store lives on a separate branch). It reports counts of `verified` / `unsigned` /
-`unknown-author` / `bad-signature` events.
+`unknown-author` / `bad-signature` events, plus `signer-not-on-keyring` identity findings
+(a sound signature by a key not on the author's keyring), which are reported but not enforced.
 
 ## Step 5 (optional) — Turn on enforcement
 
