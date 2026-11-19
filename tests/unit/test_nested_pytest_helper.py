@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from _nested_pytest import BASETEMP_FLAG, nested_basetemp, run_nested_pytest
-from _subprocess_env import subprocess_env
+from _nested_pytest import BASETEMP_FLAG, _child_env, nested_basetemp, run_nested_pytest
+from _subprocess_env import SubprocessEnv, subprocess_env
 
 _PARENT_ONLY = "REBAR_NESTED_PYTEST_PARENT_ONLY"
 
@@ -77,7 +78,8 @@ def test_a_timeout_propagates_to_the_caller(tmp_path: Path) -> None:
 def test_the_call_contract_reaches_subprocess_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """env is passed through untouched, timeout is a keyword, the result is not re-wrapped."""
+    """env is passed through untouched (on Windows, plus the OS-required SYSTEMROOT), timeout
+    is a keyword, and the result is not re-wrapped."""
     captured: dict[str, object] = {}
     completed = subprocess.CompletedProcess(args=["pytest"], returncode=0, stdout="", stderr="")
     caller_env = {"PATH": "test-path"}
@@ -91,7 +93,10 @@ def test_the_call_contract_reaches_subprocess_run(
     result = run_nested_pytest(tmp_path, "-q", env=caller_env, timeout=30, cwd=None)
 
     assert result is completed
-    assert captured["env"] is caller_env
+    if os.name == "nt":
+        assert captured["env"] == _child_env(caller_env)
+    else:
+        assert captured["env"] is caller_env
     assert captured["timeout"] == 30
     assert captured["cwd"] is None
     launch = [sys.executable, "-m", "pytest"]  # nested-pytest-ok: an expectation, not a launch
@@ -113,3 +118,45 @@ def test_the_cache_provider_suppression_is_optional(
 
     assert seen[0][3:5] == ["-p", "no:cacheprovider"]
     assert "no:cacheprovider" not in seen[1]
+
+
+_WINDOWS_AMBIENT = {"SYSTEMROOT": r"C:\Windows", "SECRET": "x"}
+
+
+def test_a_windows_child_gains_only_systemroot() -> None:
+    """Winsock (so asyncio, so anyio's pytest11 plugin) cannot start without SYSTEMROOT."""
+    caller_env = {"PATH": "p"}
+
+    child = _child_env(caller_env, os_name="nt", ambient=_WINDOWS_AMBIENT)
+
+    assert child == {"PATH": "p", "SYSTEMROOT": r"C:\Windows"}
+    assert caller_env == {"PATH": "p"}, "the caller's mapping must not be mutated"
+
+
+def test_a_posix_child_gets_the_callers_object_unchanged() -> None:
+    caller_env = {"PATH": "p"}
+
+    assert _child_env(caller_env, os_name="posix", ambient=_WINDOWS_AMBIENT) is caller_env
+
+
+@pytest.mark.parametrize("key", ["SYSTEMROOT", "SystemRoot"])
+def test_a_caller_supplied_systemroot_is_kept_as_given(key: str) -> None:
+    caller_env = {"PATH": "p", key: r"D:\Win"}
+
+    assert _child_env(caller_env, os_name="nt", ambient=_WINDOWS_AMBIENT) is caller_env
+
+
+def test_nothing_is_added_when_the_ambient_environment_has_no_systemroot() -> None:
+    caller_env = {"PATH": "p"}
+
+    assert _child_env(caller_env, os_name="nt", ambient={"SECRET": "x"}) is caller_env
+
+
+def test_a_redacting_mapping_stays_redacting() -> None:
+    caller_env = SubprocessEnv({"PATH": "p", "TOKEN": "s3cret"})
+
+    child = _child_env(caller_env, os_name="nt", ambient=_WINDOWS_AMBIENT)
+
+    assert isinstance(child, SubprocessEnv)
+    assert "s3cret" not in repr(child)
+    assert "SYSTEMROOT" not in caller_env
