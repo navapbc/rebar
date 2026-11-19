@@ -1,7 +1,7 @@
 """Verify operation-certificate merge-gate constraints through public outcomes.
 
 Coverage includes merged-log commit binding, plaintext mirror invariance, removal of a key
-from the trust list (ADR 0125), the library era primitive, and the trusted-environment helper.
+from the trust list (ADR 0125), and the library era primitive.
 Tests use ssh-keygen and a repository-backed ticket store.
 """
 
@@ -78,7 +78,7 @@ def _tracker(repo: Path) -> str:
 
 def _tip_position(repo: Path) -> str:
     """Greatest active-event log position on the tickets branch ({ts}-{uuid}); the same rule the
-    gate and `trusted-env` use to stamp positions."""
+    gate uses for anchors."""
     from rebar.reducer._cache import is_active_event
 
     tracker = _tracker(repo)
@@ -293,53 +293,3 @@ def test_unresolvable_storage_anchor_fails_closed(
         repo_root=str(repo),
     )
     assert verdict.verified is False, verdict.reason
-
-
-# ==== 3. trusted-env helper ====================================================================
-
-
-def test_trusted_env_add_and_revoke_stamp_tip_position(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """(3) `rebar trusted-env add|revoke` stamp the current tickets-branch tip log position. `add`
-    writes added_at_log_position == tip-at-add (revoked null); `revoke` stamps
-    revoked_at_log_position == tip-at-revoke (advanced between the two). Verified by loading the
-    config back through `trusted_env.trusted_env_keyring`."""
-    from rebar.attest import trusted_env
-
-    repo = _store(tmp_path, monkeypatch)
-    _priv, pub = _keypair(tmp_path, "env")
-    rebar.create_ticket("task", "seed activity", repo_root=str(repo))
-
-    tip_at_add = _tip_position(repo)
-    add = subprocess.run(
-        [sys.executable, "-m", "rebar", "trusted-env", "add", ENV_ID, pub, "--root", str(repo)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert add.returncode == 0, f"stdout={add.stdout}\nstderr={add.stderr}"
-
-    keyring = trusted_env.trusted_env_keyring(ENV_ID, repo_root=str(repo))
-    assert keyring is not None and len(keyring) == 1
-    rec = keyring[0]
-    assert rec["public_key"] == pub
-    assert rec["added_at_log_position"] == tip_at_add
-    assert rec["revoked_at_log_position"] is None
-
-    # Advance the tickets log so revoke stamps a strictly-later tip than add did.
-    rebar.create_ticket("task", "activity between add and revoke", repo_root=str(repo))
-    tip_at_revoke = _tip_position(repo)
-    assert tip_at_revoke > tip_at_add
-
-    revoke = subprocess.run(
-        [sys.executable, "-m", "rebar", "trusted-env", "revoke", ENV_ID, pub, "--root", str(repo)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert revoke.returncode == 0, f"stdout={revoke.stdout}\nstderr={revoke.stderr}"
-
-    rec = trusted_env.trusted_env_keyring(ENV_ID, repo_root=str(repo))[0]
-    assert rec["added_at_log_position"] == tip_at_add  # unchanged
-    assert rec["revoked_at_log_position"] == tip_at_revoke

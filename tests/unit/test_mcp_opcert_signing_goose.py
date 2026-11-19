@@ -225,8 +225,8 @@ def test_unregistered_key_cert_is_rejected(tmp_path: Path, monkeypatch: pytest.M
 def test_no_private_key_is_committed_in_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AC1 negative control: the round-trip persists a cert + a trusted-env PUBLIC pin, but never
-    a private key. The materialized key copy lives OUTSIDE the tracked store."""
+    """AC1 negative control: the round-trip persists a cert, but never a private key. The
+    materialized key copy lives OUTSIDE the tracked store."""
     repo = _store(tmp_path, monkeypatch)
     priv, pub = _keypair(tmp_path, "boxkey")
     commit = _head(repo)

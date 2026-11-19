@@ -99,17 +99,6 @@ def test_visible_intercept_artifacts_ignore_terminal_width(tmp_path: Path, monke
     assert narrow == wide
 
 
-def test_trusted_env_preserves_explicit_multiline_usage(tmp_path: Path, monkeypatch) -> None:
-    """The trusted-env artifact keeps its explicit add and revoke usage lines."""
-    artifacts = _write_visible_intercepts(tmp_path, monkeypatch, columns=80)
-
-    lines = artifacts["trusted-env.txt"].decode("utf-8").splitlines()
-    assert lines[:2] == [
-        "Usage: rebar trusted-env add <env_id> <public_key> [--root <path>]",
-        "rebar trusted-env revoke <env_id> <public_key-or-index> [--root <path>]",
-    ]
-
-
 def test_import_help_and_user_guide_describe_current_recovery_contract(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

@@ -21,7 +21,6 @@ AFFECTED = (
     "verify-identity",
     "verify-opcert",
     "verify-commit-ticket",
-    "trusted-env",
     "remote-cert",
 )
 
@@ -62,10 +61,6 @@ REMOVED_FRAGMENTS: dict[str, tuple[str, ...]] = {
         "(default: cwd); resolves the ticket store",
     ),
     "verify-commit-ticket": ("(default: cwd); resolves the ticket store",),
-    "trusted-env": (
-        "for add; <public_key-or-index>",
-        "(default: cwd); resolves the ticket store",
-    ),
     "remote-cert": (
         "(story ee0b)",
         "\u2014",
@@ -85,7 +80,6 @@ PRESENT_FRAGMENTS: dict[str, tuple[str, ...]] = {
     "verify-identity": ("This is the authorship merge-gate",),
     "verify-opcert": ("which is the op-cert merge-gate",),
     "verify-commit-ticket": ("resolves the ticket store",),
-    "trusted-env": ("for add, or",),
     "remote-cert": ("self-authenticating",),
 }
 
