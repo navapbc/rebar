@@ -364,6 +364,11 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 )
             except AssigneeNotFoundError:
                 pass  # unmappable → omit (leave unassigned), like the UPDATE path
+        # Plain-string labels ride the create, so the rebar-id identity label exists even
+        # when the create's response is lost (bug highbred-fabled-lobo).
+        labels = [label for label in ticket_data.get("labels") or [] if isinstance(label, str)]
+        if labels:
+            optional_fields["labels"] = labels
         # Accept either a bare parent key or REST ``{"key": K}`` shape;
         # attach during create or through the from-JSON fallback.
         parent_key = _extract_parent_key(ticket_data.get("parent"))

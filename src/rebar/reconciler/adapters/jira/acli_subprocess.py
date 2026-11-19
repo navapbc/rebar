@@ -123,6 +123,16 @@ _ASSIGNEE_NOT_FOUND_ERROR: str = (
     "User not found for email:"  # prefix match — email value varies per call
 )
 
+# Writes that create something new: a non-zero exit may come AFTER Jira applied the write,
+# so re-running would create a duplicate (bug highbred-fabled-lobo: REB-7141/REB-7142).
+# Only a detected 429, which Jira rejects without applying, is retried for these.
+_NON_REPLAYABLE_COMMANDS: tuple[tuple[str, ...], ...] = (("jira", "workitem", "create"),)
+
+
+def _is_non_replayable(cmd: list[str]) -> bool:
+    return any(tuple(cmd[: len(prefix)]) == prefix for prefix in _NON_REPLAYABLE_COMMANDS)
+
+
 # C4 (943f): rate-limit (429) backoff for the live _run_acli subprocess loop. ACLI is a
 # subprocess, so a 429 surfaces only as text in stderr (its exit code + Retry-After
 # availability are provider-dependent and unverified) — so we detect it from stderr
@@ -562,6 +572,8 @@ def _run_acli(
             # and the terminal contract (CalledProcessError) is unchanged.
             if attempt < _MAX_ATTEMPTS - 1:
                 rl_delay = _rate_limit_backoff(attempt, cpe.stderr)
+                if rl_delay is None and _is_non_replayable(cmd):
+                    break  # the write may have landed; never replay it
                 _backoff_sleep(rl_delay if rl_delay is not None else 2 ** (attempt + 1))
             continue
 
