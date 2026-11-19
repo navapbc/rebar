@@ -10,8 +10,11 @@ the temp dir at an empty sandbox and asserts no ``rebar-opcert-*`` entry remains
 
 from __future__ import annotations
 
+import shutil
+import stat
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -55,13 +58,31 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return box
 
 
+@pytest.fixture
+def short_root() -> Iterator[Path]:
+    """A short private dir directly under the system temp dir, removed afterwards.
+
+    The nested run puts job workspaces and ticket stores under its own TMPDIR and basetemp.
+    Rooted under this test's ``tmp_path`` those paths passed Windows' 260-character limit and
+    git failed with "Filename too long" (bug flowered-nonvalued-mink)."""
+    root = Path(tempfile.mkdtemp(prefix="tort-"))
+    try:
+        yield root
+    finally:
+        # Git writes its objects read-only, which Windows refuses to delete as-is.
+        for path in root.rglob("*"):
+            if path.is_file() and not path.is_symlink():
+                path.chmod(stat.S_IWRITE | stat.S_IREAD)
+        shutil.rmtree(root, ignore_errors=True)
+
+
 # 14 signer tests run serially: 82 s alone, 236 s at load 40; 300 s killed loaded workers.
 @pytest.mark.timeout(900)
-def test_signer_test_modules_leave_no_key_copy_in_the_temp_dir(tmp_path: Path) -> None:
-    box = tmp_path / "tmpdir-sandbox"
+def test_signer_test_modules_leave_no_key_copy_in_the_temp_dir(short_root: Path) -> None:
+    box = short_root / "t"
     box.mkdir()
     result = run_nested_pytest(
-        tmp_path / "run", "-q", *_SIGNER_MODULES, env=subprocess_env(TMPDIR=str(box))
+        short_root / "r", "-q", *_SIGNER_MODULES, env=subprocess_env(TMPDIR=str(box))
     )
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
     assert _leftovers(box) == [], "signer test modules left private-key copies in the temp dir"
