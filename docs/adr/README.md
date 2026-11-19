@@ -126,6 +126,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0061 — Attested evidence must declare its measurement provenance](0061-measurement-provenance-in-attested-evidence.md)
 - [0064 — The plan-review attestation manifest is unversioned and additive-only](0064-unversioned-additive-only-attestation-manifest.md)
 - [0068 — The in-flight review counter deliberately over-counts; the deploy loop must never kill a running review](0068-in-flight-review-counter-deliberate-over-count.md)
+- [0125 — Op-cert trust: validity-only by default, per-environment trust lists](0125-opcert-trust-per-environment.md)
 
 ## Config & CLI
 

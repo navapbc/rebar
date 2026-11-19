@@ -121,6 +121,10 @@ check, not the deploy gate. The paired ADR 0079 amendment records this `mcp` tar
 
 ### 3. Certified-op routing — MCP signs under the box's EXISTING opcert environment; code review stays the Gerrit vote
 
+> **Superseded in part by ADR 0125 (2026-11-19).** The repository pin file this decision relies
+> on, `.rebar/trusted_environments.yaml`, is removed. The MCP server now trusts op-certs through
+> its own deployment trust list (`verify.trusted_opcert_keys`); see ADR 0125.
+
 For the two op-cert kinds minted via MCP (plan-review at claim, completion-verifier at close —
 ADR 0049) to be **enforceable**, the MCP server signs them under the box's **EXISTING** opcert
 signing environment: the same `REBAR_OPCERT_ENV_ID` + signing key already pinned in
@@ -135,6 +139,8 @@ via MCP verifies against the same environment the opcert job-service already use
 > `env_id` is the **UUID** pinned in `.rebar/trusted_environments.yaml`; the human-readable
 > `nava-opcert-prod` label is only the SSH-key comment, and `verify.require_environment` matches
 > by UUID, not by label.
+> Since ADR 0125 that UUID is no longer pinned in the repository; it names the environment in
+> the MCP deployment's `verify.trusted_opcert_keys` list instead.
 
 rebar issues exactly **two** op-cert kinds (plan-review, completion-verifier — ADR 0049); there
 is **no code-review op-cert**. "Certified code review" is the existing Gerrit **`LLM-Review`**
