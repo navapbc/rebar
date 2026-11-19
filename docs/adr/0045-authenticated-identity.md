@@ -100,3 +100,24 @@ to the **tickets-branch commit graph**, not wall-clock or replay-order.
 - Authenticated-authorship enforcement is available but opt-in, with the security
   boundary at the merge-gate, key validity anchored to the immutable commit DAG, and
   the store always readable.
+
+## Amendment (2026-11-19): off-keyring signatures are an identity finding
+
+Ticket starving-sphalerite-skua. The operator decided that identity, authorization and op-cert
+certification are separate: anyone can sign a plan review, code review or completion
+verification, signing is not gated on an allowed identity, and identity is verified separately
+when needed. The merge gate therefore no longer classifies a signature by a key the identity
+never held as forged `bad-signature`. When that signature verifies against the public key
+embedded in its own SSHSIG blob (signature, authorship namespace and principal all checked by
+`ssh-keygen -Y verify`) and its in-toto subject binds the event's UUID and content hash, the
+verdict is `signer-not-on-keyring`: reported with the key's `SHA256:` fingerprint, displayed in
+the **verified** group, and never counted against the enforced check. A signature that does not
+verify even against its own key, or does not bind its event, is still `bad-signature` and still
+fails. A ledger entry whose `signer_pubkey` is null is verified like any other entry.
+
+Consequence: with enforcement on, the gate establishes that each signed event is unaltered and
+was signed, not that the claimed author's key signed it; the identity question is answered by
+the reported findings. A key that IS on the keyring but was not valid at the event's commit
+(for example revoked) still yields `key_not_valid_at_era` and still fails, so such a signature
+is treated more strictly than one by a key the identity never held. The decision does not
+address that asymmetry.

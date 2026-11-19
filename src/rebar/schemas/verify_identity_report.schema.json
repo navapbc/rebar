@@ -2,10 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/verify_identity_report.schema.json",
   "title": "VerifyIdentityReportEntry",
-  "description": "One entry in the `rebar verify-identity --format json` report array (epic gnu-whale-ichor, AC7). The report holds one object per NON-`verified` in-scope mutating event; `verified` events are omitted. `commit` is the event's resolved introducing tracker-branch commit (null when unresolvable); `author` is the event's author_id (null for a ledger entry, where the author is recovered from the signature at verify time). `display` is the three-way grouping and `verdict` the raw classification. `grandfathered` is true when the event's commit predates the `--since` / identity.enforce_since boundary, so it is reported but does not fail the gate.",
+  "description": "One entry in the `rebar verify-identity --format json` report array (epic gnu-whale-ichor, AC7). The report holds one object per NON-`verified` in-scope mutating event; `verified` events are omitted. `commit` is the event's resolved introducing tracker-branch commit (null when unresolvable); `author` is the event's author_id (null for a ledger entry, where the author is recovered from the signature at verify time). `display` is the three-way grouping and `verdict` the raw classification. `grandfathered` is true when the event's commit predates the `--since` / identity.enforce_since boundary, so it is reported but does not fail the gate. `signing_key` is the OpenSSH `SHA256:` fingerprint of the key embedded in the event's signature (null when unsigned or unparseable). The `signer-not-on-keyring` verdict is an identity finding: the signature verifies against that embedded key and binds the event, but the key is not on the claimed author's keyring. It displays as `verified` and never fails the gate.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["event_uuid", "ticket_id", "commit", "author", "verdict", "display", "grandfathered"],
+  "required": [
+    "event_uuid", "ticket_id", "commit", "author", "verdict", "display", "grandfathered",
+    "signing_key"
+  ],
   "properties": {
     "event_uuid": { "type": "string" },
     "ticket_id": { "type": "string" },
@@ -13,6 +16,7 @@
     "author": { "type": ["string", "null"] },
     "verdict": { "type": "string" },
     "display": { "type": "string", "enum": ["verified", "unverified", "unsigned"] },
-    "grandfathered": { "type": "boolean" }
+    "grandfathered": { "type": "boolean" },
+    "signing_key": { "type": ["string", "null"] }
   }
 }

@@ -172,8 +172,11 @@ def test_json_report_shape_and_schema(repo: Path) -> None:
         "verdict",
         "display",
         "grandfathered",
+        "signing_key",
     }
     assert entry["display"] in {"verified", "unverified", "unsigned"}
+    # The event is unsigned, so there is no signing key to name.
+    assert entry["signing_key"] is None
 
     # Validate every entry against the shipped report schema.
     import jsonschema
