@@ -1250,6 +1250,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:50:51Z"
     },
+    "02a7-a3ed-f72e-42b1": {
+      "created_at": "2026-11-19T18:36:35Z",
+      "jira_id": "4599521",
+      "jira_key": "REB-7298",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T18:36:40Z"
+    },
     "02aa-d30e-828a-4f21": {
       "baseline": {
         "assignee": {
@@ -6436,6 +6443,13 @@
       "jira_key": "REB-771",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:04Z"
+    },
+    "0dd0-cecb-3932-4c90": {
+      "created_at": "2026-11-19T18:36:29Z",
+      "jira_id": "4599520",
+      "jira_key": "REB-7297",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T18:36:34Z"
     },
     "0de0-4d1e-22b5-455a": {
       "baseline": {
@@ -37085,6 +37099,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:26Z"
     },
+    "5220-052f-6d9c-4699": {
+      "created_at": "2026-11-19T18:36:40Z",
+      "jira_id": "4599522",
+      "jira_key": "REB-7299",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T18:36:45Z"
+    },
     "5232-e024-e3f1-47c1": {
       "baseline": {
         "assignee": {
@@ -49334,6 +49355,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:16Z"
     },
+    "70d0-4528-d074-40d3": {
+      "created_at": "2026-11-19T18:36:45Z",
+      "jira_id": "4599523",
+      "jira_key": "REB-7300",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T18:36:49Z"
+    },
     "70df-13ae-df0c-4c5c": {
       "baseline": {
         "assignee": null,
@@ -56449,9 +56477,9 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\nIn run 44232977541 at dd72b461814, the \"sweep (windows)\" job (134562252974) printed this from the crash guard's timeout banner:\n\n`+++ Timeout +++ pytest-timeout expired after 600.0s in tests/unit/test_store_commit_maintenance_bd66.py::test_write_survives_foreground_maintenance_repack (xdist worker gw3)`\n\nThe stack dump shows the test thread at `tests/unit/test_store_commit_maintenance_bd66.py:67` (`_fill_loose`), called from `_cross_the_maintenance_threshold` (`:184`). It is waiting in `subprocess.run(... communicate)` on a single `git -C <tracker> hash-object -w --stdin-paths` over 20,000 paths (`_LOOSE`, `:31`). In the same dump, the writer thread is in `subprocess._stdin_write` and 2 `_readerthread`s are alive, so all 3 pipes have a live Python thread servicing them. The same failure appears without a banner in run 44211859981 (job 134491948817). The test passed on Windows in run 44141097601 (at 83ca81e709e) and in run 44253676986 (job 134630144542, at de94cc70b3b). It is intermittent: 2 of the last 3 Windows sweeps timed out in `_fill_loose`. On macOS the test's call phase takes 30.8 s (measured 2026-11-18 on a loaded host, `pytest --durations`).\n\nA timed-out test kills its xdist worker, so the Windows sweep loses that worker's remaining tests and turns red for a reason that is not a new regression.\n\n## Approach\n\nThe test's invariant is structural: no maintenance, gc or repack process may be a descendant of a `git commit` (module docstring, `:1-11`). Crossing git's real default threshold therefore needs O(20,000) file creations: 20,000 Python file writes, 20,000 loose-object writes by git, 20,000 unlinks, and then a repack of them by rebar's explicit post-commit maintenance step. On NTFS that work is the slowest part of the suite. The sibling test `test_the_trace_check_detects_maintenance_inside_a_commit` already crosses the threshold with almost no volume: `_cross_a_minimal_maintenance_threshold` (`:200-241`) writes 2 loose objects into the sampled `objects/17` directory and sets the command-scope thresholds `gc.auto=1` and `maintenance.geometric-repack.auto=1` through `GIT_CONFIG_COUNT`. rebar's suppression appends its own `gc.auto=0`/`maintenance.auto=false` entries after inherited ones (`_without_implicit_maintenance`, `src/rebar/_store/gitutil.py:258-274`), and passes `-c gc.auto=0 -c maintenance.auto=false` on the commit itself (`_AUTOMAINT_OFF`, gitutil.py:425). So with the suppression present, the minimal setup asks git to run maintenance and the suppression must stop it. With the suppression removed, the detector test proves that the same setup starts maintenance inside a commit. That pair is a complete control at about 1/10,000 of the filesystem work.\n\nThe work lands as 2 changes, measurement first, so that the cause is measured on Windows before the fill is removed:\n\n1. **Measure.** Wrap the phases of `test_write_survives_foreground_maintenance_repack` in the existing `_ci_timed_call` fixture (`tests/conftest.py`, which reports any span over 1 s as a `[rebar-ci-timing]` PytestWarning when `CI` is set). The spans are `write_paths` (the 20,000 Python writes), `hash_object`, split into 10 sequential `git hash-object -w --stdin-paths` calls of 2,000 paths each, named `hash_object[0]` to `hash_object[9]`, `unlink_paths`, and `create_tickets`. After it merges, dispatch `gh workflow run test.yml --ref main`, first checking `gh run list --workflow test.yml --status in_progress` and waiting for any in-progress run. Read the spans from the \"sweep (windows)\" job log. Per-object time is the sum of the `hash_object[k]` spans divided by 20,000. The cost counts as progressing if each 2,000-path chunk completes in roughly equal time, and as a stall if one chunk dominates or the test still times out, in which case the banner's stack names the chunk. Splitting the 2 MB stdin into chunks is part of the measurement: it tells a per-object cost apart from a pipe stall between the writer and git.\n2. **Fix.** Switch `test_write_survives_foreground_maintenance_repack` to `_cross_a_minimal_maintenance_threshold(repo, monkeypatch)`, and delete `_fill_loose`, `_LOOSE` and `_cross_the_maintenance_threshold`, which then have no caller, together with the step-1 spans. The 600 s budget (`--timeout=600` in `.github/workflows/test.yml`) is unchanged, and no config key, env var or flag is added.\n\nPortability: both changes are test-only and use only `subprocess` with list argv and `pathlib`: no shell, no fd numbers, no POSIX-only API.\n\n## Scope\n\n- `tests/unit/test_store_commit_maintenance_bd66.py`: step 1 adds the spans and chunking; step 2 replaces the fill with the minimal crossing.\n\n## Testing\n\n- Step 1: `pytest tests/unit/test_store_commit_maintenance_bd66.py` passes on macOS, and `CI=1 pytest tests/unit/test_store_commit_maintenance_bd66.py -W default` prints the `[rebar-ci-timing]` spans (so the instrumentation is shown to report before relying on Windows).\n- Step 2: `pytest tests/unit/test_store_commit_maintenance_bd66.py --durations=5` passes on macOS, with the main test's call phase under 10 s (from 30.8 s). `test_the_trace_check_detects_maintenance_inside_a_commit` keeps passing, which proves the minimal setup still makes git start maintenance inside a commit when the suppression is absent (the failure-path control). `make verify` passes for each change.\n- Windows: a `sweep (windows)` run on main after step 2 runs the test to a pass.\n\n## Acceptance Criteria\n\n- [ ] [non-codebase] The cost of the 20,000-object loose fill on the Windows CI runner is measured. A ticket comment records the per-phase rebar-ci-timing spans from a sweep (windows) job on main after step 1, the per-object hash-object time, and whether git was progressing (even chunk times) or blocked (one dominant chunk, or a timeout stack naming a chunk).\n  provenance: environment=GitHub Actions windows-latest runner (navapbc/rebar test.yml); principal=workflow_dispatch by the session's gh credential; privilege_posture=read-only CI run, no deploy or secret change; instrument=gh run view --job <id> --log \u2014 only a Windows runner can measure NTFS cost.\n- [ ] After step 2, `pytest tests/unit/test_store_commit_maintenance_bd66.py --durations=5` passes on macOS with the main test's call phase under 10 s, the `--timeout=600` budget in `.github/workflows/test.yml` is unchanged, and `make verify` passes.\n- [ ] After step 2, `test_write_survives_foreground_maintenance_repack` uses `_cross_a_minimal_maintenance_threshold`, and `_fill_loose` no longer exists.\n- [ ] [non-codebase] On the Windows CI runner, a sweep (windows) job on main after step 2 passes the bd66 maintenance test named in the criterion above. The run and job id are recorded in a ticket comment.\n  provenance: environment=GitHub Actions windows-latest runner (navapbc/rebar test.yml); principal=workflow_dispatch by the session's gh credential; privilege_posture=read-only CI run; instrument=gh run view --job <id> --log \u2014 the Windows sweep is the only Windows execution of this test.",
+        "description": "## Context / Problem\n\nIn run 44232977541 at dd72b461814, the \"sweep (windows)\" job (134562252974) printed this from the crash guard's timeout banner:\n\n`+++ Timeout +++ pytest-timeout expired after 600.0s in tests/unit/test_store_commit_maintenance_bd66.py::test_write_survives_foreground_maintenance_repack (xdist worker gw3)`\n\nThe stack dump shows the test thread at `tests/unit/test_store_commit_maintenance_bd66.py:67` (`_fill_loose`), called from `_cross_the_maintenance_threshold` (`:184`). It is waiting in `subprocess.run(... communicate)` on a single `git -C <tracker> hash-object -w --stdin-paths` over 20,000 paths (`_LOOSE`, `:31`). In the same dump, the writer thread is in `subprocess._stdin_write` and 2 `_readerthread`s are alive, so all 3 pipes have a live Python thread servicing them. The same failure appears without a banner in run 44211859981 (job 134491948817). The test passed on Windows in run 44141097601 (at 83ca81e709e) and in run 44253676986 (job 134630144542, at de94cc70b3b). It is intermittent: 2 of the last 3 Windows sweeps timed out in `_fill_loose`. On macOS the test's call phase takes 30.8 s (measured 2026-11-18 on a loaded host, `pytest --durations`).\n\nA timed-out test kills its xdist worker, so the Windows sweep loses that worker's remaining tests and turns red for a reason that is not a new regression.\n\n## Approach\n\nThe test's invariant is structural: no maintenance, gc or repack process may be a descendant of a `git commit` (module docstring, `:1-11`). Crossing git's real default threshold therefore needs O(20,000) file creations: 20,000 Python file writes, 20,000 loose-object writes by git, 20,000 unlinks, and then a repack of them by rebar's explicit post-commit maintenance step. On NTFS that work is the slowest part of the suite. The sibling test `test_the_trace_check_detects_maintenance_inside_a_commit` already crosses the threshold with almost no volume: `_cross_a_minimal_maintenance_threshold` (`:200-241`) writes 2 loose objects into the sampled `objects/17` directory and sets the command-scope thresholds `gc.auto=1` and `maintenance.geometric-repack.auto=1` through `GIT_CONFIG_COUNT`. rebar's suppression appends its own `gc.auto=0`/`maintenance.auto=false` entries after inherited ones (`_without_implicit_maintenance`, `src/rebar/_store/gitutil.py:258-274`), and passes `-c gc.auto=0 -c maintenance.auto=false` on the commit itself (`_AUTOMAINT_OFF`, gitutil.py:425). So with the suppression present, the minimal setup asks git to run maintenance and the suppression must stop it. With the suppression removed, the detector test proves that the same setup starts maintenance inside a commit. That pair is a complete control at about 1/10,000 of the filesystem work.\n\nThe work lands as 2 changes, measurement first, so that the cause is measured on Windows before the fill is removed:\n\n1. **Measure.** Wrap the phases of `test_write_survives_foreground_maintenance_repack` in the existing `_ci_timed_call` fixture (`tests/conftest.py`, which reports any span over 1 s as a `[rebar-ci-timing]` PytestWarning when `CI` is set). The spans are `write_paths` (the 20,000 Python writes), `hash_object`, split into 10 sequential `git hash-object -w --stdin-paths` calls of 2,000 paths each, named `hash_object[0]` to `hash_object[9]`, `unlink_paths`, and `create_tickets`. After it merges, dispatch `gh workflow run test.yml --ref main`, first checking `gh run list --workflow test.yml --status in_progress` and waiting for any in-progress run. Read the spans from the \"sweep (windows)\" job log. Per-object time is the sum of the `hash_object[k]` spans divided by 20,000. The cost counts as progressing if each 2,000-path chunk completes in roughly equal time, and as a stall if one chunk dominates or the test still times out, in which case the banner's stack names the chunk. Splitting the 2 MB stdin into chunks is part of the measurement: it tells a per-object cost apart from a pipe stall between the writer and git.\n2. **Fix.** Switch `test_write_survives_foreground_maintenance_repack` to `_cross_a_minimal_maintenance_threshold(repo, monkeypatch)`, and delete `_fill_loose`, `_LOOSE` and `_cross_the_maintenance_threshold`, which then have no caller, together with the step-1 spans. The 600 s budget (`--timeout=600` in `.github/workflows/test.yml`) is unchanged, and no config key, env var or flag is added.\n\nPortability: both changes are test-only and use only `subprocess` with list argv and `pathlib`: no shell, no fd numbers, no POSIX-only API.\n\n## Scope\n\n- `tests/unit/test_store_commit_maintenance_bd66.py`: step 1 adds the spans and chunking; step 2 replaces the fill with the minimal crossing.\n\n## Testing\n\n- Step 1: `pytest tests/unit/test_store_commit_maintenance_bd66.py` passes on macOS, and `CI=1 pytest tests/unit/test_store_commit_maintenance_bd66.py -W default` prints the `[rebar-ci-timing]` spans (so the instrumentation is shown to report before relying on Windows).\n- Step 2: `pytest tests/unit/test_store_commit_maintenance_bd66.py --durations=5` passes on macOS, with the main test's call phase under 10 s (from 30.8 s). `test_the_trace_check_detects_maintenance_inside_a_commit` keeps passing, which proves the minimal setup still makes git start maintenance inside a commit when the suppression is absent (the failure-path control). `make verify` passes for each change.\n- Windows: a `sweep (windows)` run on main after step 2 runs the test to a pass.\n\n## Acceptance Criteria\n\n- [x] [non-codebase] The cost of the 20,000-object loose fill on the Windows CI runner is measured. A ticket comment records the per-phase rebar-ci-timing spans from a sweep (windows) job on main after step 1, the per-object hash-object time, and whether git was progressing (even chunk times) or blocked (one dominant chunk, or a timeout stack naming a chunk).\n  provenance: environment=GitHub Actions windows-latest runner (navapbc/rebar test.yml); principal=workflow_dispatch by the session gh credential; privilege_posture=narrower; instrument=live-call \u2014 only a Windows runner can measure NTFS cost.\n- [x] After step 2, `pytest tests/unit/test_store_commit_maintenance_bd66.py --durations=5` passes on macOS with the main test's call phase under 10 s, the `--timeout=600` budget in `.github/workflows/test.yml` is unchanged, and `make verify` passes.\n- [x] After step 2, `test_write_survives_foreground_maintenance_repack` uses `_cross_a_minimal_maintenance_threshold`, and `_fill_loose` no longer exists.\n- [x] [non-codebase] On the Windows CI runner, a sweep (windows) job on main after step 2 passes the bd66 maintenance test named in the criterion above. The run and job id are recorded in a ticket comment.\n  provenance: environment=GitHub Actions windows-latest runner (navapbc/rebar test.yml); principal=workflow_dispatch by the session gh credential; privilege_posture=narrower; instrument=live-call \u2014 the Windows sweep is the only Windows execution of this test.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "bd66 maintenance test exceeds the 600 s Windows test budget inside its loose-object fill"
       },
       "created_at": "2026-11-18T05:32:09Z",
@@ -56523,6 +56551,13 @@
       "jira_key": "REB-209",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:55Z"
+    },
+    "8145-b4c2-29f8-4012": {
+      "created_at": "2026-11-19T18:36:49Z",
+      "jira_id": "4599524",
+      "jira_key": "REB-7301",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T18:36:53Z"
     },
     "8153-e9b5-5706-49c8": {
       "baseline": {
@@ -73683,9 +73718,17 @@
       "updated_at": "2026-08-15T15:07:57Z"
     },
     "a5be-a825-30ea-4f09": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\n\n`tests/interfaces/store/test_fsck_ensures.py::test_mcp_startup_sweeps_before_run` failed in `sweep (windows)` job 135688612206 (run 44560626779, main at 91322a91e9ed31b0523451b678cf2b3a40cdff8b): `AssertionError: run_ensures must precede build_server().run()`, with `order == ['run']`. It passed in the 3 previous Windows sweeps (jobs 135490319213, 135569438854, 135597358757). That makes it intermittent.\n\nSince 5029b61749d (\"Run MCP boot ensure sweep after listen\"), `mcp_server.main()` starts the boot sweep on a background thread (`start_startup_store_sweep`, `src/rebar/_mcp_health.py:403`) and then calls `run_mcp`. The test stubs `build_server().run` and asserts the order `['ensures', 'run']`, which only holds if the thread wins the race. An earlier order-dependence bug on this test, solid-velour-lynx (de95-1594-1056-436e), is closed. Its assertion message, `got ['run']`, matches this failure.\n\n## Not established\n\n- Whether the test's stub `run` path goes through `run_mcp`, which waits on the gauge, or bypasses it.\n- Why it reproduces only intermittently.\n\n## Acceptance Criteria\n\n- [ ] The ordering the test asserts is either guaranteed by the code under test or replaced by an assertion that matches the async contract (for example, the sweep has completed before shutdown). The root cause is recorded with evidence.\n- [ ] `make verify` passes, and a `sweep (windows)` job on main after the fix does not list this test among its failures.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "test_mcp_startup_sweeps_before_run races the background boot sweep thread (Windows sweep)"
+      },
       "created_at": "2026-11-19T17:31:10Z",
       "jira_id": "4599519",
       "jira_key": "REB-7296",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-19T17:31:15Z"
     },
@@ -80346,6 +80389,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-20T06:43:45Z"
+    },
+    "b39a-6c91-b585-42f4": {
+      "created_at": "2026-11-19T18:36:53Z",
+      "jira_id": "4599525",
+      "jira_key": "REB-7302",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T18:36:58Z"
     },
     "b39a-8770-a8b2-459a": {
       "baseline": {
@@ -120053,7 +120103,17 @@
     "1795109026282112666": "__rebar_unknown_comment_id__",
     "1795109059859090391": "__rebar_unknown_comment_id__",
     "1795109114519930345": "__rebar_unknown_comment_id__",
-    "1795109120264201367": "__rebar_unknown_comment_id__"
+    "1795109120264201367": "__rebar_unknown_comment_id__",
+    "1795109690099218541": "__rebar_unknown_comment_id__",
+    "1795109818495387399": "__rebar_unknown_comment_id__",
+    "1795110116292947880": "__rebar_unknown_comment_id__",
+    "1795110493502861001": "__rebar_unknown_comment_id__",
+    "1795110665831666556": "__rebar_unknown_comment_id__",
+    "1795111118586484832": "__rebar_unknown_comment_id__",
+    "1795111222966908168": "__rebar_unknown_comment_id__",
+    "1795112270110303780": "__rebar_unknown_comment_id__",
+    "1795112782690480170": "__rebar_unknown_comment_id__",
+    "1795112792516877904": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -125684,8 +125744,14 @@
     "REB-7294": "0e48-b2df-17eb-407d",
     "REB-7295": "3d9f-3788-87f7-45f6",
     "REB-7296": "a5be-a825-30ea-4f09",
+    "REB-7297": "0dd0-cecb-3932-4c90",
+    "REB-7298": "02a7-a3ed-f72e-42b1",
+    "REB-7299": "5220-052f-6d9c-4699",
     "REB-73": "3156-9092-1967-4367",
     "REB-730": "e534-5154-2401-40fb",
+    "REB-7300": "70d0-4528-d074-40d3",
+    "REB-7301": "8145-b4c2-29f8-4012",
+    "REB-7302": "b39a-6c91-b585-42f4",
     "REB-731": "eced-c6b8-7461-48a0",
     "REB-732": "f5d7-b2f2-1d70-4156",
     "REB-733": "edf7-946e-84be-48b3",
