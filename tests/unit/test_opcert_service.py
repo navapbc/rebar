@@ -20,7 +20,7 @@ from _subprocess_env import subprocess_env
 
 import rebar
 from rebar.attest import dsse
-from rebar.opcert_service import jobs
+from rebar.opcert_service import jobs, keyprov
 from rebar.opcert_service.config import OpcertServiceConfig
 from rebar.opcert_service.keyprov import OpcertSigner, compose_signer
 
@@ -174,7 +174,8 @@ def test_key_is_0600_and_gate_sees_no_env_key(authority, monkeypatch, signer):
     monkeypatch.delenv("REBAR_OPCERT_ENV_ID", raising=False)
     src, tid, _main = authority
     cfg = _cfg(src)
-    assert oct(os.stat(signer.key_path).st_mode & 0o777) == "0o600"
+    if keyprov._POSIX_MODE_BITS:  # Windows has no mode bits (cloistered-decomposed-nymph)
+        assert oct(os.stat(signer.key_path).st_mode & 0o777) == "0o600"
     seen: dict = {}
 
     def gate(tid_, rr):

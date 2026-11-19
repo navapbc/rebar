@@ -20,6 +20,12 @@ from typing import Any, Literal, Protocol, TypeAlias
 import comment_echo_reclaim_manifest as manifest_tools
 
 CANARY_ORDER = ("REB-2605", "REB-1931", "REB-1567")
+
+#: Windows does not implement POSIX mode bits (every directory reports 0o777), so the
+#: group/world check cannot run there. By operator decision (cloistered-decomposed-nymph,
+#: option 3) Windows artifacts rely on the user profile's default ACL; the residual risk is
+#: in docs/comment-echo-reclaim-runbook.md. Everywhere else the check is unchanged.
+_POSIX_MODE_BITS = os.name != "nt"
 JournalOutcomeState: TypeAlias = Literal["completed", "retryable"]
 JournalProgressState: TypeAlias = Literal["pending", "retryable", "unresolved"]
 CleanupAuthority: TypeAlias = Mapping[tuple[str, str], Mapping[str, str]]
@@ -164,6 +170,10 @@ def _load_manifest(path: Path) -> tuple[dict[str, Any], str]:
 
 
 def _read_regular(path: Path, label: str) -> bytes:
+    # O_NOFOLLOW does not exist on Windows, so refuse a symlink explicitly first; where the
+    # flag exists it still closes the check-then-open window.
+    if path.is_symlink():
+        raise CleanupError(f"{label} must be a regular file: {path}")
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
@@ -263,7 +273,7 @@ def _assert_private_artifact_dir(path: Path) -> None:
         raise CleanupError(f"artifact path must be a real directory: {path}") from exc
     if not stat.S_ISDIR(mode):
         raise CleanupError(f"artifact path must be a real directory: {path}")
-    if stat.S_IMODE(mode) & 0o077:
+    if _POSIX_MODE_BITS and stat.S_IMODE(mode) & 0o077:
         raise CleanupError(f"artifact directory must not be group/world accessible: {path}")
 
 
@@ -299,6 +309,8 @@ def _artifact_dir(repo: Path, requested: Path) -> Path:
 
 def _write_new(path: Path, value: object) -> None:
     _assert_private_artifact_dir(path.parent)
+    if path.is_symlink():  # portable counterpart of O_NOFOLLOW, absent on Windows
+        raise CleanupError(f"refusing to overwrite cleanup artifact: {path}")
     raw = manifest_tools.canonical_json(value) + b"\n"
     flags = (
         os.O_WRONLY
@@ -358,6 +370,8 @@ def _read_journal(path: Path) -> list[dict[str, Any]]:
 
 def _append_record(path: Path, value: object) -> None:
     _assert_private_artifact_dir(path.parent)
+    if path.is_symlink():  # portable counterpart of O_NOFOLLOW, absent on Windows
+        raise CleanupError(f"cleanup journal must be a regular file: {path}")
     flags = (
         os.O_WRONLY
         | os.O_CREAT

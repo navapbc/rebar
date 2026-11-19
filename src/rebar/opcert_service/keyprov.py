@@ -34,6 +34,12 @@ from rebar.opcert_service.config import OpcertServiceConfig
 #: The fixed basename of the process-owned key copy inside the 0700 runtime dir.
 _KEY_COPY_NAME = "opcert-key"
 
+#: Windows does not implement POSIX mode bits (every file reports 0o666), so the 0600 check
+#: below cannot run there. By operator decision (cloistered-decomposed-nymph, option 3) a
+#: Windows key relies on the user profile's default ACL instead; the residual risk is in
+#: docs/manifest-signing.md. Everywhere else the check is unchanged.
+_POSIX_MODE_BITS = os.name != "nt"
+
 
 class OpcertKeyError(Exception):
     """The startup op-cert key source is invalid — raised for every AC1 rejection case
@@ -108,7 +114,7 @@ def _read_path_source(key_path: str) -> bytes:
         ) from None
     if not stat.S_ISREG(st.st_mode):
         raise OpcertKeyError(f"REBAR_OPCERT_KEY_PATH={key_path!r} is not a regular file")
-    if st.st_mode & 0o077:
+    if _POSIX_MODE_BITS and st.st_mode & 0o077:
         raise OpcertKeyError(
             f"REBAR_OPCERT_KEY_PATH={key_path!r} must be 0600 or stricter "
             f"(group/other bits set: mode {oct(st.st_mode & 0o777)})"

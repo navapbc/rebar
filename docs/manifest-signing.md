@@ -19,6 +19,8 @@ The code-review gate reports its verdict through the configured review system. I
 
 The default private key is `<tracker>/.opcert-key`. rebar generates this passphrase-free Ed25519 key on the first signing operation, writes the private key with owner-only permissions, derives `<tracker>/.opcert-key.pub`, and excludes both files from the ticket log. `REBAR_OPCERT_KEY_PATH` can select a provisioned private key instead.
 
+On POSIX, rebar refuses a provisioned key file with any group or other permission bit (it must be `0600` or stricter). Windows has no POSIX permission bits, so rebar skips that check there and relies on the user profile's default access control list (normally the owner, SYSTEM and Administrators). The residual risk on Windows: a key inherits its folder's ACL, `chmod` only toggles the read-only attribute, and nothing checks for extra entries such as Users or Everyone. Keep Windows signing keys in a folder whose ACL you have checked (for example with `icacls`). This is a deliberate decision, recorded on cloistered-decomposed-nymph.
+
 The certificate principal comes from `REBAR_OPCERT_ENV_ID` when that deployment setting is present. Otherwise rebar uses the ticket store's `.env-id`. The principal attributes the certificate to the signing environment. It does not identify a person. Authorship attestations use a separate key, namespace, and trust model.
 
 Signing requires OpenSSH 8.9 or newer. A missing or unusable `ssh-keygen` produces a signing error. Gate callers record that outcome as unsigned, and a gate that requires certification remains unsatisfied. Verification never creates a missing private key.

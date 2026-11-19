@@ -88,7 +88,11 @@ substitute oldest/newest ordering, body equality alone, or the current unknown-I
 ## Artifacts and custody
 
 Create one operator-owned artifact directory outside every Git repository. It contains sensitive
-Jira material and rollback capability; mode it `0700` and do not commit it. Record paths and
+Jira material and rollback capability; mode it `0700` and do not commit it. On Windows, which has
+no POSIX permission bits, `cleanup_comment_echo_jira.py` cannot check the mode and skips that
+check: the directory inherits its parent folder's ACL, `chmod` only toggles the read-only
+attribute, and nothing checks for extra entries such as Users or Everyone, so confirm the ACL
+with `icacls` yourself. Record paths and
 SHA-256 values on the execution ticket, not the artifact contents.
 
 Required artifacts are:
