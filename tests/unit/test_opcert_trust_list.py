@@ -4,7 +4,8 @@ A verifying environment may list the (environment, key) pairs it trusts. With th
 valid, correctly bound certificate from a listed pair passes with trust basis ``trust_list``; a
 valid certificate from an unlisted pair is ``untrusted``; a broken or rebound certificate still
 fails as ``mismatch`` first. Every op-cert result names its signing key (``signing_key``).
-Epic nonblack-brigandish-guillemot, story unequaled-sincere-firefly.
+Epic nonblack-brigandish-guillemot; stories unequaled-sincere-firefly and
+notorious-deadsmooth-rattail.
 """
 
 from __future__ import annotations
@@ -226,16 +227,62 @@ def test_require_environment_naming_another_environment_is_foreign_key(
     assert out["verdict"] == "foreign_key", out["reason"]
 
 
-def test_list_unset_leaves_verification_unchanged(store: Path, tmp_path: Path) -> None:
-    """With no list, a cross-environment certificate verifies on the pre-existing basis."""
+# ── no list: validity only ──────────────────────────────────────────────────────
+def test_no_list_certifies_any_valid_key_and_names_key_and_environment(
+    store: Path, tmp_path: Path
+) -> None:
     key_a = _keypair(tmp_path, "a")
     tid = _sign(store, key_a, ENV_A)
     assert config.compose_config(root=str(store)).verify.trusted_opcert_keys == ()
 
     out = _verify(store, tid)
     assert out["verdict"] == "certified", out["reason"]
-    assert out["trust_basis"] != "trust_list"
+    assert out["trust_basis"] == "envelope_key"
     assert out["signing_key"] == _fingerprint(key_a)
+    assert out["key_id"] == ENV_A
+
+
+def test_no_list_still_refuses_tampered_and_replayed_certs(store: Path, tmp_path: Path) -> None:
+    key_a = _keypair(tmp_path, "a")
+    tampered = _sign(store, key_a, ENV_A, "tampered")
+    _forge_payload(store, tampered)
+    assert _verify(store, tampered)["verdict"] == "mismatch"
+
+    src = _sign(store, key_a, ENV_A, "src")
+    dst = rebar.create_ticket("task", "dst", repo_root=str(store))
+    _replay_onto(store, src, dst)
+    assert _verify(store, dst)["verdict"] == "mismatch"
+
+
+def test_require_environment_without_a_list_is_foreign_key(store: Path, tmp_path: Path) -> None:
+    key_a = _keypair(tmp_path, "a")
+    tid = _sign(store, key_a, ENV_A)
+    (store / "rebar.toml").write_text(
+        f'[verify]\nrequire_environment = "{ENV_A}"\nopcert_enforce_since = "HEAD"\n',
+        encoding="utf-8",
+    )
+    out = _verify(store, tid)
+    assert out["verified"] is False
+    assert out["verdict"] == "foreign_key", out["reason"]
+    assert "verify.trusted_opcert_keys" in out["reason"]
+
+
+def test_signing_is_not_gated_on_any_list(store: Path, tmp_path: Path) -> None:
+    """A key on no list still signs (ADR 0125); only verification consults the list."""
+    other = _keypair(tmp_path, "other")
+    _trust(store, f"{ENV_A} {_pub(other)}")
+    key_a = _keypair(tmp_path, "a")
+    tid = _sign(store, key_a, ENV_A)  # asserts the record was minted under ENV_A
+    assert _verify(store, tid)["verdict"] == "untrusted"
+
+
+def test_health_without_a_list_expects_nothing(store: Path, tmp_path: Path) -> None:
+    from rebar._mcp_opcert_health import opcert_signer_degraded, opcert_signing_status
+
+    key_a = _keypair(tmp_path, "a")
+    status = opcert_signing_status(_Signer(key_a, ENV_A), str(store))
+    assert status["expected"] is False
+    assert opcert_signer_degraded(status) is False
 
 
 # ── config parsing ──────────────────────────────────────────────────────────────

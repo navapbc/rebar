@@ -87,79 +87,6 @@ def _required_environment(repo_root) -> str | None:
         return None
 
 
-def _pinned_environment_keys(
-    principal: str, repo_root, *, unrevoked_only: bool = False
-) -> list[str]:
-    """Public keys pinned for ``principal`` in ``.rebar/trusted_environments.yaml`` (the
-    out-of-band, review-gated trust root the ``verify-opcert`` merge gate uses). Empty when the
-    environment is not pinned, or the config is absent/malformed. ``unrevoked_only`` drops
-    entries carrying a ``revoked_at_log_position``."""
-    try:
-        from rebar.attest import trusted_env
-
-        keyring = trusted_env.trusted_env_keyring(principal, repo_root) or []
-    except Exception:  # noqa: BLE001 — absent/malformed pin config ⇒ nothing pinned here
-        return []
-    return [
-        rec["public_key"]
-        for rec in keyring
-        if isinstance(rec, dict)
-        and isinstance(rec.get("public_key"), str)
-        and rec["public_key"]
-        and not (unrevoked_only and rec.get("revoked_at_log_position"))
-    ]
-
-
-def _opcert_trust_root(
-    principal: str, own_principal: str, tracker: str, envelope, repo_root, required_env: str | None
-) -> tuple[list[str], str | None]:
-    """Choose own, pinned, or embedded signer keys and label the trust basis.
-
-    Embedded keys prove signature consistency but not known environment identity;
-    required-environment policy disables that fallback.
-    """
-    from rebar._opcert_signing import _opcert_own_public_keys
-
-    is_own = principal == own_principal
-    if is_own:
-        own_pubs = _opcert_own_public_keys(tracker)
-        if own_pubs:
-            return own_pubs, "own_key"
-    # A revoked pinned key is never trusted, for the own or a foreign principal (bugs d909,
-    # 0ed1). There is no era check: a certificate signed before the key's revocation is refused
-    # under verify.require_environment, and in advisory mode verifies on its embedded key.
-    pinned = _pinned_environment_keys(principal, repo_root, unrevoked_only=True)
-    if pinned:
-        return pinned, "pinned_environment"
-    if required_env is not None:
-        return [], None
-    from rebar.attest import sshsig
-
-    sigs = list(envelope.signatures)
-    embedded = sshsig.embedded_public_key(sigs[0].sig) if sigs else None
-    return ([embedded], "envelope_key") if embedded else ([], None)
-
-
-def _rotated_own_key_verdict(envelope, principal: str, repo_root):
-    """Retry an own-principal ``mismatch`` under the pinned, unrevoked keys of that principal.
-
-    After the own key rotates, certificates signed under the previous key still carry the same
-    principal. Trust is "pinned and not revoked", with no era check: this function has no
-    tickets-log position for the certificate, so a key pinned after the certificate was signed
-    is not rejected here. Returns the verified verdict, or None when no pinned key verifies it.
-    """
-    from rebar.attest import authorship, registry
-    from rebar.attest.opcert import OPCERT_KIND
-
-    pinned = _pinned_environment_keys(principal, repo_root, unrevoked_only=True)
-    if not pinned:
-        return None
-    retry = registry.verify(
-        OPCERT_KIND, envelope, authorship.allowed_signers_from_keys(pinned, principal)
-    )
-    return retry if retry.verified else None
-
-
 def _signing_key_sha256(public_key: str | None) -> str | None:
     """``SHA256:`` fingerprint of an OpenSSH public-key line, as ``ssh-keygen -l`` prints it."""
     import base64
@@ -244,14 +171,16 @@ def _trust_list_configured(repo_root) -> bool:
 def verify_opcert_record(
     record: dict, ticket_id: str, *, kind: str | None = None, repo_root=None
 ) -> dict:
-    """Verify a DSSE record under the strongest available trust basis.
+    """Verify a DSSE op-cert record: validity by default, a trust list when configured.
 
-    Environment identity is advisory unless ``verify.require_environment`` is set.
-    Signature, principal, and signed ticket/kind binding still gate certification.
+    The signature must verify under the key embedded in it, for the record's principal, and
+    its signed subject must bind this ticket and kind (ADR 0125). With no
+    ``verify.trusted_opcert_keys`` list that is the whole check (trust basis
+    ``envelope_key``); with one, the (environment, key) pair must also be listed, else the
+    verdict is ``untrusted``. ``verify.require_environment`` requires a list.
     Return authenticated material, commit, and manifest for freshness checks;
     verification never creates a key.
     """
-    from rebar._opcert_signing import opcert_principal
     from rebar.attest import authorship, opcert, registry
     from rebar.attest.opcert import OPCERT_KIND
     from rebar.reducer._processors import attestation_kind
@@ -259,8 +188,6 @@ def verify_opcert_record(
 
     raw_manifest = record.get("manifest")
     manifest = raw_manifest if isinstance(raw_manifest, list) else []
-    tracker = str(config.tracker_dir(repo_root))
-    own_principal = opcert_principal(tracker)
 
     decoded = opcert.opcert_from_record(record)
     envelope = decoded[0] if decoded is not None else None
@@ -292,8 +219,7 @@ def verify_opcert_record(
         "signed_manifest": bound.get("manifest"),
         # This verified path, not the mutable algorithm field, marks an op-cert.
         "opcert": True,
-        # Expose own, pinned, or embedded-key trust; the last does not establish
-        # a known environment and must remain visible to audit readers.
+        # ``envelope_key`` (validity only) or ``trust_list`` (listed pair).
         "trust_basis": None,
         # Which key signed (its SHA256 fingerprint), whatever the verdict (ADR 0125).
         "signing_key": _signing_key_sha256(_embedded_signer_key(envelope)),
@@ -331,47 +257,36 @@ def verify_opcert_record(
             ),
         }
 
-    signer_key = _embedded_signer_key(envelope)
     with_list = _trust_list_configured(repo_root)
-    keys: list[str]
-    trust_basis: str | None
-    if with_list:
-        # A configured trust list replaces every other trust root: the signature must hold
-        # under its own embedded key, and the (environment, key) pair must be listed.
-        if not signer_key:
-            return {
-                **base,
-                "verified": False,
-                "verdict": "mismatch",
-                "reason": (
-                    f"the signature of {principal!r} carries no readable public key, so it "
-                    "cannot verify (corrupted or not an SSHSIG signature)"
-                ),
-            }
-        keys, trust_basis = [signer_key], "envelope_key"
-    else:
-        keys, trust_basis = _opcert_trust_root(
-            principal, own_principal, tracker, envelope, repo_root, required_env
-        )
-    base = {**base, "trust_basis": trust_basis}
-    if not keys:
+    if required_env is not None and not with_list:
+        # A principal is the certificate's own claim; only a trust list can vouch for it.
         return {
             **base,
             "verified": False,
             "verdict": "foreign_key",
             "reason": (
-                f"no public key is obtainable for environment {principal!r} — neither this "
-                "environment's own key, nor a key pinned in .rebar/trusted_environments.yaml, "
-                "nor one embedded in the signature envelope"
+                f"verify.require_environment is set to {required_env!r}, which requires a "
+                "verify.trusted_opcert_keys list naming that environment's keys (ADR 0125)"
             ),
         }
 
-    trust_root = authorship.allowed_signers_from_keys(keys, principal)
+    # Validity is judged under the key the signature itself carries (ADR 0125): the signature,
+    # namespace and principal binding are all still checked in full.
+    signer_key = _embedded_signer_key(envelope)
+    base = {**base, "trust_basis": "envelope_key" if signer_key else None}
+    if not signer_key:
+        return {
+            **base,
+            "verified": False,
+            "verdict": "mismatch",
+            "reason": (
+                f"the signature of {principal!r} carries no readable public key, so it cannot "
+                "verify (corrupted or not an SSHSIG signature)"
+            ),
+        }
+
+    trust_root = authorship.allowed_signers_from_keys([signer_key], principal)
     verdict = registry.verify(OPCERT_KIND, envelope, trust_root)
-    if not verdict.verified and verdict.verdict == "mismatch" and trust_basis == "own_key":
-        rotated = _rotated_own_key_verdict(envelope, principal, repo_root)
-        if rotated is not None:
-            verdict, base = rotated, {**base, "trust_basis": "pinned_environment"}
     if not verdict.verified:
         return {
             **base,
@@ -395,3 +310,57 @@ def verify_opcert_record(
         "verdict": verdict.verdict,
         "reason": verdict.reason,
     }
+
+
+def verify_completion_opcert(
+    envelope,
+    ticket_id: str,
+    material_fingerprint: str,
+    merged_log_commit: str,
+    *,
+    kind: str,
+    required_env: str,
+    trusted_pairs: frozenset[tuple[str, str]],
+):
+    """Merge-gate check of one op-cert against the gating environment's trust list (ADR 0125).
+
+    The certificate must name ``required_env``, be signed by a key listed for that environment,
+    verify under that key, and bind ``{ticket_id, material_fingerprint, merged_log_commit,
+    kind}``. Returns a :class:`rebar.attest.registry.Verdict`; never raises."""
+    from rebar._opcert_signing import _ssh_pub_body
+    from rebar.attest import authorship, opcert, registry
+
+    sigs = list(envelope.signatures)
+    principal = sigs[0].keyid if sigs else None
+    if principal != required_env:
+        return registry.Verdict(
+            verified=False,
+            verdict="foreign_key",
+            reason=f"op-cert names environment {principal!r}, not {required_env!r}",
+        )
+    signer_key = _embedded_signer_key(envelope)
+    if signer_key is None or (principal, _ssh_pub_body(signer_key)) not in trusted_pairs:
+        return registry.Verdict(
+            verified=False,
+            verdict="untrusted",
+            reason=(
+                f"signing key {_signing_key_sha256(signer_key)} is not listed for "
+                f"{principal!r} in verify.trusted_opcert_keys"
+            ),
+        )
+    expected = opcert.opcert_subject_digest(
+        ticket_id, material_fingerprint, merged_log_commit, kind
+    )
+    try:
+        subject = json.loads(envelope.payload)["subject"][0]
+        bound = subject["name"] == ticket_id and subject["digest"]["sha256"] == expected
+    except Exception:  # noqa: BLE001 — a malformed Statement binds nothing
+        bound = False
+    if not bound:
+        return registry.Verdict(
+            verified=False,
+            verdict="mismatch",
+            reason="op-cert subject does not bind this ticket, material and merged-log commit",
+        )
+    root = authorship.allowed_signers_from_keys([signer_key], principal)
+    return registry.verify(opcert.OPCERT_KIND, envelope, root)

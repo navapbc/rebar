@@ -739,9 +739,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         ``verify.trusted_opcert_keys`` list does not name for the certificate's
         environment, and ``unsigned`` lacks an op-cert (a retired legacy HMAC record
         included). ``signing_key`` names the signing key's SHA256 fingerprint.
-        Outside the opt-in environment
-        restriction, signer environment alone is not a gate; ``trust_basis`` names the
-        accepted key. Omitted ``kind`` checks the latest signature; an explicit
+        Without a trust list the check is validity only, with ``trust_basis``
+        ``envelope_key``; a listed signer reads ``trust_list``. Omitted ``kind``
+        checks the latest signature; an explicit
         ``plan-review`` or ``completion-verifier`` kind is strict. ``show_ticket``
         exposes every attestation.
         """,

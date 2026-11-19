@@ -1,11 +1,12 @@
 """Required-environment completion-certificate merge gate (``rebar verify-opcert``).
 
 For each closed ticket in merged history, verify its ``completion-verifier`` certificate
-against the configured trusted environment. The terminal close STATUS commit anchors
-grandfathering. The certificate's SIGNATURE commit anchors key-era validity. Missing or invalid
-certificates fail enforced tickets, pre-boundary tickets are advisory, and an unset required
-environment disables enforcement. Exit 2 reports config or store errors, 1 an enforced failure,
-and 0 a pass or advisory result.
+against the required environment and this environment's ``verify.trusted_opcert_keys`` list
+(ADR 0125). The terminal close STATUS commit anchors grandfathering. Missing, unlisted or
+invalid certificates fail enforced tickets, pre-boundary tickets are advisory, and an unset
+required environment disables enforcement. A required environment without a trust list is a
+configuration error. Exit 2 reports config or store errors, 1 an enforced failure, and 0 a
+pass or advisory result.
 """
 
 from __future__ import annotations
@@ -33,29 +34,6 @@ def _close_anchor_event(events, ticket_id):
             continue
         if (ev.event.get("data") or {}).get("status") == "closed":
             anchor = ev
-    return anchor
-
-
-def _opcert_anchor_event(events, ticket_id):
-    """Return the last uncompacted completion-verifier SIGNATURE event, or ``None``.
-
-    Its introducing commit is the storage anchor for key-era validation, independent of the
-    certificate's claimed merged commit. Snapshot-only or missing records remain unresolved so
-    the caller fails closed."""
-    from rebar.reducer._processors import attestation_kind
-
-    anchor = None
-    for ev in events:
-        if ev.ticket_id != ticket_id or ev.event is None:
-            continue
-        if ev.event.get("event_type") != "SIGNATURE":
-            continue
-        data = ev.event.get("data") or {}
-        if not data.get("envelope"):
-            continue
-        if attestation_kind(data.get("manifest"), data) != KIND:
-            continue
-        anchor = ev
     return anchor
 
 
@@ -89,6 +67,40 @@ def _commit_in_gated_history(commit: str, repo_root) -> bool:
         return False
 
 
+def _completion_cert_problem(state, ticket_id, root, required_env, trusted_pairs) -> str:
+    """Why the completion certificate of ``ticket_id`` fails the gate; ``""`` when it passes."""
+    from rebar._opcert_verify import verify_completion_opcert
+    from rebar.attest import opcert
+
+    rec = (state.get("attestations") or {}).get(KIND)
+    got = opcert.opcert_from_record(rec) if isinstance(rec, dict) else None
+    if got is None:
+        return "missing op-cert"
+    envelope, bound = got
+    merged_commit = bound.get("merged_log_commit")
+    # Recompute material from the current ticket state. Do not trust the self-reported
+    # record because ticket-branch data bypasses Gerrit review.
+    auth_material = _authoritative_material(ticket_id, root)
+    if auth_material is None:
+        return "cannot recompute authoritative material fingerprint"
+    if not isinstance(merged_commit, str) or not merged_commit:
+        return "malformed op-cert (missing merged_log_commit)"
+    if not _commit_in_gated_history(merged_commit, root):
+        # The bound merged-log commit must be a REAL commit in the gated main history (ancestor
+        # of HEAD), not an arbitrary/off-history value: it constrains the code-state claim.
+        return "op-cert merged_log_commit is not in the gated main history"
+    verdict = verify_completion_opcert(
+        envelope,
+        ticket_id,
+        auth_material,
+        merged_commit,
+        kind=KIND,
+        required_env=required_env,
+        trusted_pairs=trusted_pairs,
+    )
+    return "" if verdict.verified else f"invalid op-cert ({verdict.verdict}: {verdict.reason})"
+
+
 @guard_parse_errors
 def cli(argv: list[str]) -> int:
     p = build_opcert(prog="rebar verify-opcert")
@@ -104,6 +116,18 @@ def cli(argv: list[str]) -> int:
     since_ref = args.since if args.since is not None else cfg.verify.opcert_enforce_since
     as_json = args.format == "json"
 
+    from rebar._opcert_verify import trusted_opcert_pairs
+
+    trusted_pairs = trusted_opcert_pairs(args.root)
+    if required_env and trusted_pairs is None:
+        print(
+            f"verify-opcert: verify.require_environment is {required_env!r} but "
+            "verify.trusted_opcert_keys is empty; a required environment needs a trust list "
+            "naming its keys (ADR 0125)",
+            file=sys.stderr,
+        )
+        return 2
+
     tracker = str(config.tracker_dir(args.root))
     if not os.path.isdir(tracker):
         print(
@@ -117,7 +141,7 @@ def cli(argv: list[str]) -> int:
     # introducing-commit resolution / grandfathering rule verbatim.
 
     import rebar
-    from rebar.attest import authorship, opcert, trusted_env
+    from rebar.attest import authorship
 
     from .verify_authorship import _collect_all, _is_enforced, _resolve_commit
 
@@ -148,62 +172,12 @@ def cli(argv: list[str]) -> int:
             _resolve_commit(anchor, args.root, commit_map) if anchor is not None else None
         )
 
-        # Read + verify the ticket's completion-verifier op-cert against the PINNED key.
-        reason = ""
-        ok = False
-        if not required_env:
-            reason = "no required environment configured"
-        else:
-            rec = (state.get("attestations") or {}).get(KIND)
-            got = opcert.opcert_from_record(rec) if isinstance(rec, dict) else None
-            if got is None:
-                reason = "missing op-cert"
-            else:
-                envelope, bound = got
-                merged_commit = bound.get("merged_log_commit")
-                # Recompute material from the current ticket state. Do not trust the
-                # self-reported record because ticket-branch data bypasses Gerrit review.
-                auth_material = _authoritative_material(ticket_id, args.root)
-                # Resolve storage anchor S from the terminal certificate SIGNATURE event and
-                # judge trusted-key era at S, not at the claimed merged commit. Unresolvable S
-                # fails closed.
-                s_anchor = _opcert_anchor_event(events, ticket_id)
-                s_commit = (
-                    _resolve_commit(s_anchor, args.root, commit_map)
-                    if s_anchor is not None
-                    else None
-                )
-                s_position = s_anchor.position if s_anchor is not None else None
-                if auth_material is None:
-                    reason = "cannot recompute authoritative material fingerprint"
-                elif not isinstance(merged_commit, str) or not merged_commit:
-                    reason = "malformed op-cert (missing merged_log_commit)"
-                elif not _commit_in_gated_history(merged_commit, args.root):
-                    # The bound merged-log commit must be a REAL commit in the gated main history
-                    # (ancestor of HEAD), not an arbitrary/off-history value. It no longer anchors
-                    # key validity, but still constrains the code-state claim the cert makes.
-                    reason = "op-cert merged_log_commit is not in the gated main history"
-                elif s_commit is None:
-                    # The cert's storage anchor could not be resolved (its SIGNATURE event was
-                    # compacted, or is otherwise unresolvable) → we cannot judge key era-validity at
-                    # S, so we must NOT certify. Fail closed.
-                    reason = "cannot resolve op-cert storage anchor (compacted/unresolvable)"
-                else:
-                    verdict = trusted_env.verify_required_environment(
-                        envelope,
-                        ticket_id,
-                        auth_material,
-                        merged_commit,
-                        required_env,
-                        kind=KIND,
-                        storage_anchor_commit=s_commit,
-                        storage_anchor_position=s_position,
-                        repo_root=args.root,
-                    )
-                    ok = bool(verdict.verified)
-                    if not ok:
-                        reason = f"invalid op-cert ({verdict.verdict}: {verdict.reason})"
-
+        reason = (
+            _completion_cert_problem(state, ticket_id, args.root, required_env, trusted_pairs)
+            if required_env and trusted_pairs is not None
+            else "no required environment configured"
+        )
+        ok = not reason
         if ok:
             satisfied += 1
             continue

@@ -1,8 +1,8 @@
-"""Accept valid op-certs across signing environments by default (c21f).
+"""Accept valid op-certs across signing environments by default (c21f, ADR 0125).
 
 Distinct Ed25519 principals prove a cert remains valid outside its
 originating environment. Forged envelopes still mismatch, and an explicitly
-set verify.require_environment still restricts signers."""
+set trust list (verify.trusted_opcert_keys) or required environment restricts signers."""
 
 from __future__ import annotations
 
@@ -94,20 +94,14 @@ def _own_principal(store: Path) -> str:
     return opcert_principal(str(tracker_dir(str(store))))
 
 
-def _pin_environment(store: Path, env_id: str, key_path: Path) -> None:
-    """Pin ``env_id``'s public key out-of-band in ``.rebar/trusted_environments.yaml``."""
+def _trust(store: Path, env_id: str, key_path: Path, *, required_env: str | None = None) -> None:
+    """List ``env_id``'s public key in this environment's ``verify.trusted_opcert_keys``
+    (ADR 0125), optionally with the opt-in ``verify.require_environment`` pair."""
     pub = Path(str(key_path) + ".pub").read_text(encoding="utf-8").strip()
-    d = store / ".rebar"
-    d.mkdir(exist_ok=True)
-    (d / "trusted_environments.yaml").write_text(
-        "environments:\n"
-        f"  - env_id: {env_id!r}\n"
-        "    keys:\n"
-        f"      - public_key: {pub!r}\n"
-        "        added_at_log_position: '0-00000000-0000-4000-8000-000000000000'\n"
-        "        revoked_at_log_position: null\n",
-        encoding="utf-8",
-    )
+    lines = ["[verify]", f'trusted_opcert_keys = ["{env_id} {pub}"]']
+    if required_env is not None:
+        lines += [f'require_environment = "{required_env}"', 'opcert_enforce_since = "HEAD"']
+    (store / "rebar.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _enforce(store: Path, required_env: str) -> None:
@@ -148,7 +142,7 @@ def _forge_payload(store: Path, tid: str) -> None:
 
 def _resign_with_attacker_key(store: Path, tmp_path: Path, tid: str) -> None:
     """Re-sign the SAME payload with an ATTACKER's key while still claiming to be environment A —
-    a key substitution. The pinned trust root must refuse it."""
+    a key substitution. A trust list must refuse it."""
     import glob
     import json
     import os
@@ -214,19 +208,17 @@ def test_cross_environment_cert_unblocks_the_claim_gate(store: Path, tmp_path: P
     assert "signed by a different environment" not in gate["reason"]
 
 
-def test_pinned_environment_key_is_the_trust_basis_when_available(
-    store: Path, tmp_path: Path
-) -> None:
-    """When the signer IS pinned in ``.rebar/trusted_environments.yaml``, that pinned key —
-    not the envelope's own — is the trust root, and the result says so."""
-    tid = rebar.create_ticket("task", "pinned", repo_root=str(store))
+def test_listed_environment_key_is_the_trust_basis(store: Path, tmp_path: Path) -> None:
+    """When this environment lists the signer's (environment, key) pair, that list is the trust
+    root, and the result says so."""
+    tid = rebar.create_ticket("task", "listed", repo_root=str(store))
     key_a = _sign_as_env_a(store, tmp_path, tid)
-    _pin_environment(store, ENV_A, key_a)
+    _trust(store, ENV_A, key_a)
     assert _own_principal(store) == ENV_B != ENV_A
 
     out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
     assert out["verdict"] == "certified", out["reason"]
-    assert out["trust_basis"] == "pinned_environment"
+    assert out["trust_basis"] == "trust_list"
 
 
 # ── negative control: identity loosened, signature checking NOT loosened ──────
@@ -246,40 +238,37 @@ def test_forged_cross_environment_payload_is_still_refused(store: Path, tmp_path
     assert out["trust_basis"] == "envelope_key"
 
 
-def test_forged_pinned_environment_payload_is_still_refused(store: Path, tmp_path: Path) -> None:
-    """The same control with the signer PINNED: a pinned environment does not make a broken
-    signature verify."""
-    tid = rebar.create_ticket("task", "forged-pinned", repo_root=str(store))
+def test_forged_listed_environment_payload_is_still_refused(store: Path, tmp_path: Path) -> None:
+    """A listed environment does not make a broken signature verify."""
+    tid = rebar.create_ticket("task", "forged-listed", repo_root=str(store))
     key_a = _sign_as_env_a(store, tmp_path, tid)
-    _pin_environment(store, ENV_A, key_a)
+    _trust(store, ENV_A, key_a)
     _forge_payload(store, tid)
 
     out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
     assert out["verified"] is False
     assert out["verdict"] == "mismatch", out["reason"]
-    assert out["trust_basis"] == "pinned_environment"
 
 
-def test_pinned_environment_refuses_a_substituted_key(store: Path, tmp_path: Path) -> None:
-    """A cert re-signed with an ATTACKER's key while still claiming environment A is refused
-    against A's PINNED key. This is what the pinned trust root buys over the envelope's own key,
-    and is the property the deferred trusted-set feature restores everywhere."""
+def test_trust_list_refuses_a_substituted_key(store: Path, tmp_path: Path) -> None:
+    """A cert re-signed with an ATTACKER's key while still claiming environment A is valid under
+    the attacker's own key, but the trust list names only A's key, so it is untrusted. This is
+    what a trust list buys over validity alone."""
     tid = rebar.create_ticket("task", "substituted", repo_root=str(store))
     key_a = _sign_as_env_a(store, tmp_path, tid)
-    _pin_environment(store, ENV_A, key_a)
+    _trust(store, ENV_A, key_a)
     _resign_with_attacker_key(store, tmp_path, tid)
 
     out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
     assert out["verified"] is False
-    assert out["verdict"] == "mismatch", out["reason"]
-    assert out["trust_basis"] == "pinned_environment"
+    assert out["verdict"] == "untrusted", out["reason"]
 
 
 def test_envelope_with_no_parsable_key_is_refused_not_waved_through(
     store: Path, tmp_path: Path
 ) -> None:
-    """When NO signer key can be obtained at all — no own key, nothing pinned, and no embedded
-    key to read — the result is a refusal naming that, never a silent ``certified``."""
+    """When NO signer key can be obtained at all — no embedded
+    key to read — the result is a refusal (``mismatch``), never a silent ``certified``."""
     import json
 
     from rebar._commands._seam import tracker_dir
@@ -300,9 +289,9 @@ def test_envelope_with_no_parsable_key_is_refused_not_waved_through(
 
     out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
     assert out["verified"] is False
-    assert out["verdict"] == "foreign_key"
+    assert out["verdict"] == "mismatch"
     assert out["trust_basis"] is None
-    assert "no public key is obtainable" in out["reason"]
+    assert "no readable public key" in out["reason"]
 
 
 # ── AC2: the opt-in enforcement seam still restricts the signer when SET ──────
@@ -311,9 +300,8 @@ def test_enforcement_on_rejects_an_environment_other_than_the_required_one(
 ) -> None:
     tid = rebar.create_ticket("task", "enforced", repo_root=str(store))
     key_a = _sign_as_env_a(store, tmp_path, tid)
-    _pin_environment(store, ENV_A, key_a)
     # A cert from A, but the operator requires a THIRD environment.
-    _enforce(store, "some-other-required-environment")
+    _trust(store, ENV_A, key_a, required_env="some-other-required-environment")
 
     from rebar import config
 
@@ -330,85 +318,23 @@ def test_enforcement_on_rejects_an_environment_other_than_the_required_one(
 def test_enforcement_on_accepts_the_required_environment(store: Path, tmp_path: Path) -> None:
     tid = rebar.create_ticket("task", "enforced-ok", repo_root=str(store))
     key_a = _sign_as_env_a(store, tmp_path, tid)
-    _pin_environment(store, ENV_A, key_a)
-    _enforce(store, ENV_A)  # A IS the required environment — still not this environment (B)
+    _trust(store, ENV_A, key_a, required_env=ENV_A)  # A IS required — still not this env (B)
 
     assert _own_principal(store) == ENV_B != ENV_A
     out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
     assert out["verdict"] == "certified", out["reason"]
-    assert out["trust_basis"] == "pinned_environment"
+    assert out["trust_basis"] == "trust_list"
 
 
 def test_enforcement_on_withholds_the_envelope_key_fallback(store: Path, tmp_path: Path) -> None:
-    """With enforcement ON, the required environment must be verified against its PINNED key —
-    never against a key the certificate supplies about itself. An unpinned required environment
+    """With enforcement ON, the required environment needs a trust list naming its key —
+    never a key the certificate supplies about itself alone. With no list the required environment
     is therefore refused, not self-certified."""
     tid = rebar.create_ticket("task", "enforced-unpinned", repo_root=str(store))
     _sign_as_env_a(store, tmp_path, tid)
-    _enforce(store, ENV_A)  # required environment matches the signer, but nothing is pinned
-    assert not (store / ".rebar" / "trusted_environments.yaml").exists()
+    _enforce(store, ENV_A)  # required environment matches the signer, but no trust list is set
 
     out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
     assert out["verified"] is False
     assert out["verdict"] == "foreign_key", out["reason"]
     assert out["trust_basis"] is None
-
-
-# ── a REVOKED pinned key is never trusted as pinned, for a foreign principal either (0ed1) ──
-def _pin_revoked_environment(store: Path, env_id: str, key_path: Path) -> None:
-    """Pin ``env_id``'s key, marked revoked at a tickets-log position."""
-    pub = Path(str(key_path) + ".pub").read_text(encoding="utf-8").strip()
-    d = store / ".rebar"
-    d.mkdir(exist_ok=True)
-    (d / "trusted_environments.yaml").write_text(
-        "environments:\n"
-        f"  - env_id: {env_id!r}\n"
-        "    keys:\n"
-        f"      - public_key: {pub!r}\n"
-        "        added_at_log_position: '0-00000000-0000-4000-8000-000000000000'\n"
-        "        revoked_at_log_position: '9-00000000-0000-4000-8000-000000000000'\n",
-        encoding="utf-8",
-    )
-
-
-def test_revoked_pinned_key_is_not_pinned_trust_in_advisory_mode(
-    store: Path, tmp_path: Path
-) -> None:
-    tid = rebar.create_ticket("task", "revoked-advisory", repo_root=str(store))
-    key_a = _sign_as_env_a(store, tmp_path, tid)
-    _pin_revoked_environment(store, ENV_A, key_a)
-    assert _own_principal(store) == ENV_B != ENV_A
-
-    out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
-
-    # Advisory mode still verifies on the embedded key (the c21f design), but the revoked
-    # pin must not be reported as the trust root.
-    assert out["verdict"] == "certified", out["reason"]
-    assert out["trust_basis"] == "envelope_key", out
-    assert out["trust_basis"] != "pinned_environment"
-
-
-def test_revoked_pinned_key_is_refused_under_enforcement(store: Path, tmp_path: Path) -> None:
-    """The reported hole: revocation was ignored even when the gate restricts trust to pins."""
-    tid = rebar.create_ticket("task", "revoked-enforced", repo_root=str(store))
-    key_a = _sign_as_env_a(store, tmp_path, tid)
-    _pin_revoked_environment(store, ENV_A, key_a)
-    _enforce(store, ENV_A)
-    assert _own_principal(store) == ENV_B != ENV_A
-
-    out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
-
-    assert out["verified"] is False, "a revoked key certified under verify.require_environment"
-    assert out["verdict"] == "foreign_key", out["reason"]
-
-
-def test_forged_payload_under_a_revoked_pinned_key_still_fails(store: Path, tmp_path: Path) -> None:
-    tid = rebar.create_ticket("task", "revoked-forged", repo_root=str(store))
-    key_a = _sign_as_env_a(store, tmp_path, tid)
-    _pin_revoked_environment(store, ENV_A, key_a)
-    _forge_payload(store, tid)
-
-    out = signing.verify_signature(tid, kind=KIND, repo_root=str(store))
-
-    assert out["verified"] is False
-    assert out["verdict"] == "mismatch", out["reason"]

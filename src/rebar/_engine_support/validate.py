@@ -132,8 +132,8 @@ def signature_findings(tracker: str) -> list:
             out.append(
                 Finding(
                     "minor",
-                    f"[SIGNATURE] {name}: no usable signer key (nothing pinned or readable "
-                    f"from the envelope), or verify.require_environment excludes its signer",
+                    f"[SIGNATURE] {name}: verify.require_environment excludes its signer, or "
+                    f"no trust list is configured for it",
                 )
             )
         elif verdict == "untrusted":

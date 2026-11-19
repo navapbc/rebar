@@ -117,8 +117,12 @@ def test_missing_pub_is_rederived_from_private_key(store: Path) -> None:
     signing.sign_manifest(tid, ["plan-review: PASS"], kind="plan-review", repo_root=str(store))
     pub = tracker / ".opcert-key.pub"
     pub.unlink()  # the .pub is derivative — never a commit point
-    # A fresh verify (which reads the pub) re-derives it from the committed private key.
+    # Verification uses the key embedded in the signature, so it needs no local .pub (ADR 0125).
     assert signing.verify_signature(tid, kind="plan-review", repo_root=str(store))["verified"]
+    # A reader of the public half re-derives it from the committed private key.
+    from rebar._opcert_signing import _read_opcert_pub
+
+    assert _read_opcert_pub(str(tracker / ".opcert-key"))
     assert pub.exists()
 
 
