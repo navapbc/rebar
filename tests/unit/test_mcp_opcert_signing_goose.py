@@ -481,6 +481,9 @@ def test_main_cleans_up_binding_when_serving_raises(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sys, "argv", ["rebar-mcp"])
     monkeypatch.setattr(rebar.config, "compose_config", lambda: fake_cfg)
     monkeypatch.setattr(mcp_server, "build_server", lambda cfg: object())
+    # The bare object() has no drain gauge, so a real boot sweep would run untracked past
+    # this test; the sweep is not what this test is about (bug eatable-gauze-moth).
+    monkeypatch.setattr("rebar._mcp_health.start_startup_store_sweep", lambda _gauge: None)
     monkeypatch.setattr(mcp_server, "compose_startup_opcert_binding", lambda cfg: _FakeBinding())
 
     def _boom(*a, **k):

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -126,21 +127,38 @@ def test_no_mutate_library_fsck_never_sweeps(repo: Path) -> None:
 
 
 # ── MCP startup best-effort sweep ─────────────────────────────────────────────
+#: A ceiling on how long a blocked fake sweep waits, not a latency budget: each test
+#: releases it as soon as serving starts.
+_SWEEP_CEILING_S = 30
+
+
 class _StubServer:
     def __init__(self) -> None:
+        from rebar._mcp_health import _GAUGE_ATTR, InFlightGauge
+
         self.ran = False
+        # build_server() always wires a drain gauge; the boot sweep holds it and run_mcp
+        # waits for it, which is what keeps main() from returning mid-sweep. Without one
+        # the sweep thread is untracked and outlives main() (bug eatable-gauze-moth).
+        setattr(self, _GAUGE_ATTR, InFlightGauge())
 
     def run(self, *args, **kwargs) -> None:
         # main() now calls server.run(transport=...); accept and ignore it.
         self.ran = True
 
 
-def test_mcp_startup_sweeps_before_run(repo: Path, monkeypatch) -> None:
+def test_mcp_startup_sweep_completes_before_main_returns(repo: Path, monkeypatch) -> None:
+    """The boot sweep runs on a background thread after serving starts (5029b61749d, bug
+    short-elderly-cock), so it may finish after ``run``. What ``main()`` does guarantee is that
+    it does not return until the sweep has finished: the sweep holds the server's drain gauge
+    and ``run_mcp`` waits for it. The sweep below blocks until ``run`` starts, which forces the
+    run-first interleaving a synchronous ordering assertion used to lose (bug
+    eatable-gauze-moth)."""
     import rebar._store as store_pkg
     from rebar import mcp_server
 
     # Precondition, asserted loudly: the module-level ``ensures`` binding above (made at
-    # collection time) must be the SAME object that main()'s function-local
+    # collection time) must be the SAME object that the sweep's function-local
     # ``from rebar._store import ensures`` resolves at call time. A test that re-imports
     # ``rebar._store.ensures`` without restoring the parent-package attribute leaves two
     # live copies, the monkeypatch below lands on the wrong one, and this test fails with
@@ -151,15 +169,18 @@ def test_mcp_startup_sweeps_before_run(repo: Path, monkeypatch) -> None:
     )
 
     order: list[str] = []
+    serving = threading.Event()
     stub = _StubServer()
 
     def _fake_run_ensures(tracker, **kw):
+        serving.wait(timeout=_SWEEP_CEILING_S)
         order.append("ensures")
         return []
 
     def _fake_build_server(cfg=None):
         def _run(*args, **kwargs):
             order.append("run")
+            serving.set()
             stub.ran = True
 
         stub.run = _run  # type: ignore[method-assign]
@@ -169,7 +190,7 @@ def test_mcp_startup_sweeps_before_run(repo: Path, monkeypatch) -> None:
     monkeypatch.setattr(mcp_server, "build_server", _fake_build_server)
     monkeypatch.setattr("sys.argv", ["rebar-mcp"])
     mcp_server.main()
-    assert order == ["ensures", "run"], "run_ensures must precede build_server().run()"
+    assert order == ["run", "ensures"], "main() must not return before the boot sweep finishes"
 
 
 def test_mcp_help_skips_sweep(repo: Path, monkeypatch, capsys) -> None:
