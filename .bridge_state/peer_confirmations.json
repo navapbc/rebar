@@ -19940,6 +19940,15 @@
       "source_id": "6fe2-ab22-c231-4a41",
       "target_id": "jira-reb-977"
     },
+    "6ffc-a74b-dd65-4358|e266-c398-f5cd-4a3c|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795053264736334758,
+      "link_id": "52005",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "6ffc-a74b-dd65-4358",
+      "target_id": "e266-c398-f5cd-4a3c"
+    },
     "7013-447f-3084-4241|6f2d-4221-26de-48cc|relates_to": {
       "direction": "snapshot",
       "first_confirmed_at": 1786807014032094690,
@@ -38082,6 +38091,15 @@
       "source": "snapshot",
       "source_id": "e249-1034-3237-44b0",
       "target_id": "fd2b-b26e-9fef-4bae"
+    },
+    "e266-c398-f5cd-4a3c|6ffc-a74b-dd65-4358|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795053264736313298,
+      "link_id": "52005",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "e266-c398-f5cd-4a3c",
+      "target_id": "6ffc-a74b-dd65-4358"
     },
     "e27c-5a20-cd13-43b2|030f-c14f-596a-4f79|blocks": {
       "direction": "snapshot",
