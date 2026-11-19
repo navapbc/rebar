@@ -296,7 +296,6 @@ jobs:
           -n 4 --dist worksteal -q -p no:cacheprovider
           --timeout=600 --timeout-method=thread
           '@.github/windows-sweep-deselect/max-path.args'
-          '@.github/windows-sweep-deselect/nested-pytest-plugins.args'
           '@.github/windows-sweep-deselect/openssh-key-acl.args'
           '@.github/windows-sweep-deselect/unclassified.args'
 

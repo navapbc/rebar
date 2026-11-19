@@ -440,7 +440,11 @@ def _root_conftest(request: pytest.FixtureRequest):
     file by path would re-run its import-time setup inside a running session.
     """
     for name, plugin in request.config.pluginmanager.list_name_plugin():
-        if name.endswith("tests/conftest.py") and hasattr(plugin, "_no_repo_root_leaks"):
+        # By path components, not a "/"-suffix: pytest names the plugin by its native path,
+        # which uses backslashes on Windows (bug 21fb).
+        if Path(name).parts[-2:] == ("tests", "conftest.py") and hasattr(
+            plugin, "_no_repo_root_leaks"
+        ):
             return plugin
     raise AssertionError("root conftest plugin not registered")
 

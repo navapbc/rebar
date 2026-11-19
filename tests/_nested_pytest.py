@@ -7,6 +7,7 @@ python -c payloads, so children cannot clean another run's shared temp root.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -26,6 +27,37 @@ def nested_basetemp(tmp_path: Path) -> Path:
     return Path(tmp_path) / NESTED_BASETEMP_NAME
 
 
+#: Windows will not start Winsock in a process without it, so asyncio (and anyio's pytest11
+#: plugin, which imports asyncio) fails to load in a child given a minimal mapping (bug 21fb).
+_WINDOWS_REQUIRED_KEY = "SYSTEMROOT"
+
+
+def _child_env(
+    env: Mapping[str, str],
+    *,
+    os_name: str = os.name,
+    ambient: Mapping[str, str] = os.environ,
+) -> Mapping[str, str]:
+    """The mapping to hand the child: *env* itself, plus ``SYSTEMROOT`` on Windows.
+
+    Only on ``nt``, and only when the caller supplied no ``SYSTEMROOT`` (Windows keys are
+    case-insensitive) while the ambient environment has one, is a copy returned. The copy keeps
+    the caller's mapping type, so a redacting ``SubprocessEnv`` stays redacting, and the
+    caller's object is never mutated. Everywhere else the caller's object passes through.
+    """
+    if os_name != "nt" or any(key.upper() == _WINDOWS_REQUIRED_KEY for key in env):
+        return env
+    value = next(
+        (v for k, v in ambient.items() if k.upper() == _WINDOWS_REQUIRED_KEY),
+        None,
+    )
+    if value is None:
+        return env
+    child = type(env)(env) if isinstance(env, dict) else dict(env)
+    child[_WINDOWS_REQUIRED_KEY] = value
+    return child
+
+
 def run_nested_pytest(
     tmp_path: Path,
     *args: str,
@@ -36,7 +68,8 @@ def run_nested_pytest(
 ) -> subprocess.CompletedProcess[str]:
     """Run pytest with basetemp under tmp_path and return its unmodified result.
 
-    The caller supplies env verbatim. Minimal mappings must not gain ambient keys. Create
+    The caller supplies env verbatim. Minimal mappings must not gain ambient keys, with one
+    exception: on Windows the OS-required ``SYSTEMROOT`` is forwarded (see ``_child_env``). Create
     the parent directory because pytest will not. TimeoutExpired propagates and no check
     is applied to the child exit.
     """
@@ -48,7 +81,7 @@ def run_nested_pytest(
     return subprocess.run(
         command,
         cwd=cwd,
-        env=env,
+        env=_child_env(env),
         capture_output=True,
         text=True,
         timeout=timeout,
