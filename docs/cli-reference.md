@@ -72,7 +72,7 @@ The golden record of the normalization: what each verb printed before the confir
 
 ## Command syntax
 
-One section per visible command that is not retired (53 in total), in registry order. Every section embeds its committed package help bytes.
+One section per visible command that is not retired (52 in total), in registry order. Every section embeds its committed package help bytes.
 
 ### `show`
 
@@ -910,23 +910,6 @@ options:
   --format {text,json}  output format (default: text). json prints only a report
                         array to stdout
   --root ROOT           repo root that resolves the ticket store (default: cwd)
-```
-
-### `trusted-env`
-
-```
-Usage: rebar trusted-env add <env_id> <public_key> [--root <path>]
-rebar trusted-env revoke <env_id> <public_key-or-index> [--root <path>]
-
-Add or revoke trusted environment keys with ticket log position anchors.
-
-positional arguments:
-  {add,revoke}
-  env_id
-  target        <public_key> for add, or <public_key-or-index> for revoke
-
-options:
-  --root ROOT   repo root that resolves the ticket store (default: cwd)
 ```
 
 ### `remote-cert`

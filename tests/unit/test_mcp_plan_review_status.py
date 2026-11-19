@@ -179,10 +179,9 @@ _SCHEMA = Path(__file__).resolve().parents[2] / "src/rebar/schemas/plan_review_s
 
 #: The signature-check verdicts ``attest_gate`` passes through verbatim from
 #: ``signing.verify_signature``. ``key_not_valid_at_era`` is NOT among them: it is produced
-#: only by ``rebar.attest.opcert.verify_opcert``, whose sole src caller chain is
-#: ``trusted_env.verify_required_environment`` ← ``_commands/verify_opcert.py`` (the
-#: ``rebar verify-opcert`` merge gate). The status path reaches ``registry.verify`` directly,
-#: which cannot emit it.
+#: only by the library primitive ``rebar.attest.opcert.verify_opcert``, which no status path
+#: calls (since ADR 0125 not even the ``rebar verify-opcert`` merge gate). The status path
+#: reaches ``registry.verify`` directly, which cannot emit it.
 _SIGNATURE_FAILURE_VERDICTS = (
     "mismatch",
     "invalid",
