@@ -21,6 +21,7 @@ the deployment materializes the key outside the app before start.
 
 from __future__ import annotations
 
+import csv
 import os
 import shutil
 import stat
@@ -39,6 +40,17 @@ _KEY_COPY_NAME = "opcert-key"
 #: Windows key relies on the user profile's default ACL instead; the residual risk is in
 #: docs/manifest-signing.md. Everywhere else the check is unchanged.
 _POSIX_MODE_BITS = os.name != "nt"
+
+#: Win32-OpenSSH refuses a private key that anyone but its owner, SYSTEM or Administrators can
+#: open. Python 3.13's ``tempfile.mkdtemp`` gives the runtime dir SYSTEM, Administrators and
+#: OWNER RIGHTS entries and no user entry, and the copy took that ACL, so ``ssh-keygen`` refused
+#: it (bug plump-smelly-indianabat). By operator decision (option 1 there) rebar gives the dir an
+#: owner-only ACL on Windows before the copy is written. These are the well-known SIDs of OWNER
+#: RIGHTS, SYSTEM and Administrators that the ACL write removes.
+_WINDOWS_SIDS_TO_DROP = ("S-1-3-4", "S-1-5-18", "S-1-5-32-544")
+
+#: Seconds each ``whoami``/``icacls`` call may take before startup gives up on it.
+_ACL_TOOL_TIMEOUT_S = 60
 
 
 class OpcertKeyError(Exception):
@@ -77,6 +89,8 @@ def compose_signer(cfg: OpcertServiceConfig) -> OpcertSigner:
     # interrupt during validation — must not strand a private-key copy in the shared temp dir
     # (bug balladic-fattening-tortoise): no owner would ever call ``cleanup()`` on it.
     try:
+        if not _POSIX_MODE_BITS:
+            _restrict_dir_to_owner(runtime_dir)
         _write_copy(copy_path, key_bytes)
         _validate_key_file(copy_path)
     except BaseException:
@@ -160,3 +174,44 @@ def _validate_key_file(copy_path: str) -> None:
     if not pub.startswith("ssh-ed25519 "):
         key_type = pub.split(" ", 1)[0] if pub else "unknown"
         raise OpcertKeyError(f"the op-cert key must be an Ed25519 key, but it is {key_type!r}")
+
+
+def _restrict_dir_to_owner(runtime_dir: str) -> None:
+    """Give ``runtime_dir`` an ACL that grants only the current user (Windows only).
+
+    Runs before the key copy exists, so the copy is created under the owner-only ACL and is
+    never readable by anyone else. The grant precedes the removal, so the user keeps access."""
+    sid = _current_user_sid()
+    _run_acl_tool(["icacls", runtime_dir, "/inheritance:r", "/grant:r", f"*{sid}:(OI)(CI)F"])
+    others = [f"*{s}" for s in _WINDOWS_SIDS_TO_DROP if s != sid]
+    _run_acl_tool(["icacls", runtime_dir, "/remove:g", *others])
+
+
+def _current_user_sid() -> str:
+    """The SID of the user running rebar, from ``whoami /user /fo csv /nh``."""
+    out = _run_acl_tool(["whoami", "/user", "/fo", "csv", "/nh"])
+    rows = [row for row in csv.reader(out.splitlines()) if row]
+    if len(rows) != 1 or len(rows[0]) != 2 or not rows[0][1].startswith("S-"):
+        raise OpcertKeyError(
+            f"cannot restrict the op-cert key copy: no SID in whoami output {out.strip()!r}"
+        )
+    return rows[0][1]
+
+
+# raw-git-ok: runs only whoami and icacls, never git
+def _run_acl_tool(argv: list[str]) -> str:
+    """Run a Windows ACL tool; raise :class:`OpcertKeyError` if it is missing, hangs or fails.
+
+    Output is decoded leniently: the console code page varies, and only the user-name column
+    can hold non-ASCII text, never the SID this module reads."""
+    try:
+        proc = subprocess.run(argv, capture_output=True, check=False, timeout=_ACL_TOOL_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise OpcertKeyError(f"cannot restrict the op-cert key copy ({argv[0]}): {exc}") from None
+    stdout = proc.stdout.decode("utf-8", errors="replace")
+    if proc.returncode != 0:
+        detail = proc.stderr.decode("utf-8", errors="replace").strip() or stdout.strip()
+        raise OpcertKeyError(
+            f"cannot restrict the op-cert key copy ({argv[0]} exit {proc.returncode}): {detail}"
+        )
+    return stdout
