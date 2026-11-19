@@ -14,7 +14,8 @@ import stat
 import subprocess
 from pathlib import Path
 
-from _sandbox_capabilities import requires_posix_shell
+import pytest
+from _sandbox_capabilities import posix_shell_available, requires_posix_shell
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "infra" / "scripts" / "autodeploy.sh"
@@ -59,6 +60,10 @@ def _run_helpers(
 ) -> subprocess.CompletedProcess:
     """Source autodeploy.sh's function definitions (guarded from executing the
     deploy flow by an early no-op environment) and drive one helper."""
+    if not posix_shell_available():
+        # The harness is a `bash -c` script with shebang stubs; Windows has neither a POSIX
+        # shell nor room for the whole script on one command line (bug 09f9-6b9f).
+        pytest.skip("needs a POSIX shell at /bin/sh to source autodeploy.sh")
     bindir = tmp_path / "bin"
     bindir.mkdir()
     calls = tmp_path / "calls.log"

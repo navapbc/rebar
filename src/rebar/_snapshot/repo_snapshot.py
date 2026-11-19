@@ -129,6 +129,16 @@ def _tmp_root(root: Path) -> Path:
     return d
 
 
+def _build_dir(tmp_parent: Path, kind: str) -> Path:
+    """A short, unique build directory under ``tmp_parent`` for snapshot ``kind`` (t/c/w).
+
+    git writes every file of a snapshot under this path, and git for Windows refuses paths past
+    MAX_PATH unless ``core.longpaths`` is set, so the name spends 10 characters, not ~50
+    (bug 09f9-6b9f). 32 random bits separate the few concurrent builds of one store; the SHA
+    the old names carried was diagnostic only, and ``sweep_tmp`` ignores names."""
+    return tmp_parent / f"{kind}-{uuid.uuid4().hex[:8]}"
+
+
 def entry_path(sha: str, root: Path | None = None) -> Path:
     """The content-addressed path for a materialized snapshot at ``sha``."""
     return (root or store_root()) / sha
@@ -460,7 +470,7 @@ def materialize(
         _raise_snapshot_low_disk(store)
 
     tmp_parent = _tmp_root(store)
-    build = tmp_parent / f"build-{sha[:12]}-{uuid.uuid4().hex}"
+    build = _build_dir(tmp_parent, "c")
     try:
         _ensure_blobs_present(root_dir, sha, "origin")
         # Reuse a neighbouring entry when possible (bug 8386); falls back closed to a full build.
@@ -624,8 +634,10 @@ def materialize_tickets(
         return str(dest)
 
     tmp_parent = _tmp_root(store)
-    build = tmp_parent / f"tickets-{sha[:12]}-{uuid.uuid4().hex}"
-    tracker = build / _TRACKER_DIRNAME
+    # git writes into a flat, short build (MAX_PATH on Windows, bug 09f9-6b9f); Python then
+    # renames it into the published `tickets-<sha>/.tickets-tracker` layout.
+    build = _build_dir(tmp_parent, "t")
+    wrapper = _build_dir(tmp_parent, "w")
     try:
         # Use the code path's one-RPC probe/top-up against the resolved tickets remote and
         # object-owning source_dir, which may be the separate tracker repo.
@@ -635,23 +647,14 @@ def materialize_tickets(
         if not materialize_via_donor(
             source_dir,
             sha,
-            tracker,
+            build,
             store=store,
             entry_prefix="tickets-",
             subdir=_TRACKER_DIRNAME,
         ):
-            _materialize_tree(source_dir, sha, tracker)
+            _materialize_tree(source_dir, sha, build)
         _fsync_dir(build)
-        try:
-            os.rename(build, dest)
-        except OSError:
-            # Another materialization won the race (same SHA == same content); keep theirs.
-            if dest.is_dir():
-                shutil.rmtree(build, ignore_errors=True)
-            else:
-                raise
-        else:
-            _fsync_dir(dest.parent)
+        if _publish_ticket_build(build, wrapper, dest):
             # The populate-race winner alone accounts this large ticket entry's exclusive
             # bytes; hits and losers were already counted. Defer imports to avoid the cache's
             # reverse dependency.
@@ -665,9 +668,29 @@ def materialize_tickets(
         return str(dest)
     except BaseException:
         shutil.rmtree(build, ignore_errors=True)
-        idx = tracker.parent / (tracker.name + ".index")
+        shutil.rmtree(wrapper, ignore_errors=True)
+        idx = build.parent / (build.name + ".index")
         try:
             idx.unlink()
         except OSError:
             pass
         raise
+
+
+def _publish_ticket_build(build: Path, wrapper: Path, dest: Path) -> bool:
+    """Move the flat ``build`` to ``dest/.tickets-tracker`` by two directory renames.
+
+    Returns ``True`` when this call published ``dest``; ``False`` when another
+    materialization won the race (same SHA == same content), whose entry is kept."""
+    wrapper.mkdir()
+    os.rename(build, wrapper / _TRACKER_DIRNAME)
+    _fsync_dir(wrapper)
+    try:
+        os.rename(wrapper, dest)
+    except OSError:
+        if dest.is_dir():
+            shutil.rmtree(wrapper, ignore_errors=True)
+            return False
+        raise
+    _fsync_dir(dest.parent)
+    return True
