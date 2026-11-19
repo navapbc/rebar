@@ -105,6 +105,7 @@
     "verify.require_plan_review_for_close",
     "verify.require_ticket_for_commit",
     "verify.suggest_duplicate_tickets",
+    "verify.trusted_opcert_keys",
     "verify.verify_window_headroom",
     "warnings.cross_session"
   ],
@@ -212,6 +213,7 @@
     "REBAR_VERIFY_REQUIRE_PLAN_REVIEW_FOR_CLOSE",
     "REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT",
     "REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS",
+    "REBAR_VERIFY_TRUSTED_OPCERT_KEYS",
     "REBAR_VERIFY_VERIFY_WINDOW_HEADROOM",
     "REBAR_WARNINGS_CROSS_SESSION"
   ]

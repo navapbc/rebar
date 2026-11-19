@@ -74,7 +74,9 @@ def signature_findings(tracker: str) -> list:
 
     Reduces each ticket RAW and verifies its most-recent attestation. A tampered or
     invalid op-cert (``mismatch`` / ``invalid`` / ``key_not_valid_at_era``) → MAJOR; an
-    op-cert with no usable signer key (``foreign_key``) → MINOR. ``certified`` and
+    op-cert with no usable signer key (``foreign_key``) or a valid one whose key the
+    configured ``verify.trusted_opcert_keys`` list does not name (``untrusted``) → MINOR.
+    ``certified`` and
     ``unsigned`` emit nothing — including every legacy HMAC record, which reads
     ``unsigned`` since the scheme was retired (2026-09). Operates on closed tickets too
     (signatures gate closure), which ``normalize_issues`` drops — hence the separate raw
@@ -132,6 +134,14 @@ def signature_findings(tracker: str) -> list:
                     "minor",
                     f"[SIGNATURE] {name}: no usable signer key (nothing pinned or readable "
                     f"from the envelope), or verify.require_environment excludes its signer",
+                )
+            )
+        elif verdict == "untrusted":
+            out.append(
+                Finding(
+                    "minor",
+                    f"[SIGNATURE] {name}: validly signed, but its environment and signing key "
+                    f"are not in verify.trusted_opcert_keys",
                 )
             )
     return out

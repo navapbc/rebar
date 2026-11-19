@@ -56,7 +56,7 @@ or conversely if false positives prove noisy once an acting id is resolved.
 
 ## Configuration keys
 
-The 106 typed `section.field` keys with type, default, description, and lifecycle.
+The 107 typed `section.field` keys with type, default, description, and lifecycle.
 
 | Key | Type | Default | Description | Lifecycle |
 |-----|------|---------|-------------|-----------|
@@ -86,6 +86,7 @@ The 106 typed `section.field` keys with type, default, description, and lifecycl
 | `verify.contradiction_xcheck_active` | `bool` | `False` | Enables a cross-check that drops a weaker finding contradicted by another finding. | active |
 | `verify.comment_trail_xcheck_active` | `bool` | `False` | Enables a cross-check that drops findings which repeat matters resolved in comments. | active |
 | `verify.require_environment` | `str \| None` | `None` | Restricts operation certificates to the trusted environment with this identifier. | active |
+| `verify.trusted_opcert_keys` | `tuple[str, ...]` | `()` | Lists the environment and public key pairs whose operation certificates this environment trusts; empty means signature validity alone decides (ADR 0125). | active |
 | `verify.opcert_enforce_since` | `str \| None` | `None` | Limits operation-certificate checks to closure commits at this ref or descendants. | active |
 | `verify.opcert_remote_url` | `str \| None` | `None` | Routes remote certificate requests to the trusted gate service at this base URL. | active |
 | `identity.require_authenticated` | `bool` | `False` | Requires verified authorship for governed ticket mutations and refuses unsigned writes. | active |

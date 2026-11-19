@@ -20,9 +20,11 @@ _OPCERT_STATUS_ATTR = "_rebar_opcert_status"
 def opcert_signing_status(binding: Any, repo_root: str | None = None) -> dict[str, Any]:
     """Compare a bound signer's public-key body with its principal's active pins.
 
-    Returns ``{bound, expected, env_id?, matched?, error?}``. ``expected`` is true
-    only when trusted-environment configuration opts into pinning, so its absence
-    never degrades service. Composition already validates signability; this probe
+    Returns ``{bound, expected, env_id?, trust_source?, matched?, error?}``. A set
+    ``verify.trusted_opcert_keys`` list is the expectation (``trust_source`` is
+    ``trust_list``); otherwise ``expected`` is true only when the pin file opts into
+    pinning (``pin_file``), so an absent expectation never degrades service.
+    Composition already validates signability; this probe
     covers the non-redundant pinned-key match. Other resolution faults populate
     ``error`` instead of raising; removed inputs still fail hard.
     """
@@ -36,7 +38,12 @@ def opcert_signing_status(binding: Any, repo_root: str | None = None) -> dict[st
     key_path = getattr(binding, "key_path", None)
     status: dict[str, Any] = {"bound": True, "expected": False, "env_id": env_id}
     try:
+        listed = _trust_list_status(env_id, key_path, repo_root)
+        if listed is not None:
+            status.update(listed)
+            return status
         status["expected"] = load_trusted_environments(repo_root) is not None
+        status["trust_source"] = "pin_file"
         if not status["expected"]:
             return status
         signer_body = _ssh_pub_body(_read_opcert_pub(key_path) if key_path else None)
@@ -61,6 +68,26 @@ def opcert_signing_status(binding: Any, repo_root: str | None = None) -> dict[st
     except Exception as exc:  # noqa: BLE001 - the probe never raises (see docstring)
         status["error"] = str(exc)
     return status
+
+
+def _trust_list_status(env_id: Any, key_path: Any, repo_root: str | None) -> dict | None:
+    """Judge the bound signer against ``verify.trusted_opcert_keys`` (ADR 0125).
+
+    ``None`` when no list is configured, so the caller falls back to the pin file. A set
+    list makes the signer ``expected`` and ``matched`` only when its ``(env_id, key)`` pair
+    is listed."""
+    from rebar._opcert_signing import _read_opcert_pub, _ssh_pub_body
+    from rebar._opcert_verify import trusted_opcert_pairs
+
+    pairs = trusted_opcert_pairs(repo_root)
+    if pairs is None:
+        return None
+    signer_body = _ssh_pub_body(_read_opcert_pub(key_path) if key_path else None)
+    return {
+        "expected": True,
+        "trust_source": "trust_list",
+        "matched": signer_body is not None and (env_id, signer_body) in pairs,
+    }
 
 
 def opcert_signer_degraded(status: dict[str, Any]) -> bool:

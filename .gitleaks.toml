@@ -81,3 +81,19 @@ regexTarget = "match"
 regexes = [
   '''key_entities"\s*:\s*"[^"]*''',
 ]
+
+
+[[allowlists]]
+
+description = """
+Environment ids in the op-cert trust list (ADR 0125). REBAR_VERIFY_TRUSTED_OPCERT_KEYS (compose
+`mcp` service) and autodeploy's `trusted_keys` hold entries "<env_id> ssh-ed25519 <public key>":
+an environment UUID followed by an OpenSSH PUBLIC key. generic-api-key fires only because the
+identifier ends in "keys" and the first value token is the UUID env id. Neither part is secret.
+Scoped to exactly a UUID right after those two identifiers, never a path exclusion: any other
+value under them, or any credential elsewhere, still trips.
+"""
+regexTarget = "match"
+regexes = [
+  '''(?:REBAR_VERIFY_TRUSTED_OPCERT_KEYS|trusted_keys)["':=,\s]{1,6}(?:\$trusted_keys,\s)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s''',
+]
