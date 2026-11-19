@@ -115,8 +115,18 @@ def _commit_all(repo: Path) -> None:
     The gates read an ATTESTED snapshot of a committed tree (see the suite-wide default in
     ``tests/conftest.py``), so file content only exists for a gate once it is committed.
     Writing a file and calling ``_commit`` would advance HEAD while leaving the content
-    invisible — which is how the drift tests silently passed against the live checkout."""
-    subprocess.run(["git", "add", "-A"], cwd=str(repo), check=True, capture_output=True)
+    invisible — which is how the drift tests silently passed against the live checkout.
+
+    rebar's runtime cache (``.rebar/cache``) is never staged, as a real checkout's
+    ``.gitignore`` keeps it out: its ``plan-review/<ticket>/<sha256>.json`` entries are 105
+    characters long, which pushed the materialized snapshot past MAX_PATH on Windows (bug
+    09f9-6b9f-24b1-4fb6)."""
+    subprocess.run(
+        ["git", "add", "-A", "--", ".", ":(exclude).rebar/cache"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
     subprocess.run(
         ["git", "commit", "--allow-empty", "-q", "-m", "c"],
         cwd=str(repo),
@@ -138,6 +148,27 @@ def _review(tid: str, repo: Path, runner=_CLEAN):
 
 
 # ── gate off (default) ─────────────────────────────────────────────────────────
+def test_commit_all_leaves_the_runtime_cache_out_of_the_snapshot(tmp_path: Path) -> None:
+    """The fixture commits what a real checkout would, so a materialized snapshot of it stays
+    within MAX_PATH on Windows (bug 09f9-6b9f-24b1-4fb6)."""
+    repo = tmp_path / "r"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+    for key, value in (("user.email", "t@e.com"), ("user.name", "T")):
+        subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
+    cached = repo / ".rebar" / "cache" / "plan-review" / "t" / "x.json"
+    cached.parent.mkdir(parents=True)
+    cached.write_text("{}\n")
+    (repo / "src.py").write_text("x = 1\n")
+
+    _commit_all(repo)
+
+    tracked = subprocess.run(
+        ["git", "-C", str(repo), "ls-files"], capture_output=True, text=True, check=True
+    ).stdout.split()
+    assert tracked == ["src.py"]
+
+
 def test_gate_off_by_default_claims_without_attestation(rebar_repo: Path) -> None:
     tid = _make(rebar_repo)
     rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
