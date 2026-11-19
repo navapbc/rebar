@@ -16,11 +16,15 @@ from collections.abc import Set as AbstractSet
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rebar._commands.reclaim_collapse_stream import FastImportSession, ObjectReader, StreamError
 from rebar._mcp_errors import js_safe_dumps
 from rebar._store.gitutil import run_git
 from rebar.reducer import reduce_all_tickets
+
+if TYPE_CHECKING:
+    from rebar._commands.reclaim_resign import ResignPlan
 
 _SHADOW_MARKER = Path(".rebar") / "reclaim-shadow-clone"
 _SCRATCH_REF = "refs/rebar/reclaim-collapse/result"
@@ -55,6 +59,8 @@ class CollapseResult:
     replayed_commits: int
     ledger_entries_rewritten: int
     used_fast_import: bool
+    events_resigned: int = 0
+    ledger_entries_resigned: int = 0
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -74,18 +80,23 @@ def collapse_shadow_tracker(
     apply: bool = False,
     branch: str = "HEAD",
     now: datetime | None = None,
+    resign: ResignPlan | None = None,
 ) -> CollapseResult:
     """Collapse history at ``boundary_commit`` inside a disposable shadow tracker.
 
     The target ref is only updated when ``apply`` is true. Dry-runs still exercise the
     core-git fast-import path against a temporary ref, then delete that ref; HEAD is left
     unchanged.
+
+    ``resign`` (from :func:`rebar._commands.reclaim_resign.build_resign_plan`) substitutes
+    re-signed bytes for failing events; it must have been built at this branch tip.
     """
 
     tracker = Path(shadow_tracker).resolve()
     _assert_shadow_tracker(tracker)
     boundary = _rev_parse(tracker, boundary_commit)
     original_tip = _rev_parse(tracker, branch)
+    _check_resign_tip(resign, original_tip)
     if not _is_ancestor(tracker, boundary, original_tip):
         raise ReclaimCollapseError(f"boundary {boundary} is not an ancestor of {original_tip}")
 
@@ -98,12 +109,17 @@ def collapse_shadow_tracker(
     original_position_map = _position_commit_map_for_tracker(tracker)
     ref = _SCRATCH_REF if apply else _DRY_RUN_REF
     _delete_ref(tracker, ref)
-    rewrite = _StreamedRewrite(tracker, ref, boundary, original_position_map)
+    rewrite = _StreamedRewrite(tracker, ref, boundary, original_position_map, resign)
     try:
         rewrite.run(_rev_list_with_parents(tracker, f"{boundary}..{original_tip}"))
+        if resign is not None:
+            resign.assert_applied()
     except StreamError as exc:
         _delete_ref(tracker, ref)
         raise ReclaimCollapseError(str(exc)) from exc
+    except BaseException:
+        _delete_ref(tracker, ref)
+        raise
     finally:
         rewrite.close_reader()
 
@@ -133,7 +149,16 @@ def collapse_shadow_tracker(
         replayed_commits=rewrite.replayed,
         ledger_entries_rewritten=rewrite.ledger_rewrites,
         used_fast_import=rewrite.commits_written > 0,
+        events_resigned=len(resign.substituted) if resign else 0,
+        ledger_entries_resigned=len(resign.resigned_ledger) if resign else 0,
     )
+
+
+def _check_resign_tip(resign: ResignPlan | None, original_tip: str) -> None:
+    if resign is not None and resign.tip != original_tip:
+        from rebar._commands.reclaim_resign import ResignError
+
+        raise ResignError(f"re-sign plan was built at {resign.tip}, but the tip is {original_tip}")
 
 
 def cli(argv: list[str]) -> int:
@@ -302,6 +327,7 @@ def _rewrite_snapshot_blob(
     old_to_new: Mapping[str, str],
     boundary: str,
     below: AbstractSet[str],
+    resign: ResignPlan | None = None,
 ) -> tuple[bytes | None, int]:
     try:
         event = json.loads(blob.decode("utf-8"))
@@ -310,6 +336,9 @@ def _rewrite_snapshot_blob(
     if event.get("event_type") != "SNAPSHOT":
         return None, 0
     count = _rewrite_ledger_in_event(event, original_position_map, old_to_new, boundary, below)
+    ledger = event.get("data", {}).get("compiled_state", {}).get("authorship_ledger")
+    if resign is not None and isinstance(ledger, list):
+        count += resign.resign_ledger(ledger)
     if count == 0:
         return None, 0
     return json.dumps(event, sort_keys=True, separators=(",", ":")).encode() + b"\n", count
@@ -426,9 +455,15 @@ class _StreamedRewrite:
     """
 
     def __init__(
-        self, tracker: Path, ref: str, boundary: str, position_map: Mapping[str, str]
+        self,
+        tracker: Path,
+        ref: str,
+        boundary: str,
+        position_map: Mapping[str, str],
+        resign: ResignPlan | None = None,
     ) -> None:
         self.tracker = tracker
+        self.resign = resign
         self.ref = ref
         self.boundary = boundary
         self.position_map = position_map
@@ -468,13 +503,16 @@ class _StreamedRewrite:
         boundary = self.boundary
         author, committer, message = self._raw_commit(boundary)
         base_tree = b"M 040000 " + self._tree_of(boundary).encode() + b' ""\n'
+        # The checkpoint and the ledger anchor both re-emit the boundary tree, so both carry
+        # the re-signed raw events; the anchor is the base of every replayed commit.
+        raw_overrides = self._raw_overrides(boundary)
         self.checkpoint_sha = session.commit(
             self.ref,
             author=author,
             committer=committer,
             message=message,
             parents=(),
-            lines=[base_tree],
+            lines=[base_tree, *raw_overrides],
         )
         snapmap = self._snapshot_paths(boundary)
         self.source_of[self.checkpoint_sha] = boundary
@@ -483,7 +521,7 @@ class _StreamedRewrite:
         self._map(boundary, self.checkpoint_sha)
 
         derived = _derived_identity()
-        lines = [base_tree]
+        lines = [base_tree, *raw_overrides]
         anchor_rewrites = 0
         for path, (mode, oid) in snapmap.items():
             rewritten, count = self._rewritten(oid)
@@ -578,7 +616,7 @@ class _StreamedRewrite:
                 snapmap.pop(path, None)
                 continue
             mode, oid = new_mode.decode(), new_oid.decode()
-            lines.append(f"M {mode} {oid} ".encode() + _quote_path(path) + b"\n")
+            lines.append(self._m_line(mode, oid, path))
             if _is_snapshot_candidate(path) and self._is_snapshot(oid):
                 snapmap[path] = (mode, oid)
             else:
@@ -631,8 +669,34 @@ class _StreamedRewrite:
 
     def _rewritten(self, oid: str) -> tuple[bytes | None, int]:
         return _rewrite_snapshot_blob(
-            self.reader.read(oid), self.position_map, self.old_to_new, self.boundary, self.below
+            self.reader.read(oid),
+            self.position_map,
+            self.old_to_new,
+            self.boundary,
+            self.below,
+            self.resign,
         )
+
+    def _m_line(self, mode: str, oid: str, path: bytes) -> bytes:
+        """A file command for ``path``: re-signed bytes inline for a raw target."""
+        data = self.resign.raw_bytes(oid) if self.resign is not None else None
+        if data is not None:
+            return _inline(mode, path, data)
+        return f"M {mode} {oid} ".encode() + _quote_path(path) + b"\n"
+
+    def _raw_overrides(self, commit: str) -> list[bytes]:
+        if self.resign is None or not self.resign.raw_blobs:
+            return []
+        out = _git(self.tracker, "ls-tree", "-rz", commit, text=False).stdout
+        lines: list[bytes] = []
+        for raw in out.split(b"\x00"):
+            if not raw:
+                continue
+            meta, path = raw.split(b"\t", 1)
+            mode, kind, oid = meta.decode().split()
+            if kind == "blob" and oid in self.resign.raw_blobs:
+                lines.append(self._m_line(mode, oid, path))
+        return lines
 
     def _map(self, old: str, new: str) -> None:
         self.old_to_new[old] = new
