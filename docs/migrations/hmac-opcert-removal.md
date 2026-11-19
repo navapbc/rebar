@@ -73,7 +73,7 @@ they can be re-closed to re-earn a signed op-cert if certification is needed aga
 ### Rollback posture
 
 The required-environment policy is **opt-in and defaults off**. With no
-`.rebar/trusted_environments.yaml` present and `verify.require_environment` unset, the
+`verify.trusted_opcert_keys` list and `verify.require_environment` unset (ADR 0125 retired the repository pin file),
 process keeps the low-security, process-record behavior: an op-cert certifies locally without a
 pinned trust root, **whichever environment signed it** — Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* (The earlier wording
 here said "an op-cert signed by the *local* environment certifies locally", which described the

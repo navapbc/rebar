@@ -1058,11 +1058,13 @@ Ed25519 key** and the signature is an asymmetric operation certificate (a DSSE e
 carrying an SSHSIG signature over its PAE bytes), attributed to the **signing environment**
 and **verifiable by anyone** against that environment's public key — no shared secret is
 needed to verify. In the low-security default an op-cert is a **verifiable process record,
-not a control**. A high-security project **pins a required trusted environment's public key
-in `.rebar/trusted_environments.yaml`** (on the Gerrit-gated `main` branch) and the **merge
-gate** (`rebar verify-opcert`) enforces that the required environment's completion-verifier
-certificate exists and verifies over the merged log — so a developer who wants to pass cannot
-forge a verdict from an unpinned key. The agent is read-only and never signs its own homework — a
+not a control**: verification checks that the signature is valid and bound to the ticket, and
+reports which key and environment signed it. A high-security project lists the keys it trusts
+in the **verifying environment's own** `verify.trusted_opcert_keys` (never in the repository,
+ADR 0125), sets `verify.require_environment`, and the **merge gate** (`rebar verify-opcert`)
+enforces that the required environment's completion-verifier certificate exists, is signed by
+a listed key, and verifies over the merged log — so a developer who wants to pass cannot forge
+a verdict from an unlisted key. The agent is read-only and never signs its own homework — a
 deterministic gate acts on its verdict, and a successful prompt-injection can at worst flip the
 *advisory* verdict, never forge the signature. The completion-verification close gate is the sole
 close-gate attestation (it signs a PASS verdict *after* the close). An unreadable config is an

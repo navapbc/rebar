@@ -29,21 +29,18 @@ Signing requires OpenSSH 8.9 or newer. A missing or unusable `ssh-keygen` produc
 
 The DSSE payload is an in-toto Statement that binds the ticket ID, attestation kind, material fingerprint, code commit, and full manifest. Verification accepts those bound values only after checking the SSHSIG signature against an Ed25519 public key. A copied certificate therefore cannot certify another ticket or another attestation kind.
 
-`rebar verify-signature` verifies a DSSE envelope signed through SSHSIG. What it gates on is the **signature**, not the signing environment. Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* A certificate minted by another environment therefore certifies here, provided its signature verifies — which is the ordinary deployment shape, where the on-box MCP server signs a review and a local CLI worktree consumes it.
+`rebar verify-signature` verifies the DSSE envelope signed through SSHSIG. By default it checks validity only (ADR 0125): the signature must verify under the public key carried inside the SSHSIG blob, for the certificate's principal and the `rebar.opcert.v1` namespace, and the signed subject must bind the ticket and kind. The result names the signing key (`signing_key`, its SHA256 fingerprint) and the environment (`key_id`). Anyone can sign; the signing environment is not a gate unless the verifying environment asks for one.
 
-The verifier picks the strongest key available and reports which one it used in `trust_basis`:
+The result reports its trust basis in `trust_basis`:
 
-| `trust_basis` | key used |
+| `trust_basis` | meaning |
 |---|---|
-| `own_key` | this environment's own op-cert key (the signer is this environment) |
-| `pinned_environment` | a key pinned out-of-band for the signing environment in `.rebar/trusted_environments.yaml` |
-| `envelope_key` | the signer's own key, carried inside the SSHSIG blob |
+| `envelope_key` | validity only: the signer's own key, carried inside the SSHSIG blob |
+| `trust_list` | the verifying environment's `verify.trusted_opcert_keys` lists this (environment, key) pair |
 
-`envelope_key` is **self-consistent** rather than pinned: `ssh-keygen -Y verify` still checks the signature, the namespace and the principal binding in full, so a forged or altered envelope is still `mismatch`. What it does not establish is that the key belongs to a *known* environment — exactly the property the operator has deferred. The field exists so that weaker basis is **visible** rather than silently folded into `certified`.
+`envelope_key` is **self-consistent**: `ssh-keygen -Y verify` still checks signature, namespace and principal binding in full, so a forged or altered envelope is still `mismatch`. What it does not establish is that the key belongs to a *known* environment, so the basis stays visible rather than being folded silently into `certified`.
 
-`foreign_key` is now narrower: it means no usable signer key could be obtained at all, or the opt-in restriction below is configured and this certificate is from a different environment.
-
-**Future, opt-in: restricting the trusted set.** Setting `verify.require_environment` (with `verify.opcert_enforce_since`, per `infra/runbooks/mcp-opcert-enforcement-flip.md`) re-enables the restriction: only that environment's certificates are accepted, they must verify against its key pinned in `.rebar/trusted_environments.yaml`, and the `envelope_key` basis is withheld. Both keys are unset in this project. `rebar verify-opcert` is the corresponding merge-gate lane, described in [ADR 0049](adr/0049-opcert-asymmetric.md).
+**Opt-in: a per-environment trust list.** An environment that wants to restrict signers sets `verify.trusted_opcert_keys` in its own configuration (user config, deployment environment variable `REBAR_VERIFY_TRUSTED_OPCERT_KEYS`, or CI job variables; never the repository's `rebar.toml`). Each entry is `<env_id> <key-type> <base64> [comment]`. With a list set, a valid certificate whose pair is not listed is `untrusted`. Rebar's MCP server sets its list in its deployment and so trusts only its own signatures. `verify.require_environment` (with `verify.opcert_enforce_since`, per `infra/runbooks/mcp-opcert-enforcement-flip.md`) additionally requires the certificate to name that environment and requires a trust list; without a list it refuses with `foreign_key`. `rebar verify-opcert` is the corresponding merge-gate lane. Signing never consults a trust list.
 
 A certified signature establishes the integrity of the signed process record. It does not establish that the reviewed work is defect-free. Gate validity also checks current ticket material, code freshness, reopen state, and related-ticket pins where applicable.
 
