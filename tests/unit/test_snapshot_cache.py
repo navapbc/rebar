@@ -145,6 +145,12 @@ def test_cross_process_single_flight(store, repo, tmp_path):
 # --------------------------------------------------------------------------------------
 # AC3 — delete-on-last-close: an open reader survives eviction; a new lookup re-heals
 # --------------------------------------------------------------------------------------
+def _lf(data: bytes) -> bytes:
+    """The checked-out bytes with CRLF folded: Windows git checks text out with CRLF
+    (core.autocrlf), and line endings are not what eviction is about."""
+    return data.replace(b"\r\n", b"\n")
+
+
 def test_open_reader_survives_eviction_then_relookup_misses(store, repo):
     sha = _commit(repo, "f.txt", "content\n")
     h = cache.acquire(sha, repo_root=str(repo), fetch=False)
@@ -162,12 +168,12 @@ def test_open_reader_survives_eviction_then_relookup_misses(store, repo):
             # the live reader is protected by the refusal instead of by delete-on-close.
             with pytest.raises(PermissionError):
                 os.rename(dest, trash)
-            assert fh.read() == b"content\n"
+            assert _lf(fh.read()) == b"content\n"
         else:
             os.rename(dest, trash)
             shutil.rmtree(trash)
             # The open fd still reads the evicted content (POSIX delete-on-last-close).
-            assert fh.read() == b"content\n"
+            assert _lf(fh.read()) == b"content\n"
     finally:
         fh.close()
     if os.name == "nt":
