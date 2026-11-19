@@ -126,7 +126,7 @@ signing.verify_attestation_record(record, ticket_id, *, kind=None, repo_root=Non
 # anything else reads unsigned (retired HMAC scheme).
 ```
 
-An operation-certificate record uses `algorithm="sshsig"` and has no HMAC `signature` field. `verify_signature` verifies the DSSE envelope through SSHSIG against the signer's Ed25519 public key. It does **not** require the record principal to match the current environment: Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* A certificate from another environment therefore certifies when its signature verifies, and the result's `trust_basis` (`own_key` / `pinned_environment` / `envelope_key`) names which key was used. Setting `verify.require_environment` re-enables the restriction. See `docs/manifest-signing.md`.
+An operation-certificate record uses `algorithm="sshsig"` and has no HMAC `signature` field. `verify_signature` verifies the DSSE envelope through SSHSIG against the signer's Ed25519 public key. It does **not** require the record principal to match the current environment: Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* A certificate from another environment therefore certifies when its signature verifies, and the result's `trust_basis` (`own_key` / `pinned_environment` / `envelope_key`, or `trust_list` when the verifying environment's `verify.trusted_opcert_keys` names the certificate's environment and key) names which key was used; `signing_key` gives that key's SHA256 fingerprint. A set `verify.trusted_opcert_keys` list replaces the other trust roots: an unlisted signer is `untrusted` (ADR 0125). Setting `verify.require_environment` re-enables the restriction. See `docs/manifest-signing.md`.
 
 The verdict dictionary contains `verified`, `verdict`, `reason`, `manifest`, `step_count`, `algorithm`, `key_id`, `signed_at`, `head_sha`, and authenticated operation-certificate fields where available. The verdicts are exactly:
 
@@ -140,6 +140,7 @@ The verdict dictionary contains `verified`, `verdict`, `reason`, `manifest`, `st
 | `unknown_kind` | No verification policy exists for the attestation kind. |
 | `unknown_scheme` | The record uses a scheme that policy does not accept for the kind. |
 | `key_not_valid_at_era` | The authorship-gate verdict: the signature is cryptographically valid by a key the identity holds, but that key was not valid at the event's commit (e.g. a since-revoked key) — distinct from a forgery. |
+| `untrusted` | The signature is valid and correctly bound, but this environment's `verify.trusted_opcert_keys` list does not name the certificate's (environment, signing key) pair, or the list could not be read (ADR 0125). |
 | `unsigned` | No operation certificate exists in the selected slot, including a retired legacy HMAC record. |
 
 ### Retired HMAC scheme

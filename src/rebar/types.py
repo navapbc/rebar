@@ -389,10 +389,14 @@ class VerifySignatureResult(TypedDict):
         "unavailable",
         "unknown_kind",
         "unknown_scheme",
+        "untrusted",
     ]
     reason: str
     ticket_id: str
-    trust_basis: NotRequired[Literal["own_key", "pinned_environment", "envelope_key", None]]
+    trust_basis: NotRequired[
+        Literal["own_key", "pinned_environment", "envelope_key", "trust_list", None]
+    ]
+    signing_key: NotRequired[str | None]
     rebar_version: NotRequired[str | None]
 
 

@@ -224,6 +224,32 @@ def _as_str_tuple(v: Any, key: str) -> tuple[str, ...]:
     return tuple(x for x in items if x)
 
 
+def _as_trusted_key_list(v: Any, key: str) -> tuple[str, ...]:
+    """Op-cert trust-list entries ``<env_id> <key-type> <base64> [comment]`` (ADR 0125).
+
+    Accepts what :func:`_as_str_tuple` accepts. Each entry must name an environment and an
+    OpenSSH public key whose base64 body decodes; anything else is a ``ConfigError`` naming
+    the 1-based entry position, so a typo can never silently shrink the trusted set."""
+    import base64
+    import binascii
+
+    entries = _as_str_tuple(v, key)
+    for pos, entry in enumerate(entries, start=1):
+        parts = entry.split()
+        ok = len(parts) >= 3
+        if ok:
+            try:
+                ok = bool(base64.b64decode(parts[2], validate=True))
+            except (binascii.Error, ValueError):
+                ok = False
+        if not ok:
+            raise ConfigError(
+                f"{key}: entry {pos} must be '<env_id> <key-type> <base64> [comment]', "
+                f"got {entry!r}"
+            )
+    return entries
+
+
 def _as_str_list(v: Any, key: str) -> list[str]:
     """A list of strings from a TOML array or comma-separated CLI override."""
     return list(_as_str_tuple(v, key))

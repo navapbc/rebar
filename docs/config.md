@@ -182,6 +182,14 @@ verify.require_ticket_for_commit   = false   # CI Verified gate: every commit to
                                              # ticket that RESOLVES in the store (rebar-ticket: <id> trailer or a
                                              # leading <id>:; alias/full/short/Jira). env
                                              # REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT. See docs/commit-ticket-trailer.md
+verify.trusted_opcert_keys = []              # per-environment op-cert trust list (ADR 0125). Each entry is
+                                             # "<env_id> <key-type> <base64> [comment]". Empty (default):
+                                             # an op-cert verifies on signature validity and binding alone.
+                                             # Set: a valid cert whose (environment, signing key) pair is not
+                                             # listed is `untrusted`. Set it in the VERIFYING environment's own
+                                             # config (user config, deployment env, CI job variables), not in
+                                             # the repository's rebar.toml. env REBAR_VERIFY_TRUSTED_OPCERT_KEYS
+                                             # (comma-separated entries); an empty env value is an error.
 # Convergent plan-edit re-review (the rising floor: a re-review of an edited plan
 # whose CODE is unchanged drops only NOVEL low-priority findings) is now always-on
 # and unconditional; the evidence gate is always-on too. These tuning params remain:

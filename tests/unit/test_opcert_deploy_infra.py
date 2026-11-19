@@ -402,3 +402,52 @@ def test_terraform_ci_runs_fmt_check_and_validate() -> None:
     wf = (_REPO / ".github" / "workflows" / "terraform-drift.yml").read_text(encoding="utf-8")
     assert "terraform fmt -check" in wf, "CI must run `terraform fmt -check`"
     assert "terraform validate" in wf, "CI must run `terraform validate`"
+
+
+# --------------------------------------------------------------------------- MCP trust list
+# The operator's 2026-11-19 list for rebar's MCP server (epic nonblack-brigandish-guillemot,
+# ADR 0125): the box's own current and rotated nava-opcert-prod keys, and rebar-opcert.
+_MCP_TRUSTED_PAIRS = {
+    (
+        "9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB6u+ddQiB4ck/ToORQkQwtehODF4VqLirMIUNFpobZZ",
+    ),
+    (
+        "9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGA6u+J56OuLaR8xsCqyIFZisj/Pke3dkNIfgifykhfi",
+    ),
+    (
+        "ade0f2ef-51cc-45a2-bb97-c09846cd3df5",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBJYVGrlY0lry1wXJUH16LysXt4NezYJ98El+EK1yuo3",
+    ),
+}
+_TRUST_ENV_VAR = "REBAR_VERIFY_TRUSTED_OPCERT_KEYS"
+
+
+def _trust_pairs(value: str) -> set[tuple[str, str]]:
+    """Parse a trust-list value through the real config coercer into (env_id, key body)."""
+    from rebar._config_coercion import _as_trusted_key_list
+
+    entries = _as_trusted_key_list(value, "verify.trusted_opcert_keys")
+    return {(e.split()[0], " ".join(e.split()[1:3])) for e in entries}
+
+
+def _autodeploy_trusted_keys() -> str:
+    """Evaluate the ``trusted_keys`` assignments at the top of autodeploy's ``mcp_run_new``."""
+    text = (_REPO / "infra" / "scripts" / "autodeploy.sh").read_text(encoding="utf-8")
+    body = text.split("mcp_run_new() {", 1)[1].split("docker run", 1)[0]
+    script = body.replace("local trusted_keys=", "trusted_keys=") + '\nprintf %s "$trusted_keys"'
+    assert '"REBAR_VERIFY_TRUSTED_OPCERT_KEYS=$trusted_keys"' in text
+    return subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True).stdout
+
+
+def test_compose_mcp_service_trusts_exactly_the_operator_list() -> None:
+    env = yaml.safe_load(_COMPOSE.read_text())["services"]["mcp"]["environment"]
+    assert _trust_pairs(env[_TRUST_ENV_VAR]) == _MCP_TRUSTED_PAIRS
+
+
+@requires_posix_shell
+def test_autodeploy_mcp_run_new_carries_the_compose_trust_list() -> None:
+    env = yaml.safe_load(_COMPOSE.read_text())["services"]["mcp"]["environment"]
+    assert _autodeploy_trusted_keys() == env[_TRUST_ENV_VAR]
+    assert _trust_pairs(_autodeploy_trusted_keys()) == _MCP_TRUSTED_PAIRS

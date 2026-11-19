@@ -735,8 +735,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 
         Returns ``{ticket_id, verified, verdict, reason, manifest, ...}``: ``certified``
         matches, ``mismatch`` is altered or invalid, ``foreign_key`` lacks an allowed
-        key, and ``unsigned`` lacks an op-cert (a retired legacy HMAC record
-        included). Outside the opt-in environment
+        key, ``untrusted`` is validly signed by a key that this environment's
+        ``verify.trusted_opcert_keys`` list does not name for the certificate's
+        environment, and ``unsigned`` lacks an op-cert (a retired legacy HMAC record
+        included). ``signing_key`` names the signing key's SHA256 fingerprint.
+        Outside the opt-in environment
         restriction, signer environment alone is not a gate; ``trust_basis`` names the
         accepted key. Omitted ``kind`` checks the latest signature; an explicit
         ``plan-review`` or ``completion-verifier`` kind is strict. ``show_ticket``

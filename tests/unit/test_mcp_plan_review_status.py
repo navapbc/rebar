@@ -190,6 +190,7 @@ _SIGNATURE_FAILURE_VERDICTS = (
     "unavailable",
     "unknown_kind",
     "unknown_scheme",
+    "untrusted",
 )
 
 

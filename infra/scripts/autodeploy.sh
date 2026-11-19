@@ -391,6 +391,10 @@ mcp_free_port() {
 # Start a blue-green container at compose parity. SSM-backed tickets/Jira values come only
 # from --env-file to avoid empty shell overrides; the stable service label bounds metrics.
 mcp_run_new() {
+  # Op-cert trust list (ADR 0125): keep identical to the compose mcp service.
+  local trusted_keys="9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB6u+ddQiB4ck/ToORQkQwtehODF4VqLirMIUNFpobZZ nava-opcert-prod"
+  trusted_keys="$trusted_keys, 9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGA6u+J56OuLaR8xsCqyIFZisj/Pke3dkNIfgifykhfi nava-opcert-prod rotated-20260907"
+  trusted_keys="$trusted_keys, ade0f2ef-51cc-45a2-bb97-c09846cd3df5 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBJYVGrlY0lry1wXJUH16LysXt4NezYJ98El+EK1yuo3 rebar-opcert"
   docker run -d --name "$1" \
     --restart always \
     --label rebar.service=mcp \
@@ -417,6 +421,7 @@ mcp_run_new() {
     -e TMPDIR=/var/lib/rebar/gate-scratch \
     -e "REBAR_OPCERT_ENV_ID=${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}" \
     -e REBAR_IDENTITY_SIGNING_KEY=/run/secrets/opcert-ed25519-key \
+    -e "REBAR_VERIFY_TRUSTED_OPCERT_KEYS=$trusted_keys" \
     -e "REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets" \
     -e "MCP_CODE_DIR=/var/gerrit/site/mcp-code" \
     -e "REBAR_ROOT=/var/gerrit/site/mcp-code" \

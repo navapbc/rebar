@@ -212,8 +212,11 @@ def verify_signature(
     signer's key — which need NOT be this environment's: bug c21f, the signing
     environment is not a gate), ``mismatch`` (steps altered / signature invalid),
     ``foreign_key`` (no usable signer key, or the opt-in
-    ``verify.require_environment`` restriction excludes its signer), or
-    ``unsigned``. ``trust_basis`` names which key certified. Raises
+    ``verify.require_environment`` restriction excludes its signer), ``untrusted``
+    (a valid signature whose environment and key are not in the configured
+    ``verify.trusted_opcert_keys`` list, ADR 0125), or ``unsigned``. ``trust_basis``
+    names which key certified (``trust_list`` when the list vouched for it), and
+    ``signing_key`` gives the signing key's SHA256 fingerprint. Raises
     :class:`RebarError` only when the ticket id cannot be resolved.
 
     ``kind`` selects which attestation to verify (epic dark-acme-lumen): ``None`` (default)
