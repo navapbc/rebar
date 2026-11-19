@@ -27,37 +27,48 @@ A — provision signing first, flip the gate on safely via expand-contract).
 1. **The signing provisioning is deployed and live.** The `rebar-mcp` compose service is
    running with:
    - `REBAR_OPCERT_ENV_ID = 9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65` (the box env_id — the string
-     `nava-opcert-prod` is only that key's comment/label, not the env_id), and
+     `nava-opcert-prod` is only the key's comment/label, not the env_id), and
    - `REBAR_IDENTITY_SIGNING_KEY = /run/secrets/opcert-ed25519-key`, the SSM-materialized
      Ed25519 key bind-mounted read-only (materialized by `infra/scripts/fetch-secrets.sh`,
      shared with the `opcert` gate service).
 
-   The server composes its startup op-cert signer from these
-   (`rebar.mcp_server.compose_startup_opcert_binding`) and binds it around serving, so the
-   certified-op tools mint certs whose principal is `9f1c8e42-…`. Confirm a freshly minted cert
-   verifies against the pinned public key with a **dry run**:
+   The server composes the startup op-cert signer
+   (`rebar.mcp_server.compose_startup_opcert_binding`) and binds it around serving, so
+   certified-op tools mint certs whose principal is `9f1c8e42-…`.
+
+2. **The MCP server trusts its own keys.** Per ADR 0125 the repository pins no op-cert keys.
+   The MCP deployment sets its own trust list, `REBAR_VERIFY_TRUSTED_OPCERT_KEYS`, identically in
+   `infra/compose/docker-compose.yml` (the `mcp` service) and in `mcp_run_new` in
+   `infra/scripts/autodeploy.sh`. Each comma-separated entry is
+   `<env_id> <key-type> <base64> [comment]`. Confirm the live server's `/health` `opcert` field
+   reads `expected: true`, `matched: true`, `trust_source: "trust_list"` and no `error`
+   (read-only, through SSM: `curl -s http://127.0.0.1:<live port>/health` on the box).
+
+3. **The gating environment has a trust list.** `verify.require_environment` refuses every
+   certificate unless the verifying environment also sets `verify.trusted_opcert_keys`. For this
+   repository the gate is the `verify-opcert` step of `.github/workflows/verify-identity.yml`, so
+   the list goes into that job's environment as `REBAR_VERIFY_TRUSTED_OPCERT_KEYS`, from the CI
+   provider's protected variables — never committed to `rebar.toml`. List the same keys the MCP
+   deployment lists. Confirm a freshly minted cert verifies in a **dry run** with that list in the
+   environment:
    ```bash
-   rebar verify-opcert --require-environment 9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65 \
+   REBAR_VERIFY_TRUSTED_OPCERT_KEYS='<same value as the MCP deployment>' \
+     rebar verify-opcert --require-environment 9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65 \
      --since <candidate-boundary>
    ```
-   It must report the recently box-closed tickets as satisfied (exit 0), not "missing op-cert".
+   It must report recently box-closed tickets as satisfied (exit 0), not "missing op-cert" or
+   "untrusted".
 
-2. **The box is the close path for post-boundary work.** Every close that will fall *after* the
-   boundary must go through the on-box MCP server (which signs under `9f1c8e42-…`), **not** a
-   local-CLI close (which signs under the local env and would fail the gate). This is the
-   expand-contract ordering: **move-1 signing must be live before the flip.**
-
-3. **The environment is pinned.** `.rebar/trusted_environments.yaml` on `main` already carries
-   the `9f1c8e42-…` env with its real `ssh-ed25519` public key and an `added_at_log_position`
-   era anchor. This flip adds **no** new pin and **no** key material — verify the entry is
-   present and unchanged.
+4. **The box is the close path for post-boundary work.** Every close that will fall *after* the
+   boundary must go through the on-box MCP server, **not** a local-CLI close: a local close signs
+   under the local environment, whose key is not on the gate's list, and would fail the gate.
 
 ---
 
 ## Flip on (the authoritative change)
 
-Set the two `[verify]` keys **together** in the authoritative `rebar.toml`, in one change,
-reviewed through Gerrit:
+Set the pair in the authoritative `rebar.toml`, and the trust list in the gate's environment
+(precondition 3):
 
 ```toml
 [verify]
@@ -72,56 +83,63 @@ opcert_enforce_since = "<tickets-branch tip SHA at flip time>"
 - **Capture `opcert_enforce_since` at flip time.** Read the current tickets-branch tip and use
   that SHA:
   ```bash
-  git -C .tickets-tracker rev-parse HEAD   # the rebar tracker worktree on this checkout
+  git -C .tickets-tracker rev-parse HEAD   # the rebar tracker worktree on the checkout
   ```
-  This makes the flip **grandfathering**: historical closes across the repo are **not**
-  retroactively failed (which, without the boundary, would break the `verify-identity`
-  merge-gate for every pre-existing close).
-- **Set both keys in the same change.** `require_environment` without a boundary would enforce
-  every historical close; a boundary without `require_environment` enforces nothing. Together
-  they enforce **only** post-deploy closes.
+  This is the flip's **grandfathering**: historical closes across the repo are **not**
+  retroactively failed (which, without the boundary, would break the merge gate on every
+  pre-existing close).
+- **Set both keys in the same change, after the trust list exists.** `require_environment`
+  without the boundary would enforce every historical close; the boundary without
+  `require_environment` enforces nothing; `require_environment` without a trust list refuses
+  everything (and `rebar verify-opcert` exits 2). Together they enforce **only** post-deploy
+  closes.
 - `require_environment` gates the **completion-verifier** merge lane (`rebar verify-opcert`).
-  Since bug `c21f-6f29-5d2d-4a5a` it ALSO restricts the local claim/close verification path
-  (`verify_signature` / the plan-review claim gate): with it unset — the default, and this
-  project's posture — a validly signed cert from **any** environment certifies, because
-  certification environment is not currently a gate; with it set, only that environment's certs
-  are accepted there too, verified against its key pinned in
-  `.rebar/trusted_environments.yaml` (the envelope's own embedded key is not accepted as a
-  fallback under enforcement). Flipping the pair therefore tightens plan-review consumption as
-  well as the close lane — check that whichever environment your agents run `review-plan` in is
-  the one you pin.
+  It ALSO restricts the local claim/close verification path (`verify_signature` / the
+  plan-review claim gate) in any environment that reads this `rebar.toml`: there only
+  certificates naming that environment, signed by a key that environment's
+  `verify.trusted_opcert_keys` lists, are accepted. An environment with no list refuses them
+  all. Flipping the pair therefore tightens plan-review consumption as well as the close lane —
+  check that whichever environment agents run `review-plan` and `claim` in has the list.
 
-After the change merges, confirm on the authoritative config:
+After the change merges, confirm on the authoritative config (with the gate's list in the
+environment):
+
 ```bash
 rebar verify-opcert    # posture now comes from rebar.toml (no CLI flags)
 ```
-A post-boundary close lacking a valid `9f1c8e42-…` cert now **fails** (exit 1); pre-boundary
-closes remain advisory (exit 0).
+
+A post-boundary close lacking a valid, listed `9f1c8e42-…` cert now **fails** (exit 1);
+pre-boundary closes remain advisory (exit 0).
 
 ---
 
 ## Rollback (config revert)
 
-Rollback is a pure config revert — no data migration, no key changes:
+Rollback is a pure config revert — no data migration and no key changes:
 
-1. **Unset `verify.require_environment`** in `rebar.toml` (leave or drop `opcert_enforce_since`;
-   with no required environment it has no effect). Land it through Gerrit.
-2. `verify-opcert` returns to **advisory everywhere** (exit 0). The existing opcert /
-   remote-cert trust path is unchanged — a validly signed pinned-env cert still verifies — so
-   re-enabling `require_environment` later restores enforcement without any re-signing.
+1. **Unset `verify.require_environment`** in `rebar.toml` (leave or drop
+   `opcert_enforce_since`; with no required environment it has no effect). Land it through
+   Gerrit.
+2. `verify-opcert` returns to **advisory everywhere** (exit 0). Leaving the gate's
+   `verify.trusted_opcert_keys` in place is harmless; remove it to return that environment to
+   validity-only verification.
 
-This is fully additive and reversible: no new environment or key was created, and no historical
-close was retroactively failed.
+The flip is fully additive and reversible: no new environment or key is created, and no
+historical close is retroactively failed. Re-enabling `require_environment` later restores
+enforcement without any re-signing, as long as the signing keys are still listed.
 
 ---
 
 ## Related
 
-- `infra/scripts/fetch-secrets.sh` — materializes the SSM parameter
+- ADR [`0125`](../../docs/adr/0125-opcert-trust-per-environment.md) — validity-only op-cert
+  verification by default; per-environment trust lists replace the repository pin file.
+- `infra/scripts/fetch-secrets.sh` materializes the SSM parameter
   `/rebar/prod/opcert-ed25519-key` (the source) INTO the container bind-mount path
-  `/run/secrets/opcert-ed25519-key` (the destination that `REBAR_IDENTITY_SIGNING_KEY` points
-  at), shared by the `opcert` and `mcp` services. The SSM parameter name and the bind-mount path
-  are the same key at two hops, not two different keys.
-- `infra/compose/docker-compose.yml` — the `mcp` service's `REBAR_OPCERT_ENV_ID` +
-  `REBAR_IDENTITY_SIGNING_KEY` + key bind-mount.
+  `/run/secrets/opcert-ed25519-key` (the destination `REBAR_IDENTITY_SIGNING_KEY` points at),
+  shared by the `opcert` and `mcp` services. The SSM parameter name and the bind-mount path are
+  the same key at two hops, not two different keys.
+- `infra/compose/docker-compose.yml` — the `mcp` service's `REBAR_OPCERT_ENV_ID`,
+  `REBAR_IDENTITY_SIGNING_KEY`, key bind-mount and `REBAR_VERIFY_TRUSTED_OPCERT_KEYS`;
+  `infra/scripts/autodeploy.sh` `mcp_run_new` mirrors them.
 - `infra/runbooks/two-vote-gate-rollback.md` — the Gerrit submit-gate posture this gate feeds.
