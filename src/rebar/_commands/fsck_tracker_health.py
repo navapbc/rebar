@@ -1,8 +1,8 @@
 """Run tracker-wide ``fsck`` checks through ``_tracker_health``.
 
 Checks cover configured-remote divergence, configured branch mismatch, foreign store paths,
-environment identity mismatch, and dirty tracker state. Divergence, pollution, identity
-mismatch, tracked deletions, and regenerable leftovers are counted. A pending push, branch
+environment identity mismatch, and dirty tracker state. Divergence, pollution, tracked
+deletions, and regenerable leftovers are counted. A pending push, branch mismatch, identity
 mismatch, and temporary event staging files are informational. ``fsck_scan._scan`` is the sole
 caller.
 """
@@ -34,14 +34,14 @@ def _tracker_health(
 ) -> tuple[list[str], int]:
     """Return tracker-level report lines and their counted issue total.
 
-    A pending push and branch mismatch are informational. Configured-remote divergence,
-    foreign paths, environment identity divergence, and counted dirty-tree classes increment
+    A pending push, branch mismatch, and environment identity mismatch are informational.
+    Configured-remote divergence, foreign paths, and counted dirty-tree classes increment
     the total. Dirty state can contribute one line per class through
     :func:`_dirty_tracker_lines`.
     """
     lines: list[str] = []
     issues = 0
-    spans = authorship.identity_spans() if authorship is not None else {}
+    spans = authorship.key_spans() if authorship is not None else {}
     sync_line, sync_is_issue = _tracker_sync_status(tracker)
     # NOTE: any pair added here with ``is_issue=False`` (e.g. a new WARN/informational
     # check) MUST also be reflected in fsck._NEVER_COUNTED_KINDS so the JSON ``issue_count``
@@ -50,7 +50,8 @@ def _tracker_health(
         (sync_line, sync_is_issue),
         (_branch_mismatch(tracker, repo_root), False),
         (_foreign_store_paths(tracker), True),
-        (env_identity.divergence_report(env_identity.read_env_id(tracker), spans), True),
+        # Report-only: key spans cover all history, so a counted overlap could never clear.
+        (env_identity.divergence_report(spans), False),
         *_dirty_tracker_lines(tracker, include_archived=include_archived),
     ):
         if not line:

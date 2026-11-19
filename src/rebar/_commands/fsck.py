@@ -76,7 +76,7 @@ _NEVER_COUNTED_TRACKER_DIRTY_KINDS = frozenset(
     kind.lower() for _key, kind, _blurb, counted in _DIRTY_LINE_SPECS if not counted
 )
 _NEVER_COUNTED_SCAN_KINDS = frozenset(
-    {"push_pending", "status_fork_resolved", "uncertified_close", "warn"}
+    {"env_id_mismatch", "push_pending", "status_fork_resolved", "uncertified_close", "warn"}
 )
 _NEVER_COUNTED_KINDS = _NEVER_COUNTED_SCAN_KINDS | _NEVER_COUNTED_TRACKER_DIRTY_KINDS
 
