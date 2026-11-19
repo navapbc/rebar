@@ -10729,6 +10729,33 @@
       "source_id": "3863-a783-b38f-4c8a",
       "target_id": "jira-reb-1003"
     },
+    "387c-d59c-7854-40b2|977f-11fe-1dcb-4b7d|blocks": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817390519,
+      "link_id": "52015",
+      "relation": "blocks",
+      "source": "snapshot",
+      "source_id": "387c-d59c-7854-40b2",
+      "target_id": "977f-11fe-1dcb-4b7d"
+    },
+    "387c-d59c-7854-40b2|b8dd-85be-1dbb-45b9|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817388638,
+      "link_id": "52012",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "387c-d59c-7854-40b2",
+      "target_id": "b8dd-85be-1dbb-45b9"
+    },
+    "387c-d59c-7854-40b2|d4f1-da58-0748-4e1a|blocks": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817392382,
+      "link_id": "52016",
+      "relation": "blocks",
+      "source": "snapshot",
+      "source_id": "387c-d59c-7854-40b2",
+      "target_id": "d4f1-da58-0748-4e1a"
+    },
     "387d-09c5-3d50-4a1e|e369-a449-4773-48fb|parent": {
       "confirmed_at": 1786807014030461604,
       "confirmed_pass": "2026-08-15T14-49-02",
@@ -19947,6 +19974,15 @@
       "source_id": "6f2e-58a5-dfac-42f3",
       "target_id": "7f9f-05f4-796a-4c63"
     },
+    "6f5a-b6e4-327e-46b4|977f-11fe-1dcb-4b7d|blocks": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817394901,
+      "link_id": "52013",
+      "relation": "blocks",
+      "source": "snapshot",
+      "source_id": "6f5a-b6e4-327e-46b4",
+      "target_id": "977f-11fe-1dcb-4b7d"
+    },
     "6f74-2795-5ad4-4a56|0804-9a6b-9182-42c9|blocks": {
       "direction": "snapshot",
       "first_confirmed_at": 1787951339293120494,
@@ -26445,6 +26481,15 @@
       "source_id": "9753-647b-2f85-40ef",
       "target_id": "985f-0ec5-a61c-46ee"
     },
+    "977f-11fe-1dcb-4b7d|387c-d59c-7854-40b2|depends_on": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817372035,
+      "link_id": "52015",
+      "relation": "depends_on",
+      "source": "snapshot",
+      "source_id": "977f-11fe-1dcb-4b7d",
+      "target_id": "387c-d59c-7854-40b2"
+    },
     "977f-11fe-1dcb-4b7d|47d8-baf8-2348-45c9|relates_to": {
       "direction": "snapshot",
       "first_confirmed_at": 1795059266532647296,
@@ -26453,6 +26498,24 @@
       "source": "snapshot",
       "source_id": "977f-11fe-1dcb-4b7d",
       "target_id": "47d8-baf8-2348-45c9"
+    },
+    "977f-11fe-1dcb-4b7d|6f5a-b6e4-327e-46b4|depends_on": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817367909,
+      "link_id": "52013",
+      "relation": "depends_on",
+      "source": "snapshot",
+      "source_id": "977f-11fe-1dcb-4b7d",
+      "target_id": "6f5a-b6e4-327e-46b4"
+    },
+    "977f-11fe-1dcb-4b7d|d4f1-da58-0748-4e1a|depends_on": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817369838,
+      "link_id": "52014",
+      "relation": "depends_on",
+      "source": "snapshot",
+      "source_id": "977f-11fe-1dcb-4b7d",
+      "target_id": "d4f1-da58-0748-4e1a"
     },
     "978d-1d5d-8287-47bc|2eca-0a1d-45c2-4e38|blocks": {
       "direction": "snapshot",
@@ -31733,6 +31796,15 @@
       "source_id": "b8b1-6462-b4f1-4a1d",
       "target_id": "9a71-ba9b-89d0-4cb8"
     },
+    "b8dd-85be-1dbb-45b9|387c-d59c-7854-40b2|relates_to": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817328704,
+      "link_id": "52012",
+      "relation": "relates_to",
+      "source": "snapshot",
+      "source_id": "b8dd-85be-1dbb-45b9",
+      "target_id": "387c-d59c-7854-40b2"
+    },
     "b8dd-85be-1dbb-45b9|f59a-4c53-9452-4d3f|relates_to": {
       "direction": "snapshot",
       "first_confirmed_at": 1794987126696129057,
@@ -36141,6 +36213,24 @@
       "source": "backfill",
       "source_id": "d4cf-0780-cbed-4879",
       "target_id": "9d50-ead1-de68-4362"
+    },
+    "d4f1-da58-0748-4e1a|387c-d59c-7854-40b2|depends_on": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817398711,
+      "link_id": "52016",
+      "relation": "depends_on",
+      "source": "snapshot",
+      "source_id": "d4f1-da58-0748-4e1a",
+      "target_id": "387c-d59c-7854-40b2"
+    },
+    "d4f1-da58-0748-4e1a|977f-11fe-1dcb-4b7d|blocks": {
+      "direction": "snapshot",
+      "first_confirmed_at": 1795123882817397089,
+      "link_id": "52014",
+      "relation": "blocks",
+      "source": "snapshot",
+      "source_id": "d4f1-da58-0748-4e1a",
+      "target_id": "977f-11fe-1dcb-4b7d"
     },
     "d52a-40cd-75d4-46cb|a492-3e46-ca44-40a5|parent": {
       "confirmed_at": 1786807014034956190,
