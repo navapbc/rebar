@@ -25656,9 +25656,17 @@
       "updated_at": "2026-09-04T21:36:36Z"
     },
     "3822-a9e3-5999-422c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\nOn 2026-11-18 a `make verify` of an unrelated branch (worktree a2-win-portability, commit b1216d0cda3, rebased on 9ddb035cf59) failed `tests/unit/test_snapshot_janitor.py::test_byte_total_consistent_under_concurrent_populate_evict` at `tests/unit/test_snapshot_janitor.py:188`: `assert 312 == 365` (`cache.byte_total(store)` against `_real_store_bytes(store)`). The host was running a second `make verify` at the same time. The test passed 3 of 3 times rerun alone. The branch does not touch `src/rebar/_snapshot/` (its only POSIX-visible change routes `fsutil.atomic_write` through a helper that is exactly `os.replace` off Windows).\n\n## Hypotheses (unproven)\n- The running byte counter (`cache.add_bytes`, under `interprocess_lock`) and the populate/evict paths disagree on what a racing populate or evict adds or frees (for example a populate that loses the single-flight race, or `_evict`'s `exclusive_size` measured before a concurrent hardlink change).\n- The assertion reads the walk while a populate is still finishing.\n\n## Acceptance Criteria\n- [ ] The interleaving that produces the drift is reproduced deterministically and recorded on this ticket.\n- [ ] The byte total matches the store walk under that interleaving, with a regression test.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "test_byte_total_consistent_under_concurrent_populate_evict: byte total drifts from the store walk under host load"
+      },
       "created_at": "2026-11-19T00:55:43Z",
       "jira_id": "4599488",
       "jira_key": "REB-7283",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-19T00:55:46Z"
     },
@@ -48890,10 +48898,24 @@
     },
     "6ffc-a74b-dd65-4358": {
       "baseline": {
-        "assignee": null,
-        "description": "## Observation\n`make verify` on branch veery-verify-identity-perf (rebased on origin/main 9ddb035cf59, 2026-11-18 PST, host load average ~16): 1 failed, 21,400 passed. The failure is `tests/unit/test_model_classes.py::test_a_finished_gate_drive_releases_its_event_loop[raised]` with `assert <_UnixSelectorEventLoop running=False closed=True> is None`. The same 2 parametrized cases pass in isolation. The branch touches only identity-verification files; the test was added by 9ddb035cf59 (bug waxy-nonspheral-cutworm).\n\n## Root cause (reproduced)\nanyio's `WorkerThread` (anyio/_backends/_asyncio.py) stores `self.loop = root_task._loop`. When the root task finishes, `WorkerThread.stop` only enqueues a `None` sentinel; the worker thread then exits on its own schedule. The test calls `gc.collect()` right after its drive thread joins, without waiting for anyio's worker threads, so if a worker has not yet been scheduled to exit, its thread object still references the closed loop.\n\nScratch reproduction: wrapping `WorkerThread.run` so the thread lingers 0.5 s after the sentinel makes the loop survive `gc.collect()` (loop_alive=True). Joining every `WorkerThread` (and dropping the reference) before `gc.collect()` makes it collectable (loop_alive=False). With no delay it is collected. So the failure is a timing race in the test, not evidence that anyio>=4.15 regressed.\n\n## Fix direction\nIn `_drive_on_fresh_thread`, after the drive thread joins, join the anyio worker threads it started (snapshot `threading.enumerate()` before and after, join the new ones, and do not keep a reference) before returning the weakref. Test-only; no config.\n\n## Acceptance Criteria\n- [ ] The test waits for the drive's anyio worker threads to exit before `gc.collect()`.\n- [ ] A regression check that delays `WorkerThread` exit (as in the reproduction) still passes the test.\n- [ ] `make verify` passes and the change lands through Gerrit.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n`tests/unit/test_model_classes.py::test_a_finished_gate_drive_releases_its_event_loop[raised]` (added by 9ddb035cf59, bug waxy-nonspheral-cutworm) fails intermittently: `assert <_UnixSelectorEventLoop running=False closed=True> is None`. Seen in `make verify` on branch veery-verify-identity-perf (host load ~16; 1 failed, 21,400 passed) and in CI `Verified` for Gerrit 3431 (run 44417947610, job 135204371707, pytest ubuntu py3.12: 1 failed, 21,343 passed). Both parametrized cases pass in isolation. It blocks `Verified +1` for unrelated changes.\n\nRoot cause (reproduced): anyio's `WorkerThread` (anyio/_backends/_asyncio.py) holds `self.loop = root_task._loop`. When the root task finishes, `WorkerThread.stop` only enqueues a `None` sentinel; the worker thread exits on its own schedule. `_drive_on_fresh_thread` joins only its own drive thread, then the test calls `gc.collect()`. If the anyio worker has not exited yet, its thread object still references the closed loop. Scratch reproduction: wrapping `WorkerThread.run` to linger 0.5 s after the sentinel makes the loop survive `gc.collect()`; joining the worker threads (and dropping the reference) first makes it collectable.\n\n## Approach\nIn `_drive_on_fresh_thread`, record `threading.enumerate()` before starting the drive thread; after it joins, join every thread that is new since then (the anyio workers it started), with a 10 s join bound so a wedged worker fails the test instead of hanging, and keep no reference to them. Then return the weakref. This keeps the test's real claim (with anyio>=4.15 nothing but a still-running worker holds the loop) and removes the timing race. Add a regression test that monkeypatches `WorkerThread.run` to linger 0.3 s after its sentinel and asserts the loop is still collected. Test-only; no config key, env var or flag.\n\nRejected: `time.sleep` before `gc.collect()` (still a race); retrying.\n\nPortability: threading and gc only; the existing `importorskip(\"anyio.to_thread\")` stays.\n\n## Scope\n- `tests/unit/test_model_classes.py` \u2014 `_drive_on_fresh_thread` joins the drive's new threads; one new regression test.\n\n## Testing\n- New regression test with a lingering `WorkerThread` fails before the fix (RED) and passes after.\n- Existing `completed` and `raised` cases pass.\n- `make verify` green.\n\n## Acceptance Criteria\n- [ ] `_drive_on_fresh_thread` joins the anyio worker threads started by the drive before returning.\n- [ ] A regression test that delays `WorkerThread` exit fails on the old helper and passes on the new one.\n- [ ] `make verify` passes and the change lands through Gerrit with LLM-Review +1 and Verified +1.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "test_a_finished_gate_drive_releases_its_event_loop[raised] races anyio's worker-thread exit and fails under host load"
       },
       "created_at": "2026-11-18T23:30:55Z",
@@ -66114,6 +66136,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T06:47:10Z"
     },
+    "9586-0118-310a-4f63": {
+      "created_at": "2026-11-19T01:54:05Z",
+      "jira_id": "4599490",
+      "jira_key": "REB-7284",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T01:54:08Z"
+    },
     "958e-f4b3-275c-4154": {
       "baseline": {
         "assignee": {
@@ -67026,6 +67055,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T06:48:02Z"
+    },
+    "977f-11fe-1dcb-4b7d": {
+      "created_at": "2026-11-19T01:54:10Z",
+      "jira_id": "4599491",
+      "jira_key": "REB-7285",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T01:54:12Z"
     },
     "9787-4679-1993-4a99": {
       "baseline": {
@@ -119598,7 +119634,14 @@
     "1795046822966088931": "__rebar_unknown_comment_id__",
     "1795047675844996701": "__rebar_unknown_comment_id__",
     "1795048394547444779": "__rebar_unknown_comment_id__",
-    "1795049200354576155": "__rebar_unknown_comment_id__"
+    "1795049200354576155": "__rebar_unknown_comment_id__",
+    "1795051090799808198": "__rebar_unknown_comment_id__",
+    "1795051276710069934": "__rebar_unknown_comment_id__",
+    "1795051322773236803": "__rebar_unknown_comment_id__",
+    "1795051328785636000": "__rebar_unknown_comment_id__",
+    "1795051416997695453": "__rebar_unknown_comment_id__",
+    "1795051512086980903": "__rebar_unknown_comment_id__",
+    "1795052470622174907": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -125215,6 +125258,8 @@
     "REB-7281": "27fa-79cf-59c7-4db6",
     "REB-7282": "6ffc-a74b-dd65-4358",
     "REB-7283": "3822-a9e3-5999-422c",
+    "REB-7284": "9586-0118-310a-4f63",
+    "REB-7285": "977f-11fe-1dcb-4b7d",
     "REB-729": "cc7f-612b-cac1-4831",
     "REB-73": "3156-9092-1967-4367",
     "REB-730": "e534-5154-2401-40fb",
