@@ -276,8 +276,9 @@ jobs:
         run: |
           uv venv --python 3.13
           uv pip install ".[dev,reviewbot,ui]"
-      # Evidence only, never a verdict: on Windows rebar relies on the default ACL for signing
-      # keys (decision cloistered-decomposed-nymph), so print what a fresh key actually gets.
+      # Evidence only, never a verdict. It prints the default ACL a persistent signing key relies
+      # on (decision cloistered-decomposed-nymph), and a plain mkdtemp dir, whose OWNER RIGHTS
+      # entry is why compose_signer restricts its runtime dir to the owner (plump-smelly-indianabat).
       # mechanism-ok: ci_gate .github/workflows/test.yml::Print the ACL of a freshly minted op-cert key — almondy-columned-iguanodon records the default ACL the Windows decision relies on; continue-on-error, never gates.
       - name: Print the ACL of a freshly minted op-cert key
         continue-on-error: true
@@ -295,7 +296,6 @@ jobs:
           uv run --no-sync pytest -m "not integration and not external"
           -n 4 --dist worksteal -q -p no:cacheprovider
           --timeout=600 --timeout-method=thread
-          '@.github/windows-sweep-deselect/openssh-key-acl.args'
           '@.github/windows-sweep-deselect/unclassified.args'
 
   # Scheduled full macOS default suite catches platform regressions outside Verified's reduced
