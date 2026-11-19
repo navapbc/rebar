@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar.opcert_service import keyprov
 from rebar.opcert_service.config import OpcertServiceConfig
 from rebar.opcert_service.keyprov import compose_signer
 
@@ -111,7 +112,8 @@ def test_compose_still_works_after_pop(tmp_path: Path, monkeypatch: pytest.Monke
     try:
         copy = Path(signer.key_path)
         assert copy.is_file(), "compose_signer must have written its process-owned copy"
-        assert copy.stat().st_mode & 0o777 == 0o600
+        if keyprov._POSIX_MODE_BITS:  # Windows has no mode bits (cloistered-decomposed-nymph)
+            assert copy.stat().st_mode & 0o777 == 0o600
         assert signer.principal == "nava-opcert-test-932d"
     finally:
         signer.cleanup()

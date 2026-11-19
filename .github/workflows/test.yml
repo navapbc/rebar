@@ -276,6 +276,20 @@ jobs:
         run: |
           uv venv --python 3.13
           uv pip install ".[dev,reviewbot,ui]"
+      # Evidence only, never a verdict: on Windows rebar relies on the default ACL for signing
+      # keys (decision cloistered-decomposed-nymph), so print what a fresh key actually gets.
+      # mechanism-ok: ci_gate .github/workflows/test.yml::Print the ACL of a freshly minted op-cert key — almondy-columned-iguanodon records the default ACL the Windows decision relies on; continue-on-error, never gates.
+      - name: Print the ACL of a freshly minted op-cert key
+        continue-on-error: true
+        env:
+          KEY_DIR: ${{ runner.temp }}/opcert-acl-probe
+        run: >-
+          uv run --no-sync python -c "import os, subprocess, tempfile;
+          from rebar._opcert_signing import _generate_opcert_key;
+          d = os.environ['KEY_DIR']; os.makedirs(d, exist_ok=True);
+          key = os.path.join(d, '.opcert-key'); _generate_opcert_key(key);
+          copy_dir = tempfile.mkdtemp(prefix='rebar-opcert-');
+          [subprocess.run(['icacls', p], check=False) for p in (d, key, copy_dir)]"
       - name: Run the default suite
         run: >-
           uv run --no-sync pytest -m "not integration and not external"
@@ -284,8 +298,8 @@ jobs:
           '@.github/windows-sweep-deselect/hardcoded-tmp.args'
           '@.github/windows-sweep-deselect/max-path.args'
           '@.github/windows-sweep-deselect/nested-pytest-plugins.args'
+          '@.github/windows-sweep-deselect/openssh-key-acl.args'
           '@.github/windows-sweep-deselect/path-separators.args'
-          '@.github/windows-sweep-deselect/posix-permissions.args'
           '@.github/windows-sweep-deselect/posix-shell.args'
           '@.github/windows-sweep-deselect/text-encoding.args'
           '@.github/windows-sweep-deselect/unclassified.args'
