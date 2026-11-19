@@ -28388,6 +28388,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:13Z"
     },
+    "3e8c-b2fc-d34e-4a36": {
+      "created_at": "2026-11-19T11:31:18Z",
+      "jira_id": "4599498",
+      "jira_key": "REB-7291",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T11:31:21Z"
+    },
     "3e92-b7f4-dede-4c17": {
       "baseline": {
         "assignee": {
@@ -32480,10 +32487,24 @@
     },
     "47d8-baf8-2348-45c9": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\nBug 5f44-63ed-5428-4da0 made the signing-key mode test skip where the platform does not honour POSIX permission bits. On Windows the key reports mode 0o666 because Windows does not implement POSIX bits, so the 0o600 guarantee the test checks on POSIX is not checked there at all.\n\n## Approach\nDecide whether rebar must restrict the op-cert signing key's access on Windows (an ACL limited to the owner) or document that Windows relies on the user profile's default ACLs. If the former, scope the implementation as a separate change with a Windows-runner test.\n\n## Testing\nInspect the effective ACL of a freshly minted signing key on a Windows runner (icacls output recorded on the ticket); no code change for the decision itself.\n\n## Acceptance Criteria\n- [ ] The decision (restrict via ACL, or document the default) is recorded on this ticket with the observed Windows ACL of a new signing key (checked: icacls output in a ticket comment).",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nBug 5f44-63ed-5428-4da0 made the signing-key mode test skip where the platform does not honour POSIX permission bits. On Windows the key reports mode 0o666 because Windows does not implement POSIX bits, so the 0o600 guarantee the test checks on POSIX is not checked there at all.\n\n## Approach\nDecide whether rebar must restrict the op-cert signing key's access on Windows (an ACL limited to the owner) or document that Windows relies on the user profile's default ACLs. If the former, scope the implementation as a separate change with a Windows-runner test.\n\n## Testing\nInspect the effective ACL of a freshly minted signing key on a Windows runner (icacls output recorded on the ticket); no code change for the decision itself.\n\n## Acceptance Criteria\n- [x] The decision (restrict via ACL, or document the default) is recorded on this ticket with the observed Windows ACL of a new signing key (checked: icacls output in a ticket comment).",
         "priority": "Low",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Decide whether rebar owes Windows signing-key confidentiality (ACL equivalent)"
       },
       "created_at": "2026-10-25T01:13:28Z",
@@ -36466,6 +36487,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-31T07:44:24Z"
+    },
+    "513b-5241-456e-4d7a": {
+      "created_at": "2026-11-19T11:31:24Z",
+      "jira_id": "4599499",
+      "jira_key": "REB-7292",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T11:31:27Z"
     },
     "513d-67cd-5329-4220": {
       "baseline": {
@@ -84043,7 +84071,7 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nAfter an MCP blue-green cutover, `gate_status` on the new container reports a job that is still running on the draining container as `failed / daemon-stopped`, and writes that into the shared index. Callers then start a duplicate, billable gate run.\n\n### Observation (read-only, 2026-11-18 PST)\nTwo occurrences on 2026-11-16, both on `sarcastic-specified-kodiakbear` (times UTC):\n- `verify_completion_start` returned job `1794871413492186335-b6a138\u2026` at 23:23:33. Autodeploy cut `/mcp` over to a new container (8093) at 23:23:27 and retired `rebar-mcp-b4e0d01b6491-8092` with `docker stop --time 1260` (graceful drain). At 23:24:36, `gate_status` returned `status: failed, verdict: daemon-stopped`. The index file then ended `passed / PASS`, written 23:25:36 by the draining container's daemon.\n- `review_plan_start` returned job `1794872550672894186-492f05\u2026` at 23:42:30. Cutover to 8092 came at 23:44:25. At 23:49:37, `gate_status` returned `failed / daemon-stopped`. The index ended `passed / PASS` at 23:51:57.\nThe caller acted on the false failure and started a duplicate, billable run each time (23:24:45 and 23:49:58).\n\n### Mechanism (from code)\n`_running_record_is_stale` (`src/rebar/llm/gate_runs.py:293`) treats a `running` index record as crashed whenever `_mcp_inflight.is_job_active(job_id)` (`src/rebar/_mcp_inflight.py:135`) is false. That registry lives in process memory. Both containers share the `.rebar/gate_runs` index on the `gerrit_mcp_code` volume, so the new container has no registry entry for the old container's job. `_materialize_stale_running` (`gate_runs.py:308`) then writes `failed` into the shared index, and the old daemon overwrites it later. Autodeploy keeps the old container draining for up to 1,260 s, so every gate that spans a cutover takes this path.\n\n## Approach\nGive each job an owner lock that the kernel releases when the owning process dies, and have the poller ask the lock instead of only its own memory.\n1. Owner side (`src/rebar/_mcp_llm.py`, `_start_gate_job` at :257 and `_spawn_gate_daemon` at :218): the leader opens `.rebar/gate_runs/<job_id>.lock` and takes `rebar._store.lock_kernel.take_exclusive` (`lock_kernel.py:120`; `fcntl.flock` on POSIX, `msvcrt.locking` on Windows) before it writes the `running` record. The daemon's `finally` writes the terminal record first, then closes the fd and best-effort deletes the lock file. If the lock cannot be taken, the job still runs and pollers fall back to today's rule.\n2. Poller side (`gate_runs.py`): a new helper `_owner_lock_held(job_id, repo_root)` opens the existing lock file without creating it and tries `take_exclusive`; `is_contention` (`lock_kernel.py:185`) means a live owner holds it. `_running_record_is_stale` returns False when the owner lock is held. A missing lock file, or a lock that can be taken, keeps today's behaviour (stale after the grace window). `_materialize_stale_running` already re-reads the record, so an owner that finishes between the probe and the write still wins.\nWhy a kernel lock: the two containers have separate PID namespaces, so a stamped PID cannot be checked across them, but `flock` is held on the shared inode under one kernel and is dropped when the holder dies. The store write lock relies on the same property (`lock_kernel.py` docstring). A heartbeat would need a time threshold; the lock needs none. The lock file name ends in `.lock`, so the mechanism-delta census counts it; it gets a `# mechanism-ok: lock` marker naming this ticket. No config key, env var or flag. Portability: `lock_kernel` already provides both legs, and paths use `pathlib`; the test helper process is started with `sys.executable` and pipes, no signals or `fork`.\n\n## Scope\n- `src/rebar/llm/gate_runs.py`: owner-lock helpers, `_running_record_is_stale`.\n- `src/rebar/_mcp_llm.py`: take and release the owner lock.\n- `tests/unit/test_mcp_gate_async.py`: regression tests.\n\n## Testing\n- Live owner in another process: a helper Python process (started with `sys.executable`) takes the owner lock for job `J`; the test writes a `running` record for `J` older than the grace window with an empty in-process registry; `gate_run_status(J)` returns `running` and the index file is unchanged.\n- Owner died: the same helper exits (stdin closed), then `gate_run_status(J)` returns `failed / daemon-stopped` (existing tests for records with no lock file stay green).\n- End to end: a `review_plan_start` with a blocking stub leaves `<job_id>.lock` held while running and released after the terminal record is written.\n\n## Acceptance Criteria\n- [ ] A regression test simulates a job whose `running` index record was written by another process that is still alive, and asserts `gate_status` does not report `failed` or overwrite the index while that owner is live; `pytest tests/unit/test_mcp_gate_async.py` passes.\n- [ ] A job whose owning process really died is still materialized as failed (existing behaviour kept, test kept green).\n- [ ] `python scripts/check_mechanism_delta.py --check` exits 0 and `make verify` passes.\n- [ ] After merge, the `sweep (windows)` job of `test.yml` on main passes.",
+        "description": "## Context / Problem\nAfter an MCP blue-green cutover, `gate_status` on the new container reports a job that is still running on the draining container as `failed / daemon-stopped`, and writes that into the shared index. Callers then start a duplicate, billable gate run.\n\n### Observation (read-only, 2026-11-18 PST)\nTwo occurrences on 2026-11-16, both on `sarcastic-specified-kodiakbear` (times UTC):\n- `verify_completion_start` returned job `1794871413492186335-b6a138\u2026` at 23:23:33. Autodeploy cut `/mcp` over to a new container (8093) at 23:23:27 and retired `rebar-mcp-b4e0d01b6491-8092` with `docker stop --time 1260` (graceful drain). At 23:24:36, `gate_status` returned `status: failed, verdict: daemon-stopped`. The index file then ended `passed / PASS`, written 23:25:36 by the draining container's daemon.\n- `review_plan_start` returned job `1794872550672894186-492f05\u2026` at 23:42:30. Cutover to 8092 came at 23:44:25. At 23:49:37, `gate_status` returned `failed / daemon-stopped`. The index ended `passed / PASS` at 23:51:57.\nThe caller acted on the false failure and started a duplicate, billable run each time (23:24:45 and 23:49:58).\n\n### Mechanism (from code)\n`_running_record_is_stale` (`src/rebar/llm/gate_runs.py:293`) treats a `running` index record as crashed whenever `_mcp_inflight.is_job_active(job_id)` (`src/rebar/_mcp_inflight.py:135`) is false. That registry lives in process memory. Both containers share the `.rebar/gate_runs` index on the `gerrit_mcp_code` volume, so the new container has no registry entry for the old container's job. `_materialize_stale_running` (`gate_runs.py:308`) then writes `failed` into the shared index, and the old daemon overwrites it later. Autodeploy keeps the old container draining for up to 1,260 s, so every gate that spans a cutover takes this path.\n\n## Approach\nGive each job an owner lock that the kernel releases when the owning process dies, and have the poller ask the lock instead of only its own memory.\n1. Owner side (`src/rebar/_mcp_llm.py`, `_start_gate_job` at :257 and `_spawn_gate_daemon` at :218): the leader opens `.rebar/gate_runs/<job_id>.lock` and takes `rebar._store.lock_kernel.take_exclusive` (`lock_kernel.py:120`; `fcntl.flock` on POSIX, `msvcrt.locking` on Windows) before it writes the `running` record. The daemon's `finally` writes the terminal record first, then closes the fd and best-effort deletes the lock file. If the lock cannot be taken, the job still runs and pollers fall back to today's rule.\n2. Poller side (`gate_runs.py`): a new helper `_owner_lock_held(job_id, repo_root)` opens the existing lock file without creating it and tries `take_exclusive`; `is_contention` (`lock_kernel.py:185`) means a live owner holds it. `_running_record_is_stale` returns False when the owner lock is held. A missing lock file, or a lock that can be taken, keeps today's behaviour (stale after the grace window). `_materialize_stale_running` already re-reads the record, so an owner that finishes between the probe and the write still wins.\nWhy a kernel lock: the two containers have separate PID namespaces, so a stamped PID cannot be checked across them, but `flock` is held on the shared inode under one kernel and is dropped when the holder dies. The store write lock relies on the same property (`lock_kernel.py` docstring). A heartbeat would need a time threshold; the lock needs none. The lock file name ends in `.lock`, so the mechanism-delta census counts it; it gets a `# mechanism-ok: lock` marker naming this ticket. No config key, env var or flag. Portability: `lock_kernel` already provides both legs, and paths use `pathlib`; the test helper process is started with `sys.executable` and pipes, no signals or `fork`.\n\n## Scope\n- `src/rebar/llm/gate_runs.py`: owner-lock helpers, `_running_record_is_stale`.\n- `src/rebar/_mcp_llm.py`: take and release the owner lock.\n- `tests/unit/test_mcp_gate_async.py`: regression tests.\n\n## Testing\n- Live owner in another process: a helper Python process (started with `sys.executable`) takes the owner lock for job `J`; the test writes a `running` record for `J` older than the grace window with an empty in-process registry; `gate_run_status(J)` returns `running` and the index file is unchanged.\n- Owner died: the same helper exits (stdin closed), then `gate_run_status(J)` returns `failed / daemon-stopped` (existing tests for records with no lock file stay green).\n- End to end: a `review_plan_start` with a blocking stub leaves `<job_id>.lock` held while running and released after the terminal record is written.\n\n## Acceptance Criteria\n- [x] A regression test simulates a job whose `running` index record was written by another process that is still alive, and asserts `gate_status` does not report `failed` or overwrite the index while that owner is live; `pytest tests/unit/test_mcp_gate_async.py` passes.\n- [x] A job whose owning process really died is still materialized as failed (existing behaviour kept, test kept green).\n- [x] `python scripts/check_mechanism_delta.py --check` exits 0 and `make verify` passes.\n- [ ] After merge, the `sweep (windows)` job of `test.yml` on main passes.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "After an MCP blue-green cutover, gate_status on the new container marks a job still running on the draining container as failed (daemon-stopped)"
@@ -87594,7 +87622,7 @@
         },
         "description": "## Context / Problem\nThe MCP server's `rebar fsck` reports `ENV_ID_MISMATCH` for its own environment `eea68b7f` against `ad49f17f` (the review bot's clone) and `b2b5c498` (the retired pre-migration clone), and counts it, so fsck exits 1 on every run. The detector, `divergence_report` (`src/rebar/_store/env_identity.py:250`), groups event time spans by event `author` (git `user.name`, collected by `EnvAuthorshipTally.observe` in `src/rebar/_commands/fsck_authorship.py`). The review bot and the MCP server both commit as \"Rebar Bot\" by design, so their spans overlap and the line fires permanently.\n\nOperator decision (comment, 2026-11-18): detect environments by signing key, not author. Each environment has its own signing key even when the author is the same; checkouts in one environment may share a key. Rejected: creating a new identity, fsck failing permanently, counting finished overlaps indefinitely. No author grouping, no time window, no config key.\n\n## Findings (read-only, 2026-11-18 PST)\nProbe over every live (non-retired, non-SNAPSHOT) event in the Mac's tracker, which matches `origin/tickets` (0/0), reading the key embedded in each event's `author_sig` SSHSIG:\n- `eea68b7f` (MCP server): key `YWib9Gj1qZ` 2026-08-26 09:50 to 2026-09-07 15:38, then key `biqEFL9T96` 2026-09-15 11:13 to 2026-11-18 21:46. Sequential: a rotation. The \"1 event signed with YWib\" in the earlier 1,500-commit sample is the tail of the first key's era.\n- `ad49f17f` (review bot): key `PU4nHIqJCR` to 2026-09-07 15:49, then `oGCqzgfDMp` from 2026-09-07 18:05. Sequential.\n- `reconciler` env: `PU4nHIqJCR` then `oGCqzgfDMp`, sequential. Every other env id has one key.\n- So under the key rule, the live store has no `ENV_ID_MISMATCH` row.\n- Open point 1: `oGCqzgfDMp` (comment `rebar-bot \u2026 rotated-20260907`) is both the review bot's key and the Mac's configured `identity.signing_key`. Two environments share one key. Filed as `unaroused-destitute-cobra`; no key or deployment changed here. Effect on this rule: a `.env-id` carried between those two would not be reported (a false negative, never a false positive).\n- Open point 3: unsigned events (no `author_sig`) and signatures whose key cannot be parsed carry no key, so they create no key span and cannot cause or hide a report.\n\n## Approach\n1. `EnvAuthorshipTally.observe` records, per `(env_id, key fingerprint)`, the first and last event timestamp. The key comes from `rebar.attest.dsse.decode(author_sig)` then `rebar.attest.sshsig.embedded_public_key(sig)` (both existing), and the fingerprint is `SHA256:` plus the unpadded base64 SHA-256 of the key blob, the form `ssh-keygen -l` prints. Events without a key or without an integer timestamp add nothing. The per-author spans are removed (no other consumer: `identity_spans` is read only at `fsck_tracker_health.py:44`).\n2. `divergence_report(spans)` reports each env id that has 2 or more keys whose closed time spans overlap, store-wide, naming the env id, the overlapping key fingerprints and their spans. Sequential keys (rotation) and several env ids under one key are not reported.\n3. The line stays `ENV_ID_MISMATCH` but becomes report-only: `fsck_tracker_health.py` passes `False`, and `env_id_mismatch` joins `_NEVER_COUNTED_SCAN_KINDS` (`src/rebar/_commands/fsck.py:78`). Reason: spans are whole-history min..max and events are never rewritten, so a counted overlap could never stop counting without a time window, which the operator rejected along with permanent fsck failure. The message tells the operator the cause (a `.env-id` copied into another environment) and the remedy (delete `.env-id` in the copied checkout so it mints its own).\n4. Update the `ENV_ID_MISMATCH` paragraph in `docs/concurrency.md` and the module docstring.\nPortability: pure Python bytes and string handling, no filesystem, process or signal API.\n\n## Scope\n- `src/rebar/_store/env_identity.py`: `divergence_report`, docstrings.\n- `src/rebar/_commands/fsck_authorship.py`: key spans in the tally.\n- `src/rebar/_commands/fsck_tracker_health.py`: report-only flag.\n- `src/rebar/_commands/fsck.py`: `_NEVER_COUNTED_SCAN_KINDS`.\n- `docs/concurrency.md`: detector description.\n- `tests/interfaces/store/test_env_identity_guard.py`, `tests/interfaces/facades/test_fsck_issue_count_29c3.py`.\n\n## Testing\nTests build `author_sig` values from synthetic SSHSIG blobs with chosen embedded keys (no `ssh-keygen` needed).\n- One env id, keys A (100..300) and B (200..400): reported, names the env id and both fingerprints; fsck exits 0 and JSON marks the item `counted: false`.\n- One env id, A (100..200) then B (300..400): not reported (rotation).\n- Two env ids, one key: not reported. Two env ids, two keys: not reported.\n- Same author \"Rebar Bot\" under two env ids with overlapping spans but different keys: not reported (the server's case).\n- Unsigned events and unparseable signatures inside another key's span: not reported.\n\n## Acceptance Criteria\n- [x] The key-overlap rule above is implemented and covered by the cases in Testing, in `tests/interfaces/store/test_env_identity_guard.py`; `pytest tests/interfaces/store/test_env_identity_guard.py tests/interfaces/facades/test_fsck_issue_count_29c3.py` passes.\n- [x] `ENV_ID_MISMATCH` is report-only: a store with an overlap makes `rebar fsck` print the line and exit 0, verified by a test.\n- [x] Run against a read-only copy of the live tracker, the new detector prints no `ENV_ID_MISMATCH` line; result recorded in a ticket comment.\n- [x] `docs/concurrency.md` describes the key-based rule.\n- [x] `make verify` passes.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Server fsck reports ENV_ID_MISMATCH for services that share one author name; detect by signing key instead"
       },
       "created_at": "2026-11-04T11:33:48Z",
@@ -103430,6 +103458,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:23Z"
+    },
+    "e816-b30a-6a5c-4ae4": {
+      "created_at": "2026-11-19T11:31:28Z",
+      "jira_id": "4599500",
+      "jira_key": "REB-7293",
+      "state": "confirmed",
+      "updated_at": "2026-11-19T11:31:33Z"
     },
     "e818-564e-d3b6-4eaa": {
       "baseline": {
@@ -119915,7 +119950,17 @@
     "1795081735877559006": "__rebar_unknown_comment_id__",
     "1795081741742422693": "__rebar_unknown_comment_id__",
     "1795081747128218701": "__rebar_unknown_comment_id__",
-    "1795081887506606430": "__rebar_unknown_comment_id__"
+    "1795081887506606430": "__rebar_unknown_comment_id__",
+    "1795084337633135252": "__rebar_unknown_comment_id__",
+    "1795087054626401749": "__rebar_unknown_comment_id__",
+    "1795087062218034632": "__rebar_unknown_comment_id__",
+    "1795087067619621608": "__rebar_unknown_comment_id__",
+    "1795087071592890988": "__rebar_unknown_comment_id__",
+    "1795087285815819745": "__rebar_unknown_comment_id__",
+    "1795087341520274677": "__rebar_unknown_comment_id__",
+    "1795087346106012284": "__rebar_unknown_comment_id__",
+    "1795087532857129675": "__rebar_unknown_comment_id__",
+    "1795087543244584943": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -125540,6 +125585,9 @@
     "REB-7289": "77d4-2f6d-bebc-4340",
     "REB-729": "cc7f-612b-cac1-4831",
     "REB-7290": "9c9a-3331-822f-401c",
+    "REB-7291": "3e8c-b2fc-d34e-4a36",
+    "REB-7292": "513b-5241-456e-4d7a",
+    "REB-7293": "e816-b30a-6a5c-4ae4",
     "REB-73": "3156-9092-1967-4367",
     "REB-730": "e534-5154-2401-40fb",
     "REB-731": "eced-c6b8-7461-48a0",
