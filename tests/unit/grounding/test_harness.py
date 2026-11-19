@@ -171,11 +171,19 @@ def test_worker_hard_crash_maps_to_parse_error_not_host_crash() -> None:
     assert again.completed and again.value == 10
 
 
+def test_the_signal_name_is_symbolic_where_the_platform_defines_it() -> None:
+    import signal
+
+    expected = "SIGKILL" if hasattr(signal, "SIGKILL") else "signal 9"
+    assert harness._signal_name(9) == expected
+
+
 @pytest.mark.parametrize(
     ("exitcode", "os_name", "expected"),
     [
-        (-9, "posix", "killed by SIGKILL"),
-        (-9, "nt", "killed by SIGKILL"),
+        # signal.Signals has no SIGKILL member on Windows, so the name degrades to the number.
+        (-9, "posix", f"killed by {harness._signal_name(9)}"),
+        (-9, "nt", f"killed by {harness._signal_name(9)}"),
         (0xC0000005, "nt", "crashed with NTSTATUS 0xc0000005"),
         (0xC0000409, "nt", "crashed with NTSTATUS 0xc0000409"),
     ],

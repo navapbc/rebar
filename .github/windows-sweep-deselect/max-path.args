@@ -142,6 +142,7 @@
 --deselect=tests/unit/test_code_review_gate_session.py::test_local_session_review_creates_reuses_artifact_with_session_and_deps
 --deselect=tests/unit/test_code_review_gate_session.py::test_pass1_finder_receives_no_prior_findings
 --deselect=tests/unit/test_completion_signing_material.py::test_attested_run_records_the_material_the_verifier_read
+--deselect=tests/unit/test_opcert_producer_seam_8d8e.py::test_orchestrator_degrade_key_unregenerable_records_unsigned
 --deselect=tests/unit/test_opcert_producer_seam_8d8e.py::test_orchestrator_degrade_ssh_keygen_unavailable_records_unsigned
 --deselect=tests/unit/test_plan_review_agentic.py::test_a_failed_agent_run_is_unsigned_indeterminate[runner-error]
 --deselect=tests/unit/test_plan_review_agentic.py::test_a_failed_agent_run_is_unsigned_indeterminate[schema-invalid]
