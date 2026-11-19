@@ -439,16 +439,10 @@ def _load_state(repo: Path, tid: str) -> dict:
     return _reads.show_ticket(tid, repo_root=str(repo))
 
 
-def _pin(repo: Path, env_id: str, pub: str, position: str) -> None:
-    (repo / ".rebar").mkdir(exist_ok=True)
-    (repo / ".rebar" / "trusted_environments.yaml").write_text(
-        "environments:\n"
-        f"  - env_id: {env_id}\n"
-        "    keys:\n"
-        f"      - public_key: '{pub}'\n"
-        f"        added_at_log_position: '{position}'\n"
-        "        revoked_at_log_position: null\n",
-        encoding="utf-8",
+def _pin(repo: Path, env_id: str, pub: str, _position: str) -> None:
+    """List ``env_id``'s key in the fixture repo's ``verify.trusted_opcert_keys`` (ADR 0125)."""
+    (repo / "rebar.toml").write_text(
+        f'[verify]\ntrusted_opcert_keys = ["{env_id} {pub}"]\n', encoding="utf-8"
     )
 
 
@@ -531,7 +525,7 @@ def test_classify_rejects_a_cert_of_another_kind(tmp_path, monkeypatch) -> None:
 @_needs_ssh
 def test_classify_pinned_foreign_environment_reaches_accepted(tmp_path, monkeypatch) -> None:
     """THE CROSS-HOST AC: a same-material op-cert signed by ANOTHER environment whose key is
-    PINNED in trusted_environments.yaml classifies ACCEPTED — the review bot (a different host
+    LISTED in verify.trusted_opcert_keys classifies ACCEPTED — the review bot (a different host
     from the signer) must not flag an attestation merely for being foreign."""
     repo, tracker, tid, pos = _bug_in_store(tmp_path, monkeypatch)
     env_id = "foreign-ci@rebar.test"
@@ -549,8 +543,10 @@ def test_classify_unpinned_signing_environment_is_accepted(tmp_path, monkeypatch
     repo, tracker, tid, _pos = _bug_in_store(tmp_path, monkeypatch)
     env_id = "unpinned-dev@rebar.test"
     _mint_plan_review_record(repo, tracker, tid, "unpinned-env", env_id, tmp_path)
-    # Precondition: nothing pins this principal — the exact situation a developer is in.
-    assert not (repo / ".rebar" / "trusted_environments.yaml").exists()
+    # Precondition: no trust list names this principal — the exact situation a developer is in.
+    from rebar import config
+
+    assert config.compose_config(root=str(repo)).verify.trusted_opcert_keys == ()
     res = bsg.classify_plan_review_attestation(tid, repo_root=str(repo))
     assert res["verdict"] == "certified", res
     assert bsg.bucket_for_verdict(res["verdict"]) == "accepted"

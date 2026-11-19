@@ -217,7 +217,6 @@ guarantee `2`).
 | `list --limit` | 0 | — | — | `--limit` not a positive integer → 2; with `--type=session_log --sort=-created` replaces `session-logs` |
 | `sign` | 0 | 1 | — | signs the ticket's current event manifest; bad args → 2 |
 | `sign-review` | 0 | 1 | — | cheap re-sign of an existing PASS verdict (no LLM); refused when sidecar absent, non-PASS, or plan changed → 1 |
-| `trusted-env` | 0 | — | — | no ticket id; maintains `.rebar/trusted_environments.yaml`; bad args → 2; error → 1 |
 | `verify-commit-ticket` | 0 | — | — | no ticket id; 0 = commit has a valid rebar-ticket trailer, 1 = missing or invalid, 2 = bad args |
 | `verify-completion` | 0 | 1 | — | PASS → 0, ordinary FAIL → 1, nonretryable raised `LLMError` → 1, retryable raised `LLMError` → 11, `verdict_obtainable=false` → 11, insufficiency-only FAIL (`evidence_sufficient=false`) → 11 |
 | `verify-identity` | 0 | — | — | authenticated-authorship merge gate; 0 = verified, 1 = not-verified, 2 = bad args |
