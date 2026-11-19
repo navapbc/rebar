@@ -393,9 +393,7 @@ class VerifySignatureResult(TypedDict):
     ]
     reason: str
     ticket_id: str
-    trust_basis: NotRequired[
-        Literal["own_key", "pinned_environment", "envelope_key", "trust_list", None]
-    ]
+    trust_basis: NotRequired[Literal["envelope_key", "trust_list", None]]
     signing_key: NotRequired[str | None]
     rebar_version: NotRequired[str | None]
 

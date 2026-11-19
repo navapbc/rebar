@@ -40,12 +40,13 @@ def build_opcert(*, prog: str) -> argparse.ArgumentParser:
             "tickets, which is the op-cert merge-gate. It walks the merged log, groups events "
             "by ticket, and for each in-scope closed ticket verifies that "
             "verify.require_environment (or --require-environment) produced a valid "
-            "completion-verifier op-cert against its out-of-band-pinned key in "
-            ".rebar/trusted_environments.yaml. It is advisory unless a required environment is "
-            "set, in which case any enforced closed ticket without a valid cert fails the gate "
-            "with a non-zero exit. Tickets whose close commit predates --since or "
-            "verify.opcert_enforce_since are grandfathered, which means they are reported but "
-            "never fail the gate."
+            "completion-verifier op-cert signed by a key that this environment's "
+            "verify.trusted_opcert_keys list names for that environment. It is advisory unless "
+            "a required environment is set, in which case any enforced closed ticket without a "
+            "valid cert fails the gate with a non-zero exit. A required environment without a "
+            "trust list is a configuration error. Tickets whose close commit predates --since or "
+            "verify.opcert_enforce_since are grandfathered, which means reported but never fail "
+            "the gate."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

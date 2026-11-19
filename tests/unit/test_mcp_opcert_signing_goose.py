@@ -1,7 +1,7 @@
 """Verify MCP op-certs signed by the box's trusted environment.
 
 The server uses its env_id and materialized Ed25519 key. The merge gate checks
-the pinned public key. These tests use Ed25519 cryptography, a temporary store, and a
+its trust list (ADR 0125). These tests use Ed25519 cryptography, a temporary store, and a
 fixture rebar.toml. Environment enforcement remains a deferred operator step
 (infra/runbooks/mcp-opcert-enforcement-flip.md).
 
@@ -9,7 +9,7 @@ AC1: a cert from the startup binding verifies. One from an unregistered key
 fails, without adding a pin or committing a private key. AC2: fixture
 require_environment and opcert_enforce_since reject an uncertified close after
 the boundary and grandfather one before it. AC3: removing require_environment
-restores advisory checks while an existing pinned cert still verifies."""
+restores advisory checks while an existing listed cert still verifies."""
 
 from __future__ import annotations
 
@@ -92,38 +92,11 @@ def _tracker_head(repo: Path) -> str:
     ).stdout.strip()
 
 
-def _tip_position(repo: Path) -> str:
-    import os
-
-    from rebar.reducer._cache import is_active_event
-
-    tracker = _tracker(repo)
-    best = ""
-    for d in os.listdir(tracker):
-        dp = os.path.join(tracker, d)
-        if d.startswith(".") or not os.path.isdir(dp):
-            continue
-        for fn in os.listdir(dp):
-            if not fn.endswith(".json") or fn.startswith(".") or not is_active_event(fn):
-                continue
-            pos = fn[:-5].rsplit("-", 1)[0]
-            if pos > best:
-                best = pos
-    return best
-
-
-def _write_trusted_env(repo: Path, env_id: str, pub: str, added_at_position: str) -> None:
-    d = repo / ".rebar"
-    d.mkdir(exist_ok=True)
-    (d / "trusted_environments.yaml").write_text(
-        "environments:\n"
-        f"  - env_id: {env_id}\n"
-        "    keys:\n"
-        f"      - public_key: {pub}\n"
-        f"        added_at_log_position: {added_at_position}\n"
-        "        revoked_at_log_position: null\n",
-        encoding="utf-8",
-    )
+def _trust_env_key(monkeypatch: pytest.MonkeyPatch, env_id: str, pub: str) -> None:
+    """List ``env_id``'s key in this environment's op-cert trust list (ADR 0125), the way the box
+    deployment does: through ``REBAR_VERIFY_TRUSTED_OPCERT_KEYS``, which the ``verify-opcert``
+    subprocess inherits."""
+    monkeypatch.setenv("REBAR_VERIFY_TRUSTED_OPCERT_KEYS", f"{env_id} {pub}")
 
 
 def _write_verify_config(
@@ -168,7 +141,7 @@ def _mint_completion_cert_via_binding(repo: Path, tid: str, binding, commit: str
         signing.sign_manifest(tid, manifest, kind=KIND, repo_root=str(repo))
 
 
-# ── AC1: round-trip against the pinned environment ─────────────────────────────────────────────
+# ── AC1: round-trip against the listed environment ─────────────────────────────────────────────
 def test_startup_binding_composes_from_env_and_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -193,16 +166,16 @@ def test_unprovisioned_startup_binding_is_none(
     assert compose_startup_opcert_binding(cfg) is None
 
 
-def test_container_minted_cert_verifies_against_pinned_env(
+def test_container_minted_cert_verifies_against_listed_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """AC1 positive: a completion-verifier cert minted through the server's startup binding
-    verifies against the pinned pubkey through the real verify-opcert walk (exit 0)."""
+    verifies against the listed pubkey through the real verify-opcert walk (exit 0)."""
     repo = _store(tmp_path, monkeypatch)
     priv, pub = _keypair(tmp_path, "boxkey")
     commit = _head(repo)
     tid = rebar.create_ticket("task", "gated work", repo_root=str(repo))
-    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    _trust_env_key(monkeypatch, ENV_ID, pub)
 
     binding = _compose_binding(repo, monkeypatch, ENV_ID, priv)
     assert binding is not None
@@ -220,25 +193,23 @@ def test_container_minted_cert_verifies_against_pinned_env(
 
 def test_unregistered_key_cert_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """AC1 contrast: an otherwise-identical cert minted under an UNREGISTERED key (a binding whose
-    key is not the pinned one) is REJECTED by the real verify path (exit 1)."""
+    key is not the listed one) is REJECTED by the real verify path (exit 1)."""
     repo = _store(tmp_path, monkeypatch)
     _pinned_priv, pinned_pub = _keypair(tmp_path, "pinned")
     foreign_priv, _foreign_pub = _keypair(tmp_path, "foreign")
     commit = _head(repo)
     tid = rebar.create_ticket("task", "gated work", repo_root=str(repo))
-    # Pin the TRUSTED key, but mint the cert under a FOREIGN key composed the same way.
-    # The pin is WRITTEN after the mint (with the same pre-mint era position, so the pinned
-    # config the verify walk reads is byte-identical to writing it up front): the sign-time
-    # principal/key-divergence guard added for bug ff4a-2832-def4-4e55 now REFUSES to mint a
-    # cert claiming a pinned environment under a key that environment does not pin, and this
-    # test's oracle is the VERIFY-side rejection, not the mint. Assertions are unchanged.
-    era_position = _tip_position(repo)
+    # List the TRUSTED key, then mint the cert under a FOREIGN key composed the same way.
+    # Signing is never gated on an allowed key (ADR 0125), so the mint succeeds; the
+    # VERIFY side is what reports the unlisted signer.
+    _trust_env_key(monkeypatch, ENV_ID, pinned_pub)
 
     binding = _compose_binding(repo, monkeypatch, ENV_ID, foreign_priv)
     assert binding is not None
     _mint_completion_cert_via_binding(repo, tid, binding, commit)
-    _write_trusted_env(repo, ENV_ID, pinned_pub, era_position)
     binding.cleanup()
+    rec = rebar.show_ticket(tid, repo_root=str(repo))["attestations"][KIND]
+    assert rec["principal"] == ENV_ID  # minted, under the claimed environment
     rebar.transition(tid, "open", "closed", repo_root=str(repo))
 
     proc = _run_verify_opcert(repo, "--require-environment", ENV_ID)
@@ -246,7 +217,7 @@ def test_unregistered_key_cert_is_rejected(tmp_path: Path, monkeypatch: pytest.M
     # Negative-control oracle: the exit-1 must be the cert REJECTION (untrusted signer), not an
     # unrelated infra fault (exit 2) or crash — assert the specific rejection reason is reported.
     combined = proc.stdout + proc.stderr
-    assert "invalid op-cert" in combined, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+    assert "invalid op-cert (untrusted" in combined, f"stdout={proc.stdout}\nstderr={proc.stderr}"
     assert tid in combined
 
 
@@ -259,7 +230,7 @@ def test_no_private_key_is_committed_in_repo(
     priv, pub = _keypair(tmp_path, "boxkey")
     commit = _head(repo)
     tid = rebar.create_ticket("task", "gated work", repo_root=str(repo))
-    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    _trust_env_key(monkeypatch, ENV_ID, pub)
     binding = _compose_binding(repo, monkeypatch, ENV_ID, priv)
     _mint_completion_cert_via_binding(repo, tid, binding, commit)
     key_copy = binding.key_path
@@ -284,7 +255,7 @@ def test_post_boundary_close_without_cert_is_enforced(
     repo = _store(tmp_path, monkeypatch)
     _priv, pub = _keypair(tmp_path, "env")
     tid = rebar.create_ticket("task", "post-boundary work", repo_root=str(repo))
-    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    _trust_env_key(monkeypatch, ENV_ID, pub)
     # Boundary = the tracker tip BEFORE the close, so the close-STATUS commit is a DESCENDANT
     # of it → enforced.
     boundary = _tracker_head(repo)
@@ -303,7 +274,7 @@ def test_pre_boundary_close_without_cert_is_grandfathered(
     repo = _store(tmp_path, monkeypatch)
     _priv, pub = _keypair(tmp_path, "env")
     tid = rebar.create_ticket("task", "historical work", repo_root=str(repo))
-    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    _trust_env_key(monkeypatch, ENV_ID, pub)
     rebar.transition(tid, "open", "closed", repo_root=str(repo))  # closed, NO op-cert
     # A LATER tracker commit becomes the boundary, so the close predates it → grandfathered.
     rebar.create_ticket("task", "later activity", repo_root=str(repo))
@@ -323,7 +294,7 @@ def test_rollback_unset_require_environment_is_advisory_everywhere(
     repo = _store(tmp_path, monkeypatch)
     _priv, pub = _keypair(tmp_path, "env")
     tid = rebar.create_ticket("task", "post-boundary work", repo_root=str(repo))
-    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    _trust_env_key(monkeypatch, ENV_ID, pub)
     boundary = _tracker_head(repo)
     rebar.transition(tid, "open", "closed", repo_root=str(repo))  # closed, NO op-cert
 
@@ -341,13 +312,13 @@ def test_rollback_unset_require_environment_is_advisory_everywhere(
 def test_rollback_existing_opcert_trust_still_verifies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """AC3 regression oracle: after rollback the existing pinned-env op-cert trust path is intact —
+    """AC3 regression oracle: after rollback the existing listed-env op-cert trust path is intact —
     re-enabling require_environment still certifies a validly signed cert (exit 0)."""
     repo = _store(tmp_path, monkeypatch)
     priv, pub = _keypair(tmp_path, "env")
     commit = _head(repo)
     tid = rebar.create_ticket("task", "gated work", repo_root=str(repo))
-    _write_trusted_env(repo, ENV_ID, pub, _tip_position(repo))
+    _trust_env_key(monkeypatch, ENV_ID, pub)
     binding = _compose_binding(repo, monkeypatch, ENV_ID, priv)
     _mint_completion_cert_via_binding(repo, tid, binding, commit)
     binding.cleanup()

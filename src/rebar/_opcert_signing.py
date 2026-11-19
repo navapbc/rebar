@@ -199,22 +199,6 @@ def _current_binding() -> OpcertBinding | None:
     return current_binding()
 
 
-def _opcert_own_key_paths(tracker: str | os.PathLike[str]) -> list[str]:
-    """List bound, configured, and tracker key paths for read-only verification.
-
-    Include deployed keys outside the tracker so their public half is discoverable.
-    """
-    paths: list[str] = []
-    binding = _current_binding()
-    if binding is not None and binding.key_path:
-        paths.append(binding.key_path)
-    override = os.environ.get("REBAR_OPCERT_KEY_PATH")  # read-via: credential-deployment-override
-    if override and override.strip():
-        paths.append(override.strip())
-    paths.append(opcert_key_path(tracker))
-    return list(dict.fromkeys(paths))
-
-
 def _read_opcert_pub(key_path: str) -> str | None:
     """The public-key line for ``key_path`` — the cached ``.pub`` if readable, else derived from
     the private key (:func:`_derive_opcert_pub`, which caches best-effort). None when neither."""
@@ -237,94 +221,6 @@ def _ssh_pub_body(line: str | None) -> str | None:
     if len(parts) < 2:
         return None
     return f"{parts[0]} {parts[1]}"
-
-
-def _opcert_own_public_keys(tracker: str | os.PathLike[str]) -> list[str]:
-    """The public-key lines (``ssh-ed25519 AAAA…``) for every key this environment holds — the
-    trust root for SAME-ENVIRONMENT certification. Empty when it holds none, which is the honest
-    "cannot certify anything here" signal. Read-only: never CREATES a private key."""
-    pubs = [_read_opcert_pub(kp) for kp in _opcert_own_key_paths(tracker)]
-    return list(dict.fromkeys([p for p in pubs if p]))
-
-
-def _warn_if_verify_cannot_resolve(
-    tracker: str | os.PathLike[str], key_path: str, principal: str
-) -> None:
-    """Warn when local verification cannot resolve the signing key's public half.
-
-    This advisory never changes or refuses the minted record.
-    """
-    try:
-        signed_body = _ssh_pub_body(_read_opcert_pub(key_path))
-        own = {b for b in (_ssh_pub_body(p) for p in _opcert_own_public_keys(tracker)) if b}
-        if signed_body is not None and signed_body in own:
-            return
-        logger.warning(
-            "op-cert signed under a key whose public counterpart the same-environment verify path "
-            "cannot resolve (key_path=%s, principal=%s): the signature is valid but "
-            "verify_signature on this environment will not certify it (foreign_key). See bug "
-            "879b-9bf0-86fd-4a6b.",
-            key_path,
-            principal,
-        )
-    except Exception:
-        logger.debug(
-            "op-cert public-counterpart guard skipped (best-effort; key_path=%s)",
-            key_path,
-            exc_info=True,
-        )
-
-
-def _pinned_public_key_bodies(principal: str, repo_root) -> set[str] | None:
-    """Return active pinned SSH key bodies for a principal.
-
-    ``None`` means unpinned; an empty set means pinned but fully revoked and must
-    refuse signing. An unreadable trust root raises instead of masquerading as
-    unpinned. Import trust helpers lazily to avoid a cycle.
-    """
-    from rebar.attest import trusted_env
-
-    try:
-        keyring = trusted_env.trusted_env_keyring(principal, repo_root)
-    except Exception as exc:  # noqa: BLE001 — an undeterminable trust root must never read as "unpinned"
-        raise OpcertKeyUnavailable(
-            "Error: cannot mint op-cert signature: the trusted-environments pin config could "
-            f"not be read, so whether {principal!r} is a pinned environment is unknown "
-            f"({exc}). Refusing rather than signing an unverifiable certificate. "
-            "See bug ff4a-2832-def4-4e55."
-        ) from None
-    if not keyring:
-        return None
-    return {
-        b
-        for b in (
-            _ssh_pub_body(k.get("public_key"))
-            for k in keyring
-            if k.get("revoked_at_log_position") is None
-        )
-        if b
-    }
-
-
-def _refuse_if_pinned_principal_key_mismatch(key_path: str, principal: str, repo_root) -> None:
-    """Refuse a key that cannot sign for its claimed pinned principal.
-
-    This catches lost async signer bindings that mint valid local signatures for
-    the wrong environment. Unpinned principals and unreadable public halves use
-    their existing paths; fully revoked pinsets refuse.
-    """
-    pinned = _pinned_public_key_bodies(principal, repo_root)
-    if pinned is None:  # not a pinned environment — the developer-local path, unchanged
-        return
-    signed_body = _ssh_pub_body(_read_opcert_pub(key_path))
-    if signed_body is None or signed_body in pinned:
-        return
-    raise OpcertKeyUnavailable(
-        "Error: cannot mint op-cert signature: the certificate would claim the pinned "
-        f"environment {principal!r} but is signed under a key that environment does not pin "
-        f"(key_path={key_path}). Such a certificate cannot verify against that environment's "
-        "pinned public key. See bug ff4a-2832-def4-4e55."
-    )
 
 
 def _manifest_material_fingerprint(manifest) -> str | None:
@@ -362,8 +258,6 @@ def mint_opcert_record(
     key_path = ensure_opcert_key(str(tracker), create_if_missing=True, binding=binding)
 
     principal = opcert_principal(str(tracker), binding=binding)
-    _warn_if_verify_cannot_resolve(tracker, key_path, principal)
-    _refuse_if_pinned_principal_key_mismatch(key_path, principal, repo_root)
     material_fingerprint = _manifest_material_fingerprint(steps) or ""
     # Bound commit: the manifest's signed `verified-at-sha:` when present (an attested review or
     # close), else current HEAD. HEAD is resolved once: nothing below moves it.

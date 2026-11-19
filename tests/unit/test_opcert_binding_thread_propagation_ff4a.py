@@ -1,6 +1,8 @@
 """Bug ff4a-2832-def4-4e55 — a PASSED plan-review persisted an unverifiable attestation.
 
-Two independent defects, one RED test each.
+The bug had two defects. This module covers the first; the second (sign-time refusal of a key
+not pinned for its principal) was retired with the repository pin file by ADR 0125, because
+signing is never gated on an allowed key.
 
 **(1) The async gate surface loses the op-cert signer binding.** ``_spawn_gate_daemon``
 (``rebar._mcp_llm``) and the ``run_workflow`` daemon (``rebar._mcp_writes``) run their work on a
@@ -8,13 +10,8 @@ bare ``threading.Thread``, which starts with a FRESH ``contextvars.Context``. Th
 ``bound_signer()`` in the uvicorn serving thread is therefore invisible inside them, so
 ``ensure_opcert_key`` falls through to the ``<tracker>/.opcert-key`` genesis and silently
 auto-generates a key — while ``opcert_principal`` still reads the process-global
-``REBAR_OPCERT_ENV_ID`` and keeps claiming the pinned environment. The cert is minted under a key
-nobody trusts.
-
-**(2) Nothing says so at sign time.** ``mint_opcert_record`` will happily mint a cert whose claimed
-principal IS pinned in ``.rebar/trusted_environments.yaml`` but whose signing key is NOT one of
-that principal's pinned keys — an attestation that cannot verify anywhere but the signing box. The
-failure surfaced hours later, at close.
+``REBAR_OPCERT_ENV_ID`` and keeps claiming the deployed environment. The cert is minted under a key
+nobody expects.
 """
 
 from __future__ import annotations
@@ -23,7 +20,6 @@ import contextlib
 import threading
 from dataclasses import dataclass
 
-import pytest
 from _opcert_helpers import keypair
 
 
@@ -177,203 +173,3 @@ def test_the_thread_spawn_scan_sees_through_import_aliases():
     assert _thread_spawn_names(plain) == {"threading.Thread"}
     unrelated = ast.parse("from concurrent.futures import Thread\n")
     assert _thread_spawn_names(unrelated) == set()
-
-
-def _pin(repo, env_id: str, public_key: str, revoked: str | None = None) -> None:
-    rebar_dir = repo / ".rebar"
-    rebar_dir.mkdir(parents=True, exist_ok=True)
-    (rebar_dir / "trusted_environments.yaml").write_text(
-        "environments:\n"
-        f'  - env_id: "{env_id}"\n'
-        "    keys:\n"
-        f'      - public_key: "{public_key}"\n'
-        '        added_at_log_position: "1-a"\n'
-        + (
-            "        revoked_at_log_position: null\n"
-            if revoked is None
-            else f'        revoked_at_log_position: "{revoked}"\n'
-        ),
-        encoding="utf-8",
-    )
-
-
-def test_mint_refuses_a_cert_whose_key_is_not_pinned_for_its_claimed_principal(
-    tmp_path, monkeypatch
-):
-    """Sign time, not close time: minting must REFUSE when the claimed principal is pinned but
-    the signing key is not one of its pinned keys.
-
-    That cert can only ever verify on the box that made it. Today the mint reports success and
-    the failure surfaces hours later, at the close gate, as
-    ``ssh-keygen -Y verify rejected signature (exit 255)``.
-    """
-    import subprocess
-
-    import rebar
-    from rebar._opcert_signing import OpcertKeyUnavailable, mint_opcert_record
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    for args in (
-        ("git", "init", "-q"),
-        ("git", "config", "user.email", "d@e.test"),
-        ("git", "config", "user.name", "D"),
-        ("git", "commit", "-q", "--allow-empty", "-m", "init"),
-    ):
-        subprocess.run(args, cwd=repo, check=True, capture_output=True)
-    monkeypatch.setenv("REBAR_ROOT", str(repo))
-    rebar.init_repo(repo_root=str(repo))
-
-    # Someone ELSE's key is what the project pinned for this principal.
-    _, pinned_public = keypair(tmp_path, "the-real-prod-key")
-    _pin(repo, "pinned-prod-env", pinned_public)
-
-    # This process claims that principal but has no bound signer and no key override, so it
-    # will sign under a freshly generated <tracker>/.opcert-key.
-    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "pinned-prod-env")
-    monkeypatch.delenv("REBAR_OPCERT_KEY_PATH", raising=False)
-
-    with pytest.raises(OpcertKeyUnavailable) as excinfo:
-        mint_opcert_record(
-            "t-ff4a",
-            ["plan-review: PASS", "ticket: t-ff4a", "material: deadbeef"],
-            kind="plan-review",
-            repo_root=str(repo),
-        )
-    assert "pinned-prod-env" in str(excinfo.value)
-
-
-def test_mint_still_succeeds_for_an_unpinned_principal(tmp_path, monkeypatch):
-    """The guard must not disturb the developer-local path: an UNPINNED principal (every
-    ordinary dev box) signs under its genesis key exactly as before."""
-    import subprocess
-
-    import rebar
-    from rebar._opcert_signing import mint_opcert_record
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    for args in (
-        ("git", "init", "-q"),
-        ("git", "config", "user.email", "d@e.test"),
-        ("git", "config", "user.name", "D"),
-        ("git", "commit", "-q", "--allow-empty", "-m", "init"),
-    ):
-        subprocess.run(args, cwd=repo, check=True, capture_output=True)
-    monkeypatch.setenv("REBAR_ROOT", str(repo))
-    rebar.init_repo(repo_root=str(repo))
-
-    _, other_public = keypair(tmp_path, "someone-else")
-    _pin(repo, "some-other-env", other_public)
-    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "an-unpinned-dev-box")
-    monkeypatch.delenv("REBAR_OPCERT_KEY_PATH", raising=False)
-
-    record = mint_opcert_record(
-        "t-ff4a",
-        ["plan-review: PASS", "ticket: t-ff4a", "material: deadbeef"],
-        kind="plan-review",
-        repo_root=str(repo),
-    )
-    assert record["principal"] == "an-unpinned-dev-box"
-    assert record["algorithm"] == "sshsig"
-
-
-def _repo_with_store(tmp_path, monkeypatch):
-    """A git repo with an initialised rebar store — the minimum a mint needs."""
-    import subprocess
-
-    import rebar
-
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    for args in (
-        ("git", "init", "-q"),
-        ("git", "config", "user.email", "d@e.test"),
-        ("git", "config", "user.name", "D"),
-        ("git", "commit", "-q", "--allow-empty", "-m", "init"),
-    ):
-        subprocess.run(args, cwd=repo, check=True, capture_output=True)
-    monkeypatch.setenv("REBAR_ROOT", str(repo))
-    rebar.init_repo(repo_root=str(repo))
-    monkeypatch.delenv("REBAR_OPCERT_KEY_PATH", raising=False)
-    return repo
-
-
-def _mint(repo):
-    from rebar._opcert_signing import mint_opcert_record
-
-    return mint_opcert_record(
-        "t-ff4a",
-        ["plan-review: PASS", "ticket: t-ff4a", "material: deadbeef"],
-        kind="plan-review",
-        repo_root=str(repo),
-    )
-
-
-def test_mint_refuses_when_the_pin_config_is_unreadable(tmp_path, monkeypatch):
-    """Review finding (a). A malformed ``trusted_environments.yaml`` must NOT be collapsed into
-    "nothing pinned".
-
-    ``load_trusted_environments`` distinguishes the two cases deliberately: an ABSENT config
-    returns ``None`` (fail-open, legitimate), while a present-but-malformed one raises
-    ``TrustedEnvError``. Swallowing that into an empty set makes a corrupted trust root silently
-    DISABLE this guard — which is bug ff4a-2832-def4-4e55's own failure mode (an absence of
-    enforcement reported as success) reproduced inside the fix for it. If the trust root cannot
-    be read, whether the principal is pinned is UNKNOWN, and unknown must not read as fine.
-    """
-    from rebar._opcert_signing import OpcertKeyUnavailable
-
-    repo = _repo_with_store(tmp_path, monkeypatch)
-    rebar_dir = repo / ".rebar"
-    rebar_dir.mkdir(parents=True, exist_ok=True)
-    (rebar_dir / "trusted_environments.yaml").write_text(
-        "environments: [ this is not: valid: yaml\n", encoding="utf-8"
-    )
-    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "some-env")
-
-    with pytest.raises(OpcertKeyUnavailable) as excinfo:
-        _mint(repo)
-    assert "trusted" in str(excinfo.value).lower() or "pinned" in str(excinfo.value).lower()
-
-
-def test_mint_refuses_when_the_only_pinned_key_is_revoked(tmp_path, monkeypatch):
-    """Review finding (b). ``trusted_env_keyring`` returns EVERY key record regardless of
-    ``revoked_at_log_position``; the verify path filters by key era, this sign-time guard did not.
-
-    A revoked key is revoked as of a PAST log position, and a signature made now is necessarily
-    later, so a cert signed under it can never verify at its own storage anchor. Pinning a
-    principal whose only key is revoked therefore means "this principal has no key that can
-    produce a verifiable cert" — which must refuse, not pass.
-    """
-    from rebar._opcert_signing import (
-        OpcertKeyUnavailable,
-        _read_opcert_pub,
-        ensure_opcert_key,
-    )
-
-    repo = _repo_with_store(tmp_path, monkeypatch)
-    from rebar import config
-
-    tracker = str(config.tracker_dir(str(repo)))
-    own_pub = _read_opcert_pub(ensure_opcert_key(tracker))
-    # Pin THIS environment's own signing key — but mark it revoked.
-    _pin(repo, "revoked-env", " ".join(own_pub.split()[:2]), revoked="2-b")
-    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "revoked-env")
-
-    with pytest.raises(OpcertKeyUnavailable):
-        _mint(repo)
-
-
-def test_mint_accepts_a_pinned_key_that_is_not_revoked(tmp_path, monkeypatch):
-    """Control for (b): the SAME setup with ``revoked_at_log_position: null`` must still mint."""
-    from rebar import config
-    from rebar._opcert_signing import _read_opcert_pub, ensure_opcert_key
-
-    repo = _repo_with_store(tmp_path, monkeypatch)
-    tracker = str(config.tracker_dir(str(repo)))
-    own_pub = _read_opcert_pub(ensure_opcert_key(tracker))
-    _pin(repo, "active-env", " ".join(own_pub.split()[:2]))
-    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "active-env")
-
-    record = _mint(repo)
-    assert record["principal"] == "active-env"

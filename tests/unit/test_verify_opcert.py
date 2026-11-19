@@ -89,17 +89,10 @@ def _tip_position(repo: Path) -> str:
     return best
 
 
-def _write_trusted_env(repo: Path, env_id: str, pub: str, added_at_position: str) -> None:
-    d = repo / ".rebar"
-    d.mkdir(exist_ok=True)
-    (d / "trusted_environments.yaml").write_text(
-        "environments:\n"
-        f"  - env_id: {env_id}\n"
-        "    keys:\n"
-        f"      - public_key: {pub}\n"
-        f"        added_at_log_position: {added_at_position}\n"
-        "        revoked_at_log_position: null\n",
-        encoding="utf-8",
+def _write_trusted_env(repo: Path, env_id: str, pub: str, *_unused: str) -> None:
+    """List ``env_id``'s key in the fixture repo's ``verify.trusted_opcert_keys`` (ADR 0125)."""
+    (repo / "rebar.toml").write_text(
+        f'[verify]\ntrusted_opcert_keys = ["{env_id} {pub}"]\n', encoding="utf-8"
     )
 
 

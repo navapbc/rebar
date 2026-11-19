@@ -126,15 +126,15 @@ signing.verify_attestation_record(record, ticket_id, *, kind=None, repo_root=Non
 # anything else reads unsigned (retired HMAC scheme).
 ```
 
-An operation-certificate record uses `algorithm="sshsig"` and has no HMAC `signature` field. `verify_signature` verifies the DSSE envelope through SSHSIG against the signer's Ed25519 public key. It does **not** require the record principal to match the current environment: Certification environment is **not** a gate under current operator policy (bug `c21f-6f29-5d2d-4a5a`): *"Any certification is as good as any other certification right now. Limited to a trusted set of environments is a future feature, but not currently in use."* A certificate from another environment therefore certifies when its signature verifies, and the result's `trust_basis` (`own_key` / `pinned_environment` / `envelope_key`, or `trust_list` when the verifying environment's `verify.trusted_opcert_keys` names the certificate's environment and key) names which key was used; `signing_key` gives that key's SHA256 fingerprint. A set `verify.trusted_opcert_keys` list replaces the other trust roots: an unlisted signer is `untrusted` (ADR 0125). Setting `verify.require_environment` re-enables the restriction. See `docs/manifest-signing.md`.
+An operation-certificate record uses `algorithm="sshsig"` and has no HMAC `signature` field. `verify_signature` verifies the DSSE envelope through SSHSIG under the public key carried in the signature itself, for the record's principal, and checks that the signed subject binds the ticket and kind (ADR 0125). That is the whole check by default: a validly signed certificate from any environment certifies, with `trust_basis` `envelope_key`, and `signing_key` names the key (its SHA256 fingerprint) while `key_id` names the environment. An environment that sets `verify.trusted_opcert_keys` trusts only the listed (environment, key) pairs: a listed signer reads `trust_basis` `trust_list`, and an unlisted one is `untrusted`. `verify.require_environment` additionally requires the certificate to name that environment, and requires a trust list. See `docs/manifest-signing.md`.
 
 The verdict dictionary contains `verified`, `verdict`, `reason`, `manifest`, `step_count`, `algorithm`, `key_id`, `signed_at`, `head_sha`, and authenticated operation-certificate fields where available. The verdicts are exactly:
 
 | Verdict | Meaning |
 |---|---|
 | `certified` | The selected operation certificate verifies. |
-| `mismatch` | The signature, signed subject, ticket binding, or kind binding does not verify. |
-| `foreign_key` | No usable signer key could be obtained (no own key, nothing pinned, no key readable from the envelope), or `verify.require_environment` is set and the record identifies a different environment. |
+| `mismatch` | The signature (including one with no readable embedded key), signed subject, ticket binding, or kind binding does not verify. |
+| `foreign_key` | `verify.require_environment` is set and either the record identifies a different environment or no `verify.trusted_opcert_keys` list is configured, or the record names no environment. |
 | `invalid` | The operation-certificate envelope or payload is malformed. |
 | `unavailable` | The configured signing scheme cannot run. |
 | `unknown_kind` | No verification policy exists for the attestation kind. |

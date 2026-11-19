@@ -1,8 +1,8 @@
 """Verify operation-certificate merge-gate constraints through public outcomes.
 
-Coverage includes storage-anchor binding, plaintext mirror invariance, rotation, revocation,
-unresolved anchors, and trusted-environment helpers. Tests use ssh-keygen and a repository-backed
-ticket store.
+Coverage includes merged-log commit binding, plaintext mirror invariance, removal of a key
+from the trust list (ADR 0125), the library era primitive, and the trusted-environment helper.
+Tests use ssh-keygen and a repository-backed ticket store.
 """
 
 from __future__ import annotations
@@ -96,18 +96,10 @@ def _tip_position(repo: Path) -> str:
     return best
 
 
-def _write_env(repo: Path, pub: str, added_at: str, revoked_at: str | None = None) -> None:
-    d = repo / ".rebar"
-    d.mkdir(exist_ok=True)
-    rev = "null" if revoked_at is None else revoked_at
-    (d / "trusted_environments.yaml").write_text(
-        "environments:\n"
-        f"  - env_id: {ENV_ID}\n"
-        "    keys:\n"
-        f"      - public_key: {pub}\n"
-        f"        added_at_log_position: {added_at}\n"
-        f"        revoked_at_log_position: {rev}\n",
-        encoding="utf-8",
+def _write_env(repo: Path, pub: str, *_unused: str | None) -> None:
+    """List ENV_ID's key in the fixture repo's ``verify.trusted_opcert_keys`` (ADR 0125)."""
+    (repo / "rebar.toml").write_text(
+        f'[verify]\ntrusted_opcert_keys = ["{ENV_ID} {pub}"]\n', encoding="utf-8"
     )
 
 
@@ -226,51 +218,29 @@ def test_plaintext_mirror_is_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyP
     )
 
 
-# ==== 2. rollback sub-cases ====================================================================
+# ==== 2. key removal and the library era primitive ================================================
 
 
-def test_revocation_after_storage_anchor_grandfathers_cert(
+def test_key_removed_from_trust_list_fails_its_certs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """(2a) Routine rotation: a key REVOKED at a log position AFTER the cert's storage anchor S
-    (revocation stamped later than the SIGNATURE event) leaves the earlier cert VALID at S → the
-    cert PASSES (exit 0). Earlier certs are grandfathered across a rotation."""
+    """(2b) Compromise response without eras (ADR 0125): once a key is removed from the trust
+    list, every cert it signed fails (exit 1), while the same cert passes while it is listed."""
     repo = _store(tmp_path, monkeypatch)
     priv, pub = _keypair(tmp_path, "env")
+    _other_priv, other_pub = _keypair(tmp_path, "replacement")
     tid = rebar.create_ticket("task", "gated", repo_root=str(repo))
-    added_pos = _tip_position(repo)
-    material = current_material_fingerprint(tid, repo_root=str(repo))
-    # Sign+close FIRST so the storage anchor S is stamped now, BEFORE the revocation position.
-    _sign(repo, tid, priv, material=material, merged_log_commit=_head(repo))
-    rebar.transition(tid, "open", "closed", repo_root=str(repo))
-    # Advance the tickets log, then revoke at a LATER position (a descendant of S).
-    rebar.create_ticket("task", "later activity advancing the log", repo_root=str(repo))
-    revoke_pos = _tip_position(repo)
-    assert revoke_pos > added_pos
-    _write_env(repo, pub, added_pos, revoked_at=revoke_pos)
-
-    proc = _run(repo, "--require-environment", ENV_ID)
-    assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
-
-
-def test_kill_switch_revocation_fails_all_certs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """(2b) Compromise kill-switch: a key whose `revoked_at_log_position` is at/before its own
-    `added_at_log_position` (here both are the earliest position, an ancestor of every storage
-    anchor) is invalid at EVERY anchor → every cert it signed FAILS (exit 1)."""
-    repo = _store(tmp_path, monkeypatch)
-    priv, pub = _keypair(tmp_path, "env")
-    tid = rebar.create_ticket("task", "gated", repo_root=str(repo))
-    earliest = _tip_position(repo)  # ancestor of the later SIGNATURE storage anchor
+    _write_env(repo, pub)
     material = current_material_fingerprint(tid, repo_root=str(repo))
     _sign(repo, tid, priv, material=material, merged_log_commit=_head(repo))
     rebar.transition(tid, "open", "closed", repo_root=str(repo))
-    # Revocation stamped at (== ) the add position → an ancestor of S → key invalid at S.
-    _write_env(repo, pub, earliest, revoked_at=earliest)
+    listed = _run(repo, "--require-environment", ENV_ID)
+    assert listed.returncode == 0, f"stdout={listed.stdout}\nstderr={listed.stderr}"
 
+    _write_env(repo, other_pub)  # the signing key is no longer listed
     proc = _run(repo, "--require-environment", ENV_ID)
     assert proc.returncode == 1, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+    assert "untrusted" in proc.stdout, proc.stdout
 
 
 def test_unresolvable_storage_anchor_fails_closed(
