@@ -31,7 +31,7 @@ _MULTI_PROJECT_CAPABILITY = "multi-project-bridge"
 # root. A store with no configured Jira project records an EMPTY legacy_default — there
 # is NO implicit ``DIG`` fallback (AC2): the implicit default is gone, so only an
 # operator who EXPLICITLY configures ``jira.project`` seeds a non-empty mapping.
-_PROJECTS_REL_PATH = os.path.join(".bridge_state", "projects.json")
+_PROJECTS_REL_PATH = ".bridge_state/projects.json"
 
 
 # raw-git-ok: ensure-registry store-maintenance seam (init/fsck), not a ticket event
