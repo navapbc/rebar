@@ -135,6 +135,7 @@ def test_dry_run_writes_a_passing_evidence_packet(tmp_path: Path) -> None:
     assert packet["identity_counts_equal"] is True
     assert packet["identity_before"]["counts"] == packet["identity_after"]["counts"]
     assert packet["identity_before"]["counts"]["unsigned"] == 7
+    assert packet["identity_before"]["counts"]["signer_not_on_keyring"] == 0
     assert packet["enforce_since_on_branch"] is True
     assert packet["source_ref_unchanged"] is True
     assert packet["pack_kib_after"] <= packet["pack_kib_before"]

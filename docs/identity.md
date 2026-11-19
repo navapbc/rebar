@@ -131,19 +131,27 @@ Enforcement is **project-opt-in** via `identity.require_authenticated` (default 
 
 - **The merge-gate is the real control.** `rebar verify-identity` re-verifies every
   in-scope mutating event's signature against the author identity's commit-anchored
-  keyring, emitting one of five verdicts per event:
+  keyring, emitting one of six verdicts per event:
   - `verified` — the in-toto Statement binds the event and the signature verifies
     against a key valid at the event's commit;
   - `key_not_valid_at_era` — the signature is cryptographically valid by a key the
     identity holds, but that key was NOT valid at the event's commit (e.g. a
     since-revoked key) — distinct from a forgery;
-  - `bad-signature` — malformed, content-binding mismatch, or verifies against no key
-    the identity ever held (forged);
+  - `signer-not-on-keyring` — the in-toto Statement binds the event and the signature
+    verifies against the key embedded in it, but that key is not on the claimed author's
+    keyring. It is not a bad signature (nothing was altered), but the key does not
+    establish the claimed identity, so it fails the gate when enforced, like
+    `key_not_valid_at_era`;
+  - `bad-signature` — malformed, content-binding mismatch, or a signature that does not
+    verify even against its own embedded key;
   - `unknown-author` — no `author_id` / not an identity ticket;
   - `unsigned` — no `author_sig`.
 
   The user-facing display groups these as **verified** / **unverified**
-  (`bad-signature` | `key_not_valid_at_era` | `unknown-author`) / **unsigned**. (This
+  (`bad-signature` | `key_not_valid_at_era` | `signer-not-on-keyring` | `unknown-author`) /
+  **unsigned**. Every reported line and JSON entry names the signing
+  key's `SHA256:` fingerprint (`signing_key`; null, with no key printed, when the event
+  is unsigned or its signature carries no parseable SSHSIG key). (This
   is the `verify-identity` gate's own vocabulary; it is distinct from the separate
   `verify-signature` manifest-attestation verdict set.) The gate exits non-zero (blocking
   the change) only when `require_authenticated` is on and any in-scope event is not
@@ -161,9 +169,10 @@ Enforcement is **project-opt-in** via `identity.require_authenticated` (default 
   SNAPSHOT — one self-contained record `{event_uuid, content_hash, signature,
   signer_pubkey, position}` per signed folded event, where `position` is
   `{commit_sha, position}` (the introducing commit + intra-commit order) and
-  `signer_pubkey` is the actual key that verified the signature. A compacted event
-  re-verifies from the ledger alone (no keyring re-scan needed), so signed events
-  still verify after their raw event files are retired.
+  `signer_pubkey` is the keyring key that verified the signature at compaction time (null
+  when none did). A compacted event re-verifies from the ledger alone, so signed events
+  still verify after their raw event files are retired; the gate verifies a null-signer
+  entry like any other rather than rejecting it.
 
 To sign your own writes, configure `identity.signing_key` (the path to your
 identity's SSH private key) and set your self-identity; `append_event` then stamps an

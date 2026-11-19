@@ -2,8 +2,11 @@
 
 For each in-scope mutating event, verify canonical content and the author's commit-era
 keyring, classifying it as ``verified``, ``unsigned``, ``unknown-author``,
-``bad-signature``, or ``key_not_valid_at_era``. Only ``verified`` passes when
-``identity.require_authenticated`` is enabled. Otherwise reporting is advisory.
+``bad-signature``, ``key_not_valid_at_era``, or ``signer-not-on-keyring``. Only ``verified``
+passes when ``identity.require_authenticated`` is enabled. ``signer-not-on-keyring`` is a sound,
+event-binding signature by a key that is not on the claimed author's keyring: it is not a bad
+signature, but it fails enforcement like ``key_not_valid_at_era`` because the key does not
+establish the claimed identity (ticket df01-290f-89a2-4ce8). Otherwise reporting is advisory.
 
 ``--base`` scopes to event files changed in ``base..HEAD``. ``--all`` or no base scans the
 store. Compacted events are reverified from the snapshot authorship ledger.
@@ -27,6 +30,9 @@ UNSIGNED = "unsigned"
 UNKNOWN_AUTHOR = "unknown-author"
 BAD_SIGNATURE = "bad-signature"
 KEY_NOT_VALID_AT_ERA = "key_not_valid_at_era"
+# Identity finding: the signature verifies against the key embedded in it and binds its event,
+# but that key is not on the claimed author's keyring. Not a bad signature, but not verified.
+SIGNER_NOT_ON_KEYRING = "signer-not-on-keyring"
 
 # Git's canonical empty-tree object id — the default diff base when none is resolvable, so
 # a ``<base>..HEAD`` range degrades to "every event file at HEAD" rather than crashing.
@@ -119,16 +125,38 @@ def _is_archived_ticket(ticket_dir: str) -> bool:
         return False
 
 
+def _verifies_against_own_key(envelope, author_id) -> bool:
+    """Whether ``envelope`` verifies against the public key embedded in its SSHSIG blob.
+
+    The trust root is that one key bound to ``author_id`` as principal, so ``ssh-keygen -Y
+    verify`` still checks the signature bytes, the authorship namespace, and the principal.
+    It does not establish that the key belongs to the author; the caller reports that as an
+    identity finding. Any parse failure is ``False``."""
+    from rebar.attest import authorship, registry, sshsig
+
+    if not envelope.signatures:
+        return False
+    public_key = sshsig.embedded_public_key(envelope.signatures[0].sig)
+    if public_key is None:
+        return False
+    trust_root = authorship.allowed_signers_from_keys([public_key], principal=str(author_id))
+    return registry.verify(authorship.AUTHORSHIP_KIND, envelope, trust_root).verified
+
+
 def _verify_signed(
     ev: _ScopedEvent, tracker: str, repo_root, position_resolver=None, is_ancestor=None
 ) -> str:
     """Classify a signed event as ``verified``, ``key_not_valid_at_era``,
-    ``bad-signature``, or ``unknown-author``.
+    ``signer-not-on-keyring``, ``bad-signature``, or ``unknown-author``.
 
     Validate the first in-toto subject's event UUID and content hash before commit-era key
     checks. After failed era verification, test every key recorded for the identity. A match
     yields ``key_not_valid_at_era`` when a commit was resolved. An unresolved ledger record
-    instead yields ``verified``, while an unresolved raw event remains nonverified."""
+    instead yields ``verified``, while an unresolved raw event remains nonverified. A
+    signature matching no recorded key is ``signer-not-on-keyring`` when it verifies against
+    its own embedded key, and ``bad-signature`` otherwise. A ledger entry's recorded
+    ``signer_pubkey`` is not consulted: a null one only means no keyring key matched at
+    compaction time, so the entry is verified like any other."""
     from rebar.attest import authorship, dsse
 
     is_live = ev.event is not None
@@ -137,10 +165,6 @@ def _verify_signed(
     # gate's vocabulary) even before we look at the signature.
     if is_live and not _is_identity_author(ev.author_id, tracker):
         return UNKNOWN_AUTHOR
-
-    # LEDGER: a recorded null signer means no key matched at compaction → forged/foreign.
-    if not is_live and ev.signer_pubkey is None:
-        return BAD_SIGNATURE
 
     try:
         envelope = dsse.decode(ev.author_sig if isinstance(ev.author_sig, str) else "")
@@ -208,10 +232,15 @@ def _verify_signed(
             return VERIFIED
 
     # Era verify failed OR the commit was unresolvable. An any-key verify (against EVERY key the
-    # identity has ever held) decides authenticity: a signature by no such key is a forgery.
+    # identity has ever held) decides whether an identity key made it. A signature by no such
+    # key is signer-not-on-keyring when it is sound against its own key, else a bad signature.
     any_v = authorship.verify_authorship_any_key(envelope, str(author_id), repo_root=repo_root)
     if not any_v.verified:
-        return BAD_SIGNATURE
+        return (
+            SIGNER_NOT_ON_KEYRING
+            if _verifies_against_own_key(envelope, author_id)
+            else BAD_SIGNATURE
+        )
     # A signature from an identity key is wrong-era when a commit was resolved. An unresolved
     # ledger entry cannot be era-scoped, so accept a signature verified against the identity's
     # recorded keys. Raw events remain fail-closed because their files are present at HEAD.
@@ -240,6 +269,19 @@ def _display_group(verdict: str) -> str:
     if verdict == VERIFIED:
         return "verified"
     return "unverified"
+
+
+def _signing_key(ev: _ScopedEvent) -> str | None:
+    """The ``SHA256:`` fingerprint of the key that made ``ev``'s signature, or ``None``."""
+    from rebar._commands.fsck_authorship import signer_key_id
+
+    return signer_key_id(ev.author_sig) if ev.author_sig else None
+
+
+def _problem_line(ref: str, verdict: str, grandfathered: bool, signing_key: str | None) -> str:
+    """One human-readable report line, naming the signing key when there is one."""
+    line = f"  {verdict}{' [grandfathered]' if grandfathered else ''}: {ref}"
+    return f"{line} (signing key {signing_key})" if signing_key else line
 
 
 def _resolve_commit(
@@ -520,8 +562,9 @@ def cli(argv: list[str]) -> int:
         UNKNOWN_AUTHOR: 0,
         BAD_SIGNATURE: 0,
         KEY_NOT_VALID_AT_ERA: 0,
+        SIGNER_NOT_ON_KEYRING: 0,
     }
-    problems: list[tuple[str, str, bool]] = []  # (ref, verdict, grandfathered)
+    problems: list[str] = []  # one human-readable line per reported event
     report: list[dict] = []  # one entry per NON-verified in-scope event
     enforced_not_verified = 0
     for ev in events:
@@ -547,7 +590,8 @@ def cli(argv: list[str]) -> int:
         grandfathered = not enforced
         if enforced:
             enforced_not_verified += 1
-        problems.append((ev.ref, cls, grandfathered))
+        signing_key = _signing_key(ev)
+        problems.append(_problem_line(ev.ref, cls, grandfathered, signing_key))
         report.append(
             {
                 "event_uuid": ev.event_uuid,
@@ -557,6 +601,7 @@ def cli(argv: list[str]) -> int:
                 "verdict": cls,
                 "display": _display_group(cls),
                 "grandfathered": grandfathered,
+                "signing_key": signing_key,
             }
         )
 
@@ -564,24 +609,21 @@ def cli(argv: list[str]) -> int:
         "verify-identity: "
         f"{counts[VERIFIED]} verified, {counts[UNSIGNED]} unsigned, "
         f"{counts[UNKNOWN_AUTHOR]} unknown-author, {counts[BAD_SIGNATURE]} bad-signature, "
-        f"{counts[KEY_NOT_VALID_AT_ERA]} key-not-valid-at-era "
+        f"{counts[KEY_NOT_VALID_AT_ERA]} key-not-valid-at-era, "
+        f"{counts[SIGNER_NOT_ON_KEYRING]} {SIGNER_NOT_ON_KEYRING} "
         f"({len(events)} event(s) in scope)"
     )
 
+    # JSON mode: ONLY the report array on stdout; any human text goes to stderr.
+    human = sys.stderr if as_json else sys.stdout
     if as_json:
-        # JSON mode: ONLY the report array on stdout; any human text goes to stderr.
         print(js_safe_dumps(report))
-        for ref, cls, gf in problems:
-            print(f"  {cls}{' [grandfathered]' if gf else ''}: {ref}", file=sys.stderr)
-        print(summary, file=sys.stderr)
-    else:
-        for ref, cls, gf in problems:
-            print(f"  {cls}{' [grandfathered]' if gf else ''}: {ref}")
-        print(summary)
+    for line in problems:
+        print(line, file=human)
+    print(summary, file=human)
 
     # Enforcement is ON here (the advisory/report-only path returned early, above, without
     # running any per-event era-verify — ticket a2c7).
-    out = sys.stderr if as_json else sys.stdout
     if enforced_not_verified:
         print(
             f"verify-identity: FAIL — {enforced_not_verified} enforced in-scope event(s) "
@@ -589,5 +631,5 @@ def cli(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    print("verify-identity: OK — every enforced in-scope event is verified.", file=out)
+    print("verify-identity: OK — every enforced in-scope event is verified.", file=human)
     return 0
