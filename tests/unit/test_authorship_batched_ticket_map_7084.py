@@ -65,11 +65,11 @@ def _forensics(repo: Path) -> str:
                 if path.is_file():
                     stat = path.stat()
                     lines.append(
-                        f"{path.relative_to(objects)}  size={stat.st_size}"
+                        f"{path.relative_to(objects).as_posix()}  size={stat.st_size}"
                         f"  mtime={stat.st_mtime:.6f}"
                     )
             except OSError as exc:  # raced away mid-listing: itself evidence, record it
-                lines.append(f"{path.relative_to(objects)}  <stat failed: {exc}>")
+                lines.append(f"{path.relative_to(objects).as_posix()}  <stat failed: {exc}>")
         return "\n".join(lines) or "(empty)"
 
     try:
