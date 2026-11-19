@@ -338,13 +338,15 @@ def test_default_run_creates_every_missing_artifact_ancestor_private(tmp_path: P
     finally:
         os.umask(previous_umask)
 
-    assert (
-        result,
-        [
-            path.stat().st_mode & 0o777
-            for path in (artifacts.parent.parent, artifacts.parent, artifacts)
-        ],
-    ) == (0, [0o700, 0o700, 0o700])
+    created = (artifacts.parent.parent, artifacts.parent, artifacts)
+    if not cleanup._POSIX_MODE_BITS:
+        # Windows has no mode bits; it relies on the default ACL (cloistered-decomposed-nymph).
+        assert (result, [path.is_dir() for path in created]) == (0, [True, True, True])
+        return
+    assert (result, [path.stat().st_mode & 0o777 for path in created]) == (
+        0,
+        [0o700, 0o700, 0o700],
+    )
 
 
 def test_execute_without_the_exact_manifest_digest_refuses_before_delete(tmp_path: Path) -> None:
@@ -876,6 +878,11 @@ def test_execution_refuses_a_symlinked_before_artifact_before_delete(tmp_path: P
     assert resumed.delete_calls == []
 
 
+@pytest.mark.skipif(
+    not cleanup._POSIX_MODE_BITS,
+    reason="Windows has no POSIX mode bits; it relies on the default ACL "
+    "(cloistered-decomposed-nymph)",
+)
 def test_execution_rechecks_artifact_directory_permissions_after_jira_get(
     tmp_path: Path,
 ) -> None:

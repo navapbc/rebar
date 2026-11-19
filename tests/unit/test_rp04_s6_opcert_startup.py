@@ -23,7 +23,7 @@ from _tree_scan import parsed_python_files
 
 import rebar
 from rebar.attest import dsse
-from rebar.opcert_service import jobs
+from rebar.opcert_service import jobs, keyprov
 from rebar.opcert_service.config import OpcertServiceConfig
 from rebar.opcert_service.keyprov import OpcertKeyError, compose_signer
 
@@ -194,6 +194,9 @@ def test_compose_rejects_too_permissive_key_path(tmp_path, monkeypatch):
     BEFORE it is copied/used. Teeth: the error must name the permission problem, not merely be
     some OpcertKeyError (a wrong-key or missing-source failure would also raise the base type)."""
     _clear_seam_env(monkeypatch)
+    # Pin the POSIX branch so the rejection is tested on every platform; Windows skips the
+    # check by decision (cloistered-decomposed-nymph), tested in test_windows_mode_bit_skip.
+    monkeypatch.setattr(keyprov, "_POSIX_MODE_BITS", True)
     key = _write_ed25519_key(tmp_path, name="loosekey")
     key.chmod(0o644)  # world/group readable — a private signing key must be 0600 or stricter
     cfg = _cfg_heldout(str(tmp_path), key_path=str(key))
@@ -239,8 +242,9 @@ def test_composed_key_is_process_owned_0600_source_untouched(tmp_path, monkeypat
         copy = Path(signer.key_path)
         assert copy != key  # a process-owned copy, not the source
         assert copy.exists()
-        assert (copy.stat().st_mode & 0o777) == 0o600
-        assert (Path(signer.runtime_dir).stat().st_mode & 0o777) == 0o700
+        if keyprov._POSIX_MODE_BITS:  # Windows has no mode bits (cloistered-decomposed-nymph)
+            assert (copy.stat().st_mode & 0o777) == 0o600
+            assert (Path(signer.runtime_dir).stat().st_mode & 0o777) == 0o700
         # Source is untouched (content + mode).
         assert key.read_text(encoding="utf-8") == original
         assert (key.stat().st_mode & 0o777) == original_mode
