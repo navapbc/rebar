@@ -129,6 +129,16 @@ _ASSIGNEE_NOT_FOUND_ERROR: str = (
 # markers and honor a Retry-After value IFF present. Cap any delay at MAX_BACKOFF_S so a
 # huge/hostile Retry-After (or continuous 429s) can never hang the pass; _MAX_ATTEMPTS
 # still bounds the total attempts and the terminal error is unchanged (CalledProcessError).
+# Writes that create something new: a non-zero exit may come AFTER Jira applied the write,
+# so re-running would create a duplicate (bug highbred-fabled-lobo: REB-7141/REB-7142).
+# Only a detected 429, which Jira rejects without applying, is retried for these.
+_NON_REPLAYABLE_COMMANDS: tuple[tuple[str, ...], ...] = (("jira", "workitem", "create"),)
+
+
+def _is_non_replayable(cmd: list[str]) -> bool:
+    return any(tuple(cmd[: len(prefix)]) == prefix for prefix in _NON_REPLAYABLE_COMMANDS)
+
+
 _RATE_LIMIT_MARKERS: tuple[str, ...] = ("429", "too many requests", "rate limit", "rate-limit")
 _RETRY_AFTER_RE = re.compile(r"retry[-\s]?after[:\s]+(\d+(?:\.\d+)?)", re.IGNORECASE)
 
@@ -562,6 +572,8 @@ def _run_acli(
             # and the terminal contract (CalledProcessError) is unchanged.
             if attempt < _MAX_ATTEMPTS - 1:
                 rl_delay = _rate_limit_backoff(attempt, cpe.stderr)
+                if rl_delay is None and _is_non_replayable(cmd):
+                    break  # the write may have landed; never replay it
                 _backoff_sleep(rl_delay if rl_delay is not None else 2 ** (attempt + 1))
             continue
 

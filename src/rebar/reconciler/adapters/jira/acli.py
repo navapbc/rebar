@@ -366,6 +366,8 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 pass  # unmappable → omit (leave unassigned), like the UPDATE path
         # Accept either a bare parent key or REST ``{"key": K}`` shape;
         # attach during create or through the from-JSON fallback.
+        if ticket_data.get("labels"):
+            optional_fields["labels"] = list(ticket_data["labels"])
         parent_key = _extract_parent_key(ticket_data.get("parent"))
         if parent_key:
             optional_fields["parent"] = parent_key
