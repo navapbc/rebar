@@ -100,9 +100,11 @@ def build_identity(*, prog: str) -> argparse.ArgumentParser:
             "author identity's epoch-scoped keyring. This is the authorship merge-gate. It is "
             "advisory unless identity.require_authenticated (or --require-authenticated) is "
             "on, in which case any enforced event that is not `verified` fails the gate with a "
-            "non-zero "
-            "exit. Events whose introducing commit predates --since or identity.enforce_since "
-            "are grandfathered, which means they are reported but never fail the gate."
+            "non-zero exit. That includes `signer-not-on-keyring`: the signature verifies "
+            "against its own embedded key and binds its event, but that key is not on the "
+            "claimed author's keyring. Every reported event names its signing key. Events "
+            "whose introducing commit predates --since or identity.enforce_since are "
+            "grandfathered, which means they are reported but never fail the gate."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
