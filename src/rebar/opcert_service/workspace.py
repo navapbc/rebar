@@ -9,8 +9,12 @@ signature events remain in the discarded clone.
 from __future__ import annotations
 
 import os
+import shutil
+import stat
 import subprocess
+import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from rebar import config as _config
@@ -152,7 +156,28 @@ def discard(root: str) -> None:
     """Remove the ephemeral workspace (its git worktrees + the whole tree). Best-effort.
 
     The linked tracker's registration lives under ``<root>/.git/worktrees``, so the
-    one ``rmtree`` removes it with the tree; no ``git worktree prune`` is needed."""
-    import shutil
+    one ``rmtree`` removes it with the tree; no ``git worktree prune`` is needed. Git writes
+    its objects read-only and Windows refuses to delete a read-only file, so a failed removal
+    clears the read-only bit and retries once (bug inaccurate-genetic-asianlion)."""
+    try:
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(root, onexc=_retry_writable)
+        else:  # pragma: no cover - Python 3.11 spells the hook onerror
+            shutil.rmtree(root, onerror=lambda func, path, _info: _retry_writable(func, path, None))
+    except Exception:  # noqa: BLE001 - best-effort cleanup in the job's finally
+        pass
 
-    shutil.rmtree(root, ignore_errors=True)
+
+def _retry_writable(func: Callable[[str], object], path: str, _exc: object) -> None:
+    """rmtree error hook: for a failed removal, make ``path`` writable and retry once.
+
+    rmtree also reports failed ``open``/``scandir``/``lstat``/``close`` calls here; those are
+    not retried (``os.open`` needs flags, ``os.close`` an fd), so the hook returns at once."""
+    if func not in (os.unlink, os.remove, os.rmdir):
+        return
+    try:
+        # Add the write bit to the existing mode, so a directory keeps its search bit.
+        os.chmod(path, stat.S_IMODE(os.lstat(path).st_mode) | stat.S_IWRITE | stat.S_IREAD)
+        func(path)
+    except OSError:
+        pass
