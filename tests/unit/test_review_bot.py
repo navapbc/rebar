@@ -1795,7 +1795,9 @@ def test_lifespan_is_safe_by_default_without_per_test_stubs(monkeypatch, tmp_pat
     assert shutdown_drain_seconds() == 1.0
 
 
-@pytest.mark.timeout(3)
+# The marker also covers the autouse git probes in setup and teardown (see
+# test_timeout_budget_headroom.py), so it must clear their bound, not just the body.
+@pytest.mark.timeout(30)
 def test_webhook_auth_rejection_is_visible_on_health(monkeypatch, tmp_path):
     """A stale Gerrit webhook token must be visible while ordinary health is 200."""
     pytest.importorskip("fastapi")
@@ -1824,7 +1826,9 @@ def test_webhook_auth_rejection_is_visible_on_health(monkeypatch, tmp_path):
     assert health.json()["webhook_auth_last_rejected_age_seconds"] >= 0
 
 
-@pytest.mark.timeout(3)
+# The marker also covers the autouse git probes in setup and teardown (see
+# test_timeout_budget_headroom.py), so it must clear their bound, not just the body.
+@pytest.mark.timeout(30)
 def test_gerrit_internal_webhook_does_not_need_unsupported_plugin_header(monkeypatch, tmp_path):
     """The Gerrit webhooks plugin cannot add the X-Rebar-Token header; internal origin proves it."""
     pytest.importorskip("fastapi")
@@ -1871,7 +1875,9 @@ def test_gerrit_internal_webhook_does_not_need_unsupported_plugin_header(monkeyp
     assert missing_origin.status_code == 401
 
 
-@pytest.mark.timeout(3)
+# The marker also covers the autouse git probes in setup and teardown (see
+# test_timeout_budget_headroom.py), so it must clear their bound, not just the body.
+@pytest.mark.timeout(30)
 def test_gerrit_internal_webhook_requires_the_gerrit_service_peer(monkeypatch, tmp_path):
     """The public edge cannot spoof the internal path with only client-controlled headers."""
     pytest.importorskip("fastapi")
