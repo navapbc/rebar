@@ -226,9 +226,12 @@ services:
       REBAR_GATE_TMPDIR: "/var/lib/rebar/gate-scratch"
       # mechanism-ok: env_var TMPDIR — ce66-59ef-d6d7-4c7a
       TMPDIR: "/var/lib/rebar/gate-scratch"
-      # Sign certified operations with the mounted key and environment ID.
+      # Sign certified operations with the mounted op-cert key and environment ID.
       REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
-      REBAR_IDENTITY_SIGNING_KEY: "/run/secrets/opcert-ed25519-key"
+      REBAR_OPCERT_KEY_PATH: "/run/secrets/opcert-ed25519-key"
+      # Sign tracker writes with the bot key on the writing identity's keyring, as
+      # review-bot does. The op-cert key is not on that keyring.
+      REBAR_IDENTITY_SIGNING_KEY: "/run/secrets/rebar-bot-signing-key"
       # Trust only op-certs from these (environment, key) pairs: the box's own current and
       # rotated nava-opcert-prod keys and the rebar-opcert environment (ADR 0125). Keep
       # this value identical to autodeploy's mcp_run_new.
@@ -264,11 +267,13 @@ services:
       # Publish host loopback for nginx on 8091.
       - "127.0.0.1:8091:8091"
     volumes:
-      # Mount bearer digests and the opcert key read-only. The secrets
-      # fetch must create files even for blank slots. Missing bearer digests
-      # fail closed rather than serving unauthenticated MCP.
+      # Mount bearer digests, the opcert key and the bot authorship key read-only.
+      # The secrets fetch must create files even for blank slots. Missing bearer
+      # digests fail closed rather than serving unauthenticated MCP; an empty or
+      # invalid key fails startup.
       - ./mcp-static-tokens.json:/run/secrets/mcp-static-tokens.json:ro
       - ./opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro
+      - ./rebar-bot-signing-key:/run/secrets/rebar-bot-signing-key:ro
       # Persist ticket events in an external site volume.
       - gerrit_mcp_tickets:/var/gerrit/site/mcp-tickets
       # Persist the blobless main clone in an external site volume.
