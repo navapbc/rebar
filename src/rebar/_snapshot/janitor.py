@@ -200,24 +200,36 @@ def _evict(root: Path, entry: Path) -> int:
 
     Measure :func:`exclusive_size` before rename: shared hardlinks free nothing, while the
     result drives both free-space progress and the running-total decrement. Open readers
-    retain their descriptors after the canonical path disappears."""
-    size = _cache.exclusive_size(entry)
+    retain their descriptors after the canonical path disappears. Measurement through the
+    decrement is one :func:`~rebar._snapshot.cache.accounting_lock` hold: a donor build
+    linking from this entry in between would keep bytes the measurement counted as freed,
+    and the trash copy's links must be gone before the next measurement reads a count."""
     sha = entry.name
     dest = _trash_dir(root) / f"{uuid.uuid4().hex}"
-    try:
-        os.rename(entry, dest)
-    except OSError:
-        return 0  # already gone (raced another evictor) — nothing reclaimed
-    shutil.rmtree(dest, ignore_errors=True)
+    with _cache.accounting_lock(root):
+        size = _cache.exclusive_size(entry)
+        try:
+            os.rename(entry, dest)
+        except OSError:
+            return 0  # already gone (raced another evictor) — nothing reclaimed
+        shutil.rmtree(dest, ignore_errors=True)
+        _cache.add_bytes_held(-size, root)
     _remove_sidecars(root, sha)
-    _cache.add_bytes(-size, root)
     return size
 
 
 def drain_trash(root: Path | None = None) -> int:
     """Re-drain any trash stragglers (an interrupted rename→rmtree from a prior pass).
-    Returns the count of trash entries removed."""
+    Returns the count of trash entries removed.
+
+    A straggler can still share inodes with a published entry, so removing it changes link
+    counts the byte total trusts; it runs under the accounting lock like an eviction."""
     root = root or store_root()
+    with _cache.accounting_lock(root):
+        return _drain_trash_held(root)
+
+
+def _drain_trash_held(root: Path) -> int:
     trash = root / "trash"
     if not trash.is_dir():
         return 0
@@ -305,14 +317,17 @@ def startup_sweep(root: Path | None = None) -> int:
     """Crash recovery: clear ``tmp/*`` and ``trash/*`` and reconcile the byte total via one
     full walk (the authoritative count). Returns the reconciled byte total."""
     root = root or store_root()
-    sweep_tmp(root)
-    drain_trash(root)
-    # Charge each inode ONCE: summing per-entry sizes would count a blob shared by k entries
-    # k times, and the incremental path (exclusive_size) counts it once.
-    total = _cache.distinct_bytes(_entries(root))
-    # Authoritative reset (not an increment) — the walk IS ground truth.
-    delta = total - _cache.byte_total(root)
-    _cache.add_bytes(delta, root)
+    # Clearing debris and the walk-and-reset share one accounting-lock hold: a crashed donor
+    # build or a trash straggler still holds links, and a populate must not land between the
+    # walk and the reset.
+    with _cache.accounting_lock(root):
+        sweep_tmp(root)
+        _drain_trash_held(root)
+        # Charge each inode ONCE: summing per-entry sizes would count a blob shared by k
+        # entries k times, and the incremental path (exclusive_size) counts it once.
+        total = _cache.distinct_bytes(_entries(root))
+        # Authoritative reset (not an increment) — the walk IS ground truth.
+        _cache.add_bytes_held(total - _cache.byte_total(root), root)
     return total
 
 

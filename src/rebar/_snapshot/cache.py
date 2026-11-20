@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import threading
 from collections.abc import Iterable
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import IO
 
@@ -94,21 +95,37 @@ def byte_total(root: Path | None = None) -> int:
         return 0
 
 
+def accounting_lock(root: Path) -> AbstractContextManager[None]:
+    """The store-wide lock that orders link-count changes against byte accounting.
+
+    The total trusts ``st_nlink``, so it is only exact if, outside this lock, a file's link
+    count counts links from published entries alone. A donor build's hardlinks, the publish
+    rename and its :func:`exclusive_size` increment, and an eviction from its measurement
+    through its ``rmtree`` and decrement therefore each run inside one hold (bug
+    3822-a9e3-5999-422c). Not reentrant: inside a hold, use :func:`add_bytes_held`."""
+    return interprocess_lock(root / "locks" / "bytes.total.lock")
+
+
+def add_bytes_held(delta: int, root: Path) -> int:
+    """:func:`add_bytes` for a caller already inside :func:`accounting_lock`."""
+    path = _byte_total_path(root)
+    try:
+        current = int(path.read_text().strip() or "0")
+    except (OSError, ValueError):
+        current = 0
+    new = max(0, current + delta)
+    fsutil.atomic_write(path, str(new))
+    return new
+
+
 def add_bytes(delta: int, root: Path | None = None) -> int:
     """Atomically add ``delta`` to the store's running byte total; return the new total.
 
-    Serialized cross-process by an flock so a concurrent populate (increment) and the
-    janitor's decrement cannot lose an update (no read-modify-write TOCTOU)."""
+    Serialized cross-process by :func:`accounting_lock`, so a concurrent populate
+    (increment) and the janitor's decrement cannot lose an update."""
     root = root or store_root()
-    path = _byte_total_path(root)
-    with interprocess_lock(root / "locks" / "bytes.total.lock"):
-        try:
-            current = int(path.read_text().strip() or "0")
-        except (OSError, ValueError):
-            current = 0
-        new = max(0, current + delta)
-        fsutil.atomic_write(path, str(new))
-    return new
+    with accounting_lock(root):
+        return add_bytes_held(delta, root)
 
 
 def entry_size(path: Path) -> int:
@@ -198,7 +215,7 @@ def acquire(
 
     ``local`` returns the uncached, unsigned checkout. ``attested`` resolves one immutable
     SHA, touches hits, and on a miss rechecks under thread and process locks before atomic
-    materialization and one-time byte accounting."""
+    materialization, whose publish step accounts the entry's bytes once."""
     if source_mode == SOURCE_LOCAL:
         return materialize(source_mode=SOURCE_LOCAL, repo_root=repo_root)
 
@@ -224,7 +241,6 @@ def acquire(
                 return materialize(
                     sha, source_mode=SOURCE_ATTESTED, repo_root=repo_root, fetch=False
                 )
-            handle = materialize(sha, source_mode=SOURCE_ATTESTED, repo_root=repo_root, fetch=False)
-            # We performed the populate — account its bytes exactly once.
-            add_bytes(exclusive_size(dest), root)
-            return handle
+            # The build that publishes the entry also accounts its bytes, inside the
+            # accounting lock (see accounting_lock), so nothing is added here.
+            return materialize(sha, source_mode=SOURCE_ATTESTED, repo_root=repo_root, fetch=False)
