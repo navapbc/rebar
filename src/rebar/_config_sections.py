@@ -79,7 +79,7 @@ _SECTIONS: dict[str, dict] = {
         "comment_trail_xcheck_active": lambda v, k: _as_bool(v, k),
         "require_environment": lambda v, k: _as_str(v, k),
         "opcert_enforce_since": lambda v, k: _as_str(v, k),
-        # mechanism-ok: config_key verify.trusted_opcert_keys — 0dd0-cecb-3932-4c90 (ADR 0125)
+        # mechanism-ok: config_key verify.trusted_opcert_keys — 71cd-1e05-0cdc-4731 (ADR 0125)
         "trusted_opcert_keys": lambda v, k: _as_trusted_key_list(v, k),
         "opcert_remote_url": lambda v, k: _as_str(v, k),
     },
