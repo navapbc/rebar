@@ -80,7 +80,9 @@ class _CommentsMixin(_TransportBase):
     per-issue ``get_comments`` and the bulk ``get_comment_map``."""
 
     def add_comment(self, remote_id: str, body: str) -> dict[str, Any]:
-        comment = _with_connection_retry(lambda: self._client.add_comment(remote_id, body))
+        comment = _with_connection_retry(
+            lambda: self._client.add_comment(remote_id, body), replayable=False
+        )
         return _unwrap(comment)
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]:

@@ -73,7 +73,7 @@ def test_a_real_pat_builds_a_client(monkeypatch) -> None:
     built: dict = {}
 
     def _fake_cls():
-        def _ctor(server, token_auth, options):
+        def _ctor(server, token_auth, options, max_retries):
             built.update(server=server, token_auth=token_auth)
             return object()
 
