@@ -773,6 +773,7 @@ def _short_head(_tracker: str) -> str:
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
             check=False,
         ).stdout.strip()

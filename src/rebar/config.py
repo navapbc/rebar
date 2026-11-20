@@ -583,6 +583,7 @@ def _git_toplevel_of_cwd() -> Path | None:
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             timeout=10,
         )

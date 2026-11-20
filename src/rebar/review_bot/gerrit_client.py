@@ -364,6 +364,7 @@ class GerritClient:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=_GIT_TIMEOUT,
             )
             subprocess.run(
@@ -384,6 +385,7 @@ class GerritClient:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=_GIT_TIMEOUT,
             )
             subprocess.run(
@@ -391,6 +393,7 @@ class GerritClient:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=_GIT_TIMEOUT,
             )
             # Fetch the orphan tickets branch from the GitHub mirror as origin/tickets.
@@ -401,6 +404,7 @@ class GerritClient:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=_GIT_TIMEOUT,
             )
             subprocess.run(
@@ -419,6 +423,7 @@ class GerritClient:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=_GIT_TIMEOUT,
             )
         except subprocess.TimeoutExpired as exc:

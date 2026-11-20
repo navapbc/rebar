@@ -185,6 +185,7 @@ def _resolve_reviewed_head(repo_root: str | Path) -> str | None:
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_REV_PARSE_TIMEOUT,
             check=False,
         )

@@ -112,6 +112,7 @@ def is_merge_commit(sha: str, repo_root: str) -> bool:
         ["git", "-C", str(repo_root), "rev-list", "--parents", "-n", "1", sha],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if proc.returncode != 0:
@@ -129,6 +130,7 @@ def changed_paths(sha: str, repo_root: str) -> list[str] | None:
         ["git", "-C", str(repo_root), "show", "--name-only", "--pretty=format:", sha],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if proc.returncode != 0:
@@ -156,6 +158,7 @@ def invalid_commit_shas(shas: list[str], repo_root: str) -> list[str]:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         if proc.returncode != 0:
@@ -201,6 +204,7 @@ def upstream_branch_refs(repo_root: str) -> list[str]:
         ["git", "-C", str(repo_root), "for-each-ref", "--format=%(refname)", "refs/remotes/"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if listed.returncode != 0:
@@ -272,7 +276,7 @@ def referencing_commits(
         # for one caller only.
         log_argv += ["HEAD", *upstream_branch_refs(repo_root)]
     git_started_ns = time.monotonic_ns() if metrics is not None else 0
-    proc = subprocess.run(log_argv, capture_output=True, text=True, check=False)
+    proc = subprocess.run(log_argv, capture_output=True, text=True, encoding="utf-8", check=False)
     if metrics is not None:
         metrics["git_history_read_ms"] = (time.monotonic_ns() - git_started_ns) // 1_000_000
     if proc.returncode != 0:

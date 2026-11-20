@@ -113,36 +113,67 @@ def test_a_non_wrapper_stream_is_left_alone(monkeypatch: pytest.MonkeyPatch) -> 
     assert sys.stdout is captured
 
 
-_CLI_CONSUMERS = (
-    "src/rebar/reconciler/pass_support.py",
-    "src/rebar/reconciler/run_differs.py",
-    "src/rebar/reconciler/invariant_sink.py",
-    "src/rebar/reconciler/conflict_bug_filing.py",
-    "src/rebar/_commands/reclaim_dry_run.py",
-)
+_SUBPROCESS_RUNNERS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
 
 
-def _text_mode_runs_without_utf8(path: Path) -> list[int]:
-    missing = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-            continue
-        if node.func.attr != "run":
+def _is_subprocess_runner(func: ast.expr) -> bool:
+    if not (isinstance(func, ast.Attribute) and func.attr in _SUBPROCESS_RUNNERS):
+        return False
+    owner = func.value
+    return (isinstance(owner, ast.Name) and owner.id == "subprocess") or (
+        isinstance(owner, ast.Attribute) and owner.attr == "subprocess"
+    )
+
+
+def _locale_decoded_text_calls(source: str) -> list[int]:
+    """Lines of calls that run a child in text mode without naming an encoding.
+
+    Such a call decodes the child's output (and encodes its stdin) with the locale codec,
+    which is cp1252 on Windows. A call counts when it passes ``text`` or
+    ``universal_newlines`` (not literally false) and no ``encoding``, and either calls a
+    ``subprocess`` runner or passes the literal ``True``; the second arm catches keyword
+    bundles built with ``dict(...)`` and injected runners.
+    """
+    lines = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
             continue
         kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg}
-        text = kwargs.get("text")
-        if not (isinstance(text, ast.Constant) and text.value is True):
+        mode = kwargs.get("text", kwargs.get("universal_newlines"))
+        if "encoding" in kwargs or mode is None:
             continue
-        encoding = kwargs.get("encoding")
-        if not (isinstance(encoding, ast.Constant) and encoding.value == "utf-8"):
-            missing.append(node.lineno)
-    return missing
+        if isinstance(mode, ast.Constant) and mode.value in (False, None):
+            continue
+        if _is_subprocess_runner(node.func) or (
+            isinstance(mode, ast.Constant) and mode.value is True
+        ):
+            lines.append(node.lineno)
+    return lines
 
 
-@pytest.mark.parametrize("relative", _CLI_CONSUMERS)
-def test_rebar_cli_output_is_decoded_as_utf8(relative: str) -> None:
-    """The CLI writes UTF-8, so every text-mode parent must decode UTF-8 to match."""
-    assert _text_mode_runs_without_utf8(REPO_ROOT / relative) == []
+@pytest.mark.parametrize(
+    ("source", "flagged"),
+    [
+        ('subprocess.run(["git"], text=True)', True),
+        ('subprocess.run(["git"], text=True, encoding="utf-8")', False),
+        ('mod.subprocess.check_output(["git"], universal_newlines=flag)', True),
+        ('subprocess.Popen(["git"], text=False)', False),
+        ("dict(stdout=PIPE, text=True)", True),
+        ("find_similar(text=query)", False),
+    ],
+)
+def test_the_scan_flags_text_mode_calls_without_an_encoding(source: str, flagged: bool) -> None:
+    assert bool(_locale_decoded_text_calls(source)) is flagged
+
+
+def test_no_src_call_decodes_child_output_with_the_locale_codec() -> None:
+    """Every text-mode child in src/rebar names UTF-8 (bug dogtired-blank-fieldmouse)."""
+    offenders = [
+        f"{path.relative_to(REPO_ROOT).as_posix()}:{line}"
+        for path in sorted((REPO_ROOT / "src" / "rebar").rglob("*.py"))
+        for line in _locale_decoded_text_calls(path.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
 
 
 def test_binding_files_keep_lf_line_endings(

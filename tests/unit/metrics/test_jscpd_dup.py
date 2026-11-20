@@ -38,7 +38,7 @@ def test_parse_statistics_total(tmp_path: Path) -> None:
 
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         commands.append(command)
-        assert kwargs == {"capture_output": True, "text": True, "check": False}
+        assert kwargs == {"capture_output": True, "text": True, "encoding": "utf-8", "check": False}
         output_dir = Path(command[command.index("--output") + 1])
         (output_dir / "jscpd-report.json").write_text(
             json.dumps(

@@ -478,6 +478,7 @@ def review_code_sha(repo_root=None) -> str | None:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         return out.stdout.strip() or None
     except Exception:  # noqa: BLE001 — best-effort: no resolvable SHA → None (baseline precondition fails)

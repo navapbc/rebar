@@ -506,6 +506,7 @@ def _run_acli(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
             errors="replace",  # spike E3: SIGKILL mid-multibyte must not crash the reap
             env=env,
         )

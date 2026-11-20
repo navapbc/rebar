@@ -44,6 +44,7 @@ def _git(repo_root: str, *args: str) -> str | None:
             ["git", "-C", repo_root, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_GIT_TIMEOUT,
             check=False,
         )

@@ -346,6 +346,7 @@ def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
             ["git", "-C", repo_root, *stall_abort_args(), *argv],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             timeout=fetch_timeout(),
             check=False,
@@ -539,6 +540,7 @@ def _pin_tickets_sha(
         ["git", "-C", tracker, "rev-parse", "--git-dir"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if probe.returncode != 0:
@@ -568,13 +570,18 @@ def _pin_tickets_sha(
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         if probe.returncode != 0:
             return None
 
     head = subprocess.run(
-        ["git", "-C", tracker, "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+        ["git", "-C", tracker, "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
     )
     sha = (head.stdout or "").strip()
     if head.returncode != 0 or not sha:

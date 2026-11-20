@@ -60,6 +60,7 @@ def _git(cwd: str, *args: str, shown: str | None = None) -> subprocess.Completed
             ["git", "-C", cwd, *prefix, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             timeout=_GIT_TIMEOUT,
         )

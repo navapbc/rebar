@@ -309,6 +309,7 @@ def _changed_since_repo_root(config_module: object) -> str | None:
             cwd=Path.cwd(),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         )
     except (OSError, subprocess.CalledProcessError):
@@ -322,6 +323,7 @@ def _changed_paths_since(ref: str, *, cwd: str | None) -> list[str]:
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return sorted({line.strip() for line in proc.stdout.splitlines() if line.strip()})
