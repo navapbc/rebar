@@ -84,6 +84,7 @@ def test_live_signed_event_verifies(store: Path, tmp_path: Path, monkeypatch) ->
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     # require_authenticated ON + every in-scope event verified ⇒ exit 0, ≥1 verified.
@@ -139,6 +140,7 @@ def _verify_authorship(store: Path, priv: str | None = None) -> subprocess.Compl
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
 
@@ -226,7 +228,11 @@ def test_key_not_valid_at_era_for_revoked_key(tmp_path: Path, monkeypatch) -> No
 def _fingerprint(pub_path: Path) -> str:
     """The ``SHA256:`` fingerprint ``ssh-keygen -l`` prints for the public key file."""
     out = subprocess.run(
-        ["ssh-keygen", "-lf", str(pub_path)], check=True, capture_output=True, text=True
+        ["ssh-keygen", "-lf", str(pub_path)],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     ).stdout
     return out.split()[1]
 
@@ -340,6 +346,7 @@ def test_off_keyring_signature_passes_in_advisory_mode(tmp_path: Path, monkeypat
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     combined = res.stdout + res.stderr
@@ -488,6 +495,7 @@ def test_identity_finding_json_entry_names_the_signing_key(tmp_path: Path, monke
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     assert res.returncode == 1, res.stdout + res.stderr
