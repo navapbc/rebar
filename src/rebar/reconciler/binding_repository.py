@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from rebar._store.fsutil import replace_with_retry
+from rebar._store.fsutil import open_published, replace_with_retry
 from rebar.reconciler import get_rotation
 
 __all__ = ["BindingRepository"]
@@ -190,10 +190,8 @@ class BindingRepository:
         retired state degrades instead of aborting. (Unlike :meth:`_load_retired`, this
         read is silent — the alert is raised once, at load.)
         """
-        if not self._retired_path.exists():
-            return {}
         try:
-            with open(self._retired_path, encoding="utf-8") as handle:
+            with open_published(self._retired_path) as handle:
                 data = json.load(handle)
             retired = data.get("retired", {})
             return retired if isinstance(retired, dict) else {}
@@ -257,14 +255,14 @@ class BindingRepository:
 
     def _load(self) -> dict[str, Any]:
         """Load live state, or a fresh empty store if absent; raise on corruption."""
-        if self._path.exists():
-            try:
-                with open(self._path, encoding="utf-8") as handle:
-                    loaded: dict[str, Any] = json.load(handle)
-                    return loaded
-            except (json.JSONDecodeError, ValueError, OSError) as exc:
-                raise ValueError(_corrupt_live_message(self._path, exc)) from exc
-        return json.loads(json.dumps(_EMPTY_STORE))  # deep copy
+        try:
+            with open_published(self._path) as handle:
+                loaded: dict[str, Any] = json.load(handle)
+                return loaded
+        except FileNotFoundError:
+            return json.loads(json.dumps(_EMPTY_STORE))  # deep copy
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
+            raise ValueError(_corrupt_live_message(self._path, exc)) from exc
 
     def _load_retired(self) -> set[str]:
         """Load the retired-binding key set. FAILS OPEN, with a deduped alert.
@@ -278,16 +276,16 @@ class BindingRepository:
         A legacy list-form ``retired`` value still yields its key set (an additive read
         of the pre-entry-map format).
         """
-        if not self._retired_path.exists():
-            return set()
         try:
-            with open(self._retired_path, encoding="utf-8") as handle:
+            with open_published(self._retired_path) as handle:
                 data = json.load(handle)
             retired = data.get("retired", {})
             if isinstance(retired, dict):
                 return set(retired.keys())
             if isinstance(retired, list):
                 return set(retired)
+            return set()
+        except FileNotFoundError:
             return set()
         except (json.JSONDecodeError, ValueError, OSError) as exc:
             self.alert(

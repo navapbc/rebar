@@ -40,6 +40,7 @@ from rebar._engine_support.bridge_fsck_drift import (
 )
 from rebar._errors import RebarError
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.fsutil import open_published
 from rebar._store.gitutil import run_git
 
 # ---------------------------------------------------------------------------
@@ -66,10 +67,11 @@ def _integrity_error(detail: str) -> RebarError:
 
 def _read_integrity_store(tickets_tracker: Path) -> dict | None:
     path = tickets_tracker / ".bridge_state" / "bindings.json"
-    if not path.exists():
-        return None
     try:
-        store = json.loads(path.read_text(encoding="utf-8"))
+        with open_published(path) as fh:
+            store = json.loads(fh.read())
+    except FileNotFoundError:
+        return None
     except Exception as exc:
         raise _integrity_error(f"cannot read {path.name}: {exc}") from exc
     if not isinstance(store, dict):

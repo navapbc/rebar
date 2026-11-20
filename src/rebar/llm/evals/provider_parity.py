@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar import config as _root_config
+from rebar._store.fsutil import open_published
 from rebar.llm import parity
 from rebar.llm.bedrock_model import DEFAULT_BEDROCK_MODEL_ID
 from rebar.llm.config import DEFAULT_MODEL, VERIFIER_DEFAULT_MODEL, LLMConfig, gate_config
@@ -218,7 +219,8 @@ def eligible_cases(repo_root: str | None = None) -> list[CorpusItem]:
 
     items: list[CorpusItem] = []
     for path in _spec_paths(repo_root):
-        spec = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        with open_published(path) as fh:
+            spec = yaml.safe_load(fh.read()) or {}
         prompt_id = str(spec.get("prompt") or "")
         for case in spec.get("dataset") or []:
             label = GOLD_EXPECTS.get(str(case.get("expect")))

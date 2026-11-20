@@ -48,6 +48,7 @@ from rebar._config_resolvers import resolve_stall_abort_limits as resolve_stall_
 from rebar._config_resolvers import resolve_stall_attempts as resolve_stall_attempts
 from rebar._config_resolvers import resolve_usage_log_sink as resolve_usage_log_sink
 from rebar._config_schema import _SECTIONS, ConfigError
+from rebar._store.fsutil import open_published, published_is_file, retry_contended
 
 logger = logging.getLogger("rebar.config")
 
@@ -117,7 +118,7 @@ def _parse_toml(path: Path) -> dict:
     import tomllib
 
     try:
-        st = path.stat()
+        st = retry_contended(os.stat, path)
     except OSError as exc:
         raise ConfigError(f"could not read config {path}: {exc}") from None
     cache_key = (str(path), st.st_mtime_ns, st.st_size)
@@ -125,7 +126,7 @@ def _parse_toml(path: Path) -> dict:
     if hit is not None:
         return hit
     try:
-        with open(path, "rb") as f:
+        with open_published(path, "rb") as f:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(f"could not read config {path}: {exc}") from None
@@ -163,7 +164,7 @@ def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tupl
     ``[tool.rebar]`` table (stopping at ``.git`` / filesystem root). Returns
     ``(path, kind)`` or ``None`` where kind ∈ {toml, pyproject}."""
     env = os.environ.get("REBAR_CONFIG")
-    if env and Path(env).is_file():
+    if env and published_is_file(env):
         p = Path(env)
         if p.name == "pyproject.toml":
             return (p, "pyproject")
@@ -172,7 +173,7 @@ def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tupl
     cur = base
     while True:
         rt = cur / "rebar.toml"
-        if rt.is_file():
+        if published_is_file(rt):
             return (rt, "toml")
         pp = cur / "pyproject.toml"
         # A pyproject with [tool.rebar] is the config; an UNREADABLE pyproject is
@@ -181,7 +182,7 @@ def _discover_project_config(root: str | os.PathLike[str] | None = None) -> tupl
         # (rebar.toml above takes precedence, so this only bites when it's the
         # would-be-chosen config.) An "absent" (parses, no [tool.rebar]) pyproject
         # is skipped, and the walk continues.
-        if pp.is_file() and _pyproject_rebar_state(pp) in ("has", "unreadable"):
+        if published_is_file(pp) and _pyproject_rebar_state(pp) in ("has", "unreadable"):
             return (pp, "pyproject")
         if (cur / ".git").exists() or cur.parent == cur:
             break  # repo boundary / filesystem root
@@ -206,7 +207,7 @@ def raw_layers(root: str | os.PathLike[str] | None = None) -> Iterator[RawLayer]
     layer still keeps the earlier layers it already consumed.
     """
     up = user_config_path()
-    if up.is_file():
+    if published_is_file(up):
         yield RawLayer("user", up, "toml", _read_toml_table(up, pyproject=False))
     proj = _discover_project_config(root)
     if proj is not None:

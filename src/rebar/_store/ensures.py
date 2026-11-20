@@ -33,6 +33,7 @@ from rebar._store import fsutil
 # (bug d720-fc72).
 from rebar._store import lock as _lock
 from rebar._store.compat import StoreIncompatibleError
+from rebar._store.fsutil import open_published
 
 logger = logging.getLogger("rebar")
 
@@ -111,7 +112,7 @@ def applied_ids(tracker: str | os.PathLike) -> set[str]:
     non-list JSON degrades to the EMPTY set (never raises) — a pre-feature or
     corrupt marker simply reads as 'everything pending'."""
     try:
-        with open(_applied_path(_lock.canonical_tracker(tracker)), encoding="utf-8") as fh:
+        with open_published(_applied_path(_lock.canonical_tracker(tracker))) as fh:
             raw = fh.read()
         data = json.loads(raw)
     except (OSError, ValueError):
@@ -209,7 +210,7 @@ def _read_hinted(tracker: str) -> float | None:
     """Parse ``.ensure-hinted`` → last-hinted unix timestamp, or ``None`` when the
     marker is absent/unparseable ("never hinted", symmetric with applied_ids)."""
     try:
-        with open(os.path.join(tracker, HINTED_MARKER), encoding="utf-8") as fh:
+        with open_published(os.path.join(tracker, HINTED_MARKER)) as fh:
             return float(fh.read().strip())
     except (OSError, ValueError):
         return None

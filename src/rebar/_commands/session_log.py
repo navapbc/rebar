@@ -22,6 +22,7 @@ from rebar._commands._seam import (
 )
 from rebar._commands.composer import create_core, link_core
 from rebar._commands.session_id import resolve_session_id
+from rebar._store.fsutil import open_published
 
 _DEFAULT_TITLE = "Session log"
 _POINTER_NAME = "current_session_log"
@@ -52,7 +53,8 @@ def _read_pointer(repo_root=None) -> dict | None:
     with ``session`` None, never trigger rotation — degrade-safe).
     """
     try:
-        raw = _pointer_path(repo_root).read_text(encoding="utf-8").strip()
+        with open_published(_pointer_path(repo_root)) as fh:
+            raw = fh.read().strip()
     except OSError:
         return None
     if not raw:

@@ -14,11 +14,14 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from rebar._store.fsutil import open_published
+
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     """Read a JSON file, returning None on any parse or IO error."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        with open_published(path) as fh:
+            return json.loads(fh.read())
     except Exception:  # noqa: BLE001 - helper fail-open: any parse/IO error yields None
         return None
 

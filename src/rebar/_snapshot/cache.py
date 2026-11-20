@@ -28,6 +28,7 @@ from rebar._snapshot.repo_snapshot import (
     store_root,
 )
 from rebar._store import fsutil
+from rebar._store.fsutil import open_published
 
 
 class CacheMiss(RuntimeError):
@@ -89,7 +90,8 @@ def _byte_total_path(root: Path) -> Path:
 def byte_total(root: Path | None = None) -> int:
     root = root or store_root()
     try:
-        return int(_byte_total_path(root).read_text().strip() or "0")
+        with open_published(_byte_total_path(root)) as fh:
+            return int(fh.read().strip() or "0")
     except (OSError, ValueError):
         return 0
 

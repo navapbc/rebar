@@ -161,7 +161,7 @@ def _epoch_refusal(detail: str) -> str:
 def _local_store_epoch(tracker: str | os.PathLike[str]) -> tuple[str | None, str | None]:
     path = _record_path(tracker)
     try:
-        with open(path, encoding="utf-8") as fh:
+        with fsutil.open_published(path) as fh:
             epoch, problem = _epoch_from_record(fh.read(), path)
             return epoch, f"local {problem}" if problem is not None else None
     except FileNotFoundError:
@@ -338,7 +338,7 @@ def _analyze(tracker: str | os.PathLike[str]) -> dict[str, str] | None:
     """
     path = _record_path(tracker)
     try:
-        with open(path, encoding="utf-8") as fh:
+        with fsutil.open_published(path) as fh:
             raw = fh.read()
     except FileNotFoundError:
         return None  # ABSENT → implicit legacy (format version 0), compatible.

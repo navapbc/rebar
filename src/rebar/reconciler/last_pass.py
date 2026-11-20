@@ -22,7 +22,7 @@ from pathlib import Path
 from time import sleep as _sleep
 from typing import Any
 
-from rebar._store.fsutil import replace_with_retry
+from rebar._store.fsutil import open_published, replace_with_retry
 
 SCHEMA_VERSION = 2
 # Older witnesses (schema 1, before the additive disposition block) still validate and
@@ -180,7 +180,8 @@ def _read_matching_detail(
 ) -> tuple[str, dict[str, Any] | None]:
     path = _store_dir(repo_root) / DETAIL_IN_STORE
     try:
-        decoded = json.loads(path.read_text(encoding="utf-8"))
+        with open_published(path) as fh:
+            decoded = json.loads(fh.read())
     except FileNotFoundError:
         return "missing", None
     except (OSError, json.JSONDecodeError):

@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from rebar._store.fsutil import atomic_write
+from rebar._store.fsutil import atomic_write, open_published
 from rebar.llm.config import verify_step_floor
 from rebar.llm.errors import CompletionRecoveryError
 
@@ -540,7 +540,8 @@ class CriterionBank:
 
     def _read(self, path: Path) -> dict[str, Any]:
         try:
-            entry = json.loads(path.read_text(encoding="utf-8"))
+            with open_published(path) as fh:
+                entry = json.loads(fh.read())
         except (OSError, ValueError) as exc:
             raise CompletionRecoveryError(
                 "completion recovery could not read a banked verdict"

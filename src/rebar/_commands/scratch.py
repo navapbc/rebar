@@ -23,6 +23,7 @@ import sys
 from rebar import config
 from rebar._mcp_errors import js_safe_dumps
 from rebar._store import fsutil
+from rebar._store.fsutil import open_published
 from rebar.timeutils import utc_now_iso
 
 _MAX_BYTES = 98304
@@ -151,11 +152,8 @@ def _get(args: list[str]) -> int:
     if abs_path is None:
         return rc
 
-    if not os.path.isfile(abs_path):
-        _emit({"status": "miss", "ticket_id": ticket_id, "key": key})
-        return 0
     try:
-        with open(abs_path, encoding="utf-8") as f:
+        with open_published(abs_path) as f:
             content = f.read()
     except OSError:
         _emit({"status": "miss", "ticket_id": ticket_id, "key": key})

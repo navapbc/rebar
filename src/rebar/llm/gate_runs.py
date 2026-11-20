@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Protocol
 
 from rebar import _mcp_inflight as _inflight
+from rebar._store.fsutil import open_published
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,8 @@ def _owner_lock_held(job_id: str, repo_root: str | None) -> bool:
 def read_gate_run(job_id: str, *, repo_root: str | None = None) -> dict[str, Any] | None:
     """The recorded run dict for ``job_id``, or ``None`` when no index entry exists."""
     try:
-        raw = (_index_dir(repo_root) / job_id).read_text(encoding="utf-8")
+        with open_published(_index_dir(repo_root) / job_id) as fh:
+            raw = fh.read()
     except OSError:
         return None
     try:

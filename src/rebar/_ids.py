@@ -21,6 +21,7 @@ import sys
 from typing import NamedTuple
 
 from rebar._alias import compute_alias
+from rebar._store.fsutil import open_published
 
 _FULL_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}$")
 _SHORT_ID_RE = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}$")
@@ -116,7 +117,7 @@ def _parse_binding_reverse(bindings_path: str) -> tuple[int, int, dict] | None:
     ``{}``.
     """
     try:
-        with open(bindings_path, encoding="utf-8") as f:
+        with open_published(bindings_path) as f:
             st = os.fstat(f.fileno())
             try:
                 data = json.load(f, object_pairs_hook=_keep_reverse_only)
