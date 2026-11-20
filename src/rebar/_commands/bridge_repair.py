@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from rebar._store.fsutil import open_published
+
 _AUDIT_BASENAME = "rebar-bridge-repair-audit.jsonl"
 _ORPHAN_KIND = "reverse_missing_forward"
 
@@ -62,11 +64,11 @@ def _retired_keys(tracker: Path) -> set[str]:
     because guard 2 only ever *blocks* a deletion.
     """
     path = tracker / ".bridge_state" / "bindings-retired.json"
-    if not path.exists():
-        return set()
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open_published(path) as fh:
             data = json.load(fh)
+    except FileNotFoundError:
+        return set()
     except (OSError, ValueError):
         return set()
     if isinstance(data, dict):

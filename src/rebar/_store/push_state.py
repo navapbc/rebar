@@ -19,6 +19,7 @@ import time
 from typing import Any
 
 from rebar._store import fsutil
+from rebar._store.fsutil import open_published
 from rebar._store.paths import StorePaths
 
 logger = logging.getLogger(__name__)
@@ -140,7 +141,7 @@ def read_status(tracker: str | os.PathLike[str] | None = None) -> dict[str, Any]
             from rebar.config import tracker_dir
 
             tracker = tracker_dir()
-        with open(_marker_path(tracker), encoding="utf-8") as fh:
+        with open_published(_marker_path(tracker)) as fh:
             payload = json.load(fh)
         if not isinstance(payload, dict) or payload.get("state") != "pending":
             return {"state": "ok"}

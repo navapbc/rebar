@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from rebar._store.fsutil import sibling_exclusive_lock
+from rebar._store.fsutil import open_published, sibling_exclusive_lock
 from rebar.reconciler.scratch_retention import alerts_dir
 
 #: The stable sibling every appender serializes on. A dotfile, so retention
@@ -60,7 +60,9 @@ def is_deduped(key: str, repo_root: Path, window_ns: int = _24H_NS) -> bool:
     now = time.time_ns()
     for jf in sorted(store_dir.glob("*.jsonl")):
         try:
-            for line in jf.read_text(encoding="utf-8").splitlines():
+            with open_published(jf) as fh:
+                lines = fh.read().splitlines()
+            for line in lines:
                 try:
                     rec = json.loads(line)
                 except Exception:  # noqa: BLE001 — skip an unparseable alert-store line (per-line fail-open during the dedupe scan)

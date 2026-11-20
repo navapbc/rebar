@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from rebar._store.fsutil import open_published
+
 _VERSION = 1
 
 
@@ -63,11 +65,11 @@ def load_mapping(repo_root: str | os.PathLike[str]) -> Mapping:
       raise ``ValueError`` rather than silently degrade to empty.
     """
     path = _projects_path(Path(repo_root))
-    if not path.exists():
-        return Mapping()
     try:
-        with open(path, encoding="utf-8") as f:
+        with open_published(path) as f:
             data = json.load(f)
+    except FileNotFoundError:
+        return Mapping()
     except (json.JSONDecodeError, ValueError, OSError) as exc:
         raise ValueError(
             f"projects.json is corrupt or contains git conflict markers "  # tickets-boundary-ok

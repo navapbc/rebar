@@ -20,7 +20,7 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from rebar._store.fsutil import replace_with_retry
+from rebar._store.fsutil import open_published, replace_with_retry
 from rebar.llm.review_kernel import (
     CheckpointEnvelope,
     DiscoveryStagePlan,
@@ -113,10 +113,10 @@ def load_checkpoint(ctx: PlanContext, digest: str) -> CheckpointEnvelope | None:
         return None
     try:
         path = d / f"{digest}.json"
-        if path.is_file():
-            env = CheckpointEnvelope.from_json(path.read_text(encoding="utf-8"))
-            if env is not None and env.digest == digest and env.is_reusable_success():
-                return env
+        with open_published(path) as fh:
+            env = CheckpointEnvelope.from_json(fh.read())
+        if env is not None and env.digest == digest and env.is_reusable_success():
+            return env
     except Exception:  # noqa: BLE001 — checkpoint read is a best-effort resume optimization; any failure ⇒ no cached result (recompute)
         return None
     return None

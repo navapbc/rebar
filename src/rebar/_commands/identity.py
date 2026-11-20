@@ -15,6 +15,7 @@ from pathlib import Path
 
 from rebar._commands._seam import CommandError, append_event, tracker_dir
 from rebar._commands.composer import create_core
+from rebar._store.fsutil import open_published
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ def _read_pointer_id(repo_root=None) -> str | None:
     Tolerates extra keys. Any read/parse failure or a missing/blank id yields
     ``None`` (a corrupt pointer is a miss, not an error)."""
     try:
-        raw = _pointer_path(repo_root).read_text(encoding="utf-8").strip()
+        with open_published(_pointer_path(repo_root)) as fh:
+            raw = fh.read().strip()
     except OSError:
         return None
     if not raw:
