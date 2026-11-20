@@ -154,6 +154,7 @@ def _gate_commit_sha(*, source_dir: str | None = None) -> str | None:
             ["git", "-C", src, "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except OSError:
@@ -170,6 +171,7 @@ def _gate_commit_sha(*, source_dir: str | None = None) -> str | None:
             ["git", "-C", src, "status", "--porcelain"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         if status.returncode == 0 and status.stdout.strip():
@@ -206,6 +208,7 @@ def head_sha(repo_root) -> str:
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except OSError:

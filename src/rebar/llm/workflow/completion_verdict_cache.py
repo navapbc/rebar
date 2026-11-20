@@ -84,6 +84,7 @@ def _rev_parse_lines(repo_root: str | None, *specs: str) -> list[str] | None:
             cwd=_resolve_root(repo_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_GIT_TIMEOUT_SECONDS,
             check=False,
         )
