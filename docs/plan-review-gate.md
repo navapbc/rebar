@@ -1921,7 +1921,9 @@ Read the map through these interfaces:
 > id plus key), not in the repository (ADR 0125). `rebar verify-opcert` walks the merged ticket log
 > and verifies each completion certificate's SSHSIG signature, its binding, and that its
 > (environment, key) pair is listed. Without a required-environment configuration a certificate
-> remains a local process record.
+> remains a local process record. The gate reads its `[verify]` settings from the project config
+> committed on the reviewed base branch (`origin/main`), along with `tracker.dir`, never from
+> the checkout under review, so a change cannot widen the trust of its own gate run.
 
 ## End-to-end latency before work begins
 

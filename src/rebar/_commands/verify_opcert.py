@@ -6,7 +6,9 @@ against the required environment and this environment's ``verify.trusted_opcert_
 invalid certificates fail enforced tickets, pre-boundary tickets are advisory, and an unset
 required environment disables enforcement. A required environment without a trust list is a
 configuration error. Exit 2 reports config or store errors, 1 an enforced failure, and 0 a
-pass or advisory result.
+pass or advisory result. The three ``[verify]`` keys that decide the gate come from the
+project config committed on the reviewed base branch, not from the working tree
+(:mod:`rebar._opcert_gate_config`).
 """
 
 from __future__ import annotations
@@ -107,19 +109,36 @@ def cli(argv: list[str]) -> int:
     p = build_opcert(prog="rebar verify-opcert")
     args = p.parse_args(argv)
 
+    # Trust and posture come from the reviewed base branch's committed project config, never
+    # from the checkout under review, so a change cannot widen its own gate (golden-busied-nag).
+    from rebar._engine_support.reads import local_read_context
+    from rebar._opcert_gate_config import gate_config
+    from rebar._operation_config import bind_operation_snapshot
+
     try:
-        cfg = config.compose_config(root=args.root)
+        cfg, trust_source, snapshot = gate_config(args.root)
     except config.ConfigError as exc:
         print(f"verify-opcert: {exc}", file=sys.stderr)
         return 2
+    print(f"verify-opcert: trust configuration from {trust_source}", file=sys.stderr)
+    # Bind the same configuration for the whole run, so snapshot-aware readers (the store
+    # location, `tracker.dir`, above all) use main's values: a change pointing `tracker.dir`
+    # at an empty directory would otherwise leave nothing in scope. Reads stay local: the
+    # gate verifies the store as mounted, so no read-time sync consults the working tree's
+    # `sync.pull` (load_config does not see the snapshot).
+    with bind_operation_snapshot(snapshot), local_read_context():
+        return _gate(args, cfg)
 
+
+def _gate(args, cfg) -> int:
+    """Run the merge gate under the base-branch configuration ``cfg``."""
     required_env = args.require_environment or cfg.verify.require_environment
     since_ref = args.since if args.since is not None else cfg.verify.opcert_enforce_since
     as_json = args.format == "json"
 
-    from rebar._opcert_verify import trusted_opcert_pairs
+    from rebar._opcert_verify import opcert_pairs
 
-    trusted_pairs = trusted_opcert_pairs(args.root)
+    trusted_pairs = opcert_pairs(cfg.verify.trusted_opcert_keys)
     if required_env and trusted_pairs is None:
         print(
             f"verify-opcert: verify.require_environment is {required_env!r} but "

@@ -46,7 +46,11 @@ def build_opcert(*, prog: str) -> argparse.ArgumentParser:
             "valid cert fails the gate with a non-zero exit. A required environment without a "
             "trust list is a configuration error. Tickets whose close commit predates --since or "
             "verify.opcert_enforce_since are grandfathered, which means reported but never fail "
-            "the gate."
+            "the gate. Those verify settings and tracker.dir come from the project config "
+            "committed on origin/main, never from the checkout under review, so a change "
+            "cannot widen its own gate. A checkout with a remote but "
+            "no fetched base branch is a configuration error. A checkout with no remote reads "
+            "its working tree."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
