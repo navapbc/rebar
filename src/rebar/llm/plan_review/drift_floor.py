@@ -55,6 +55,7 @@ def _drifted_paths(
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
     except Exception:  # noqa: BLE001 — best-effort: unresolvable diff → unknown set → no drops
         return None

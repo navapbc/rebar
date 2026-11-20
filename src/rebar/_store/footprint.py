@@ -159,6 +159,7 @@ def _git(  # raw-git-ok: read-only footprint probes, variable subcommand
             ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except OSError as exc:
@@ -306,6 +307,7 @@ def measure_fresh_clone(repo_root: str | PathLike[str]) -> dict[str, object]:
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
         except OSError as exc:

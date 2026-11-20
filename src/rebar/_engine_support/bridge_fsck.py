@@ -338,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
                 ["git", "rev-parse", "--show-toplevel"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=True,
             )
             repo_root = Path(result.stdout.strip())

@@ -351,6 +351,7 @@ def _churn_90d(path: str, repo_root: Any) -> int:
             ["git", "-C", str(repo_root), "log", "--since=90 days ago", "--oneline", "--", path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=10,
             check=False,
         )

@@ -278,6 +278,7 @@ def verify_opcert(
                 ["git", "-C", tracker, "merge-base", "--is-ancestor", ancestor, descendant],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=30,
                 check=False,
             )

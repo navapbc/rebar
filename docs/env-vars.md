@@ -236,11 +236,11 @@ _216 variables._
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
-- `src/rebar/_config_resolvers.py:339` — `os.environ.get(<non-literal>)`
+- `src/rebar/_config_resolvers.py:341` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:374` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:386` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:393` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:671` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:672` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/terraform_source.py:410` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:37` — `os.environ.get(<non-literal>)`

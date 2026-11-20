@@ -106,6 +106,7 @@ def _link_session_artifact(artifact_id: str, *, head: str = "HEAD", repo_root: A
             ["git", "-C", root, "log", "-1", "--format=%B", head or "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         ).stdout
         tracker = str(_config.tracker_dir(repo_root))

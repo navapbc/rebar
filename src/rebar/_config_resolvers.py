@@ -262,6 +262,7 @@ def _git_toplevel() -> tuple[str, Path] | None:
             ["git", "-C", ".", "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env={**os.environ, "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"},
             check=False,
         )
@@ -315,6 +316,7 @@ def resolve_os_actor(tracker: str | os.PathLike[str]) -> str:
             ["git", "-C", str(tracker), "config", "user.email"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         if result.returncode == 0 and result.stdout.strip():

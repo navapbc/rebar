@@ -231,7 +231,13 @@ def needs_folding(
 
 def git_author() -> str:
     """The configured git author name, or ``"system"`` when git cannot answer."""
-    cp = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, check=False)
+    cp = subprocess.run(
+        ["git", "config", "user.name"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
     if cp.returncode != 0:
         return "system"
     return cp.stdout.strip()

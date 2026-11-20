@@ -321,6 +321,7 @@ def _is_enforced(commit_sha: str | None, since_ref: str | None, tracker: str) ->
             ["git", "-C", tracker, "merge-base", "--is-ancestor", since_ref, commit_sha],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
             check=False,
         )
@@ -454,6 +455,7 @@ def _collect_range(tracker: str, base: str) -> list[_ScopedEvent]:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     events: list[_ScopedEvent] = []

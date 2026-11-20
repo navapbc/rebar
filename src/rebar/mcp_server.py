@@ -585,6 +585,7 @@ def _check_startup_authorship_key(cfg) -> None:
             ["ssh-keygen", "-y", "-P", "", "-f", key_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except OSError as exc:

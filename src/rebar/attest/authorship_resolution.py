@@ -42,6 +42,7 @@ def resolve_event_commit(
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
         )
         if proc.returncode != 0:
@@ -83,6 +84,7 @@ def resolve_position_commit(
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
         )
         if proc.returncode != 0:
@@ -131,6 +133,7 @@ def build_ticket_position_commit_map(
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=300,
         )
         if proc.returncode != 0:
@@ -193,6 +196,7 @@ def _scan_added_event_files(tracker: str) -> list[tuple[str, str]]:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
     )
     if proc.returncode != 0:
@@ -280,6 +284,7 @@ def _subprocess_is_ancestor(tracker: str, ancestor: str, descendant: str) -> boo
             ["git", "-C", tracker, "merge-base", "--is-ancestor", ancestor, descendant],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
             check=False,
         )
@@ -354,6 +359,7 @@ def build_ancestry_oracle(tracker: str) -> Callable[[str, str], bool] | None:
             ["git", "-C", tracker, "rev-list", "--parents", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=300,
         )
     except Exception:  # noqa: BLE001 — ANY git failure → no oracle, callers use the subprocess

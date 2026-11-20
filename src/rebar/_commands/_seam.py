@@ -175,6 +175,7 @@ def _git_config(key: str, fallback: str = "", *, cwd=None) -> str:
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             timeout=5,
         )

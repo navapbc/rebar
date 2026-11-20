@@ -396,6 +396,7 @@ def _ruff(args: list[str], text: str) -> str:
         input=text,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return proc.stdout

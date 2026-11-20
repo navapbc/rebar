@@ -228,7 +228,12 @@ def fetch_gerrit_merged_changes(
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     # raw-git-ok: read-only reachability probe for the checked-out mirror-guard workspace.
     return subprocess.run(  # raw-git-ok: read-only reachability probe, never writes refs
-        ["git", *args], capture_output=True, text=True, check=False, timeout=_GIT_TIMEOUT
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=_GIT_TIMEOUT,
     )
 
 

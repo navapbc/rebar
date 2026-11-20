@@ -162,6 +162,7 @@ def tracker_head_sha(
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=30,
             )
             return proc.stdout or ""

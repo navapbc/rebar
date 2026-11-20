@@ -40,7 +40,7 @@ def _git(tracker: str, *args: str) -> subprocess.CompletedProcess[str]:
     helper the init ensure units use). Never raises on a non-zero status — callers
     inspect ``returncode`` — so a tree-check miss is data, not an exception."""
     return subprocess.run(
-        ["git", "-C", tracker, *args], capture_output=True, text=True, check=False
+        ["git", "-C", tracker, *args], capture_output=True, text=True, encoding="utf-8", check=False
     )
 
 
