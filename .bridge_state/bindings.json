@@ -13449,10 +13449,24 @@
     },
     "1e11-96bb-87da-456b": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n`reconciler/alert_store.patch_bug_filed` (`src/rebar/reconciler/alert_store.py:100-147`) reads a day's `*.jsonl` alert file, patches one record and republishes the whole file through `_atomic_write`, without holding the append lock. `append` writes the same file under `sibling_exclusive_lock(today, lock_name=_APPEND_LOCK_NAME)` (`:49`). An alert appended between the patch's `read_text` (`:123`) and its replace (`:144`) is dropped by the replace, on every platform. Found while enumerating readers for ruby-unwomanish-willet; this is a lost-update race, not that bug's Windows read refusal.\n\n## Approach\nHold the same `sibling_exclusive_lock(jf, lock_name=_APPEND_LOCK_NAME)` across the read-modify-write of each file in `patch_bug_filed`, so a patch and an append are serialized.\n\n## Scope\n- `src/rebar/reconciler/alert_store.py`\n- `tests/unit/reconciler/test_alert_store_patch_lock.py` (new)\n\n## Testing\nA unit test starts `patch_bug_filed` with its read paused (monkeypatched `_atomic_write` that waits on an event), appends an alert from another thread, then releases the patch; the appended record must survive. It fails on the current code and passes with the lock held.\n\n## Acceptance Criteria\n- [ ] The new test fails on origin/main before the change and passes after it.\n- [ ] `make verify` passes.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "alert_store.patch_bug_filed rewrites the alert file without the append lock and can drop a concurrent append"
       },
       "created_at": "2026-11-20T03:35:25Z",
@@ -17761,7 +17775,7 @@
     "2781-42c5-201c-4efe": {
       "baseline": {
         "assignee": null,
-        "description": "## Observation\nIn Windows sweep run 44456347985 (job 135332660982, main at ab323f7df0c), `tests/unit/reconciler/apply/test_bridge_state_atomic_write_concurrency.py::test_peer_confirmations_distinct_concurrent_saves_are_merged` failed with `PermissionError(13, 'Permission denied')` recorded by the test's concurrent READER thread (`final_path.read_text()`, `:43-47`), not by the writers. The writers now retry a contended replace (`rebar._store.fsutil.replace_with_retry`, sporting-feudalist-bluet). On Windows, opening a file while `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` replaces it can fail with access denied; POSIX readers never see this.\n\n## Hypotheses (unproven)\n- Product readers that open a published sidecar, cache or cursor without holding the writer's lock (for example a store's initial load) can get the same transient `PermissionError` on Windows and treat it as a failed or empty read.\n- Readers that already read under the sibling lock (`sidecar_transactions.mutate_json_object`) are unaffected.\n\n## Enumeration (origin/main `717c50f8b33`, 2026-11-19 PST)\nEvery product reader of a file published by `atomic_write`/`replace_with_retry`/`os.replace` in `src/rebar` was traced. No read-side retry exists in the tree: the only `PermissionError` handling around a publish is the writer's `replace_with_retry` (`src/rebar/_store/fsutil.py:45-65`).\n\nNot exposed: event files, new SNAPSHOT names (`_commands/txn.py`, `_store/staging.py`, `compact_txn.py`, `compact_rebuild.py`), whose destination never exists before the rename.\n\nLock-protected (reader and writer hold the same lock): `hlc.state` (`_store/hlc.py:78`), `bytes.total` read-modify-write inside `add_bytes` (`_snapshot/cache.py:104`), `.store-compat.json` read-modify-write (`compat.py:437`, `project_ensures.py:111`, under `ensures.py:157`), the compaction intent journal (`compact_recovery.py:132`), the recent-creates journal (`recent_creates.py:146`), `projects.json` inside the locked set/remove (`projects_store.py:209`), the snapshot integrity digest under the GC interlock (`janitor.py:267`), and `mapping.json` under `mutate_json_object`'s sibling lock (`sidecar_transactions.py:61`).\n\nExposed but needing no change, because a refused read is a cheap cache miss that is recomputed and rewritten: `.opcert-key.pub` (`_opcert_signing.py:222`), the reducer cache (`reducer/_cache.py:37`), the graph cache (`graph/_cache.py:61`), snapshot caveats (`_snapshot/repo_snapshot.py:164`), the review-bot cursor (`review_bot/reconcile.py:94`).\n\nExposed with a harmful outcome (crash, a silent wrong default, or a lost write), all fixed here:\n- Crash / fail-closed: `_store/compat.py:341` (`_analyze`, reached from `lock.acquire` at `_store/lock.py:373`, so every write command fails while an ensure republishes the record) and `:164` (`_local_store_epoch`); `_config_sources.py:120,128` (`rebar.toml` stat and open; also reached by `_config_writer.py:221`); `_cli/__init__.py:174`; `llm/evals/eval.py:80`; `llm/evals/provider_parity.py:221`; `reconciler/projects_store.py:69`; `reconciler/binding_repository.py:262`; `_engine_support/bridge_fsck.py:68-71`; `llm/workflow/completion_banking.py:543`.\n- Lost or wrong write: `_commands/session_log.py:55` (an unreadable pointer starts a new session log and overwrites the pointer); `_commands/bridge_repair.py:68` (an empty retired set disables Guard 2 before `save()`); `_snapshot/cache.py:92` (`byte_total` read as 0 makes `janitor.py:314-315` add the full total again); `reconciler/get_rotation.py:30`; `llm/gate_runs.py:179` (a terminal record read as absent can be overwritten by `_materialize_stale_running`, `:389-403`).\n- Silent wrong default: `llm/prompting/prompts.py:190,351,522` (a user prompt override silently replaced by the packaged prompt); `_commands/identity.py:38` (events stamped without the current identity); `_store/push_state.py:143` (PUSH_PENDING hidden); `_store/ensures.py:113,207`; `_commands/scratch.py:158`; `_ids.py:119`; `_engine_support/bridge_fsck_drift.py:21`; `reconciler/alert_store.py:63,123`; `reconciler/last_pass.py:183`; `reconciler/binding_repository.py:196,284`; `reconciler/peer_confirmations.py:71`; `reconciler/impossible_links.py:195`; `llm/plan_review/checkpoints.py:117` and `llm/workflow/completion_verdict_cache.py:258` (a refused read reruns a billable LLM call).\n\n## Approach\nMove the contended-path retry loop out of `replace_with_retry` into one helper, `fsutil.retry_contended(fn, *args, **kwargs)`: on Windows it retries `PermissionError` with the existing backoff and 2 s deadline (`_REPLACE_RETRY_DEADLINE_S`), then re-raises; elsewhere it calls `fn` once. `replace_with_retry` becomes `retry_contended(os.replace, src, dst)`, unchanged in behaviour. Add `fsutil.open_published(path, mode=\"r\", *, encoding=\"utf-8\")`, which is `retry_contended(open, ...)` (encoding omitted for binary modes); the refusal happens when the file is opened, so retrying the open is enough. Each exposed reader above replaces its `open(...)`/`Path.read_text(...)` with `open_published(...)` (and `_config_sources.py:120` wraps its `path.stat()` in `retry_contended`), keeping its existing exception handling, so a refusal that outlasts the deadline still takes the same path as today. POSIX behaviour is unchanged: on POSIX both helpers are a single direct call. Reusing the existing Windows switch `_RETRY_CONTENDED_REPLACE` adds no config key, environment variable or flag.\n\nThe unlocked read-modify-write in `alert_store.patch_bug_filed` (`alert_store.py:118-147`) can also drop an append made between its read and its replace, on every platform. That is a separate race, not this Windows read refusal; it is filed as equable-overseas-hoiho.\n\n## Scope\n- `src/rebar/_store/fsutil.py` (`retry_contended`, `open_published`; `replace_with_retry` delegates)\n- The reader modules listed under \"Exposed with a harmful outcome\" (one call-site swap each)\n- `tests/unit/store/test_fsutil_read_retry.py` (new)\n\n## Testing\n- New unit tests force the Windows branch (`monkeypatch.setattr(fsutil, \"_RETRY_CONTENDED_REPLACE\", True)`) and inject an `open` that raises `PermissionError` twice and then succeeds: `open_published` returns the content; a refusal that outlasts a shortened deadline re-raises `PermissionError`; `FileNotFoundError` propagates at once. On the POSIX branch one `PermissionError` propagates immediately.\n- A wiring test parses each fixed reader module and asserts each listed reader function calls `open_published` or `retry_contended`, so the enumeration cannot silently regress.\n- Existing `replace_with_retry` tests keep passing; `make verify` passes.\n\n## Acceptance Criteria\n- [ ] The product read paths of files published through `atomic_write`/`replace_with_retry` are enumerated, and each is recorded as either lock-protected or exposed on Windows.\n- [ ] Every exposed read path tolerates the transient refusal (or is shown not to need to), with a Windows-branch unit test.",
+        "description": "## Observation\nIn Windows sweep run 44456347985 (job 135332660982, main at ab323f7df0c), `tests/unit/reconciler/apply/test_bridge_state_atomic_write_concurrency.py::test_peer_confirmations_distinct_concurrent_saves_are_merged` failed with `PermissionError(13, 'Permission denied')` recorded by the test's concurrent READER thread (`final_path.read_text()`, `:43-47`), not by the writers. The writers now retry a contended replace (`rebar._store.fsutil.replace_with_retry`, sporting-feudalist-bluet). On Windows, opening a file while `MoveFileEx(MOVEFILE_REPLACE_EXISTING)` replaces it can fail with access denied; POSIX readers never see this.\n\n## Hypotheses (unproven)\n- Product readers that open a published sidecar, cache or cursor without holding the writer's lock (for example a store's initial load) can get the same transient `PermissionError` on Windows and treat it as a failed or empty read.\n- Readers that already read under the sibling lock (`sidecar_transactions.mutate_json_object`) are unaffected.\n\n## Enumeration (origin/main `717c50f8b33`, 2026-11-19 PST)\nEvery product reader of a file published by `atomic_write`/`replace_with_retry`/`os.replace` in `src/rebar` was traced. No read-side retry exists in the tree: the only `PermissionError` handling around a publish is the writer's `replace_with_retry` (`src/rebar/_store/fsutil.py:45-65`).\n\nNot exposed: event files, new SNAPSHOT names (`_commands/txn.py`, `_store/staging.py`, `compact_txn.py`, `compact_rebuild.py`), whose destination never exists before the rename.\n\nLock-protected (reader and writer hold the same lock): `hlc.state` (`_store/hlc.py:78`), `bytes.total` read-modify-write inside `add_bytes` (`_snapshot/cache.py:104`), `.store-compat.json` read-modify-write (`compat.py:437`, `project_ensures.py:111`, under `ensures.py:157`), the compaction intent journal (`compact_recovery.py:132`), the recent-creates journal (`recent_creates.py:146`), `projects.json` inside the locked set/remove (`projects_store.py:209`), the snapshot integrity digest under the GC interlock (`janitor.py:267`), and `mapping.json` under `mutate_json_object`'s sibling lock (`sidecar_transactions.py:61`).\n\nExposed but needing no change, because a refused read is a cheap cache miss that is recomputed and rewritten: `.opcert-key.pub` (`_opcert_signing.py:222`), the reducer cache (`reducer/_cache.py:37`), the graph cache (`graph/_cache.py:61`), snapshot caveats (`_snapshot/repo_snapshot.py:164`), the review-bot cursor (`review_bot/reconcile.py:94`).\n\nExposed with a harmful outcome (crash, a silent wrong default, or a lost write), all fixed here:\n- Crash / fail-closed: `_store/compat.py:341` (`_analyze`, reached from `lock.acquire` at `_store/lock.py:373`, so every write command fails while an ensure republishes the record) and `:164` (`_local_store_epoch`); `_config_sources.py:120,128` (`rebar.toml` stat and open; also reached by `_config_writer.py:221`); `_cli/__init__.py:174`; `llm/evals/eval.py:80`; `llm/evals/provider_parity.py:221`; `reconciler/projects_store.py:69`; `reconciler/binding_repository.py:262`; `_engine_support/bridge_fsck.py:68-71`; `llm/workflow/completion_banking.py:543`.\n- Lost or wrong write: `_commands/session_log.py:55` (an unreadable pointer starts a new session log and overwrites the pointer); `_commands/bridge_repair.py:68` (an empty retired set disables Guard 2 before `save()`); `_snapshot/cache.py:92` (`byte_total` read as 0 makes `janitor.py:314-315` add the full total again); `reconciler/get_rotation.py:30`; `llm/gate_runs.py:179` (a terminal record read as absent can be overwritten by `_materialize_stale_running`, `:389-403`).\n- Silent wrong default: `llm/prompting/prompts.py:190,351,522` (a user prompt override silently replaced by the packaged prompt); `_commands/identity.py:38` (events stamped without the current identity); `_store/push_state.py:143` (PUSH_PENDING hidden); `_store/ensures.py:113,207`; `_commands/scratch.py:158`; `_ids.py:119`; `_engine_support/bridge_fsck_drift.py:21`; `reconciler/alert_store.py:63,123`; `reconciler/last_pass.py:183`; `reconciler/binding_repository.py:196,284`; `reconciler/peer_confirmations.py:71`; `reconciler/impossible_links.py:195`; `llm/plan_review/checkpoints.py:117` and `llm/workflow/completion_verdict_cache.py:258` (a refused read reruns a billable LLM call).\n\n## Approach\nMove the contended-path retry loop out of `replace_with_retry` into one helper, `fsutil.retry_contended(fn, *args, **kwargs)`: on Windows it retries `PermissionError` with the existing backoff and 2 s deadline (`_REPLACE_RETRY_DEADLINE_S`), then re-raises; elsewhere it calls `fn` once. `replace_with_retry` becomes `retry_contended(os.replace, src, dst)`, unchanged in behaviour. Add `fsutil.open_published(path, mode=\"r\", *, encoding=\"utf-8\")`, which is `retry_contended(open, ...)` (encoding omitted for binary modes); the refusal happens when the file is opened, so retrying the open is enough. Each exposed reader above replaces its `open(...)`/`Path.read_text(...)` with `open_published(...)` (and `_config_sources.py:120` wraps its `path.stat()` in `retry_contended`), keeping its existing exception handling, so a refusal that outlasts the deadline still takes the same path as today. A refused replace also refuses a stat, so an existence check before the open is exposed in the same way: `Path.exists()`/`is_file()` re-raise `PermissionError` on Python 3.11/3.12 and return False on 3.13+, and `os.path.exists`/`isfile` return False. Where a listed reader checks existence of the file it then opens (`binding_repository.py:193,260,281`, `projects_store.py:66`, `prompts.py:189,350`, `scratch.py:154`, `checkpoints.py:116`, `eval.py:77`, `bridge_repair.py:65`, and any other such check in a listed reader), the check is removed and `FileNotFoundError` raised by `open_published` maps to the reader's existing absent branch. Absence is then decided only by an open, and only `PermissionError` is retried. Existence checks that gate a read but sit outside a reader function use a third helper, `fsutil.published_is_file(path)`: `stat.S_ISREG(retry_contended(os.stat, path).st_mode)`, mapping `FileNotFoundError`/`NotADirectoryError` to False. It replaces `is_file()` on published config files in `_config_sources._discover_project_config` (`rt.is_file()` `:175` for `rebar.toml`, `pp.is_file()` `:184` for `pyproject.toml`) and `raw_layers` (`up.is_file()` `:209`, the user config), and `os.path.exists` on `.store-compat.json` in `_store/store_usability._carries_store_structure` (`:55`). Without it, a refused stat on Python 3.13+ makes discovery silently skip the project `rebar.toml` while `_config_writer.py:221` republishes it. POSIX behaviour is unchanged: on POSIX both helpers are a single direct call. Reusing the existing Windows switch `_RETRY_CONTENDED_REPLACE` adds no config key, environment variable or flag.\n\nThe unlocked read-modify-write in `alert_store.patch_bug_filed` (`alert_store.py:118-147`) can also drop an append made between its read and its replace, on every platform. That is a separate race, not this Windows read refusal; it is filed as equable-overseas-hoiho.\n\n## Scope\n- `src/rebar/_store/fsutil.py` (`retry_contended`, `open_published`, `published_is_file`; `replace_with_retry` delegates)\n- `src/rebar/_store/store_usability.py` (`_carries_store_structure`)\n- The reader modules listed under \"Exposed with a harmful outcome\" (one call-site swap each)\n- `tests/unit/store/test_fsutil_read_retry.py` (new)\n\n## Testing\n- New unit tests force the Windows branch (`monkeypatch.setattr(fsutil, \"_RETRY_CONTENDED_REPLACE\", True)`) and inject an `open` that raises `PermissionError` twice and then succeeds: `open_published` returns the content; a refusal that outlasts a shortened deadline re-raises `PermissionError`; `FileNotFoundError` propagates at once. On the POSIX branch one `PermissionError` propagates immediately.\n- A wiring test parses each fixed reader module and asserts each listed reader function (including `_discover_project_config`, `raw_layers` and `_carries_store_structure`) calls `open_published`, `retry_contended` or `published_is_file` and makes no `exists()`/`is_file()`/`os.path.exists`/`os.path.isfile` call, so the enumeration cannot silently regress.\n- For each reader whose existence guard is removed, its existing absent-file test (or a new one in the new test module) still gets the absent default when the file does not exist.\n- Existing `replace_with_retry` tests keep passing; `make verify` passes.\n\n## Acceptance Criteria\n- [ ] The product read paths of files published through `atomic_write`/`replace_with_retry` are enumerated, and each is recorded as either lock-protected or exposed on Windows.\n- [ ] Every exposed read path tolerates the transient refusal (or is shown not to need to), with a Windows-branch unit test.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Windows: readers of an atomically replaced file can get PermissionError while a replace is in flight"
@@ -25817,10 +25831,24 @@
     },
     "3822-a9e3-5999-422c": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\nOn 2026-11-18 a `make verify` of an unrelated branch (worktree a2-win-portability, commit b1216d0cda3, rebased on 9ddb035cf59) failed `tests/unit/test_snapshot_janitor.py::test_byte_total_consistent_under_concurrent_populate_evict` at `tests/unit/test_snapshot_janitor.py:188`: `assert 312 == 365` (`cache.byte_total(store)` against `_real_store_bytes(store)`). The host was running a second `make verify` at the same time. The test passed 3 of 3 times rerun alone. The branch does not touch `src/rebar/_snapshot/` (its only POSIX-visible change routes `fsutil.atomic_write` through a helper that is exactly `os.replace` off Windows).\n\n## Hypotheses (unproven)\n- The running byte counter (`cache.add_bytes`, under `interprocess_lock`) and the populate/evict paths disagree on what a racing populate or evict adds or frees (for example a populate that loses the single-flight race, or `_evict`'s `exclusive_size` measured before a concurrent hardlink change).\n- The assertion reads the walk while a populate is still finishing.\n\n## Root cause (reproduced deterministically on 2026-11-19)\nThe first hypothesis holds. The running total trusts each file's `st_nlink` at the moment one side measures it, and nothing orders that measurement against the hardlinks a donor build (`delta_tree.materialize_via_donor`) creates from a published entry. The failing interleaving: the evictor's `_evict(A)` measures `exclusive_size(A)` while file X has one link, so it will subtract X; a populater then builds the adjacent SHA B by hardlinking X from A, publishes B, and measures `exclusive_size(B)` while X has two links, so it adds nothing for X; the evictor then renames and deletes A and subtracts. X stays on disk in B and is counted nowhere. The observed `312 == 365` is a 53-byte undercount, the size of the fixture's `f3.txt`.\n\nForced single-threaded (scratch script; the evictor's `exclusive_size` call runs `cache.acquire(B)` before returning, then `_evict` continues): `byte_total 7` against an independent walk of `110`, every run. 25 unforced reruns of the test on an idle host all passed, which is why the race needs host load to show.\n\nThe same defect has 2 sibling interleavings: (a) B hardlinks X from A, the evictor measures A (X has two links, frees 0) and deletes A, then B measures X at one link and adds it again, an overcount; (b) B publishes, C hardlinks from B before B measures, so both count X as shared, an undercount.\n\n## Approach\nHold one invariant: outside the store's accounting lock, a file's link count counts only links from published entries. Every step that changes a published file's link count, and every measurement that reads one, happens under that lock.\n\n- `src/rebar/_snapshot/cache.py`: add `accounting_lock(root)`, which returns the existing `interprocess_lock` on `<root>/locks/bytes.total.lock` (no new lock file). `add_bytes` takes it and delegates to a held-lock variant that callers already holding the lock use. `acquire` stops adding bytes itself, because the publish step now accounts (next bullet).\n- `src/rebar/_snapshot/repo_snapshot.py`: both populate paths (`materialize` for code entries, `materialize_tickets` for ticket entries) go through one helper. It runs the donor attempt (hardlinks plus delta rewrite) and, when the donor build succeeds, the publish rename and the `exclusive_size` increment in a single lock hold. A full materialization builds outside the lock, because its files are fresh inodes under `tmp/` that no other build can link, and takes the lock only to publish and account. Only the build whose rename published the entry adds bytes; a build that lost the publish race adds nothing.\n- `src/rebar/_snapshot/janitor.py`: `_evict` holds the lock from `exclusive_size` through the rename to trash, the `rmtree`, and the decrement, so the trash copy's links are gone before the next measurement. `startup_sweep` holds it across its authoritative walk and reset, so a populate cannot land between the two.\n- `docs/adr/0005-snapshot-cache-architecture.md`: add the invariant to the \"Sharing changes what the byte total may be built from\" section.\n\nRejected alternatives: having a populate add only the bytes it wrote fresh (still drifts when a donor build that already holds links is discarded); a per-entry lock (a link count is shared across entries, so the state is store-wide).\n\nCost: donor-path populates serialize with each other and with eviction for the length of a delta build (the hardlinks, `read-tree`, and a `checkout-index` of the changed paths). Full materializations still build concurrently.\n\n## Scope\n- `src/rebar/_snapshot/cache.py`\n- `src/rebar/_snapshot/janitor.py`\n- `src/rebar/_snapshot/repo_snapshot.py`\n- `tests/unit/test_snapshot_janitor.py`\n- `docs/adr/0005-snapshot-cache-architecture.md`\n\n## Testing\nAdd 3 deterministic interleaving tests to `tests/unit/test_snapshot_janitor.py`, one per interleaving above. Each test pauses one actor at the suspected window and runs the other actor in a second thread. The paused actor resumes once the second thread has either finished (the race happened, as on the current code) or is waiting on `cache.accounting_lock` (the fix excluded it). A spy on `cache.accounting_lock` reports the wait, so no sleep or timing bound decides the outcome; a generous join bound only turns a hang into a loud failure. Each test then asserts `cache.byte_total(store)` equals the independent inode walk `_real_store_bytes(store)`.\n1. Evict measures, then a populate links from the entry being evicted: pause point is the evictor's `exclusive_size` call.\n2. A populate links from a donor, then the donor is evicted before the populate measures: pause point is the populater's `delta_tree._link_tree_paths` return.\n3. A populate publishes, then a second populate links from it before the first measures: pause point is the first populater's `exclusive_size` call.\nRun each against the pre-fix tree first and record the failures on this ticket. The existing `test_byte_total_consistent_under_concurrent_populate_evict`, `tests/unit/test_snapshot_janitor.py`, and `tests/unit/test_snapshot_cache.py` must stay green.\n\n## Acceptance Criteria\n- [ ] The interleaving that produces the drift is reproduced deterministically and recorded on this ticket.\n- [ ] The byte total matches the store walk under that interleaving, with a regression test.\n- [ ] The 3 interleaving tests in `tests/unit/test_snapshot_janitor.py` fail on the pre-fix tree and pass with the fix (checked by running them on both trees; results recorded on this ticket).\n- [ ] `make verify` passes on the change.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "test_byte_total_consistent_under_concurrent_populate_evict: byte total drifts from the store walk under host load"
       },
       "created_at": "2026-11-19T00:55:43Z",
@@ -29968,6 +29996,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:30Z"
     },
+    "41e5-5e7c-52f5-43c6": {
+      "created_at": "2026-11-20T06:41:13Z",
+      "jira_id": "4599573",
+      "jira_key": "REB-7313",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T06:41:16Z"
+    },
     "41ee-cae2-6fc9-47b7": {
       "baseline": {
         "assignee": null,
@@ -33232,6 +33267,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-28T12:17:28Z"
+    },
+    "4955-1705-4a36-4763": {
+      "created_at": "2026-11-20T06:41:18Z",
+      "jira_id": "4599574",
+      "jira_key": "REB-7314",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T06:41:21Z"
     },
     "49a3-0511-dd2d-4592": {
       "baseline": {
@@ -37026,6 +37068,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:24Z"
+    },
+    "51c6-9f1d-595b-411f": {
+      "created_at": "2026-11-20T06:41:22Z",
+      "jira_id": "4599575",
+      "jira_key": "REB-7315",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T06:41:25Z"
     },
     "51ce-b03e-cff5-4e9c": {
       "baseline": {
@@ -52942,10 +52991,24 @@
     },
     "77d4-2f6d-bebc-4340": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nDiscovered from livid-painful-mosquito, which fixes the shared `run_git` wrapper (`src/rebar/_store/gitutil.py`) and the `ssh -V` probe (`src/rebar/attest/sshsig.py`). An AST census of `src/rebar` at origin/main `1654f3e3e53` finds 92 `subprocess.run`/`Popen`/`check_output` calls that pass `text=True` (or `universal_newlines`) and no `encoding`, in 58 files. Excluding the 3 sites fixed under livid-painful-mosquito leaves 89-90 sites in 56 files. Examples: `src/rebar/_store/project_ensures.py:42` (`_git`), `src/rebar/_store/footprint.py:158,295`, `src/rebar/_commands/verify_commit.py:141,146` (`git show -s --format=%B`, a commit body that can be non-ASCII), `src/rebar/_snapshot/repo_snapshot.py:335,528,549,566`, `src/rebar/_engine_support/commit_impact.py`, `src/rebar/mirror_guard.py:230`, `src/rebar/review_bot/gerrit_client.py` (5 sites).\n\nEach of them decodes child output with the locale codec: cp1252 on Windows. Non-ASCII git output (commit bodies, paths, ticket titles) is then garbled, or raises `UnicodeDecodeError` on bytes that cp1252 leaves undefined. Each site also emits `EncodingWarning` under `-X warn_default_encoding`. obtuse-phenocryst-verdin owns the sites behind current Windows-sweep failures; this bug owns the rest.\n\n## Current census (origin/main `717c50f8b33`, 2026-11-19 PST)\nAn AST scan of `src/rebar` finds 85 calls in 54 files that run a child in text mode (`text=`/`universal_newlines=` not literally false) with no `encoding=`: 82 direct `subprocess.run`/`subprocess.Popen` calls (including `_authorship.subprocess.run`), the injected `run(...)` default in `src/rebar/metrics/analyzers/_jscpd.py:55`, and 2 `dict(...)` keyword bundles later splatted into `subprocess.Popen` (`src/rebar/grounding/harness.py:165`, `src/rebar/reconciler/adapters/jira/acli_subprocess.py:504`). The in-tree wrappers `run_git` and `_run_in_group` (`src/rebar/_store/gitutil.py:169-232`) already decode with `encoding=\"utf-8\", errors=\"replace\"`, so calls through them are not sites. The scan rule: flag a call when it has a truthy `text`/`universal_newlines` keyword and no `encoding` keyword, and either its callee is `subprocess.<run|Popen|check_output|check_call|call>` (on a `subprocess` name or a `.subprocess` attribute) or the text keyword is the literal `True`.\n\n## Approach\nAdd `encoding=\"utf-8\"` to each of the 85 calls, keeping any `errors=` the call already passes. Every child these sites start (git, gh, ssh-keygen, ruff, uv, docker, acli, jscpd, the rebar CLI itself) writes UTF-8 or ASCII. On Linux and macOS the locale codec is already UTF-8 with strict errors, so naming UTF-8 leaves POSIX behaviour byte-for-byte unchanged and makes Windows decode the same way; strict decoding (rather than `errors=\"replace\"`) keeps that equivalence and surfaces corrupt output instead of masking it. Routing git reads through `run_git` is not done here: it would change error handling and call shape at each site for no decoding difference, since `run_git` decodes UTF-8 too.\n\nEnforce it with a Linux-gate test: replace `test_rebar_cli_output_is_decoded_as_utf8` in `tests/unit/test_windows_text_encoding.py`, which scans only 5 CLI-consumer files (`_CLI_CONSUMERS`, `:116-145`), with a tree-wide test applying the scan rule above to every module under `src/rebar` and asserting the list of sites is empty. The 5 files stay covered because they are under `src/rebar`.\n\nTwo files are near the 800-line module cap (`src/rebar/llm/evals/plan_replay/tier2.py` 794 lines, 3 sites; `src/rebar/_commands/transition_close.py` 780 lines, 1 site). One added keyword line per call keeps both at or under 800, which `make verify`'s module-size gate checks.\n\n## Scope\nThe 54 `src/rebar` modules listed under File impact (one keyword per site), and `tests/unit/test_windows_text_encoding.py` (the tree-wide guard). `tests/unit/metrics/test_jscpd_dup.py` also changes: its fake runner asserts the exact keywords of the `_jscpd.py:55` call (`:41`), so it gains `\"encoding\": \"utf-8\"`. A grep of `tests/` for exact text-mode keyword assertions (`\"text\": True` in a dict, `kwargs.get(\"text\")`) finds no other test pinning an edited `src/rebar` call; `tests/scripts/test_generate_dc_wiki_legacy_outputs.py:66` pins a `scripts/` call this change does not touch. No new config key, environment variable or flag.\n\n## Testing\n- New guard: fails on the current tree (85 sites) and passes after the edit. It also flags a synthetic `subprocess.run([...], text=True)` snippet and accepts one with `encoding=\"utf-8\"` (parametrized cases on an in-memory source string), so the rule cannot pass vacuously.\n- `make verify` passes.\n\n## Acceptance Criteria\n- [ ] The AST census above reports 0 text-mode subprocess calls without `encoding` in `src/rebar`, and a Linux-gate test enforces it.\n- [ ] `make verify` passes.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "90 text-mode subprocess calls in src/rebar decode output with the locale codec"
       },
       "created_at": "2026-11-19T06:44:15Z",
@@ -54087,6 +54150,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T05:38:23Z"
+    },
+    "7a2d-9166-ce30-4c1d": {
+      "created_at": "2026-11-20T06:41:27Z",
+      "jira_id": "4599576",
+      "jira_key": "REB-7316",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T06:41:30Z"
     },
     "7a3b-24cd-ad98-4ab7": {
       "baseline": {
@@ -56321,10 +56391,24 @@
     },
     "7fcc-dac7-6f05-4ad1": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observation\nGerrit 3440 patch set 1 (9771ff17b27) got `Verified -1` from run 44445060532, job 135298967486 (`build-and-test / pytest (ubuntu-latest, py3.12)`, git 2.56.1, 2026-11-19). The only failure was `tests/unit/test_recent_creates_shared_journal.py::test_a_linked_worktree_tracker_keeps_the_journal_in_its_own_git_dir` (`:196-212`): the setup command `git worktree add -q --detach <tmp>/repo/.tickets-tracker` exited 128 with `fatal: could not open '.git/worktrees/-tickets-tracker/locked' for writing: No such file or directory`. The change under test does not touch this test or the code it exercises (op-cert key loading, the comment-echo cleanup script, docs, the Windows sweep workflow). The module passed 5 of 5 times locally on macOS.\n\nThe repo is a fresh `git init` under the test's own `tmp_path`, so nothing else should touch its `.git/worktrees/`. git writes `locked` right after creating `.git/worktrees/<id>/`; ENOENT means that directory was gone or never created at that path.\n\n## Hypotheses (unproven)\n- A concurrent `git worktree prune` against this repo (callers: `src/rebar/_commands/init.py:186`, `src/rebar/llm/evals/plan_replay/tier2.py:304`), reached through an inherited `GIT_DIR`/cwd from a detached child of an earlier test on the same xdist worker.\n- A git 2.56.x worktree-id sanitisation issue for a dot-led basename (`.tickets-tracker` becomes `-tickets-tracker`).\n\n## Root cause (reproduced deterministically on 2026-11-19)\nNeither hypothesis holds. The pruner is a detached `git maintenance run --auto` that the test's own setup `git commit` starts, one step before its `git worktree add`.\n\n- `git commit` ends by starting `git maintenance run --auto --detach`, a child that outlives the commit (`run-command.c:prepare_auto_maintenance`; detaching is the default when neither `maintenance.autoDetach` nor `gc.autoDetach` is set).\n- Unscheduled maintenance now uses the `geometric` strategy, which includes the `worktree-prune` task (`builtin/gc.c`). Its auto condition and the `git worktree prune` it runs treat a `.git/worktrees/<id>/` directory holding neither `locked` nor `gitdir` as prunable (\"gitdir file does not exist\", with no expiry check: `worktree.c:should_prune_worktree`).\n- `git worktree add` creates that directory (`builtin/worktree.c:505`, v2.56.1) and writes `locked` (\"initializing\") only afterwards (`:526-530`). Git master has the same window. A maintenance run that scans in between deletes the in-flight directory, and the add dies writing `locked` with ENOENT.\n\nDeterministic reproduction (macOS, git 2.56.0, two `DYLD_INSERT_LIBRARIES` interposers in a scratch directory): pause the commit's detached maintenance child at its `opendir` of `.git/worktrees`, pause `git worktree add` right after its `mkdir` of `.git/worktrees/-tickets-tracker`, then release the maintenance child. 3 of 3 runs failed with exactly `fatal: could not open '.git/worktrees/-tickets-tracker/locked' for writing: No such file or directory`. The same sequence with the commit run as `git -c maintenance.auto=false commit` (no child) passed 3 of 3. Running `git maintenance run --auto --no-detach` inside the paused window also reproduces the error.\n\n## The class\nAny raw git write a test makes (commit, merge, fetch, a push into a local repository) leaves a detached auto-maintenance child running at git's defaults. 188 test files make a raw `git commit` and then create a linked worktree, directly or through `rebar init`. rebar's own git calls already keep maintenance off or in the foreground (`gitutil._IMPLICIT_MAINTENANCE_OFF`, the `_gc_config_unit` pins), so the exposure is the test suite's own git.\n\n## Approach\nDo what git's own test harness does: `t/test-lib.sh` exports `GIT_TEST_MAINT_AUTO_DETACH=false` with the comment \"Ensure that tests cannot race with background maintenance by default.\" In `tests/conftest.py`'s `pytest_configure`, after the existing `scrub_ambient_git_config`, set `GIT_TEST_MAINT_AUTO_DETACH=false` in `os.environ` for the session (xdist workers and every test subprocess inherit it). Git reads it only when neither `maintenance.autoDetach` nor `gc.autoDetach` is configured. The triggered maintenance still runs, but in the foreground of the command that started it, so it finishes before that command returns. Any repo-local or global pin a test sets keeps precedence, and `GIT_CONFIG_*`, which the scrub keeps clean, is untouched. This is a setting of git's existing variable inside the test harness; it adds no rebar config key, environment variable, or flag.\n\nGuard tests that prove a pin prevents `--detach` need git's default of detaching, or they pass without testing anything:\n- `tests/_git_upkeep.py`: `assert_no_detached_upkeep` fails with a clear message if `GIT_TEST_MAINT_AUTO_DETACH` is `false` when it runs, so a guard that forgets to restore git's default cannot pass vacuously.\n- Delete the variable (`monkeypatch.delenv`) for the guards' own runs: `tests/unit/test_init_leaves_no_detached_upkeep.py`, `tests/integration/test_prepare_reclaim_backup.py`, `tests/interfaces/store/test_inline_write_push.py`, `tests/interfaces/test_rebar_repo_isolation.py`.\n- `tests/scripts/bridge/test_bridge_fsck_keyset_prev.py` and `tests/unit/test_authorship_fixture_maintenance.py` stay unchanged: they write `autoDetach = true` into a global config, which outranks the variable.\n\nRejected alternatives: injecting `maintenance.auto=false` through `GIT_CONFIG_*` (it outranks the repo-local pins the guards exist to test, and the scrub exists to keep that channel clean); per-file fixes (188 files, and the next new test reopens the class).\n\n## Scope\n- `tests/conftest.py`\n- `tests/_git_upkeep.py`\n- `tests/unit/test_init_leaves_no_detached_upkeep.py`\n- `tests/integration/test_prepare_reclaim_backup.py`\n- `tests/interfaces/store/test_inline_write_push.py`\n- `tests/interfaces/test_rebar_repo_isolation.py`\n- `tests/unit/test_suite_git_maintenance_foreground.py` (new)\n\n## Testing\n- New `tests/unit/test_suite_git_maintenance_foreground.py`: in a fresh repository, a raw `git commit` under `GIT_TRACE2_EVENT` records a `git maintenance run` child (positive control: the commit did trigger maintenance), and no recorded child carries `--detach`. This is a fact about the recorded argv, with no timing. It fails on the pre-fix tree, where the child is `--detach`, and passes with the fix.\n- A second case covers the guard's failure path: `assert_no_detached_upkeep` raises when the variable is `false`.\n- Rerun the scratch reproduction with the session's setting instead of `-c maintenance.auto=false`: the commit's maintenance reaches its worktree scan before the commit returns, and the paused `git worktree add` succeeds.\n- The 4 guard files, `tests/unit/test_recent_creates_shared_journal.py`, and `tests/unit/test_compact_trigger_shared_sidecars.py` pass.\n\n## Acceptance Criteria\n- [ ] The interleaving or condition that produces the ENOENT is reproduced deterministically and recorded here.\n- [ ] The test passes reliably under that condition, with the class fixed.\n- [ ] `tests/unit/test_suite_git_maintenance_foreground.py` fails on the pre-fix tree and passes with the fix (checked by running it on both trees; results recorded here).\n- [ ] `make verify` passes on the change.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "test_a_linked_worktree_tracker_keeps_the_journal_in_its_own_git_dir: `git worktree add` intermittently fails on its own .git/worktrees lock file"
       },
       "created_at": "2026-11-19T03:34:04Z",
@@ -60688,6 +60772,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-09-17T01:45:32Z"
+    },
+    "8896-1f18-0965-4f1f": {
+      "created_at": "2026-11-20T06:41:32Z",
+      "jira_id": "4599577",
+      "jira_key": "REB-7317",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T06:41:35Z"
     },
     "88ab-7052-8850-46d4": {
       "baseline": {
@@ -72441,6 +72532,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:36Z"
+    },
+    "a2da-e61b-989e-4862": {
+      "created_at": "2026-11-20T06:41:36Z",
+      "jira_id": "4599578",
+      "jira_key": "REB-7318",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T06:41:39Z"
     },
     "a2e5-094d-0736-456e": {
       "baseline": {
@@ -85833,9 +85931,17 @@
       "updated_at": "2026-09-05T07:51:18Z"
     },
     "beef-0e12-6db9-491d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\nOn 2026-11-19 at about 20:57 PST (load average 42.97/43.57/41.22 on the shared agent host), a targeted pytest run in worktree fix-test-git-maint-detach (73 tests, -n 4) reported 72 passed and 1 error: tests/unit/test_topology_template_upkeep_guard.py::test_a_partially_pinned_repository_is_still_refused errored in teardown with subprocess.TimeoutExpired from tests/_isolation.py head() (git -C <worktree> rev-parse HEAD, 5 s watchdog, re-sampled GIT_PROBE_ATTEMPTS times). The test body passed.\n\nClosed bug dominating-removable-monkfish measured the same probe (p99 2.08 s, max 3.30 s under 18 processes x 100 probes) and closed with an environment-or-config disposition. This is the same symptom at a higher load than that measurement covered.\n\n## Hypotheses (unproven)\n- Process-spawn and scheduler saturation at load ~43 pushes all re-sampled probes past 5 s.\n- Contention on the shared checkout's object store or index from concurrent agent sessions.\n\n## Acceptance Criteria\n- [ ] Probe latency is measured at a load comparable to 40+ and the outcome is recorded here.\n- [ ] Either the guard tolerates that load without a false teardown error (with a regression test), or the ticket records why the current bound is kept.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Repo-isolation HEAD watchdog still errors a passing test at host load ~43"
+      },
       "created_at": "2026-11-20T05:32:13Z",
       "jira_id": "4599572",
       "jira_key": "REB-7312",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-20T05:32:16Z"
     },
@@ -89158,6 +89264,13 @@
       "peer_parent": "REB-4635",
       "state": "confirmed",
       "updated_at": "2026-09-05T08:40:06Z"
+    },
+    "c7b2-e4ed-37fd-4f60": {
+      "created_at": "2026-11-20T06:41:41Z",
+      "jira_id": "4599579",
+      "jira_key": "REB-7319",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T06:41:43Z"
     },
     "c7c5-12ea-ad68-4690": {
       "baseline": {
@@ -100580,6 +100693,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:32Z"
     },
+    "e062-1686-1a27-41a4": {
+      "created_at": "2026-11-20T06:41:45Z",
+      "jira_id": "4599580",
+      "jira_key": "REB-7320",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T06:41:48Z"
+    },
     "e063-edbb-435d-430b": {
       "baseline": {
         "assignee": null,
@@ -104007,7 +104127,7 @@
         },
         "description": "## Observation (2026-11-19 PST)\n`test.yml` dispatched on main at `92d3f373e2c` (run 44503581058), job `sweep (windows)` 135490319213: 14 failed, 20,016 passed.\n- 12 also failed on main at `3f47117c97b` (run 44487190183, job 135433617476, 13 failures). They compare backslash paths against forward-slash expectations or vice versa:\n  - `tests/unit/store/test_store_paths.py::test_exactly_one_rebar_dir_definition_under_src`\n  - `tests/unit/test_repo_root_from_package_guard.py::test_the_only_sanctioned_site_is_the_resolver_seam`\n  - `tests/unit/test_repo_root_from_tracker_guard.py` (2 tests)\n  - `tests/unit/test_single_definition_helpers.py::test_the_argparse_positive_int_is_defined_once_and_its_namesake_survives`\n  - `tests/unit/test_uv_pin_guard.py` (7 tests): the expected message uses `infra\\compose\\Dockerfile.svc`, while the script prints `infra/compose/Dockerfile.svc`.\n- 2 are new since `04e175d70eb` (ticket `livid-painful-mosquito`, closed): `tests/unit/test_git_ssh_output_encoding.py::test_run_git_encodes_str_stdin_as_utf8[process-group]` and `[subprocess-run]` (blob SHA mismatch on Windows, which points at a newline translation of the stdin text).\n- The previous run's one other failure, `test_store_commit_maintenance_bd66.py::test_write_survives_foreground_maintenance_repack` (worker crash), did not recur.\n\n## Resolution evidence (2026-11-19 PST)\nAll 14 failures are fixed on main by commits that landed under other tickets: the 5 path-separator guard tests (obtuse-phenocryst-verdin), the 7 `test_uv_pin_guard.py` cases (arctic-unsecular-esok), and the 2 `test_run_git_encodes_str_stdin_as_utf8` cases (scholastic-travelsick-salmon). None of the 14 node ids appears in `.github/windows-sweep-deselect/unclassified.args` (the only remaining deselect file), and none of the 6 test modules carries a Windows `skipif`. `gh workflow run test.yml --ref main` dispatch run 44621093373 at `0fec72331c4` (2026-11-19 13:40 PST): job `sweep (windows)` 135902646205 concluded `success`, \"20269 passed, 872 skipped\" with no failure. The 2 failures in later main runs are owned elsewhere: `test_mcp_opcert_signing_goose.py::test_compose_startup_binding_fails_closed_on_bad_key` by plump-smelly-indianabat, and `test_identity_ts3_117b.py::test_off_keyring_signature_fails_enforcement` (new at `9a6ed375112`) by legatine-good-feline.\n\n## Approach\nVerification-only close. No repository file changes under this ticket: the fixes already landed under the tickets named above, so this ticket records the dispatch evidence and closes.\n\n## Scope\nNo repository files. Evidence lives in this ticket's description and comments (run and job ids above).\n\n## Acceptance Criteria\n- [x] `sweep (windows)` on main passes, or each remaining failure has its own ticket; verified by the job result of a `gh workflow run test.yml --ref main` dispatch.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Windows sweep on main fails 14 tests: path separators in guard tests, uv-pin messages, and the new run_git stdin encoding test"
       },
       "created_at": "2026-11-19T11:31:28Z",
@@ -120653,7 +120773,12 @@
     "1795147639839367001": "__rebar_unknown_comment_id__",
     "1795151804820589001": "__rebar_unknown_comment_id__",
     "1795151851592916001": "__rebar_unknown_comment_id__",
-    "1795152548855110001": "__rebar_unknown_comment_id__"
+    "1795152548855110001": "__rebar_unknown_comment_id__",
+    "1795152582109977001": "__rebar_unknown_comment_id__",
+    "1795152726167867001": "__rebar_unknown_comment_id__",
+    "1795153034942079001": "__rebar_unknown_comment_id__",
+    "1795154811600089001": "__rebar_unknown_comment_id__",
+    "1795156333566174001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -126303,7 +126428,15 @@
     "REB-7310": "c0ed-53e2-aa14-48f8",
     "REB-7311": "ef47-eca9-66ff-4279",
     "REB-7312": "beef-0e12-6db9-491d",
+    "REB-7313": "41e5-5e7c-52f5-43c6",
+    "REB-7314": "4955-1705-4a36-4763",
+    "REB-7315": "51c6-9f1d-595b-411f",
+    "REB-7316": "7a2d-9166-ce30-4c1d",
+    "REB-7317": "8896-1f18-0965-4f1f",
+    "REB-7318": "a2da-e61b-989e-4862",
+    "REB-7319": "c7b2-e4ed-37fd-4f60",
     "REB-732": "f5d7-b2f2-1d70-4156",
+    "REB-7320": "e062-1686-1a27-41a4",
     "REB-733": "edf7-946e-84be-48b3",
     "REB-734": "f43b-8f6b-3494-44be",
     "REB-735": "6f0a-0c1e-cdf8-4a8d",
