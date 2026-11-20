@@ -52,6 +52,25 @@ def _run_at(
     )
 
 
+#: Clone A must fold or repair WITHOUT seeing the other clone's newest write. ``--skip-sync``
+#: skips only the compact's own pre-fetch; every rebar read surface also reconverges from
+#: origin once its 60 s freshness marker expires (``ensure_fresh``), which a loaded host
+#: reaches between steps. ``REBAR_SYNC_PULL=off`` keeps A's view pinned to what it fetched.
+_PINNED_VIEW = {"REBAR_SYNC_PULL": "off"}
+
+
+def _publish(tracker: Path) -> None:
+    """Deliver this clone's commits to origin as a checked fixture precondition.
+
+    A rebar write pushes best-effort: ``push_tickets_branch`` bounds each ``git push`` at
+    30 s and a timed-out push never fails the write. On a starved host the write exits 0
+    without reaching origin, and the other clone's next fetch silently misses it. This is
+    a no-op when the best-effort push already landed, and fails loudly at the setup site
+    otherwise (leisurable-capillary-bug).
+    """
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker)
+
+
 def _events(tracker: Path, tid: str, suffix: str) -> list[Path]:
     return sorted((tracker / tid).glob(f"*-{suffix}.json"))
 
@@ -77,11 +96,13 @@ def test_fold_on_stale_clone_keeps_concurrent_tag(two_clones) -> None:  # noqa: 
     # Clone A (the operator host) creates the ticket and links it; both writes push.
     tid = _create(repo_a, "task", "fold race victim")
     _run_at(repo_a, "comment", tid, "linked", now=_T0)
+    _publish(tracker_a)
 
     # Clone B (the MCP server) fetches, then tags the ticket 24 s before A's fold.
     fold_at = _T0 + 46 * _MIN_NS
     _sync_from_origin(tracker_b)
     _run_at(repo_b, "edit", tid, "--add-tag=late", now=fold_at - 24 * _SEC_NS)
+    _publish(tracker_b)
     (tag_b,) = _events(tracker_b, tid, "TAG_DELTA")
     assert not _events(tracker_a, tid, "TAG_DELTA"), "SETUP: A must not have fetched the tag"
 
@@ -95,6 +116,7 @@ def test_fold_on_stale_clone_keeps_concurrent_tag(two_clones) -> None:  # noqa: 
         f"--horizon={_HORIZON_NS}",
         "--skip-sync",
         now=fold_at,
+        **_PINNED_VIEW,
     )
     (snap,) = _events(tracker_a, tid, "SNAPSHOT")
     _git("fetch", "-q", "origin", "tickets", cwd=tracker_a)
@@ -118,8 +140,10 @@ def test_snapshot_repair_on_stale_clone_keeps_concurrent_tag(two_clones) -> None
 
     tid = _create(repo_a, "task", "repair race victim")
     _run_at(repo_a, "comment", tid, "linked", now=_T0)
+    _publish(tracker_a)
     _sync_from_origin(tracker_b)
     _run_at(repo_b, "comment", tid, "early", now=_T0 + 10 * _MIN_NS)
+    _publish(tracker_b)
 
     # A folds at its clock before fetching B's comment, which then merges in as an orphan.
     _run_at(
@@ -131,6 +155,7 @@ def test_snapshot_repair_on_stale_clone_keeps_concurrent_tag(two_clones) -> None
         "--horizon=0",
         "--skip-sync",
         now=_T0 + 20 * _MIN_NS,
+        **_PINNED_VIEW,
     )
     _git("fetch", "-q", "origin", "tickets", cwd=tracker_a)
     _git("merge", "-q", "--no-edit", "FETCH_HEAD", cwd=tracker_a)
@@ -139,6 +164,7 @@ def test_snapshot_repair_on_stale_clone_keeps_concurrent_tag(two_clones) -> None
     repair_at = _T0 + 46 * _MIN_NS
     _sync_from_origin(tracker_b)
     _run_at(repo_b, "edit", tid, "--add-tag=late", now=repair_at - 24 * _SEC_NS)
+    _publish(tracker_b)
     (tag_b,) = _events(tracker_b, tid, "TAG_DELTA")
     assert not _events(tracker_a, tid, "TAG_DELTA"), "SETUP: A must not have fetched the tag"
 
@@ -150,6 +176,7 @@ def test_snapshot_repair_on_stale_clone_keeps_concurrent_tag(two_clones) -> None
         now=repair_at,
         check=False,
         REBAR_COMPACTION_HORIZON_NS=str(_HORIZON_NS),
+        **_PINNED_VIEW,
     )
     (snap,) = _events(tracker_a, tid, "SNAPSHOT")
     _git("fetch", "-q", "origin", "tickets", cwd=tracker_a)
