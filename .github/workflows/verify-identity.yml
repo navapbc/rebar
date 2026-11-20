@@ -130,9 +130,17 @@ jobs:
             exit 1
           fi
       - name: verify-opcert (required-environment op-cert gate)
-        # Same merged-log walk; posture + grandfather boundary from rebar.toml
-        # (verify.require_environment, verify.opcert_enforce_since) — no CI variable.
-        run: rebar verify-opcert
+        # Same merged-log walk. Posture, grandfather boundary and trust list
+        # (verify.require_environment, verify.opcert_enforce_since,
+        # verify.trusted_opcert_keys) come from the rebar.toml committed on main, never
+        # from the change under test, so a change cannot widen its own gate
+        # (golden-busied-nag). The gate fails closed without origin/main, so fetch it
+        # here, after the pack measurement.
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --filter=blob:none --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          rebar verify-opcert
       - name: Fail closed if the blobless checkout pack exceeds its limit
         # LAST on purpose, and `always()` so it reports even when authorship above failed.
         # This is the same fail-closed budget on the same measured value as before; only the

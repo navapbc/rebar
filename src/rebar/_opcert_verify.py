@@ -117,7 +117,12 @@ def trusted_opcert_pairs(repo_root) -> frozenset[tuple[str, str]] | None:
     ``None`` means no list is configured (validity decides). A configuration that cannot be
     read raises :class:`rebar.config.ConfigError`; callers fail closed rather than reading
     a broken configuration as "no list" (ADR 0125)."""
-    entries = config.compose_config(root=repo_root).verify.trusted_opcert_keys
+    return opcert_pairs(config.compose_config(root=repo_root).verify.trusted_opcert_keys)
+
+
+def opcert_pairs(entries) -> frozenset[tuple[str, str]] | None:
+    """Parse ``verify.trusted_opcert_keys`` entries into ``(env_id, "<key-type> <base64>")``
+    pairs; ``None`` for an empty list (validity decides)."""
     if not entries:
         return None
     return frozenset((p[0], f"{p[1]} {p[2]}") for p in (e.split() for e in entries))

@@ -95,6 +95,9 @@ opcert_enforce_since = "<tickets-branch tip SHA at flip time>"
   This is the flip's **grandfathering**: historical closes across the repo are **not**
   retroactively failed (which, without the boundary, would break the merge gate on every
   pre-existing close).
+- **The flip takes effect after it merges, not in its own gate run.** `rebar verify-opcert`
+  reads its `[verify]` settings from the `rebar.toml` committed on `origin/main`, never from the change under test, so the flip change itself is still gated
+  by main's previous, advisory settings.
 - **Set both keys in the same change, after the trust list exists.** `require_environment`
   without the boundary would enforce every historical close; the boundary without
   `require_environment` enforces nothing; `require_environment` without a trust list refuses
