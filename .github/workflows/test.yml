@@ -276,21 +276,6 @@ jobs:
         run: |
           uv venv --python 3.13
           uv pip install ".[dev,reviewbot,ui]"
-      # Evidence only, never a verdict. It prints the default ACL a persistent signing key relies
-      # on (decision cloistered-decomposed-nymph), and a plain mkdtemp dir, whose OWNER RIGHTS
-      # entry is why compose_signer restricts its runtime dir to the owner (plump-smelly-indianabat).
-      # mechanism-ok: ci_gate .github/workflows/test.yml::Print the ACL of a freshly minted op-cert key — almondy-columned-iguanodon records the default ACL the Windows decision relies on; continue-on-error, never gates.
-      - name: Print the ACL of a freshly minted op-cert key
-        continue-on-error: true
-        env:
-          KEY_DIR: ${{ runner.temp }}/opcert-acl-probe
-        run: >-
-          uv run --no-sync python -c "import os, subprocess, tempfile;
-          from rebar._opcert_signing import _generate_opcert_key;
-          d = os.environ['KEY_DIR']; os.makedirs(d, exist_ok=True);
-          key = os.path.join(d, '.opcert-key'); _generate_opcert_key(key);
-          copy_dir = tempfile.mkdtemp(prefix='rebar-opcert-');
-          [subprocess.run(['icacls', p], check=False) for p in (d, key, copy_dir)]"
       - name: Run the default suite
         run: >-
           uv run --no-sync pytest -m "not integration and not external"
