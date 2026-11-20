@@ -136,10 +136,25 @@ def _rate_limit_delay(retry_after: float) -> float:
     return min(MAX_BACKOFF_S, retry_after * (1.0 + random.random() * _RETRY_AFTER_JITTER))
 
 
+def _ambiguous_write_error(exc: BaseException) -> BaseException:
+    """The error to raise when a write that creates something hit a connection fault.
+
+    The request may have reached Jira, so the write is never re-sent. A builtin
+    ``TimeoutError``/``ConnectionError`` passes through; a library fault (``requests``'
+    ``ConnectionError``/``Timeout`` subclass ``OSError``, not those builtins) becomes a builtin
+    ``ConnectionError``, which the create coordinator treats as ambiguous and re-observes by
+    the issue's ``rebar-id:`` label instead of failing it as permanent.
+    """
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return exc
+    return ConnectionError(f"Jira write outcome unknown after a connection fault: {exc!r}")
+
+
 def _with_connection_retry(
     fn: Any,
     *,
     rate_limit_retry: bool = False,
+    replayable: bool = True,
     attempts: int = 3,
     backoffs: tuple[int, ...] = (2, 5),
 ) -> Any:
@@ -149,6 +164,10 @@ def _with_connection_retry(
     failures are not retried, except an opted-in 429 with a usable
     ``Retry-After`` header. Default opt-out protects mutations from duplicate
     effects. Unretriable vendor HTTP errors become ``BackendHTTPError``.
+
+    ``replayable=False`` marks a write that creates something (an issue, a comment):
+    a connection fault may arrive after Jira applied it, so it is raised on the first
+    attempt as an ambiguous outcome and never re-sent (bug oppressed-topsecret-chickadee).
     """
     retryable = _connection_retry_exceptions()
     http_errors = _jira_http_error_types()
@@ -181,6 +200,11 @@ def _with_connection_retry(
             tls_error = _tls_verification_error(exc)
             if tls_error is not None:
                 raise tls_error from exc
+            if not replayable:
+                ambiguous = _ambiguous_write_error(exc)
+                if ambiguous is exc:
+                    raise
+                raise ambiguous from exc
             last_exc = exc
         if attempt < attempts - 1:
             delay = backoffs[attempt]

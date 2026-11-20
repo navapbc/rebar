@@ -120,7 +120,18 @@ def build_client_from_settings(settings: Any) -> Any:
     options: dict[str, Any] = {}
     if settings.ca_bundle:
         options["verify"] = settings.ca_bundle
-    return jira_cls(server=settings.url, token_auth=settings.pat, options=options or None)
+    # ``max_retries=0``: the library's ResilientSession otherwise re-sends ANY request, POST
+    # included, after a connection fault, which duplicates a create or comment that already
+    # landed (bug oppressed-topsecret-chickadee). ``_with_connection_retry`` is the one retry
+    # policy; the constructor's serverInfo GET is a read, so it runs through it here.
+    return _with_connection_retry(
+        lambda: jira_cls(
+            server=settings.url,
+            token_auth=settings.pat,
+            options=options or None,
+            max_retries=0,
+        )
+    )
 
 
 class JiraDataCenterTransport(

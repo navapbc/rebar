@@ -81,13 +81,15 @@ class _JiraProbePort:
     (``issue_link_types``) the degraded value is ``None`` (could not check), kept
     distinct from a genuinely-empty ``[]``."""
 
-    def __init__(self, jira_client: Any) -> None:
+    def __init__(self, jira_client: Any, call: Any = None) -> None:
         self._client = jira_client
+        # ``call`` runs each read; ``build_probe`` passes the Data Center retry boundary, since
+        # the client itself is built without library retries.
+        self._call = call if call is not None else (lambda fn: fn())
 
-    @staticmethod
-    def _soft(fn: Any, default: Any, *, optional: bool = True) -> Any:
+    def _soft(self, fn: Any, default: Any, *, optional: bool = True) -> Any:
         try:
-            return fn()
+            return self._call(fn)
         except Exception as exc:  # external getter; classify by criticality below
             if not optional:
                 raise ProbeError(str(exc)) from exc
@@ -181,6 +183,7 @@ def build_probe(*_args: Any, **_kwargs: Any) -> ProbePort:
     ``monkeypatch.setattr(mapping_probe, "build_probe", ...)`` to inject an offline fake;
     the ``suggest-mapping`` handler MUST obtain its port through this attribute for that
     patch to take effect."""
+    from rebar.reconciler.adapters.jira_datacenter.retry import _with_connection_retry
     from rebar.reconciler.adapters.jira_datacenter.settings import (
         resolve_jira_datacenter_settings,
     )
@@ -190,7 +193,7 @@ def build_probe(*_args: Any, **_kwargs: Any) -> ProbePort:
 
     settings = resolve_jira_datacenter_settings()
     client = build_client_from_settings(settings)
-    return _JiraProbePort(client)
+    return _JiraProbePort(client, call=lambda fn: _with_connection_retry(fn, rate_limit_retry=True))
 
 
 # ---------------------------------------------------------------------------

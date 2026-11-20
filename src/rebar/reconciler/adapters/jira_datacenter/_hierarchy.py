@@ -38,7 +38,14 @@ class _HierarchyMixin(_TransportBase):
             cached = (
                 None
                 if lister is None
-                else next((f.get("id") for f in lister() if f.get("name") == "Epic Link"), None)
+                else next(
+                    (
+                        f.get("id")
+                        for f in _call_logged("epic_link_field", None, lister)
+                        if f.get("name") == "Epic Link"
+                    ),
+                    None,
+                )
             )
             self._epic_link_field_id = cached
         return cached

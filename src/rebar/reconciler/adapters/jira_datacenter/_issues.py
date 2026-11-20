@@ -138,7 +138,11 @@ class _IssuesMixin(_TransportBase):
             "project",
             {"key": ticket_data.get("_bridge_target_project") or self.project},
         )
-        issue = _with_connection_retry(lambda: self._client.create_issue(**fields))
+        # One POST, never re-sent: ``prefetch=False`` keeps the library's follow-up GET out of
+        # the non-replayable unit, and callers read only the returned ``key``/``id``.
+        issue = _with_connection_retry(
+            lambda: self._client.create_issue(prefetch=False, **fields), replayable=False
+        )
         return _unwrap(issue)
 
     def get_issue(self, remote_id: str) -> dict[str, Any]:
