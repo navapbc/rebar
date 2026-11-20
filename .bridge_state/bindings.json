@@ -4596,10 +4596,24 @@
     },
     "096f-a831-3aac-4851": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Observed defect\nOn origin/main 2ca3e28fcc6, `pytest tests/unit/test_reclaim_resign.py -k test_resign_makes_enforced_verify_pass_with_era_keys` fails (reproduced locally on macOS and in Gerrit CI on ubuntu py3.11, py3.12 and py3.13, runs 44728882402 and 44728890345):\n\n```\ntests/unit/test_reclaim_resign.py:382\nassert {f[\"verdict\"] for f in failing} == {\"unsigned\", \"bad-signature\"}\nAssertionError: assert {'signer-not-...', 'unsigned'} == {'bad-signature', 'unsigned'}\n```\n\n## Cause (from history)\n- `9a6ed375112` \"Classify off-keyring signers apart from forgeries\" (starving-sphalerite-skua) changed `verify-identity` so a sound signature by a key that is not on the claimed author's keyring reports `signer-not-on-keyring` instead of `bad-signature`.\n- `717c50f8b33` \"Re-sign failing events during the reclaim collapse\" (minimum-seedy-lowchen) added this test expecting the old `bad-signature` verdict for the fixture's off-keyring events. The two landed independently, so main is red on this test.\n\n## Impact\nEvery Gerrit change whose CI runs the default pytest tier gets `Verified -1` until this is fixed (seen on 3472 and 3473).\n\n## Acceptance Criteria\n- [ ] `pytest tests/unit/test_reclaim_resign.py -q` passes on main, with the failing-verdict expectation matching the current verify-identity vocabulary (`signer-not-on-keyring` for a sound off-keyring signature) or the fixture producing a genuine forgery if `bad-signature` is what the test means to exercise.\n- [ ] `make verify` is green and the fix lands through Gerrit with LLM-Review +1 and Verified +1.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "test_reclaim_resign expects bad-signature but verify-identity now reports signer-not-on-keyring (main is red)"
       },
       "created_at": "2026-11-20T12:37:03Z",
@@ -7963,9 +7977,17 @@
       "updated_at": "2026-08-15T14:52:21Z"
     },
     "10c6-8881-c05e-4209": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\nIn a sandboxed local `make verify` (worktree almondy-drop-acl-step, Nov 19 18:23 to Nov 20 01:14 PST, load average around 40), pytest-timeout (300 s, thread method) killed workers in `tests/unit/metrics/test_git_metrics.py::test_oracle_cap_change_events_compares_unsampled_adjacent_revisions` (inside `git_metrics._git` from `_py_blobs_at` / `module_size_trend`) and in 3 tests of `tests/interfaces/lifecycle/test_plan_policy_dogfood.py` (inside the `_cli` subprocess helper). The same change passed CI Verified (Gerrit 3475).\n\nMeasured 2026-11-20 on this host:\n- test_oracle_cap_change_events alone: 416 s at load ~30-40 (passes only under a 900 s budget); 90 s at lower load. A counting git shim records 606 git starts per run: 182 from the test's own setup (60 x `add`, `commit`, `rev-parse`) and about 410 from the code under test (240 `ls-tree`, 170 `cat-file`, for 60 revisions).\n- Deterministic reproduction: a PATH git shim that sleeps 0.5 s before every git start (606 x 0.5 s = 303 s) makes the test hit `+++ Timeout +++` every run.\n- test_in_progress_to_open_resets_phase_and_requires_a_planning_review alone: 57 s at load ~25 (14.7 s setup) with 265 git starts plus several `python -m rebar.cli` subprocesses.\nNot a hang: the processes were alive and advancing (sampled child list showed successive `git add -A` / `git commit` for qualified 0..12 within 60 s).\n\n## Hypotheses (unproven)\n- The budget failure is driven by start count times per-start latency; the 300 s budget was sized from CI timings where a git start costs tens of milliseconds.\n- `git_metrics` walks history with one `ls-tree`/`cat-file` per revision and blob, which is also a production cost on long histories.\n\n## Acceptance Criteria\n- [ ] Under the 0.5 s-per-start shim, test_oracle_cap_change_events completes inside the 300 s budget (for example by building its fixture history with one `git fast-import` and batching blob reads in `git_metrics` through `cat-file --batch`), with the shim run recorded here.\n- [ ] The plan-policy dogfood tests are measured under the same shim and either fit the budget or carry a justified `@pytest.mark.timeout(N)` per the pyproject policy.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Git-spawn-heavy tests exceed the 300 s per-test budget when each git start costs 0.5 s or more"
+      },
       "created_at": "2026-11-20T13:32:40Z",
       "jira_id": "4599588",
       "jira_key": "REB-7322",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-20T13:32:45Z"
     },
@@ -69740,6 +69762,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:44Z"
     },
+    "9b8a-60c3-2194-418c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observation\nOutside the agent sandbox on 2026-11-20 at about 06:00 PST (host load average 25-45 from concurrent verifies), `tests/interfaces/lifecycle/test_atomic_completion_close.py::test_two_processes_publish_at_most_one_equivalent_same_ticket_bundle` failed 2 of 2 serial runs with `concurrent.futures.TimeoutError` from `future.result(timeout=60)` (test line 401), after 247 s and 203 s of wall time. Each of the 2 `ProcessPoolExecutor` workers starts a fresh interpreter, imports rebar, and commits a completion bundle through git.\n\nInside the sandbox the same test fails earlier for a different reason, filed as allstar-sleepy-armadillo.\n\n## Hypothesis (unproven)\nThe 60 s per-future bound is a wall-clock assumption about worker start-up and git latency that a loaded host violates; it adds no hang protection beyond the suite's 300 s per-test budget, because leaving the `with ProcessPoolExecutor` block still waits for the workers.\n\n## Acceptance Criteria\n- [ ] A deterministic reproduction (for example a git shim adding a fixed delay per start inside the workers) is recorded here.\n- [ ] The test no longer depends on a hard-coded worker wall-clock bound, with the reproduction passing.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "test_two_processes_publish_at_most_one_equivalent_same_ticket_bundle waits only 60 s for its worker processes"
+      },
+      "created_at": "2026-11-20T15:32:12Z",
+      "jira_key": "REB-7324",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T15:32:12Z"
+    },
     "9b94-af9e-4acf-4dff": {
       "baseline": {
         "assignee": null,
@@ -112542,9 +112578,31 @@
       "updated_at": "2026-08-15T15:15:58Z"
     },
     "fa59-9a21-097b-49be": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Observation\nA sandboxed local `make verify` (worktree almondy-drop-acl-step, Nov 19 18:23 to Nov 20 01:14 PST, tree origin/main 717c50f8b33 plus a workflow-only change) failed `tests/interfaces/lifecycle/test_atomic_completion_close.py::test_two_processes_publish_at_most_one_equivalent_same_ticket_bundle` at `ProcessPoolExecutor(max_workers=2)` (test line 399) with `PermissionError: [Errno 1] Operation not permitted`, raised from CPython 3.12 `concurrent/futures/process.py:613`. That line is `os.sysconf(\"SC_SEM_NSEMS_MAX\")` in `_check_system_limits`, which catches only AttributeError and ValueError. The same change passed CI Verified (Gerrit 3475, run 44732620097).\n\nThe test carries `@pytest.mark.requires_posix_named_semaphore`, whose conftest hook skips it (counted) when `tests/_sandbox_capabilities.posix_named_semaphore_probe()` reports unavailable. That probe only constructs a `_multiprocessing.SemLock`.\n\nMeasured 2026-11-20 on this host, same interpreter: inside the Claude Code sandbox the probe returns `available=True`, `os.sysconf(\"SC_SEM_NSEMS_MAX\")` raises `PermissionError [Errno 1]`, and `ProcessPoolExecutor(1)` raises the same error. Outside the sandbox sysconf returns 87381 and the pool runs. So the failure is deterministic under the sandbox and is not load-related.\n\n## Root cause\nThe probe checks a different capability from the one the marked tests need: the sandbox allows SemLock creation but denies the sysconf query that ProcessPoolExecutor makes first. The marker therefore does not skip a test the host cannot run.\n\n## Approach\nFix the test, not the probe. The probe (`tests/_sandbox_capabilities.posix_named_semaphore_probe`) is shared by 4 marked tests; 3 of them need only `SemLock`, which the sandbox allows, so widening the probe would skip tests that run correctly there. Only this test goes through `ProcessPoolExecutor`, whose sysconf query the sandbox denies.\n\nIn `tests/interfaces/lifecycle/test_atomic_completion_close.py`, replace the `ProcessPoolExecutor` with 2 plain `multiprocessing` spawn-context `Process`es. Each runs `_commit_worker`, which sends `(\"ok\", atomic_close)` or `(\"error\", repr)` back over a one-way `Pipe`; the parent receives both outcomes and joins the workers. The same rewrite drops the `future.result(timeout=60)` per-worker wall-clock bound filed as sweltering-difficult-drongo: the suite's 300 s per-test budget bounds a hang. The race the test checks (2 processes publish the same bundle; exactly one is non-idempotent) is unchanged. The `requires_posix_named_semaphore` marker stays, since `Pipe`/`Process` still need it on hosts without POSIX semaphores. No probe, marker, config key, environment variable, or flag changes.\n\n## Scope\n- `tests/interfaces/lifecycle/test_atomic_completion_close.py`\n\n## Testing\n- Inside the agent sandbox: before, the test fails with `PermissionError: [Errno 1] Operation not permitted` (measured 2026-11-20, 1 failed in 119.81 s); after, it runs and passes (measured: 1 passed in 208.76 s, load average ~30).\n- Outside the sandbox: the test passes with the change.\n- The module `tests/interfaces/lifecycle/test_atomic_completion_close.py` passes.\n\n## Acceptance Criteria\n- [ ] Inside the agent sandbox the atomic-close test runs and passes instead of failing on the sysconf query (before/after runs recorded here); outside the sandbox it still passes.\n- [ ] The test no longer uses ProcessPoolExecutor or a per-worker wall-clock bound.\n- [ ] `make verify` passes on the change.",
+        "priority": "Low",
+        "status": "In Progress",
+        "summary": "Semaphore capability probe passes in the agent sandbox, but ProcessPoolExecutor still fails on os.sysconf EPERM"
+      },
       "created_at": "2026-11-20T13:32:45Z",
       "jira_id": "4599589",
       "jira_key": "REB-7323",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-20T13:32:50Z"
     },
@@ -126580,6 +126638,7 @@
     "REB-7321": "096f-a831-3aac-4851",
     "REB-7322": "10c6-8881-c05e-4209",
     "REB-7323": "fa59-9a21-097b-49be",
+    "REB-7324": "9b8a-60c3-2194-418c",
     "REB-733": "edf7-946e-84be-48b3",
     "REB-734": "f43b-8f6b-3494-44be",
     "REB-735": "6f0a-0c1e-cdf8-4a8d",
