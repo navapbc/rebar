@@ -4611,9 +4611,9 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Observed defect\nOn origin/main 2ca3e28fcc6, `pytest tests/unit/test_reclaim_resign.py -k test_resign_makes_enforced_verify_pass_with_era_keys` fails (reproduced locally on macOS and in Gerrit CI on ubuntu py3.11, py3.12 and py3.13, runs 44728882402 and 44728890345):\n\n```\ntests/unit/test_reclaim_resign.py:382\nassert {f[\"verdict\"] for f in failing} == {\"unsigned\", \"bad-signature\"}\nAssertionError: assert {'signer-not-...', 'unsigned'} == {'bad-signature', 'unsigned'}\n```\n\n## Cause (from history)\n- `9a6ed375112` \"Classify off-keyring signers apart from forgeries\" (starving-sphalerite-skua) changed `verify-identity` so a sound signature by a key that is not on the claimed author's keyring reports `signer-not-on-keyring` instead of `bad-signature`.\n- `717c50f8b33` \"Re-sign failing events during the reclaim collapse\" (minimum-seedy-lowchen) added this test expecting the old `bad-signature` verdict for the fixture's off-keyring events. The two landed independently, so main is red on this test.\n\n## Impact\nEvery Gerrit change whose CI runs the default pytest tier gets `Verified -1` until this is fixed (seen on 3472 and 3473).\n\n## Acceptance Criteria\n- [ ] `pytest tests/unit/test_reclaim_resign.py -q` passes on main, with the failing-verdict expectation matching the current verify-identity vocabulary (`signer-not-on-keyring` for a sound off-keyring signature) or the fixture producing a genuine forgery if `bad-signature` is what the test means to exercise.\n- [ ] `make verify` is green and the fix lands through Gerrit with LLM-Review +1 and Verified +1.",
+        "description": "## Observed defect\nOn origin/main 2ca3e28fcc6, `pytest tests/unit/test_reclaim_resign.py -k test_resign_makes_enforced_verify_pass_with_era_keys` fails (reproduced locally on macOS and in Gerrit CI on ubuntu py3.11, py3.12 and py3.13, runs 44728882402 and 44728890345):\n\n```\ntests/unit/test_reclaim_resign.py:382\nassert {f[\"verdict\"] for f in failing} == {\"unsigned\", \"bad-signature\"}\nAssertionError: assert {'signer-not-...', 'unsigned'} == {'bad-signature', 'unsigned'}\n```\n\n## Cause (from history)\n- `9a6ed375112` \"Classify off-keyring signers apart from forgeries\" (starving-sphalerite-skua) changed `verify-identity` so a sound signature by a key that is not on the claimed author's keyring reports `signer-not-on-keyring` instead of `bad-signature`.\n- `717c50f8b33` \"Re-sign failing events during the reclaim collapse\" (minimum-seedy-lowchen) added this test expecting the old `bad-signature` verdict for the fixture's off-keyring events. The two landed independently, so main is red on this test.\n\n## Impact\nEvery Gerrit change whose CI runs the default pytest tier gets `Verified -1` until this is fixed (seen on 3472 and 3473).\n\n## Acceptance Criteria\n- [x] `pytest tests/unit/test_reclaim_resign.py -q` passes on main, with the failing-verdict expectation matching the current verify-identity vocabulary (`signer-not-on-keyring` for a sound off-keyring signature) or the fixture producing a genuine forgery if `bad-signature` is what the test means to exercise.\n- [x] `make verify` is green and the fix lands through Gerrit with LLM-Review +1 and Verified +1.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "test_reclaim_resign expects bad-signature but verify-identity now reports signer-not-on-keyring (main is red)"
       },
       "created_at": "2026-11-20T12:37:03Z",
@@ -29334,9 +29334,17 @@
       "updated_at": "2026-08-15T14:57:20Z"
     },
     "4020-ce89-21ef-431d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n`tests/unit/test_review_bot.py::test_gerrit_internal_webhook_does_not_need_unsupported_plugin_header` carries `@pytest.mark.timeout(3)` (`tests/unit/test_review_bot.py:1827`). Run alone on macOS it takes 2.27 s and 2.58 s (2026-11-20 PST, two runs), so it has under 1 s of headroom. In a loaded `make verify` (worktree w05-fieldmouse, 4 h 10 min wall, 21,537 passed) it hit the 3.0 s limit: \"pytest-timeout expired after 3.0s ... (xdist worker gw2); the worker exits now\", then \"worker 'gw2' crashed\". The change under test did not touch `src/rebar/review_bot`. Found while verifying dogtired-blank-fieldmouse.\n\n## Approach\nMeasure where the test's wall time goes (likely app/server startup) and either remove the slow setup from this test or make its bound reflect what it guards. Do not just raise the number without a measured reason.\n\n## Scope\n- `tests/unit/test_review_bot.py`\n\n## Acceptance Criteria\n- [ ] The test's measured duration and the cause of its cost are recorded in a comment on this ticket.\n- [ ] The test passes 20 consecutive runs under `make verify`-level parallel load (for example `pytest -n 8` over `tests/unit` with the test included), recorded in a comment.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "test_gerrit_internal_webhook_does_not_need_unsupported_plugin_header times out at its 3 s mark under load"
+      },
       "created_at": "2026-11-20T19:40:20Z",
       "jira_id": "4599626",
       "jira_key": "REB-7325",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-20T19:40:23Z"
     },
@@ -67677,6 +67685,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-01T01:25:52Z"
     },
+    "9735-46ee-26b7-4822": {
+      "created_at": "2026-11-20T20:34:13Z",
+      "jira_id": "4599636",
+      "jira_key": "REB-7326",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T20:34:16Z"
+    },
     "9738-b485-bb21-44ac": {
       "baseline": {
         "assignee": null,
@@ -95379,6 +95394,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:24Z"
     },
+    "d492-04db-b79e-428f": {
+      "created_at": "2026-11-20T20:34:17Z",
+      "jira_id": "4599637",
+      "jira_key": "REB-7327",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T20:34:21Z"
+    },
     "d494-d34f-cf36-43df": {
       "baseline": {
         "assignee": null,
@@ -120988,7 +121010,15 @@
     "1795199799758370001": "__rebar_unknown_comment_id__",
     "1795201735879997001": "__rebar_unknown_comment_id__",
     "1795201883715775001": "__rebar_unknown_comment_id__",
-    "1795202985069439001": "__rebar_unknown_comment_id__"
+    "1795202985069439001": "__rebar_unknown_comment_id__",
+    "1795203526677988001": "__rebar_unknown_comment_id__",
+    "1795203784001061001": "__rebar_unknown_comment_id__",
+    "1795204667685908001": "__rebar_unknown_comment_id__",
+    "1795205696167050001": "__rebar_unknown_comment_id__",
+    "1795206516539148001": "__rebar_unknown_comment_id__",
+    "1795206531716795001": "__rebar_unknown_comment_id__",
+    "1795206640834687001": "__rebar_unknown_comment_id__",
+    "1795206656458180001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -126652,6 +126682,8 @@
     "REB-7323": "fa59-9a21-097b-49be",
     "REB-7324": "9b8a-60c3-2194-418c",
     "REB-7325": "4020-ce89-21ef-431d",
+    "REB-7326": "9735-46ee-26b7-4822",
+    "REB-7327": "d492-04db-b79e-428f",
     "REB-733": "edf7-946e-84be-48b3",
     "REB-734": "f43b-8f6b-3494-44be",
     "REB-735": "6f0a-0c1e-cdf8-4a8d",
