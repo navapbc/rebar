@@ -147,7 +147,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py`, `src/rebar/mcp_server.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_GUARD` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_JOB_TIMEOUT_SECONDS` | `src/rebar/opcert_service/config.py` |  |
-| `REBAR_OPCERT_KEY_PATH` | `src/rebar/_opcert_signing.py`, `src/rebar/opcert_service/config.py` |  |
+| `REBAR_OPCERT_KEY_PATH` | `src/rebar/_opcert_signing.py`, `src/rebar/mcp_server.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_PORT` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_PRIVATE_KEY` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_REVIEW_BRANCH` | `src/rebar/opcert_service/config.py` |  |

@@ -1411,7 +1411,9 @@ def test_mcp_container_defines_signing_key_exactly_once(tmp_path: Path) -> None:
     from a single owning layer (the `-e` in mcp_run_new). A second definition from the shared
     SSM-rendered .env makes the effective value rest on docker's last-wins ordering."""
     KEY = "REBAR_IDENTITY_SIGNING_KEY"
-    OPCERT = "/run/secrets/opcert-ed25519-key"
+    # The authorship key is the bot key on the writing identity's keyring, not the op-cert key
+    # (bug promising-unwasteful-xantus); the op-cert key is named by REBAR_OPCERT_KEY_PATH.
+    BOT_KEY = "/run/secrets/rebar-bot-signing-key"
 
     env_file_pairs = _render_mcp_env_file(tmp_path)
     e_flag_pairs = _mcp_run_e_flags()
@@ -1449,10 +1451,51 @@ def test_mcp_container_defines_signing_key_exactly_once(tmp_path: Path) -> None:
         f"fetch-secrets.sh must not also emit {KEY} into the shared .env."
     )
 
-    # AC #2: the single definition is the op-cert key — the effective value is UNCHANGED.
-    assert definitions[0][1] == OPCERT, (
-        f"the MCP container's {KEY} must be {OPCERT!r}, got {definitions[0][1]!r}"
+    # The single definition is the bot authorship key.
+    assert definitions[0][1] == BOT_KEY, (
+        f"the MCP container's {KEY} must be {BOT_KEY!r}, got {definitions[0][1]!r}"
     )
+
+
+# The MCP container's two signing keys (bug promising-unwasteful-xantus): op-certs are signed by
+# the op-cert key (REBAR_OPCERT_KEY_PATH), tracker writes by the bot key on the writing
+# identity's keyring (REBAR_IDENTITY_SIGNING_KEY). Compose and autodeploy's mcp_run_new must
+# agree on both values and mount both key files read-only.
+_MCP_KEY_ENV = {
+    "REBAR_OPCERT_KEY_PATH": "/run/secrets/opcert-ed25519-key",
+    "REBAR_IDENTITY_SIGNING_KEY": "/run/secrets/rebar-bot-signing-key",
+}
+_MCP_KEY_MOUNTS = ("opcert-ed25519-key", "rebar-bot-signing-key")
+
+
+def _compose_mcp_service() -> dict:
+    import yaml
+
+    return yaml.safe_load(COMPOSE_FILE.read_text())["services"]["mcp"]
+
+
+@pytest.mark.parametrize("key", sorted(_MCP_KEY_ENV))
+def test_compose_mcp_sets_signing_key_paths(key: str) -> None:
+    assert _compose_mcp_service()["environment"].get(key) == _MCP_KEY_ENV[key]
+
+
+@pytest.mark.parametrize("key", sorted(_MCP_KEY_ENV))
+def test_mcp_run_new_sets_signing_key_paths_once(key: str) -> None:
+    values = [v for k, v in _mcp_run_e_flags() if k == key]
+    assert values == [_MCP_KEY_ENV[key]], f"mcp_run_new {key} definitions: {values}"
+
+
+@pytest.mark.parametrize("name", _MCP_KEY_MOUNTS)
+def test_compose_mcp_mounts_key_read_only(name: str) -> None:
+    assert f"./{name}:/run/secrets/{name}:ro" in _compose_mcp_service()["volumes"]
+
+
+@pytest.mark.parametrize("name", _MCP_KEY_MOUNTS)
+def test_mcp_run_new_mounts_key_read_only(name: str) -> None:
+    text = AUTODEPLOY.read_text()
+    body = text[text.index("mcp_run_new() {") :]
+    body = body[: body.index("\n}\n")]
+    assert f'-v "$COMPOSE_DIR/{name}:/run/secrets/{name}:ro"' in body
 
 
 # --------------------------------------------------------------------------- #
