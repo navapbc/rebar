@@ -109,7 +109,7 @@ def spawn_context_daemon(
     ``ff4a-2832-def4-4e55``: a certified op running on such a thread resolved its PRINCIPAL
     from the process-global ``REBAR_OPCERT_ENV_ID`` (which threads DO share) but its KEY from
     the unbound ``<tracker>/.opcert-key`` genesis path — which silently AUTO-GENERATES a fresh
-    Ed25519 key. The resulting op-cert claimed the pinned production environment while being
+    Ed25519 key. The resulting op-cert claimed the production environment while being
     signed under an untrusted key, so ``ssh-keygen -Y verify`` failed and the attestation read
     as ``mismatch`` / "no certified plan-review attestation". The synchronous surface never had
     this problem because ``anyio.to_thread.run_sync`` propagates the caller's context.

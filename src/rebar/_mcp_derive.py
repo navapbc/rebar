@@ -46,7 +46,7 @@ class Param:
 
 @dataclass(frozen=True)
 class PerCall:
-    """A pinned keyword argument evaluated per call against the registrar context."""
+    """A fixed keyword argument evaluated per call against the registrar context."""
 
     resolve: Callable[[Any], Any]
 
