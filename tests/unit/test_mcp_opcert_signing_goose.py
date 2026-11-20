@@ -27,6 +27,7 @@ from rebar._mcp_health import run_http_with_grace, run_mcp
 from rebar._opcert_binding import bound_signer, current_binding, current_push_mode
 from rebar.attest import sshsig
 from rebar.mcp_server import compose_startup_opcert_binding
+from rebar.opcert_service import keyprov
 from rebar.opcert_service.keyprov import OpcertKeyError
 
 try:
@@ -416,17 +417,40 @@ def test_run_http_binds_signer_inside_the_serving_thread(monkeypatch: pytest.Mon
 def test_compose_startup_binding_fails_closed_on_bad_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Fail-closed: with both inputs present but the key too-permissive (not 0600),
+    """Fail-closed: with both inputs present but the key unusable,
     ``compose_startup_opcert_binding`` RAISES (startup aborts) rather than returning None or
-    serving with an unusable signer."""
+    serving with an unusable signer. The key is invalid on every platform (bug
+    lowfat-hydrated-koalabear): a group-readable key is not rejected on Windows, so it cannot
+    carry this check there."""
+    repo = _store(tmp_path, monkeypatch)
+    priv = tmp_path / "boxkey"
+    priv.write_text("not an OpenSSH private key\n", encoding="utf-8")
+    priv.chmod(0o600)
+    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", ENV_ID)
+    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", str(priv))
+    cfg = rebar.config.compose_config(root=str(repo))
+    with pytest.raises(OpcertKeyError, match="malformed, encrypted"):
+        compose_startup_opcert_binding(cfg)
+
+
+def test_compose_startup_binding_group_readable_key_follows_the_platform_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A group-readable key is refused where POSIX mode bits exist. On Windows rebar relies on the
+    default ACL instead (decision cloistered-decomposed-nymph), so the same key composes there."""
     repo = _store(tmp_path, monkeypatch)
     priv, _pub = _keypair(tmp_path, "boxkey")
-    Path(priv).chmod(0o644)  # group/other readable → rejected by the 0600 source check
+    Path(priv).chmod(0o644)
     monkeypatch.setenv("REBAR_OPCERT_ENV_ID", ENV_ID)
     monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", priv)
     cfg = rebar.config.compose_config(root=str(repo))
-    with pytest.raises(OpcertKeyError):
-        compose_startup_opcert_binding(cfg)
+    if keyprov._POSIX_MODE_BITS:
+        with pytest.raises(OpcertKeyError, match="0600 or stricter"):
+            compose_startup_opcert_binding(cfg)
+        return
+    binding = compose_startup_opcert_binding(cfg)
+    assert binding is not None
+    binding.cleanup()
 
 
 def test_main_cleans_up_binding_when_serving_raises(monkeypatch: pytest.MonkeyPatch) -> None:
