@@ -125,6 +125,7 @@ if _TESTS_DIR not in sys.path:
 # Turn missing Python extras into collection errors when REBAR_REQUIRE_EXTRAS=1.
 # Import the directly tested guard before test modules can call importorskip.
 import _extra_guard  # noqa: E402  (needs _TESTS_DIR on sys.path, set just above)
+from _git_upkeep import DETACH_SWITCH  # noqa: E402
 from _sandbox_capabilities import (  # noqa: E402
     collect_counted_skips_from_worker,
     configure_semgrep_settings_file,
@@ -202,6 +203,14 @@ def pytest_configure(config: pytest.Config) -> None:
     import _git_floor
 
     scrub_ambient_git_config(os.environ)
+    # Git's own t/test-lib.sh does the same. At git's defaults a raw git write in a test
+    # (commit, merge, fetch, a local push) returns while `git maintenance run --auto --detach`
+    # keeps running, and that child's worktree-prune deletes the admin dir of a concurrent
+    # `git worktree add` before the add writes `locked` (bug 7fcc-dac7-6f05-4ad1). Git reads
+    # this only when neither maintenance.autoDetach nor gc.autoDetach is set, so pinned
+    # repositories keep their posture; guards that judge `--detach` restore the default
+    # (see _git_upkeep.assert_git_detaches_by_default).
+    os.environ[DETACH_SWITCH] = "false"
     configure_semgrep_settings_file(_REPO_ROOT)
     _select_repo_pandoc()
     _register_counted_skip_xdist_hooks(config)

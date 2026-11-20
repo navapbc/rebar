@@ -27,7 +27,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _git_upkeep import maintenance_children
+from _git_upkeep import DETACH_SWITCH, assert_git_detaches_by_default, maintenance_children
 
 import rebar
 from rebar import config
@@ -63,6 +63,9 @@ def traced_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, 
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "user.name", "Test")
+    # The session keeps unpinned upkeep in the foreground; this guard needs git's default.
+    monkeypatch.delenv(DETACH_SWITCH, raising=False)
+    assert_git_detaches_by_default(tmp_path)
     trace = tmp_path / "trace.jsonl"
     monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
     monkeypatch.setenv("REBAR_ROOT", str(root))
