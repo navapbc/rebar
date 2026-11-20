@@ -77,7 +77,7 @@ PYTEST_WORKERS ?= 4
 # git-remote-s3 API-surface contract test (bug a54e-4b02-ab42-481f).
 TEST_EXTRAS := reviewbot ui grounding-terraform s3
 
-.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify test scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin ensure-pandoc verify-mcp-pin release-build-check
+.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check verify verify-host test scanner-integration jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin ensure-pandoc verify-mcp-pin release-build-check
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -552,7 +552,10 @@ import-convention:  ## ERRORS ONLY: bare-pytest import convention guards (python
 	@# `tests.`-rooted imports that fail under `make test` and CI.
 	pytest tests/unit/test_tests_import_convention.py tests/unit/test_scripts_import_convention.py -q
 
-verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + typecheck + import convention + default and integration tiers. Costs 25-30 min, not seconds.
+verify-host:  ## Refuse when this host lacks a capability the suite needs (AF_UNIX sockets, outbound HTTPS); see docs/local-dev-env.md.
+	@python scripts/check_verify_host.py
+
+verify: verify-host  ## THE PRE-PUSH GATE: host-capability preflight, then lint + typecheck + import convention + default and integration tiers. Costs 25-30 min, not seconds.
 	@# Bug 1035-bed7-c855-4732. `make lint` is what AGENTS.md names, what the pre-commit hook
 	@# runs, and what every contributor treats as the local proxy for CI — but it is only the
 	@# check-only half. Three gates enforced solely by pytest (test_mechanism_delta,
@@ -593,6 +596,10 @@ verify: lint typecheck import-convention test  ## THE PRE-PUSH GATE: lint + type
 	@#
 	@# make + ruff + mypy + pytest over this checkout only: no CI provider required
 	@# (project.portability).
+	@# Bug d492-04db-b79e-428f: the gates run in this recipe, not as prerequisites, so the
+	@# preflight strictly precedes them even under make -j or -k (a failed prerequisite
+	@# means the recipe never starts). The sub-make keeps the gates' own ordering.
+	@$(MAKE) --no-print-directory lint typecheck import-convention test
 
 test:  ## Run the default suite, then the integration tier (excludes external and live), parallelised like CI.
 	@# Bug 1035-bed7-c855-4732. CI runs this tier under `-n 4 --dist worksteal` while a local

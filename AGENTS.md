@@ -30,7 +30,8 @@ baseline-vs-tree comparisons, the public-API surface census, CI-workflow parity,
 artifact and docs drift, whole-tree AST policy scans (roughly seventy modules). On 2026-09-04
 three separate changes were pushed red by exactly those tests after their authors ran
 `make lint` and `make typecheck` and saw green (bug `1035-bed7-c855-4732`). **`make verify`**
-= `lint` + `typecheck` + the bare-`pytest` `import-convention` guard + `test`, and
+= the `verify-host` capability preflight, then `lint` + `typecheck` + the bare-`pytest`
+`import-convention` guard + `test`, and
 `make test` runs exactly the two pytest selections CI's gating `ubuntu-latest, py3.13` cell
 runs, in order — the default tier (`not integration and not external`), then the integration
 tier (`integration and not live`) — a superset of every other matrix cell, so it is the locally
@@ -41,6 +42,10 @@ on an explicit `pytest -m live` (bug `5f29-9bed-5a47-4a25`, `docs/jira-sync-setu
 The import-convention guard is intentionally called out and run with the **BARE `pytest`
 console script**: `python -m pytest` injects the checkout root onto `sys.path`, so it can
 false-green `tests.`-rooted imports that fail under `make test` and CI.
+
+It refuses up front inside an agent sandbox, which denies AF_UNIX sockets and outbound
+HTTPS that the suite needs; run it outside (`docs/local-dev-env.md` §"Where `make verify` can
+run").
 
 **It costs 25-30 minutes** (measured twice on one six-performance-core host at the default
 `PYTEST_WORKERS=4`: 22 min 25 s and 26 min 04 s wall for lint + typecheck + ~19.2k tests,
