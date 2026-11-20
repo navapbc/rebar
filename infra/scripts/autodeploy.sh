@@ -420,7 +420,8 @@ mcp_run_new() {
     -e REBAR_GATE_TMPDIR=/var/lib/rebar/gate-scratch \
     -e TMPDIR=/var/lib/rebar/gate-scratch \
     -e "REBAR_OPCERT_ENV_ID=${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}" \
-    -e REBAR_IDENTITY_SIGNING_KEY=/run/secrets/opcert-ed25519-key \
+    -e REBAR_OPCERT_KEY_PATH=/run/secrets/opcert-ed25519-key \
+    -e REBAR_IDENTITY_SIGNING_KEY=/run/secrets/rebar-bot-signing-key \
     -e "REBAR_VERIFY_TRUSTED_OPCERT_KEYS=$trusted_keys" \
     -e "REBAR_TRACKER_DIR=/var/gerrit/site/mcp-tickets" \
     -e "MCP_CODE_DIR=/var/gerrit/site/mcp-code" \
@@ -431,6 +432,7 @@ mcp_run_new() {
     -p "127.0.0.1:${2}:8091" \
     -v "$COMPOSE_DIR/mcp-static-tokens.json:/run/secrets/mcp-static-tokens.json:ro" \
     -v "$COMPOSE_DIR/opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro" \
+    -v "$COMPOSE_DIR/rebar-bot-signing-key:/run/secrets/rebar-bot-signing-key:ro" \
     -v "gerrit_mcp_tickets:/var/gerrit/site/mcp-tickets" \
     -v "gerrit_mcp_code:/var/gerrit/site/mcp-code" \
     -v "/var/lib/rebar:/var/lib/rebar" \

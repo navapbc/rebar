@@ -28,9 +28,16 @@ A — provision signing first, flip the gate on safely via expand-contract).
    running with:
    - `REBAR_OPCERT_ENV_ID = 9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65` (the box env_id — the string
      `nava-opcert-prod` is only that key's comment/label, not the env_id), and
-   - `REBAR_IDENTITY_SIGNING_KEY = /run/secrets/opcert-ed25519-key`, the SSM-materialized
-     Ed25519 key bind-mounted read-only (materialized by `infra/scripts/fetch-secrets.sh`,
+   - `REBAR_OPCERT_KEY_PATH = /run/secrets/opcert-ed25519-key`, the SSM-materialized
+     Ed25519 op-cert key bind-mounted read-only (materialized by `infra/scripts/fetch-secrets.sh`,
      shared with the `opcert` gate service).
+
+   `REBAR_IDENTITY_SIGNING_KEY` is a different key: it names the rebar bot signing key
+   (`/run/secrets/rebar-bot-signing-key`) that signs the server's tracker writes, and it plays
+   no part in op-cert signing. With `REBAR_OPCERT_ENV_ID` set, the server refuses to start if
+   either key is missing or invalid. That includes a blank `/rebar/prod/rebar-bot-signing-key`
+   slot: `fetch-secrets.sh` then writes an empty key file, which review-bot tolerates (it writes
+   unsigned events) but the MCP server does not.
 
    The server composes its startup op-cert signer from these
    (`rebar.mcp_server.compose_startup_opcert_binding`) and binds it around serving, so the
@@ -119,9 +126,10 @@ close was retroactively failed.
 
 - `infra/scripts/fetch-secrets.sh` — materializes the SSM parameter
   `/rebar/prod/opcert-ed25519-key` (the source) INTO the container bind-mount path
-  `/run/secrets/opcert-ed25519-key` (the destination that `REBAR_IDENTITY_SIGNING_KEY` points
+  `/run/secrets/opcert-ed25519-key` (the destination that `REBAR_OPCERT_KEY_PATH` points
   at), shared by the `opcert` and `mcp` services. The SSM parameter name and the bind-mount path
   are the same key at two hops, not two different keys.
 - `infra/compose/docker-compose.yml` — the `mcp` service's `REBAR_OPCERT_ENV_ID` +
-  `REBAR_IDENTITY_SIGNING_KEY` + key bind-mount.
+  `REBAR_OPCERT_KEY_PATH` + op-cert key bind-mount (and, separately, the
+  `REBAR_IDENTITY_SIGNING_KEY` bot-key bind-mount for authorship).
 - `infra/runbooks/two-vote-gate-rollback.md` — the Gerrit submit-gate posture this gate feeds.
