@@ -124,9 +124,13 @@ _ASSIGNEE_NOT_FOUND_ERROR: str = (
 )
 
 # Writes that create something new: a non-zero exit may come AFTER Jira applied the write,
-# so re-running would create a duplicate (bug highbred-fabled-lobo: REB-7141/REB-7142).
-# Only a detected 429, which Jira rejects without applying, is retried for these.
-_NON_REPLAYABLE_COMMANDS: tuple[tuple[str, ...], ...] = (("jira", "workitem", "create"),)
+# so re-running would create a duplicate (bug highbred-fabled-lobo: REB-7141/REB-7142; the
+# comment create, bug oppressed-topsecret-chickadee). Only a detected 429, which Jira rejects
+# without applying, is retried for these.
+_NON_REPLAYABLE_COMMANDS: tuple[tuple[str, ...], ...] = (
+    ("jira", "workitem", "create"),
+    ("jira", "workitem", "comment", "create"),
+)
 
 
 def _is_non_replayable(cmd: list[str]) -> bool:

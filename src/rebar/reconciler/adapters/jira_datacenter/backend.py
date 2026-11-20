@@ -268,7 +268,9 @@ def _search_users_by_username(client: Any, username: str) -> tuple[str | None, b
     is the non-authoritative case. ``is_account_id`` is always ``False``: DC has
     no accountId concept at all.
     """
-    users = client.search_users(user=username, maxResults=2)
+    from rebar.reconciler.adapters.jira_datacenter.retry import _with_connection_retry
+
+    users = _with_connection_retry(lambda: client.search_users(user=username, maxResults=2))
     for user in users:
         name = getattr(user, "name", None)
         if name == username:
