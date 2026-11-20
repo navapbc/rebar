@@ -544,14 +544,11 @@ def compose_startup_opcert_binding(cfg):
     env_id = (raw_env_id or "").strip()
     if not env_id:
         return None
-    from rebar.opcert_service.config import OpcertServiceConfig
+    from rebar.opcert_service.config import OpcertServiceConfig, key_path_from_env
     from rebar.opcert_service.keyprov import compose_signer
 
-    # mechanism-ok: env_var REBAR_OPCERT_KEY_PATH — promising-unwasteful-xantus
-    raw = os.environ.get("REBAR_OPCERT_KEY_PATH")  # read-via: credential-deployment-override
-    key_path = (raw or "").strip() or None
     _check_startup_authorship_key(cfg)
-    return compose_signer(OpcertServiceConfig(env_id=env_id, key_path=key_path))
+    return compose_signer(OpcertServiceConfig(env_id=env_id, key_path=key_path_from_env()))
 
 
 def _check_startup_authorship_key(cfg) -> None:

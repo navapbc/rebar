@@ -147,7 +147,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py`, `src/rebar/mcp_server.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_GUARD` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_JOB_TIMEOUT_SECONDS` | `src/rebar/opcert_service/config.py` |  |
-| `REBAR_OPCERT_KEY_PATH` | `src/rebar/_opcert_signing.py`, `src/rebar/mcp_server.py`, `src/rebar/opcert_service/config.py` |  |
+| `REBAR_OPCERT_KEY_PATH` | `src/rebar/_opcert_signing.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_PORT` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_PRIVATE_KEY` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_REVIEW_BRANCH` | `src/rebar/opcert_service/config.py` |  |
@@ -250,5 +250,5 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/config_readers.py:100` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config_readers.py:120` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config_readers.py:145` — `_llm_str(<non-literal>)`
-- `src/rebar/opcert_service/config.py:72` — `os.environ.get(<non-literal>)`
+- `src/rebar/opcert_service/config.py:77` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:159` — `os.environ.get(<non-literal>)`
