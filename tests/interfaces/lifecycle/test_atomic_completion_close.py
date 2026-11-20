@@ -8,10 +8,11 @@ cleanliness, and a clean retry.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import subprocess
 import uuid
-from concurrent.futures import ProcessPoolExecutor
+from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
 
@@ -117,9 +118,46 @@ def _commit_bundle(repo: str | Path, ticket: str, result: dict[str, Any]):
     )
 
 
-def _commit_worker(repo: str, ticket: str, result: dict[str, Any]) -> dict[str, object]:
-    """Picklable process entry point for the same-ticket publication race."""
-    return dict(_commit_bundle(repo, ticket, result).atomic_close)
+def _commit_worker(repo: str, ticket: str, result: dict[str, Any], conn: Connection) -> None:
+    """Picklable process entry point for the same-ticket publication race.
+
+    Sends ``("ok", atomic_close)`` or ``("error", repr)`` back over ``conn``."""
+    try:
+        conn.send(("ok", dict(_commit_bundle(repo, ticket, result).atomic_close)))
+    except BaseException as exc:  # noqa: BLE001 - reported to the parent, which fails the test
+        conn.send(("error", repr(exc)))
+    finally:
+        conn.close()
+
+
+def _race_two_commit_workers(repo: str, ticket: str, result: dict[str, Any]) -> list[dict]:
+    """Run two ``_commit_worker`` processes at once and return both outcomes.
+
+    Plain ``multiprocessing`` processes, not ``ProcessPoolExecutor``: the pool first queries
+    ``os.sysconf("SC_SEM_NSEMS_MAX")``, which the agent sandbox denies even though the
+    semaphores this test needs work (bug fa59-9a21-097b-49be). No per-worker wall-clock
+    bound either: worker start-up and git latency scale with host load, and the suite's
+    per-test budget already bounds a hang (bug 9b8a-60c3-2194-418c)."""
+    ctx = multiprocessing.get_context("spawn")
+    pipes = [ctx.Pipe(duplex=False) for _ in range(2)]
+    workers = [
+        ctx.Process(target=_commit_worker, args=(repo, ticket, result, send))
+        for _recv, send in pipes
+    ]
+    for worker in workers:
+        worker.start()
+    for _recv, send in pipes:
+        send.close()  # the parent keeps only the receiving ends
+    outcomes = []
+    try:
+        for recv, _send in pipes:
+            status, payload = recv.recv()
+            assert status == "ok", f"a commit worker raised: {payload}"
+            outcomes.append(payload)
+    finally:
+        for worker in workers:
+            worker.join()
+    return outcomes
 
 
 def _ticket_remote(repo: Path, tmp_path: Path) -> tuple[Path, Path]:
@@ -396,9 +434,7 @@ def test_two_processes_publish_at_most_one_equivalent_same_ticket_bundle(
     tracker = str(config.tracker_dir(str(rebar_repo)))
     baseline_count = int(_git(tracker, "rev-list", "--count", "HEAD"))
 
-    with ProcessPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(_commit_worker, str(rebar_repo), ticket, result) for _ in range(2)]
-        outcomes = [future.result(timeout=60) for future in futures]
+    outcomes = _race_two_commit_workers(str(rebar_repo), ticket, result)
 
     assert int(_git(tracker, "rev-list", "--count", "HEAD")) == baseline_count + 1
     assert sorted(bool(outcome["idempotent"]) for outcome in outcomes) == [False, True]
