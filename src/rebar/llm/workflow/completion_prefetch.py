@@ -297,7 +297,9 @@ def referencing_commit_diffs(ticket_id: str, repo_root) -> dict[str, str]:
             "--format=%H",
             "HEAD",
         ]
-        proc = subprocess.run(grep_args, capture_output=True, text=True, timeout=10, check=False)
+        proc = subprocess.run(
+            grep_args, capture_output=True, text=True, encoding="utf-8", timeout=10, check=False
+        )
         if proc.returncode != 0:
             return {}
         shas = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
@@ -315,6 +317,7 @@ def referencing_commit_diffs(ticket_id: str, repo_root) -> dict[str, str]:
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=10,
                 check=False,
             )

@@ -90,6 +90,7 @@ def _has_any_link_refs(tracker_path: Path, deleted_id: str) -> bool:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -380,6 +381,7 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
                 ["git", "-C", tracker, "reset", "-q", "--", *rels],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 check=False,
             )
         for p in written:

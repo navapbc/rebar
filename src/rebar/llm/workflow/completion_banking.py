@@ -393,6 +393,7 @@ def _resolve_tree_sha(repo_root: str | None) -> str | None:
             cwd=repo_root or None,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except Exception:  # noqa: BLE001 — no git / no tree → not-comparable stamp

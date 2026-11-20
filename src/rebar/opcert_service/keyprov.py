@@ -159,6 +159,7 @@ def _validate_key_file(copy_path: str) -> None:
             ["ssh-keygen", "-y", "-P", "", "-f", copy_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except OSError as exc:

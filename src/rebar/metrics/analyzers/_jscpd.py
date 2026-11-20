@@ -52,7 +52,7 @@ def run_jscpd(
             output_dir,
             str(scan_root),
         ]
-        completed = run(command, capture_output=True, text=True, check=False)
+        completed = run(command, capture_output=True, text=True, encoding="utf-8", check=False)
         if completed.returncode != 0:
             raise subprocess.SubprocessError(f"jscpd exited with status {completed.returncode}")
 

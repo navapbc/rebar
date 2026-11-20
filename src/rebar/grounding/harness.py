@@ -167,6 +167,7 @@ def run_tool(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
         errors="replace",  # a SIGKILL mid-multibyte must not crash the reap
         env=env,
     )

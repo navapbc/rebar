@@ -109,6 +109,7 @@ def _validate_checkout(root: Path) -> str | None:
             ("git", "-C", str(root), "rev-parse", "--is-shallow-repository"),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=TIMEOUT_SECONDS,
             check=False,
         )
@@ -145,6 +146,7 @@ def _spawn_bounded(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
         errors="replace",
         start_new_session=(os.name == "posix"),
     )

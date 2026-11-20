@@ -62,6 +62,7 @@ def _git_stdout(tracker_path: str, *args: str) -> str:
         ["git", "-C", tracker_path, *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     ).stdout
 
