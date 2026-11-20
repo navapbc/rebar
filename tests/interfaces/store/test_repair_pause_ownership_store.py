@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -580,3 +583,45 @@ def test_provider_shaped_fsck_invocations_share_the_same_pause_contract(
     assert unresolved == 0, lines
     assert seen
     assert ref_lock.read_pause(repo) is None
+
+
+# One local `git update-ref` slower than the production bound `_ref_lock._LOCAL_TIMEOUT_SECS`
+# (5.0 s), as a host starved by concurrent suites produced (bug c0ed-53e2-aa14-48f8).
+_SLOW_UPDATE_REF_SECS = 5.6
+
+
+def test_a_slow_local_git_call_does_not_fail_the_repair_pause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pause semantics hold when every ``git update-ref`` outlasts the production bound;
+    tests/conftest.py gives in-process ref-lock calls that headroom for the session."""
+    from rebar._commands._seam import CommandError
+
+    repo = _git_repo(tmp_path / "repo")
+    tracker = tmp_path / "doctor-tracker"
+    tracker.mkdir()
+    real_git = shutil.which("git")
+    assert real_git is not None
+    delayed = tmp_path / "delayed-update-refs"
+    bin_dir = tmp_path / "slowgit"
+    bin_dir.mkdir()
+    shim = bin_dir / "git"
+    shim.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys, time\n"
+        "if 'update-ref' in sys.argv[1:]:\n"
+        f"    time.sleep({_SLOW_UPDATE_REF_SECS})\n"
+        f"    with open({str(delayed)!r}, 'a') as log:\n"
+        "        log.write(' '.join(sys.argv[1:]) + '\\n')\n"
+        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n"
+    )
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", os.pathsep.join((str(bin_dir), os.environ["PATH"])))
+
+    with pytest.raises(CommandError, match="a reconciler pass is in flight"):
+        _doctor_run(monkeypatch, tracker, repo, lambda: None, in_flight=True)
+
+    assert _ref_lock().read_pause(repo) is None
+    # The test exercised the delay: both the pause write and its cleanup went through the shim.
+    calls = delayed.read_text().splitlines()
+    assert len(calls) >= 2, calls
