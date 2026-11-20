@@ -26,9 +26,11 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
+from types import ModuleType
 
 from rebar._snapshot.delta_tree import materialize_via_donor
 from rebar._snapshot.git_fetch import (
@@ -474,20 +476,17 @@ def materialize(
     try:
         _ensure_blobs_present(root_dir, sha, "origin")
         # Reuse a neighbouring entry when possible (bug 8386); falls back closed to a full build.
-        if not materialize_via_donor(root_dir, sha, build, store=store, entry_prefix="", subdir=""):
-            _materialize_tree(root_dir, sha, build)
-        _fsync_dir(build)
-        try:
-            os.rename(build, dest)
-        except OSError:
-            # Another materialization won the race (same SHA == same content); keep
-            # theirs and drop ours.
-            if dest.is_dir():
-                shutil.rmtree(build, ignore_errors=True)
-            else:
-                raise
-        else:
-            _fsync_dir(dest.parent)
+        _build_publish_account(
+            store,
+            dest,
+            build,
+            donor=lambda: materialize_via_donor(
+                root_dir, sha, build, store=store, entry_prefix="", subdir=""
+            ),
+            full=lambda: _materialize_tree(root_dir, sha, build),
+            publish=lambda: _publish_code_build(build, dest),
+            discard=(build,),
+        )
         # Persist faithfulness caveats while this builder has the SHA, keeping later cache
         # hits cheap and independent of the clone that populated the entry.
         lfs, subs = _detect_lfs_pointers(dest), _list_submodules(root_dir, sha)
@@ -644,27 +643,22 @@ def materialize_tickets(
         _ensure_blobs_present(source_dir, sha, remote)
         # Fast-moving ticket tips rarely hit cache, so reuse a hardlinked neighbour and rewrite
         # its delta. Any doubt returns False and preserves full materialization.
-        if not materialize_via_donor(
-            source_dir,
-            sha,
+        _build_publish_account(
+            store,
+            dest,
             build,
-            store=store,
-            entry_prefix="tickets-",
-            subdir=_TRACKER_DIRNAME,
-        ):
-            _materialize_tree(source_dir, sha, build)
-        _fsync_dir(build)
-        if _publish_ticket_build(build, wrapper, dest):
-            # The populate-race winner alone accounts this large ticket entry's exclusive
-            # bytes; hits and losers were already counted. Defer imports to avoid the cache's
-            # reverse dependency.
-            from rebar._snapshot.cache import add_bytes as _add_bytes
-            from rebar._snapshot.cache import exclusive_size as _exclusive_size
-
-            try:
-                _add_bytes(_exclusive_size(dest), store)
-            except OSError:  # pragma: no cover - best effort, like the janitor's fs calls
-                pass  # accounting is bookkeeping; it must never fail a materialization
+            donor=lambda: materialize_via_donor(
+                source_dir,
+                sha,
+                build,
+                store=store,
+                entry_prefix="tickets-",
+                subdir=_TRACKER_DIRNAME,
+            ),
+            full=lambda: _materialize_tree(source_dir, sha, build),
+            publish=lambda: _publish_ticket_build(build, wrapper, dest),
+            discard=(build, wrapper),
+        )
         return str(dest)
     except BaseException:
         shutil.rmtree(build, ignore_errors=True)
@@ -675,6 +669,73 @@ def materialize_tickets(
         except OSError:
             pass
         raise
+
+
+def _publish_code_build(build: Path, dest: Path) -> bool:
+    """Rename the code ``build`` to ``dest``; ``False`` when another materialization won.
+
+    The same SHA means the same content, so the winner's entry is kept and ours dropped."""
+    try:
+        os.rename(build, dest)
+    except OSError:
+        if dest.is_dir():
+            shutil.rmtree(build, ignore_errors=True)
+            return False
+        raise
+    _fsync_dir(dest.parent)
+    return True
+
+
+def _build_publish_account(
+    store: Path,
+    dest: Path,
+    build: Path,
+    *,
+    donor: Callable[[], bool],
+    full: Callable[[], None],
+    publish: Callable[[], bool],
+    discard: tuple[Path, ...],
+) -> None:
+    """Build an entry, publish it, and add the bytes it alone holds to the running total.
+
+    The total trusts link counts (see ``cache.accounting_lock``), so a donor build's
+    hardlinks, the publish rename, and the :func:`~rebar._snapshot.cache.exclusive_size`
+    increment share one lock hold. A full build writes only fresh inodes under ``tmp/``
+    that no other build can link, so it runs outside the lock and holds it only to publish
+    and account. Only the build whose rename published the entry adds bytes. ``discard``
+    names the build's directories, removed inside the hold if the donor attempt raises.
+
+    Hold time: the donor attempt includes its candidate search (``ls-tree`` and ``diff``
+    per candidate) as well as the links and the delta rewrite."""
+    from rebar._snapshot import cache as _cache  # deferred: cache imports this module
+
+    with _cache.accounting_lock(store):
+        try:
+            if donor():
+                _publish_and_account(_cache, store, dest, build, publish)
+                return
+        except BaseException:
+            # A failed donor build may still hold links to published files; drop them
+            # before the lock is released, or an eviction would read inflated counts.
+            for path in discard:
+                shutil.rmtree(path, ignore_errors=True)
+            raise
+    full()
+    with _cache.accounting_lock(store):
+        _publish_and_account(_cache, store, dest, build, publish)
+
+
+def _publish_and_account(
+    cache_module: ModuleType, store: Path, dest: Path, build: Path, publish: Callable[[], bool]
+) -> None:
+    """Publish ``build`` and account it; the caller holds the accounting lock."""
+    _fsync_dir(build)
+    if not publish():
+        return
+    try:
+        cache_module.add_bytes_held(cache_module.exclusive_size(dest), store)
+    except OSError:  # pragma: no cover - best effort, like the janitor's fs calls
+        pass  # accounting is bookkeeping; it must never fail a materialization
 
 
 def _publish_ticket_build(build: Path, wrapper: Path, dest: Path) -> bool:
