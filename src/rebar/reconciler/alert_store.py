@@ -117,31 +117,40 @@ def patch_bug_filed(key: str, bug_ticket_id: str, repo_root: Path) -> None:
     if not store_dir.is_dir():
         return
     for jf in sorted(store_dir.glob("*.jsonl"), reverse=True):
-        out_lines: list[str] = []
-        patched = False
         try:
-            for line in jf.read_text(encoding="utf-8").splitlines():
-                rec = None
-                try:
-                    rec = json.loads(line)
-                except json.JSONDecodeError:
-                    pass  # malformed JSONL line — skip and preserve original text
-                if (
-                    not patched
-                    and isinstance(rec, dict)
-                    and rec.get("key") == key
-                    and not rec.get("resolved")
-                ):
-                    rec["bug_ticket_id"] = bug_ticket_id
-                    rec["op"] = "bug_filed"
-                    patched = True
-                    # Only the patched line is re-serialized; all other lines
-                    # are written back byte-identical to their original input.
-                    out_lines.append(json.dumps(rec))
-                else:
-                    out_lines.append(line)
-            if patched:
-                _atomic_write(jf, "\n".join(out_lines) + "\n")
-                return
+            # Hold the append lock across the read and the rewrite: an alert appended in
+            # between would otherwise be dropped by the replace (bug equable-overseas-hoiho).
+            with sibling_exclusive_lock(jf, lock_name=_APPEND_LOCK_NAME):
+                if _patch_file(jf, key, bug_ticket_id):
+                    return
         except Exception:  # noqa: BLE001 — skip an unwritable/unparseable alert file (per-file fail-open during the patch scan)
             continue
+
+
+def _patch_file(jf: Path, key: str, bug_ticket_id: str) -> bool:
+    """Patch the first unresolved record for *key* in *jf*; return whether one was patched."""
+    out_lines: list[str] = []
+    patched = False
+    for line in jf.read_text(encoding="utf-8").splitlines():
+        rec = None
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            pass  # malformed JSONL line — skip and preserve original text
+        if (
+            not patched
+            and isinstance(rec, dict)
+            and rec.get("key") == key
+            and not rec.get("resolved")
+        ):
+            rec["bug_ticket_id"] = bug_ticket_id
+            rec["op"] = "bug_filed"
+            patched = True
+            # Only the patched line is re-serialized; all other lines
+            # are written back byte-identical to their original input.
+            out_lines.append(json.dumps(rec))
+        else:
+            out_lines.append(line)
+    if patched:
+        _atomic_write(jf, "\n".join(out_lines) + "\n")
+    return patched
