@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from _git_upkeep import assert_no_detached_upkeep, init_bare_remote
+from _git_upkeep import DETACH_SWITCH, assert_no_detached_upkeep, init_bare_remote
 from _store_template import (
     _IDENTITY_FILES,
     _WORKTREE_POINTERS,
@@ -279,6 +279,7 @@ def test_template_stays_virgin(_rebar_repo_template: Path, monkeypatch: pytest.M
 def test_fixture_bare_remote_leaves_no_detached_upkeep_behind_a_push(
     _rebar_repo_template: Path,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove fixture pushes leave no detached Git maintenance process (bug dca1).
 
@@ -286,6 +287,7 @@ def test_fixture_bare_remote_leaves_no_detached_upkeep_behind_a_push(
     and reject ``git maintenance run --detach`` instead of relying on timing.
     """
     trace = tmp_path / "trace2.json"
+    monkeypatch.delenv(DETACH_SWITCH, raising=False)  # this guard needs git's default
     remote = init_bare_remote(tmp_path / "origin.git")
     work = _clone_template(_rebar_repo_template, tmp_path / "work")
     subprocess.run(
