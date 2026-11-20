@@ -544,7 +544,7 @@ Verify with `command -v scc` and `command -v jscpd`.
 
 ```sh
 make check     # lint + typecheck — the tight loop (~40 s); NOT the pre-push gate
-make verify    # THE PRE-PUSH GATE: lint + typecheck + the default and integration tiers (25-30 min)
+make verify    # THE PRE-PUSH GATE: host preflight, then lint + typecheck + the default and integration tiers (25-30 min)
 make test      # default tier (-n 4 --dist worksteal), then integration tier minus live (--dist loadgroup)
 make format    # the ONLY target that rewrites files
 ```
@@ -559,12 +559,28 @@ whose contract is process-level `multiprocessing` behavior are skipped and count
 pytest's terminal summary as `sandbox compatibility skips`.
 
 The hosted verification lanes still run those tests normally because their runners
-provide POSIX named semaphores, so this local skip restores a real `make test` /
-`make verify` verdict under the sandbox without reducing hosted-gate coverage. Worker
+provide POSIX named semaphores, so this local skip keeps targeted `pytest` and `make test`
+runs under the sandbox from failing on that one capability without reducing hosted-gate
+coverage. It does not make `make verify` runnable there: see the next section. Worker
 count is unrelated: pytest-xdist starts successfully under the sandbox, all known
 semaphore denials are test-level `multiprocessing` construction failures, and
 `PYTEST_WORKERS=1` still invokes xdist because `make test` passes
 `-n $(PYTEST_WORKERS)`.
+
+### Where `make verify` can run
+
+`make verify` first runs `make verify-host` (`scripts/check_verify_host.py`), which refuses in
+about 10 seconds on a host that lacks a capability the suite needs and CI runners always have:
+
+- **AF_UNIX sockets** — the reclaim re-sign tests run a private `ssh-agent`, and the network
+  guard's tests check its local-IPC allowance.
+- **Outbound HTTPS** — `python -m build` installs its isolated build backend from the package
+  index, and `semgrep --validate` downloads its rule lints from semgrep.dev.
+
+An agent sandbox (for example Claude Code's) denies both, so a sandboxed `make verify` used to
+fail about 20 tests after 25 minutes, and pass some detector tests falsely. Run `make verify`
+outside the sandbox. The preflight has no bypass; a host that can run the suite passes it
+silently. Targeted `pytest` runs are not gated.
 
 **`make verify` is what must pass before `git push gerrit`, and it costs minutes, not
 seconds.** `make check` and `make lint` are check-only gates over the *source text*; a large
@@ -612,7 +628,7 @@ PYTEST_ADDOPTS="--store-durations --clean-durations --durations-path=$PWD/.rebar
 cp .rebar/scratch/test_durations.json .test_durations
 ```
 
-`make verify` stops at the first failing prerequisite (`lint`, `typecheck`,
+`make verify` stops at the first failing step (`verify-host`, `lint`, `typecheck`,
 `import-convention`) before it reaches `test`, so run those three green first or no profile is
 written. `--clean-durations` drops node ids that no longer exist, so renamed or deleted tests
 do not linger. The 17 known pandoc failures on an arm64 host still get an entry.
