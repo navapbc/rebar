@@ -13,7 +13,12 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from _git_upkeep import assert_no_detached_upkeep, init_bare_remote, missing_upkeep_pins
+from _git_upkeep import (
+    DETACH_SWITCH,
+    assert_no_detached_upkeep,
+    init_bare_remote,
+    missing_upkeep_pins,
+)
 from _topology_template import clone_topology_template
 
 import rebar
@@ -243,6 +248,7 @@ def test_a_write_pushing_to_the_origin_leaves_no_detached_upkeep(
             "the fixture built its bare origin without the upkeep pins"
         )
         trace = tmp_path / "trace2.json"
+        monkeypatch.delenv(DETACH_SWITCH, raising=False)  # this guard needs git's default
         monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
         rebar.create_ticket("task", "push into the fixture origin", return_alias=True)
     finally:
