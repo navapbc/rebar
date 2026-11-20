@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from rebar._config_sources import repo_root as _resolve_root
-from rebar._store.fsutil import replace_with_retry
+from rebar._store.fsutil import open_published, replace_with_retry
 
 from .completion_banking import _MANIFEST_TEXT_CAP
 from .completion_prefetch import _normalize_impact
@@ -255,7 +255,8 @@ def load_valid_pass_entries(
             key = criterion_cache_key(text)
             path = directory / f"{key}.json"
             try:
-                entry = json.loads(path.read_text(encoding="utf-8"))
+                with open_published(path) as fh:
+                    entry = json.loads(fh.read())
             except (OSError, ValueError):
                 continue
             if not isinstance(entry, dict) or entry.get("schema_version") != CACHE_SCHEMA_VERSION:

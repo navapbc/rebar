@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 
 from rebar._store.compat import COMPAT_FILENAME
+from rebar._store.fsutil import published_is_file
 from rebar._store.gitutil import run_git_bounded
 
 # Bound the HEAD probe even when it runs under the store write lock.
@@ -53,7 +54,7 @@ def _carries_store_structure(tracker: str) -> bool:
 
     Both identify readable stores without ``.git``; marker-only directories fail.
     """
-    if os.path.exists(os.path.join(tracker, COMPAT_FILENAME)):
+    if published_is_file(os.path.join(tracker, COMPAT_FILENAME)):
         return True
     try:
         entries = os.listdir(tracker)

@@ -13,6 +13,7 @@ import sys
 from rebar._cli import _help, _help_route, _registry
 from rebar._cli._init import ensure_initialized, ensure_store_mounted_best_effort
 from rebar._mcp_errors import js_safe_dumps
+from rebar._store.fsutil import open_published
 
 # The stdlib-only registry is the sole routing authority and source of runtime policy sets.
 _DERIVED_POLICY_SETS = _registry.derive_policy_sets()
@@ -169,12 +170,14 @@ def _suggest_mapping_write(key: str, block: dict) -> int:
     target = proj[0] if (proj is not None and proj[1] == "toml") else base / "rebar.toml"
 
     data: dict = {}
-    if target.is_file():
-        try:
-            data = tomllib.loads(target.read_text(encoding="utf-8"))
-        except (OSError, tomllib.TOMLDecodeError) as exc:
-            sys.stderr.write(f"Error: cannot read existing config {target}: {exc}\n")
-            return 1
+    try:
+        with open_published(target) as fh:
+            data = tomllib.loads(fh.read())
+    except FileNotFoundError:
+        pass
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        sys.stderr.write(f"Error: cannot read existing config {target}: {exc}\n")
+        return 1
 
     mapping = data.get("mapping")
     if not isinstance(mapping, dict):

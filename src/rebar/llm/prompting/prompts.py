@@ -35,6 +35,8 @@ import json
 from importlib.resources import files
 from pathlib import Path
 
+from rebar._store.fsutil import open_published
+
 # The prompt-MODEL leaf (story deft-effortless-greatdane): what a prompt IS — its value
 # types, its error vocabulary, the closed execution_mode enum, and the text grammar it is
 # written in. Re-exported here so ``from rebar.llm.prompting.prompts import …``
@@ -186,8 +188,8 @@ def get_prompt(prompt_id: str, *, repo_root=None) -> Prompt:
     if repo_root:
         user = Path(repo_root) / ".rebar" / "prompts" / f"{prompt_id}.md"
         try:
-            if user.is_file():
-                raw = user.read_text(encoding="utf-8")
+            with open_published(user) as fh:
+                raw = fh.read()
         except OSError:
             raw = None
     packaged = _packaged_prompt_files()
@@ -347,8 +349,8 @@ def _prompt_file(reviewer: Reviewer | Prompt, repo_root, variant: str | None):
     if repo_root:
         user = Path(repo_root) / ".rebar" / "prompts" / f"{reviewer.id}{suffix}.md"
         try:
-            if user.is_file():
-                return user.read_text(encoding="utf-8")
+            with open_published(user) as fh:
+                return fh.read()
         except OSError:
             pass
     if reviewer.fallback_file:
@@ -519,7 +521,8 @@ def prompt_override_drift(repo_root=None) -> list[str]:
         if pid not in packaged:
             continue  # an override with no built-in counterpart cannot drift
         try:
-            override_meta, _ = parse_front_matter(path.read_text(encoding="utf-8"))
+            with open_published(path) as fh:
+                override_meta, _ = parse_front_matter(fh.read())
             builtin_raw = _catalog_dir().joinpath(packaged[pid]).read_text(encoding="utf-8")
             builtin_meta, _ = parse_front_matter(builtin_raw)
         except Exception:  # noqa: BLE001 - unreadable/malformed prompt is not this check's job

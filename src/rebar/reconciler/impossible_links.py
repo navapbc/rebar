@@ -17,6 +17,8 @@ import os
 import time
 from typing import Any
 
+from rebar._store.fsutil import open_published
+
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
@@ -192,7 +194,7 @@ class ImpossibleLinkStore:
 
     def _load(self) -> None:
         try:
-            with open(self.path, encoding="utf-8") as handle:
+            with open_published(self.path) as handle:
                 data = json.load(handle)
         except FileNotFoundError:
             return

@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from rebar._store.fsutil import replace_with_retry
+from rebar._store.fsutil import open_published, replace_with_retry
 
 _VERSION = 1
 
@@ -27,7 +27,7 @@ def load(path: Path) -> dict[str, str]:
     malformed file from the in-memory state.
     """
     try:
-        with path.open(encoding="utf-8") as file:
+        with open_published(path) as file:
             payload: Any = json.load(file)
     except (json.JSONDecodeError, OSError, ValueError):
         return {}

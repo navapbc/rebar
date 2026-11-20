@@ -37,6 +37,7 @@ from typing import Any
 from xml.sax.saxutils import escape as _xml_escape
 from xml.sax.saxutils import quoteattr as _xml_attr
 
+from rebar._store.fsutil import open_published
 from rebar.llm.errors import LLMError
 
 # Model families we can distinguish (for the cross-family grader rule).
@@ -74,10 +75,13 @@ def load_eval_spec(prompt_id: str, *, repo_root=None) -> dict[str, Any]:
     A user ``.rebar/evals/<id>.eval.yaml`` (git-tracked beside the prompt) wins;
     otherwise a packaged built-in spec is used."""
     path = eval_spec_path(prompt_id, repo_root)
-    if not path.is_file():
-        path = _packaged_eval_spec(prompt_id)
     try:
-        text = path.read_text(encoding="utf-8")
+        try:
+            with open_published(path) as fh:
+                text = fh.read()
+        except (FileNotFoundError, IsADirectoryError, NotADirectoryError):
+            path = _packaged_eval_spec(prompt_id)
+            text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise EvalError(f"no eval spec for prompt {prompt_id!r} at {path}: {exc}") from None
     import yaml

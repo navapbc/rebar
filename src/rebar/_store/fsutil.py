@@ -23,12 +23,23 @@ so the defect class was limited to temporary-file naming.
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import IO, Any, TypeVar
 
-__all__ = ["atomic_write", "replace_with_retry", "sibling_exclusive_lock"]
+_T = TypeVar("_T")
+
+__all__ = [
+    "atomic_write",
+    "open_published",
+    "published_is_file",
+    "replace_with_retry",
+    "retry_contended",
+    "sibling_exclusive_lock",
+]
 
 #: Windows ``os.replace`` is ``MoveFileEx(MOVEFILE_REPLACE_EXISTING)``, which fails with
 #: ``ERROR_ACCESS_DENIED`` (``PermissionError``) while another rename onto the same target
@@ -42,28 +53,59 @@ _REPLACE_RETRY_FIRST_SLEEP_S = 0.01
 _REPLACE_RETRY_MAX_SLEEP_S = 0.1
 
 
-def replace_with_retry(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
-    """``os.replace(src, dst)``, retrying a transient Windows ``PermissionError``.
+def retry_contended(fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
+    """Call ``fn(*args, **kwargs)``, retrying a transient Windows ``PermissionError``.
 
-    On Windows a ``PermissionError`` is retried with a short doubling backoff until
+    While a ``MoveFileEx`` replace onto a path is in flight, Windows refuses a second
+    replace onto it, and an open or stat of it, with ``ERROR_ACCESS_DENIED``. On Windows a
+    ``PermissionError`` is retried with a short doubling backoff until
     :data:`_REPLACE_RETRY_DEADLINE_S` has passed, then the last error is re-raised. On
-    every other platform this is exactly ``os.replace``. Any other ``OSError`` propagates
-    at once everywhere: only the contended-target failure is transient.
+    every other platform ``fn`` runs once. Any other exception propagates at once
+    everywhere (bugs sporting-feudalist-bluet, ruby-unwomanish-willet).
     """
     if not _RETRY_CONTENDED_REPLACE:
-        os.replace(src, dst)
-        return
+        return fn(*args, **kwargs)
     deadline = time.monotonic() + _REPLACE_RETRY_DEADLINE_S
     sleep_s = _REPLACE_RETRY_FIRST_SLEEP_S
     while True:
         try:
-            os.replace(src, dst)
-            return
+            return fn(*args, **kwargs)
         except PermissionError:
             if time.monotonic() >= deadline:
                 raise
         time.sleep(sleep_s)
         sleep_s = min(sleep_s * 2, _REPLACE_RETRY_MAX_SLEEP_S)
+
+
+def replace_with_retry(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+    """``os.replace(src, dst)`` through :func:`retry_contended`."""
+    retry_contended(os.replace, src, dst)
+
+
+def open_published(
+    path: str | os.PathLike[str], mode: str = "r", *, encoding: str = "utf-8"
+) -> IO[Any]:
+    """Open a file another process may be republishing with :func:`atomic_write`.
+
+    The refusal happens at open time, so only the open is retried. ``encoding`` applies
+    to text modes and is ignored for binary ones. ``FileNotFoundError`` propagates, so
+    callers decide absence from the open itself rather than from a separate stat.
+    """
+    if "b" in mode:
+        return retry_contended(open, path, mode)
+    return retry_contended(open, path, mode, encoding=encoding)
+
+
+def published_is_file(path: str | os.PathLike[str]) -> bool:
+    """``os.path.isfile`` for a published file, with the stat retried like an open.
+
+    A missing path (or one under a non-directory) is False; a refusal that outlasts the
+    retry deadline propagates instead of reading as absent.
+    """
+    try:
+        return stat.S_ISREG(retry_contended(os.stat, path).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
 
 
 @contextmanager
