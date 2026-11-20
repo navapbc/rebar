@@ -379,7 +379,8 @@ def test_resign_makes_enforced_verify_pass_with_era_keys(tmp_path: Path, agent) 
     for key, _pub in store.keys.values():
         agent(key)
     failing = _failing(store, tmp_path)
-    assert {f["verdict"] for f in failing} == {"unsigned", "bad-signature"}
+    # The foreign key signs soundly but is not on the keyring, so it is not a forgery.
+    assert {f["verdict"] for f in failing} == {"unsigned", "signer-not-on-keyring"}
     before = _reduced(store.tracker)
 
     plan = _resign().build_resign_plan(
