@@ -60,12 +60,17 @@ class OpcertServiceConfig:
             review_branch=_str_env("REBAR_OPCERT_REVIEW_BRANCH") or DEFAULT_REVIEW_BRANCH,
             guard=_str_env("REBAR_OPCERT_GUARD"),
             env_id=_str_env("REBAR_OPCERT_ENV_ID"),
-            key_path=_str_env("REBAR_OPCERT_KEY_PATH"),
+            key_path=key_path_from_env(),
             private_key=_private_key_env(),
             job_timeout_seconds=_timeout_env(),
             shutdown_cancel_seconds=_shutdown_cancel_env(),
             port=_port_env(),
         )
+
+
+def key_path_from_env() -> str | None:
+    """The deploy-injected op-cert key path, shared with the MCP server's startup binding."""
+    return _str_env("REBAR_OPCERT_KEY_PATH")
 
 
 def _str_env(name: str) -> str | None:
