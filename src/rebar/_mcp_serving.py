@@ -200,7 +200,7 @@ def run_mcp(server: Any, mcp_cfg: Any, *, opcert_binding: Any = None) -> None:
     Bind the optional op-cert signer where each transport executes requests.
     """
 
-    # Expose pinned-key match status through /health and warn without aborting.
+    # Expose the bound signer's trust-list match status through /health; warn, never abort.
     setattr(server, _OPCERT_STATUS_ATTR, opcert_signing_status(opcert_binding))
     run_startup_opcert_check(opcert_binding)
 

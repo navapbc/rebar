@@ -529,7 +529,7 @@ def build_server(cfg=None):
 
 
 def compose_startup_opcert_binding(cfg):
-    """Bind the pinned environment's startup signer when the box claims an environment.
+    """Bind the claimed environment's startup signer when the box claims an environment.
 
     The op-cert key comes from ``REBAR_OPCERT_KEY_PATH``, never from
     ``identity.signing_key``: that setting names the authorship key, which must be on

@@ -123,6 +123,11 @@ def _assert_states_the_current_attestation_policy(text: str) -> None:
     only under the opt-in ``verify.require_environment`` (bug westbound-chivalric-pinemarten)."""
     assert "verify.require_environment" in text, "the condition for foreign_key is not named"
     assert "foreign_key" in text
+    # ADR 0125: validity-only by default, a per-environment trust list when one is set, and no
+    # repository-pinned keys (bug childproof-adrenal-macaw).
+    assert "verify.trusted_opcert_keys" in text, "the per-environment trust list is not named"
+    assert "untrusted" in text, "the trust-list verdict is not named"
+    assert "pinned" not in text, "still describes repository-pinned op-cert keys"
     for stale in ("unverifiable", "re-earned", "cannot be verified", "no existing attestation"):
         assert stale not in text, f"still claims attestations are lost: {stale!r}"
 

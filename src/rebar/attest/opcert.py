@@ -3,7 +3,8 @@
 Story 368c (epic sonic-columned-sturgeon): an *environment* signs a plan-review /
 completion-verifier operation certificate with its own asymmetric Ed25519 key via the foundation
 substrate (DSSE-PAE envelope + ``sshsig`` scheme + per-kind policy table), and anyone verifies it
-against that environment's **out-of-band-pinned** public key. Orthogonal to authorship
+against the public key embedded in its signature, checking only validity unless the verifier
+keeps its own trust list (ADR 0125). Orthogonal to authorship
 (``rebar.authorship.v1``) in actor/threat-model — different key, trust-root, and namespace — but it
 **reuses** the substrate and the identity epic's commit-ancestry era-validity *rule*.
 
@@ -345,7 +346,8 @@ def opcert_from_record(record: dict) -> tuple[dsse.Envelope, dict] | None:
     "merged_log_commit": …, "manifest": …})`` when the record carries an op-cert (an encoded DSSE
     ``envelope`` field), or ``None`` for a legacy HMAC record (no envelope). ``manifest`` is the
     SIGNED steps list when the producer bound it into the payload (``None`` for a pre-binding
-    op-cert). The returned envelope is fed to :func:`verify_opcert` with a pinned keyring.
+    op-cert). Callers verify the returned envelope on the key embedded in its signature
+    (:func:`rebar._opcert_verify.verify_opcert_record`, ADR 0125).
 
     SECURITY (finding #4, commit half — story 4214): every bound field
     (``{ticket_id, kind, material_fingerprint, merged_log_commit}``) is sourced from the SIGNED

@@ -60,8 +60,10 @@ CARRY_OVER = (
     (
         ".opcert-key",
         "the op-cert signing key — carry it with .env-id: under the old id, the "
-        "first op-cert this clone signs mints a new key, and attestations the old "
-        "key signed then fail as `mismatch` unless that key is pinned",
+        "first op-cert this clone signs mints a new key. Attestations the old key "
+        "signed still verify on the key embedded in each signature, but an environment "
+        "whose `verify.trusted_opcert_keys` list omits the old environment-and-key pair "
+        "reads them as `untrusted`",
     ),
     (
         ".opcert-key.pub",
@@ -172,9 +174,13 @@ def reidentification_warning(prior_ids: set[str], *, acknowledged: bool) -> str:
         "— it simply starts with no attestations of its own.\n"
         "  If this is a RE-CLONE of a tracker you were already working in, you have just "
         "lost that environment's identity. Its op-cert attestations still certify here on "
-        "the public key embedded in each signature; they turn `foreign_key` only under the "
-        "opt-in `verify.require_environment`, which trusts only the own or pinned keys of "
-        "the environment it names. What is lost is one continuous audit identity (new "
+        "the public key embedded in each signature, because verification checks validity "
+        "only by default. A verifying environment that sets `verify.trusted_opcert_keys` "
+        "trusts them only while its list names the old environment-and-key pair (otherwise "
+        "they read "
+        "`untrusted`), and the opt-in `verify.require_environment` turns a certificate "
+        "naming another environment `foreign_key`. What is lost is one continuous audit "
+        "identity (new "
         "events carry the new id) and the ability to sign as the old identity. Recover both "
         "by copying this "
         "git-ignored state out of the old tracker and re-running the command:\n"
