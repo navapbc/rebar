@@ -121,13 +121,32 @@ def _run_verify_opcert(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     )
 
 
-def _compose_binding(repo: Path, monkeypatch, env_id: str, key_path: str):
+def _compose_binding(
+    repo: Path, monkeypatch, env_id: str, key_path: str, authorship_key: str | None = None
+):
     """Build the server startup binding EXACTLY as the box does: REBAR_OPCERT_ENV_ID +
-    REBAR_IDENTITY_SIGNING_KEY (the materialized key path) → compose_startup_opcert_binding."""
+    REBAR_OPCERT_KEY_PATH (the materialized op-cert key) → compose_startup_opcert_binding, with
+    REBAR_IDENTITY_SIGNING_KEY naming the SEPARATE authorship key (the box's bot key). When no
+    authorship key is given, a distinct one is generated beside the op-cert key."""
+    if authorship_key is None:
+        key_dir = Path(key_path).parent
+        name = f"author-{Path(key_path).name}"
+        authorship_key = str(key_dir / name) if (key_dir / name).exists() else None
+        if authorship_key is None:
+            authorship_key, _ = _keypair(key_dir, name)
     monkeypatch.setenv("REBAR_OPCERT_ENV_ID", env_id)
-    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", key_path)
+    monkeypatch.setenv("REBAR_OPCERT_KEY_PATH", key_path)
+    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", authorship_key)
     cfg = rebar.config.compose_config(root=str(repo))
     return compose_startup_opcert_binding(cfg)
+
+
+def _pub_body(key_path: str) -> str:
+    """The ``ssh-ed25519 AAAA…`` body of a private key, derived with ssh-keygen."""
+    out = subprocess.run(
+        ["ssh-keygen", "-y", "-f", key_path], capture_output=True, text=True, check=True
+    ).stdout.split()
+    return f"{out[0]} {out[1]}"
 
 
 def _mint_completion_cert_via_binding(repo: Path, tid: str, binding, commit: str) -> None:
@@ -426,8 +445,10 @@ def test_compose_startup_binding_fails_closed_on_bad_key(
     priv = tmp_path / "boxkey"
     priv.write_text("not an OpenSSH private key\n", encoding="utf-8")
     priv.chmod(0o600)
+    author, _ = _keypair(tmp_path, "author")
     monkeypatch.setenv("REBAR_OPCERT_ENV_ID", ENV_ID)
-    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", str(priv))
+    monkeypatch.setenv("REBAR_OPCERT_KEY_PATH", str(priv))
+    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", author)
     cfg = rebar.config.compose_config(root=str(repo))
     with pytest.raises(OpcertKeyError, match="malformed, encrypted"):
         compose_startup_opcert_binding(cfg)
@@ -441,8 +462,10 @@ def test_compose_startup_binding_group_readable_key_follows_the_platform_rule(
     repo = _store(tmp_path, monkeypatch)
     priv, _pub = _keypair(tmp_path, "boxkey")
     Path(priv).chmod(0o644)
+    author, _ = _keypair(tmp_path, "author")
     monkeypatch.setenv("REBAR_OPCERT_ENV_ID", ENV_ID)
-    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", priv)
+    monkeypatch.setenv("REBAR_OPCERT_KEY_PATH", priv)
+    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", author)
     cfg = rebar.config.compose_config(root=str(repo))
     if keyprov._POSIX_MODE_BITS:
         with pytest.raises(OpcertKeyError, match="0600 or stricter"):
@@ -489,3 +512,137 @@ def test_main_cleans_up_binding_when_serving_raises(monkeypatch: pytest.MonkeyPa
     with pytest.raises(RuntimeError, match="serving failed"):
         mcp_server.main()
     assert cleaned["count"] == 1, "binding.cleanup() not called on the serving-exception path"
+
+
+# ── bug promising-unwasteful-xantus: the op-cert key and the authorship key are separate ─────────
+def test_startup_binding_signs_with_opcert_key_path_not_authorship_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The box signer takes its key from REBAR_OPCERT_KEY_PATH. REBAR_IDENTITY_SIGNING_KEY names
+    the authorship key (the bot key on the writing identity's keyring) and must NOT become the
+    op-cert key, or every certified op would be signed by a key the environment does not pin."""
+    repo = _store(tmp_path, monkeypatch)
+    opcert_priv, opcert_pub = _keypair(tmp_path, "opcert")
+    bot_priv, bot_pub = _keypair(tmp_path, "bot")
+    binding = _compose_binding(repo, monkeypatch, ENV_ID, opcert_priv, authorship_key=bot_priv)
+    try:
+        assert _pub_body(binding.key_path) == opcert_pub
+        assert _pub_body(binding.key_path) != bot_pub
+    finally:
+        binding.cleanup()
+
+
+def test_startup_fails_closed_without_opcert_key_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A box that claims an environment (REBAR_OPCERT_ENV_ID set) but names no op-cert key must
+    refuse to start rather than fall back to the authorship key or the tracker genesis key."""
+    repo = _store(tmp_path, monkeypatch)
+    bot_priv, _ = _keypair(tmp_path, "bot")
+    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", ENV_ID)
+    monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", bot_priv)
+    cfg = rebar.config.compose_config(root=str(repo))
+    with pytest.raises(OpcertKeyError, match="no op-cert key source is set"):
+        compose_startup_opcert_binding(cfg)
+
+
+@pytest.mark.parametrize("variant", ["unset", "empty", "too-permissive"])
+def test_startup_fails_closed_on_unusable_authorship_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str
+) -> None:
+    """With the box signer configured, an unusable authorship key stops startup, as it did while
+    one setting named both keys; otherwise every MCP write would silently go out unsigned."""
+    repo = _store(tmp_path, monkeypatch)
+    opcert_priv, _ = _keypair(tmp_path, "opcert")
+    monkeypatch.setenv("REBAR_OPCERT_ENV_ID", ENV_ID)
+    monkeypatch.setenv("REBAR_OPCERT_KEY_PATH", opcert_priv)
+    if variant == "empty":
+        empty = tmp_path / "empty-bot-key"
+        empty.write_text("", encoding="utf-8")
+        empty.chmod(0o600)
+        monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", str(empty))
+    elif variant == "too-permissive":
+        if not keyprov._POSIX_MODE_BITS:
+            pytest.skip("Windows relies on the default ACL (decision cloistered-decomposed-nymph)")
+        bot_priv, _ = _keypair(tmp_path, "bot")
+        Path(bot_priv).chmod(0o644)
+        monkeypatch.setenv("REBAR_IDENTITY_SIGNING_KEY", bot_priv)
+    cfg = rebar.config.compose_config(root=str(repo))
+    with pytest.raises(OpcertKeyError, match=r"identity\.signing_key"):
+        compose_startup_opcert_binding(cfg)
+
+
+def test_write_under_box_signer_is_authorship_signed_by_identity_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bug's acceptance path: with the box signer bound (op-cert key) and the authorship key
+    on the writing identity's keyring, an event written while the binding is active verifies
+    under ENFORCED verify-identity — its signer is the keyring key, not the op-cert key."""
+    repo = _store(tmp_path, monkeypatch)
+    subprocess.run(
+        ["git", "config", "user.email", "bot@example.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    opcert_priv, _ = _keypair(tmp_path, "opcert")
+    bot_priv, bot_pub = _keypair(tmp_path, "bot")
+    ident = rebar.create_identity("Bot", "bot@example.com", keys=[bot_pub], repo_root=str(repo))
+    rebar.use_identity(ident, repo_root=str(repo))
+    binding = _compose_binding(repo, monkeypatch, ENV_ID, opcert_priv, authorship_key=bot_priv)
+    try:
+        with bound_signer(binding, push_mode=None):
+            tid = rebar.create_ticket("task", "written by the box", repo_root=str(repo))
+            rebar.comment(tid, "a second MCP-style write", repo_root=str(repo))
+    finally:
+        binding.cleanup()
+
+    import json
+
+    events = [
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in sorted((Path(_tracker(repo)) / tid).glob("*.json"))
+        if not p.name.startswith(".")
+    ]
+    assert events, "the box write produced no events"
+    assert all(e.get("author_sig") for e in events), "every box write must be authorship-signed"
+
+    # The identity's keyring holds ONLY the bot key, so an event signed by the op-cert key fails
+    # here as signer-not-on-keyring; enforced verify-identity passing proves the bot key signed.
+    from _subprocess_env import subprocess_env
+
+    env = subprocess_env({"REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"})
+    proc = subprocess.run(
+        [sys.executable, "-m", "rebar", "verify-identity", "--all"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, f"stdout={proc.stdout}\nstderr={proc.stderr}"
+
+
+def test_startup_accepts_a_non_ed25519_authorship_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Authorship signing is not limited to Ed25519 (op-certs are), so a valid ECDSA bot key
+    starts the box, and the check leaves no private-key copy behind."""
+    import tempfile
+
+    repo = _store(tmp_path, monkeypatch)
+    opcert_priv, _ = _keypair(tmp_path, "opcert")
+    bot = tmp_path / "bot-ecdsa"
+    subprocess.run(
+        ["ssh-keygen", "-t", "ecdsa", "-f", str(bot), "-N", "", "-q"],
+        check=True,
+        capture_output=True,
+    )
+    bot.chmod(0o600)
+    before = set(Path(tempfile.gettempdir()).glob("rebar-opcert-*"))
+    binding = _compose_binding(repo, monkeypatch, ENV_ID, opcert_priv, authorship_key=str(bot))
+    try:
+        after = set(Path(tempfile.gettempdir()).glob("rebar-opcert-*")) - before
+        assert after == {Path(binding.key_path).parent}, "only the op-cert copy may be written"
+    finally:
+        binding.cleanup()

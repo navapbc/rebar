@@ -529,23 +529,71 @@ def build_server(cfg=None):
 
 
 def compose_startup_opcert_binding(cfg):
-    """Bind the pinned environment's startup signer when both inputs exist.
+    """Bind the pinned environment's startup signer when the box claims an environment.
 
-    Compose a process-owned Ed25519 key copy so certified tools sign under the
-    claimed principal. Invalid provisioned keys fail startup; missing inputs
-    retain the developer-local env/genesis path.
+    The op-cert key comes from ``REBAR_OPCERT_KEY_PATH``, never from
+    ``identity.signing_key``: that setting names the authorship key, which must be on
+    the writing identity's keyring (bug promising-unwasteful-xantus). Compose a
+    process-owned Ed25519 key copy so certified tools sign under the claimed principal.
+    With ``REBAR_OPCERT_ENV_ID`` set, a missing or invalid op-cert key or authorship key
+    fails startup; without it, the developer-local env/genesis path is retained.
     """
     import os
 
     raw_env_id = os.environ.get("REBAR_OPCERT_ENV_ID")  # read-via: identity-deployment-override
     env_id = (raw_env_id or "").strip()
-    key_path = (cfg.identity.signing_key or "").strip()
-    if not env_id or not key_path:
+    if not env_id:
         return None
     from rebar.opcert_service.config import OpcertServiceConfig
     from rebar.opcert_service.keyprov import compose_signer
 
+    # mechanism-ok: env_var REBAR_OPCERT_KEY_PATH — promising-unwasteful-xantus
+    raw = os.environ.get("REBAR_OPCERT_KEY_PATH")  # read-via: credential-deployment-override
+    key_path = (raw or "").strip() or None
+    _check_startup_authorship_key(cfg)
     return compose_signer(OpcertServiceConfig(env_id=env_id, key_path=key_path))
+
+
+def _check_startup_authorship_key(cfg) -> None:
+    """Refuse startup when the box's authorship key is unset or unusable.
+
+    Event signing logs a failure and writes unsigned, so an empty or invalid key
+    would otherwise go unnoticed. The key must be a regular file, owner-only where
+    POSIX mode bits exist, and loadable without a passphrase by ``ssh-keygen``; any
+    key type ``ssh-keygen -Y sign`` accepts is allowed, and no copy is written.
+    """
+    import os
+    import stat
+    import subprocess
+
+    from rebar.opcert_service.keyprov import OpcertKeyError
+
+    key_path = (cfg.identity.signing_key or "").strip()
+    if not key_path:
+        raise OpcertKeyError(
+            "identity.signing_key (REBAR_IDENTITY_SIGNING_KEY) is unset; a box that signs "
+            "op-certs must also sign its tracker writes"
+        )
+    prefix = f"identity.signing_key={key_path!r}"
+    try:
+        st = os.stat(key_path)
+    except OSError as exc:
+        raise OpcertKeyError(f"{prefix} does not exist or is unreadable: {exc}") from None
+    if not stat.S_ISREG(st.st_mode):
+        raise OpcertKeyError(f"{prefix} is not a regular file")
+    if os.name != "nt" and st.st_mode & 0o077:
+        raise OpcertKeyError(f"{prefix} must be 0600 or stricter (mode {oct(st.st_mode & 0o777)})")
+    probe = subprocess.run(
+        ["ssh-keygen", "-y", "-P", "", "-f", key_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        raise OpcertKeyError(
+            f"{prefix} is not a usable passphrase-free OpenSSH private key (empty, malformed "
+            "or encrypted)"
+        )
 
 
 def main() -> None:
