@@ -203,11 +203,6 @@ def test_durable_cwd_of_a_live_store_is_its_repo_root_not_the_tracker(tmp_path: 
     assert detached_child_cwd(tracker) == os.path.realpath(root)
 
 
-@pytest.mark.skipif(
-    os.name == "nt",
-    reason="Windows refuses to delete a directory that is a process's cwd, so the "
-    "cwd-gone state this test reaches cannot occur there",
-)
 def test_durable_cwd_never_raises_when_the_callers_own_directory_is_gone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -215,7 +210,48 @@ def test_durable_cwd_never_raises_when_the_callers_own_directory_is_gone(
     by passing a merely absent path: a RELATIVE tracker sends ``realpath`` through
     ``getcwd()``, which raises when the caller's own directory is already gone. Every caller
     detaches under a never-raise posture — a background concern must not fail the write or
-    close that triggered it — so the helper has to absorb it rather than propagate."""
+    close that triggered it — so the helper has to absorb it rather than propagate.
+
+    Windows refuses to delete a directory that is a process's cwd, so the dead-cwd state is
+    simulated: ``os.getcwd`` raises what POSIX raises for a deleted cwd. ``posixpath.realpath``
+    reaches it directly. ``ntpath.realpath`` (3.13) resolves a relative path through
+    ``nt._getfullpathname`` first and only falls back to ``os.getcwd()`` when that raises, so on
+    Windows that resolver fails too. The call record proves the simulated failure reached the
+    helper on whichever platform runs this, so a resolver change cannot turn it into a no-op.
+    """
+    from rebar._proc import detached_child_cwd
+
+    calls: list[str] = []
+
+    def dead(name: str):
+        def raiser(*_args: object) -> str:
+            calls.append(name)
+            raise FileNotFoundError(2, "No such file or directory")
+
+        return raiser
+
+    # An empty cwd: posixpath.realpath (3.11/3.12) lstats the relative path before it asks
+    # for the cwd, so a ``.tickets-tracker`` symlink in pytest's own cwd would resolve to an
+    # absolute path and skip the branch under test.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os, "getcwd", dead("getcwd"))
+    if hasattr(os.path, "_getfullpathname"):  # ntpath on Windows
+        monkeypatch.setattr(os.path, "_getfullpathname", dead("_getfullpathname"))
+
+    assert detached_child_cwd(".tickets-tracker") == os.sep
+    assert "getcwd" in calls, f"realpath never consulted os.getcwd (calls: {calls})"
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows refuses to delete a directory that is a process's cwd, so the "
+    "cwd-gone state this test reaches cannot occur there",
+)
+def test_durable_cwd_never_raises_when_the_cwd_is_really_deleted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The kernel-backed POSIX twin of the simulated test above: the caller's cwd is really
+    removed, so the OSError the helper absorbs is the one the platform raises, not a stand-in."""
     from rebar._proc import detached_child_cwd
 
     doomed = tmp_path / "doomed"
