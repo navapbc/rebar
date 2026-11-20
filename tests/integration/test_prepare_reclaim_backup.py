@@ -9,7 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-from _git_upkeep import assert_no_detached_upkeep, init_bare_remote, missing_upkeep_pins
+from _git_upkeep import (
+    DETACH_SWITCH,
+    assert_no_detached_upkeep,
+    init_bare_remote,
+    missing_upkeep_pins,
+)
 from _sandbox_capabilities import requires_posix_shell
 from _topology_template import clone_topology_template
 
@@ -660,6 +665,7 @@ def test_backup_fixture_remote_leaves_no_detached_upkeep(
     # Trace ONLY the push. The local commit above runs upkeep against `repo`, a separate
     # repository whose posture is not what this guard is about.
     trace = tmp_path / "trace2.json"
+    monkeypatch.delenv(DETACH_SWITCH, raising=False)  # this guard needs git's default
     monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
     _git(fixture.repo, "push", "-q", "origin", "HEAD:refs/heads/upkeep-probe")
 

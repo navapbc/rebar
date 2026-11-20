@@ -3,6 +3,11 @@
 A push may return while detached maintenance still rewrites the object store. Tests that
 copy or locally clone that remote can then race pruning. Pin autoDetach and disable
 fixture upkeep before any push. A push failure still propagates.
+
+``tests/conftest.py`` also sets :data:`DETACH_SWITCH` to ``false`` for the whole session, so
+any repository WITHOUT pins runs its triggered maintenance in the foreground (bug
+7fcc-dac7-6f05-4ad1). A guard that judges ``--detach`` must therefore delete the switch and
+prove git still detaches by default; :func:`assert_git_detaches_by_default` is that control.
 """
 
 from __future__ import annotations
@@ -12,6 +17,14 @@ import os
 import subprocess
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+
+import pytest
+from _subprocess_env import subprocess_env
+
+# Git's own test-suite switch for where triggered auto-maintenance runs: ``false`` keeps it in
+# the foreground of the command that triggered it. Read only when neither
+# ``maintenance.autoDetach`` nor ``gc.autoDetach`` is configured.
+DETACH_SWITCH = "GIT_TEST_MAINT_AUTO_DETACH"
 
 # The upkeep posture a fixture bare remote is pinned to BEFORE anything is pushed into
 # it. This dict is the SINGLE definition of those keys across ``tests/``; consume it,
@@ -171,9 +184,43 @@ def assert_no_detached_upkeep(trace: Path, remote: Path) -> None:
         f"trace2 at {trace} recorded no git-receive-pack against {remote}, so it cannot "
         f"witness upkeep there. Recorded instead: {receive_pack_targets(trace) or 'nothing'}"
     )
+    # Second control: in this environment an unpinned commit must still detach, or a pinless
+    # remote would also pass the check below.
+    assert_git_detaches_by_default(trace.parent)
     detached = [argv for argv in maintenance_children(trace) if "--detach" in argv]
     assert not detached, (
         f"a push left detached background upkeep running against {remote}: {detached}. "
         f"Build the remote with init_bare_remote() so it carries "
         f"{sorted(BARE_REMOTE_UPKEEP_PINS)}."
+    )
+
+
+def assert_git_detaches_by_default(scratch: Path) -> None:
+    """Fail unless an unpinned commit, in the CURRENT environment, starts detached upkeep.
+
+    A guard that judges ``--detach`` is only meaningful where git would detach without the
+    pin under test. The session sets :data:`DETACH_SWITCH` to keep upkeep in the foreground,
+    so such a guard deletes it first; this control proves it did, through whatever channel
+    git reads. Git releases that predate the switch never put ``--detach`` or
+    ``--no-detach`` on the child's argv, so there is nothing for the guard to observe: skip.
+    """
+    repo = scratch / "detach-control"
+    trace = scratch / "detach-control.trace2.json"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+         "--allow-empty", "-m", "detach control"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=subprocess_env(GIT_TRACE2_EVENT=str(trace)),
+    )  # fmt: skip
+    children = maintenance_children(trace)
+    assert children, f"the control commit started no maintenance run; trace at {trace}"
+    if not any({"--detach", "--no-detach"} & set(argv) for argv in children):
+        pytest.skip(f"this git does not report detaching on the maintenance argv: {children}")
+    assert all("--detach" in argv for argv in children), (
+        f"an unpinned commit ran its maintenance in the foreground here ({children}), so a "
+        f"`--detach` guard cannot fail. Delete {DETACH_SWITCH} for this test "
+        "(monkeypatch.delenv) before the git commands it judges."
     )
