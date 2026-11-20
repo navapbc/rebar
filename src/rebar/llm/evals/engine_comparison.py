@@ -217,6 +217,8 @@ def _fixture_files(row: dict[str, Any], checkout: Path) -> tuple[dict[str, str],
             ["git", "-C", str(checkout), "show", f"HEAD:{path}"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,  # a path absent at HEAD is counted, not fatal
         )
         if shown.returncode == 0:
@@ -487,7 +489,11 @@ def main(
         make_runner = get_runner
     checkout = Path(
         subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
         ).stdout.strip()
     )
     results = run(

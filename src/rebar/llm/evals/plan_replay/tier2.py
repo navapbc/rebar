@@ -213,6 +213,7 @@ def _scratch_source_checkout(ticket_repo_root: str) -> str:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
         return cp.stdout.strip()
 
@@ -296,6 +297,7 @@ def cleanup_reconstructed_ticket(scratch_root: str, *, ticket_repo_root: str) ->
         cwd=ticket_repo_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if result.returncode != 0:
@@ -305,6 +307,7 @@ def cleanup_reconstructed_ticket(scratch_root: str, *, ticket_repo_root: str) ->
             cwd=ticket_repo_root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
 

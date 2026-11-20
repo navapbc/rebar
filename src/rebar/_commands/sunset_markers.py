@@ -77,6 +77,7 @@ def _has_repository(code_root: str) -> bool:
             ["git", "-C", code_root, "rev-parse", "--git-dir"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
     except OSError:
@@ -104,6 +105,8 @@ def _marker_lines(code_root: str) -> list[tuple[str, int, str]]:
             ["git", "-C", code_root, "grep", "-n", "--fixed-strings", "--", MARKER],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
     except OSError as exc:

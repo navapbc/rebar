@@ -87,6 +87,7 @@ def last_rubric_commit_ts(
             ["git", "-C", repo_root, "log", "-1", "--format=%ct", base_ref, "--", logged_path],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         )
     except (OSError, subprocess.CalledProcessError, FileNotFoundError, PromptNotFound):

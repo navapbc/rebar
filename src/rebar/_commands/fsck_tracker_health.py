@@ -80,6 +80,7 @@ def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
             ["git", "-C", tracker, "symbolic-ref", "--quiet", "--short", "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_FSCK_GIT_TIMEOUT,
             check=False,
         )

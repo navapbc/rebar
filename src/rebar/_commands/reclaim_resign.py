@@ -239,7 +239,9 @@ class _Keyring:
     def require_in_agent(self) -> None:
         if not self.files:
             return
-        done = subprocess.run(["ssh-add", "-L"], capture_output=True, text=True, check=False)
+        done = subprocess.run(
+            ["ssh-add", "-L"], capture_output=True, text=True, encoding="utf-8", check=False
+        )
         loaded = {_key_id(line) for line in done.stdout.splitlines()}
         absent = sorted(set(self.files) - loaded)
         if absent:

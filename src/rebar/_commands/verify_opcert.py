@@ -59,6 +59,7 @@ def _commit_in_gated_history(commit: str, repo_root) -> bool:
             ["git", "-C", root, "merge-base", "--is-ancestor", commit, "HEAD"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=30,
             check=False,
         )

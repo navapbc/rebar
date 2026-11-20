@@ -260,6 +260,7 @@ def verify_authorship_at_commit(
                 ["git", "-C", tracker, "merge-base", "--is-ancestor", ancestor, descendant],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=30,
                 check=False,
             )

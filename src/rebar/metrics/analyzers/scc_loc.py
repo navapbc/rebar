@@ -22,7 +22,9 @@ Runner = Callable[..., subprocess.CompletedProcess[str]]
 def _run_scc(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     """Run an scc command with text output captured for parsing."""
 
-    return subprocess.run(command, capture_output=True, check=False, text=True, **kwargs)
+    return subprocess.run(
+        command, capture_output=True, check=False, text=True, encoding="utf-8", **kwargs
+    )
 
 
 def analyze(

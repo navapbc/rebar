@@ -70,6 +70,7 @@ def _git(args: list[str], repo_root: str) -> str | None:
             ["git", "-C", repo_root, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             timeout=_GIT_TIMEOUT_S,
         )
@@ -89,6 +90,7 @@ def _is_ancestor(ancestor: str, descendant: str, repo_root: str) -> bool:
             ["git", "-C", repo_root, "merge-base", "--is-ancestor", ancestor, descendant],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             timeout=_GIT_TIMEOUT_S,
         )
