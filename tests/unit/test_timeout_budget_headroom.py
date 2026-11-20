@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 import tomllib
+from _isolation import GIT_PROBE_ATTEMPTS, GIT_PROBE_TIMEOUT_SECONDS
 
 pytestmark = pytest.mark.unit
 
@@ -93,22 +94,76 @@ def test_the_budget_is_still_a_real_hang_guard() -> None:
     )
 
 
-def test_review_bot_lifespan_marker_covers_autouse_setup() -> None:
-    """The local marker must not be tighter than cold autouse fixture setup.
+# The autouse `_no_repo_commits` guard (tests/conftest.py) samples this checkout's HEAD with
+# `git rev-parse` in setup and again in teardown, each sample bounded by
+# GIT_PROBE_TIMEOUT_SECONDS and re-tried up to GIT_PROBE_ATTEMPTS times. A per-test marker
+# covers setup + call + teardown (no timeout_func_only), so a marker below that bound can
+# kill the worker inside the guard before the test body runs (stinky-blushing-gelding).
+_AUTOUSE_GIT_PROBE_BOUND_SECS = 2 * GIT_PROBE_TIMEOUT_SECONDS * GIT_PROBE_ATTEMPTS
 
-    The marker wraps setup/call/teardown, not only the measured TestClient body. Under coverage
-    a cold import in an autouse fixture can exceed a tiny marker; with timeout_method=thread
-    pytest-timeout kills the whole xdist worker, surfacing as "worker gwN crashed" instead of a
-    timeout failure on the real culprit.
+
+def _timeout_marker_values(source: str) -> list[tuple[int, int | float]]:
+    """(line, seconds) for every literal ``pytest.mark.timeout(N)`` call in *source*.
+
+    Covers decorators, ``pytestmark = ...`` assignments and lists of marks alike, because
+    each is the same call node. A non-literal argument is not a number this census can
+    check, so it is skipped rather than guessed.
     """
-    root = Path(__file__).resolve().parents[2]
-    seconds = _timeout_marker_seconds(
-        root / "tests" / "unit" / "test_review_bot.py",
-        "test_lifespan_is_safe_by_default_without_per_test_stubs",
+    found: list[tuple[int, int | float]] = []
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "timeout"
+            and isinstance(node.func.value, ast.Attribute)
+            and node.func.value.attr == "mark"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+        ):
+            continue
+        value = node.args[0].value
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            found.append((node.lineno, value))
+    return sorted(found)
+
+
+def test_the_marker_census_reads_every_literal_marker_shape() -> None:
+    """The census sees decorator and ``pytestmark`` markers and skips non-literals."""
+    source = (
+        "import pytest\n"
+        "pytestmark = [pytest.mark.unit, pytest.mark.timeout(4)]\n"
+        "LIMIT = 7\n"
+        "@pytest.mark.timeout(2.5)\n"
+        "def test_a(): pass\n"
+        "@pytest.mark.timeout(LIMIT)\n"
+        "def test_b(): pass\n"
+        "@pytest.mark.timeout(seconds=9)\n"
+        "def test_c(): pass\n"
     )
 
-    assert seconds is not None
-    assert seconds >= 30
+    assert _timeout_marker_values(source) == [(2, 4), (4, 2.5)]
+
+
+def test_no_timeout_marker_is_tighter_than_the_autouse_git_probe_bound() -> None:
+    """Every per-test marker must leave room for the autouse repo-isolation git probes.
+
+    Under ``timeout_method = "thread"`` an expired marker kills the whole xdist worker, so a
+    too-tight marker shows up as ``worker 'gwN' crashed`` on a loaded host, never in CI.
+    """
+    root = Path(__file__).resolve().parents[2]
+    offenders = [
+        f"{path.relative_to(root)}:{line} timeout({seconds:g})"
+        for path in sorted((root / "tests").rglob("*.py"))
+        for line, seconds in _timeout_marker_values(path.read_text(encoding="utf-8"))
+        if seconds < _AUTOUSE_GIT_PROBE_BOUND_SECS
+    ]
+
+    assert not offenders, (
+        f"these pytest timeout markers are below {_AUTOUSE_GIT_PROBE_BOUND_SECS:g}s, the bound "
+        "of the autouse _no_repo_commits git probes (2 samples x GIT_PROBE_ATTEMPTS x "
+        "GIT_PROBE_TIMEOUT_SECONDS in tests/_isolation.py) that the marker also covers. On a "
+        f"loaded host they expire inside fixture setup and crash the worker: {offenders}"
+    )
 
 
 # The tortoise test runs 14 signer tests serially in one nested pytest: 82.07 s alone at load
