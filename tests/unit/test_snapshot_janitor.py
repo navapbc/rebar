@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
-from rebar._snapshot import cache, janitor
+from rebar._snapshot import cache, delta_tree, janitor
 from rebar._snapshot import repo_snapshot as rs
 
 try:
@@ -970,3 +972,117 @@ def test_operation_linked_trigger_carries_the_count_axis(monkeypatch, tmp_path):
     assert gc_trigger._janitor_config(None).max_entries == janitor.DEFAULT_MAX_ENTRIES
     monkeypatch.setenv("REBAR_GATE_MAX_ENTRIES", "77")
     assert gc_trigger._janitor_config(None).max_entries == 77
+
+
+# --------------------------------------------------------------------------------------
+# Bug 3822-a9e3 — the total trusts st_nlink, so link changes and measurements must not
+# interleave. Each test pauses one actor inside its window and runs the other in a thread;
+# on the pre-fix tree the other actor ran straight through and the total drifted.
+# --------------------------------------------------------------------------------------
+_JOIN_BOUND_S = 60
+
+
+def _adjacent_shas(repo: Path, count: int) -> list[str]:
+    """``count`` consecutive commits that each change one file of a shared tree, so every
+    later SHA builds from the previous entry by hardlink delta."""
+    for i in range(5):
+        (repo / f"shared{i}.txt").write_text(f"{i}" * (40 + i))
+    return [_commit(repo, f"step{n}.txt", "s" * (50 + n)) for n in range(count)]
+
+
+class _Other:
+    """Run a second actor while the first is paused inside its window.
+
+    The paused actor resumes once the second actor has FINISHED (it ran straight through the
+    window) or is WAITING on ``cache.accounting_lock`` (the window excludes it). A spy on the
+    lock reports the wait, so no sleep or timing bound decides which happened."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, action: Callable[[], object]) -> None:
+        self._settled = threading.Event()
+        self.outcome: str | None = None
+        self.errors: list[BaseException] = []
+        self._thread = threading.Thread(target=self._run, args=(action,), daemon=True)
+        real_lock = getattr(cache, "accounting_lock", None)
+        if real_lock is not None:
+
+            def spy(root):
+                if threading.current_thread() is self._thread and self.outcome is None:
+                    self.outcome = "waited on the accounting lock"
+                    self._settled.set()
+                return real_lock(root)
+
+            monkeypatch.setattr(cache, "accounting_lock", spy)
+
+    def _run(self, action: Callable[[], object]) -> None:
+        try:
+            action()
+        except BaseException as exc:  # noqa: BLE001 - re-raised by join() in the test thread
+            self.errors.append(exc)
+        finally:
+            if self.outcome is None:
+                self.outcome = "finished inside the window"
+            self._settled.set()
+
+    def start_and_settle(self) -> None:
+        self._thread.start()
+        assert self._settled.wait(_JOIN_BOUND_S), "second actor neither finished nor waited"
+
+    def join(self) -> None:
+        self._thread.join(_JOIN_BOUND_S)
+        assert not self._thread.is_alive(), "second actor never finished"
+        assert not self.errors, self.errors
+
+
+def test_evict_measures_then_a_populate_links_from_the_victim(store, repo, monkeypatch):
+    a, b = _adjacent_shas(repo, 2)
+    cache.acquire(a, repo_root=str(repo), fetch=False)
+    victim = rs.entry_path(a, store)
+    other = _Other(monkeypatch, lambda: cache.acquire(b, repo_root=str(repo), fetch=False))
+    real = cache.exclusive_size
+
+    def evictor_measures(path):
+        size = real(path)
+        if Path(path) == victim and other.outcome is None:
+            other.start_and_settle()
+        return size
+
+    monkeypatch.setattr(cache, "exclusive_size", evictor_measures)
+    janitor._evict(store, victim)
+    other.join()
+    assert cache.byte_total(store) == _real_store_bytes(store)
+
+
+def test_populate_links_then_the_donor_is_evicted_before_it_measures(store, repo, monkeypatch):
+    a, b = _adjacent_shas(repo, 2)
+    cache.acquire(a, repo_root=str(repo), fetch=False)
+    donor = rs.entry_path(a, store)
+    other = _Other(monkeypatch, lambda: janitor._evict(store, donor))
+    real_link = delta_tree._link_tree_paths
+
+    def populater_links(*args, **kwargs):
+        linked = real_link(*args, **kwargs)
+        if other.outcome is None:
+            other.start_and_settle()
+        return linked
+
+    monkeypatch.setattr(delta_tree, "_link_tree_paths", populater_links)
+    cache.acquire(b, repo_root=str(repo), fetch=False)
+    other.join()
+    assert cache.byte_total(store) == _real_store_bytes(store)
+
+
+def test_a_populate_links_from_an_entry_before_that_entry_measures(store, repo, monkeypatch):
+    b, c = _adjacent_shas(repo, 2)
+    published = rs.entry_path(b, store)
+    other = _Other(monkeypatch, lambda: cache.acquire(c, repo_root=str(repo), fetch=False))
+    real = cache.exclusive_size
+
+    def first_populater_measures(path):
+        if Path(path) == published and other.outcome is None:
+            other.start_and_settle()
+        return real(path)
+
+    monkeypatch.setattr(cache, "exclusive_size", first_populater_measures)
+    cache.acquire(b, repo_root=str(repo), fetch=False)
+    other.join()
+    assert cache.byte_total(store) == _real_store_bytes(store)

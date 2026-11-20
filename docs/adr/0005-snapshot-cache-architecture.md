@@ -74,6 +74,18 @@ exactly the bytes whose last link it removed; and `distinct_bytes` (each inode o
 ground truth the startup sweep reconciles to. Each inode is therefore added once and subtracted
 once, so the incremental total tracks the authoritative walk exactly.
 
+That holds only if every `st_nlink` the total reads counts links from published entries
+alone, so link changes and measurements are serialized under one store-wide accounting lock
+(`cache.accounting_lock`, the `locks/bytes.total.lock` flock). A donor build holds it from
+its candidate search through its hardlinks, delta rewrite, publish rename, and increment,
+and discards a failed build's links before releasing it. An eviction holds it from its
+measurement through the rename to trash, the `rmtree`, and the decrement. Trash draining
+and the startup sweep's cleanup, walk, and reset hold it too. A full materialization writes
+only fresh inodes that no other build can link, so it builds outside the lock and takes it
+only to publish and account. Without this ordering a populate could hardlink a file between
+an eviction's measurement and its rename (an undercount), or measure after its donor was
+deleted (an overcount) (bug 3822-a9e3-5999-422c).
+
 An apportioned `st_size // st_nlink` was tried and rejected. It is a fair way to divide bytes
 for a report, but as an increment it is wrong in the direction that matters: evicting one of
 `k` links credits a `1/k` share of bytes that are still on disk, so D5's free-space loop stops
