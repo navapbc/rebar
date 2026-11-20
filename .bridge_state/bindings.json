@@ -4595,9 +4595,17 @@
       "updated_at": "2026-08-15T14:51:40Z"
     },
     "096f-a831-3aac-4851": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Observed defect\nOn origin/main 2ca3e28fcc6, `pytest tests/unit/test_reclaim_resign.py -k test_resign_makes_enforced_verify_pass_with_era_keys` fails (reproduced locally on macOS and in Gerrit CI on ubuntu py3.11, py3.12 and py3.13, runs 44728882402 and 44728890345):\n\n```\ntests/unit/test_reclaim_resign.py:382\nassert {f[\"verdict\"] for f in failing} == {\"unsigned\", \"bad-signature\"}\nAssertionError: assert {'signer-not-...', 'unsigned'} == {'bad-signature', 'unsigned'}\n```\n\n## Cause (from history)\n- `9a6ed375112` \"Classify off-keyring signers apart from forgeries\" (starving-sphalerite-skua) changed `verify-identity` so a sound signature by a key that is not on the claimed author's keyring reports `signer-not-on-keyring` instead of `bad-signature`.\n- `717c50f8b33` \"Re-sign failing events during the reclaim collapse\" (minimum-seedy-lowchen) added this test expecting the old `bad-signature` verdict for the fixture's off-keyring events. The two landed independently, so main is red on this test.\n\n## Impact\nEvery Gerrit change whose CI runs the default pytest tier gets `Verified -1` until this is fixed (seen on 3472 and 3473).\n\n## Acceptance Criteria\n- [ ] `pytest tests/unit/test_reclaim_resign.py -q` passes on main, with the failing-verdict expectation matching the current verify-identity vocabulary (`signer-not-on-keyring` for a sound off-keyring signature) or the fixture producing a genuine forgery if `bad-signature` is what the test means to exercise.\n- [ ] `make verify` is green and the fix lands through Gerrit with LLM-Review +1 and Verified +1.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "test_reclaim_resign expects bad-signature but verify-identity now reports signer-not-on-keyring (main is red)"
+      },
       "created_at": "2026-11-20T12:37:03Z",
       "jira_id": "4599587",
       "jira_key": "REB-7321",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-20T12:37:06Z"
     },
@@ -7953,6 +7961,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:21Z"
+    },
+    "10c6-8881-c05e-4209": {
+      "created_at": "2026-11-20T13:32:40Z",
+      "jira_id": "4599588",
+      "jira_key": "REB-7322",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T13:32:45Z"
     },
     "10c8-9981-3877-4ed5": {
       "baseline": {
@@ -112526,6 +112541,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:58Z"
     },
+    "fa59-9a21-097b-49be": {
+      "created_at": "2026-11-20T13:32:45Z",
+      "jira_id": "4599589",
+      "jira_key": "REB-7323",
+      "state": "confirmed",
+      "updated_at": "2026-11-20T13:32:50Z"
+    },
     "fa6e-5301-848a-4b00": {
       "baseline": {
         "assignee": null,
@@ -120893,7 +120915,10 @@
     "1795154811600089001": "__rebar_unknown_comment_id__",
     "1795156333566174001": "__rebar_unknown_comment_id__",
     "1795177660783774001": "__rebar_unknown_comment_id__",
-    "1795177905379996001": "__rebar_unknown_comment_id__"
+    "1795177905379996001": "__rebar_unknown_comment_id__",
+    "1795178345639824001": "__rebar_unknown_comment_id__",
+    "1795180119814180001": "__rebar_unknown_comment_id__",
+    "1795180253988949001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -126553,6 +126578,8 @@
     "REB-732": "f5d7-b2f2-1d70-4156",
     "REB-7320": "e062-1686-1a27-41a4",
     "REB-7321": "096f-a831-3aac-4851",
+    "REB-7322": "10c6-8881-c05e-4209",
+    "REB-7323": "fa59-9a21-097b-49be",
     "REB-733": "edf7-946e-84be-48b3",
     "REB-734": "f43b-8f6b-3494-44be",
     "REB-735": "6f0a-0c1e-cdf8-4a8d",
