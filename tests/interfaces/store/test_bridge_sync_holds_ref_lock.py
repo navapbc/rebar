@@ -52,15 +52,9 @@ def _last_pass(repo: Path) -> dict:
 def stub_pass(monkeypatch: pytest.MonkeyPatch):
     """Stub the pass body and the project preflight; record what the body observed.
 
-    Also gives the ref lock's local git bound headroom. The production
-    ``_ref_lock._LOCAL_TIMEOUT_SECS`` (5.0 s) is a fail-closed safety policy and is not
-    changed; these tests assert sync and pause semantics, not latency, so a starved host must
-    not fail them with a correct "treat as HELD" verdict (dissocial-malleable-tuna; same
-    reasoning as bug ddc8 in tests/unit/reconciler/state/test_advisory_lock.py).
+    Headroom over the ref lock's production local git bound (dissocial-malleable-tuna) comes
+    from the session-wide setting in ``tests/conftest.py`` (``_give_ref_lock_git_headroom``).
     """
-    monkeypatch.setattr(
-        importlib.import_module("rebar.reconciler._ref_lock"), "_LOCAL_TIMEOUT_SECS", 60.0
-    )
     observed: dict[str, object] = {"calls": 0}
     reconcile = importlib.import_module("rebar.reconciler.reconcile")
     preflight = importlib.import_module("rebar.reconciler._preflight")

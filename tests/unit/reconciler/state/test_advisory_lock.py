@@ -63,17 +63,13 @@ def tmp_git_repo(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def _ref_backend(advisory_lock: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A local (no-remote) CAS, a short lease, and headroom over the local git bound.
+    """A local (no-remote) CAS and a short lease.
 
-    The production bound ``_ref_lock._LOCAL_TIMEOUT_SECS`` (5.0 s) is a fail-closed safety
-    policy and is not touched; ``monkeypatch`` restores it after each test. These tests assert
-    lock semantics, not latency, so a host starved by concurrent suites must not fail them with
-    a correct "held" verdict (bug ddc8). That a timeout becomes ``RefLockTimeoutError`` is
-    proved by ``test_ref_lock.py::test_timeout_raises_reflocktimeout``, independent of the bound.
+    Headroom over the production local git bound (bug ddc8) comes from the session-wide
+    setting in ``tests/conftest.py`` (``_give_ref_lock_git_headroom``).
     """
     monkeypatch.setattr(advisory_lock, "_lock_lease_secs", lambda: 1)
     monkeypatch.setattr(advisory_lock, "_lock_remote", lambda repo_root: None)
-    monkeypatch.setattr(advisory_lock._load_ref_lock(), "_LOCAL_TIMEOUT_SECS", 60.0)
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +122,7 @@ def test_ref_backend_acquire_release_roundtrip(
 # One local `git update-ref` slower than the production bound `_ref_lock._LOCAL_TIMEOUT_SECS`
 # (5.0 s). The bound is a fail-closed safety policy (a timeout means "treat as HELD"), proved
 # independently of its value by test_ref_lock.py::test_timeout_raises_reflocktimeout; this test
-# is about lock semantics, so its fixture gives it headroom (bug ddc8).
+# is about lock semantics, and tests/conftest.py gives every test headroom (bug ddc8).
 _SLOW_UPDATE_REF_SECS = 5.6
 
 

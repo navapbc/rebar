@@ -193,6 +193,23 @@ def _installed_version_drift() -> str | None:
     return module.installed_version_drift()
 
 
+def _give_ref_lock_git_headroom() -> None:
+    """Give in-process ref-lock git calls a 60 s local bound for the whole session.
+
+    ``_ref_lock._LOCAL_TIMEOUT_SECS`` (5.0 s) is production's fail-closed policy: a local
+    ref operation slower than that is treated as HELD. Tests that drive the backend with real
+    git assert lock and pause semantics, not latency, and a host starved by concurrent suites
+    can push one ``git update-ref`` past 5 s; three modules failed that way one at a time
+    (bugs ddc8-5fcf-93c4-4406, dissocial-malleable-tuna, c0ed-53e2-aa14-48f8). Production is
+    unchanged, and ``test_ref_lock.py::test_timeout_raises_reflocktimeout`` proves the
+    timeout-means-HELD contract by forcing ``TimeoutExpired``. Child processes a test starts
+    keep the production bound.
+    """
+    from rebar.reconciler import _ref_lock
+
+    _ref_lock._LOCAL_TIMEOUT_SECS = 60.0
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Enforce the shared Git version floor before registering markers.
 
@@ -202,6 +219,7 @@ def pytest_configure(config: pytest.Config) -> None:
     import _git_floor
 
     scrub_ambient_git_config(os.environ)
+    _give_ref_lock_git_headroom()
     configure_semgrep_settings_file(_REPO_ROOT)
     _select_repo_pandoc()
     _register_counted_skip_xdist_hooks(config)
