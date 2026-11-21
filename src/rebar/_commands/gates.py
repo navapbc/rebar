@@ -333,7 +333,13 @@ def plan_review_precheck(
     """
     from rebar import config
     from rebar._commands._seam import CommandError
+    from rebar._store.freshness import heal_if_superseded
     from rebar.reducer import reduce_ticket as _reduce
+
+    # Move a reclaim-superseded clone first: the gate's freshness probe would otherwise read
+    # it as DIVERGED and refuse start-work as stale (bug unwelcome-persimmon-quahog). This runs
+    # before claim_core/transition_core take the write lock.
+    heal_if_superseded(repo_root=repo_root)
 
     # ``_plan_review_gate_applies`` shares configuration failure and exemption behavior with
     # the close gate and ``claim --review``.

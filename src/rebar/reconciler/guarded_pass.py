@@ -239,6 +239,10 @@ def run_pass_result(
     if preflight_abort is not None:
         return preflight_abort
 
+    unpublishable = None if route == "preview" else _store_divergence_before_pass(repo_root)
+    if unpublishable is not None:
+        return unpublishable
+
     applier = _try_load_step("applier")
 
     if pass_id is None:
@@ -266,6 +270,41 @@ def run_pass_result(
             lock_lost_cls=lock_lost_cls,
         )
     return _classify_reconcile_result(result)
+
+
+def _store_divergence_before_pass(repo_root: Path) -> PassResult | None:
+    """Heal a reclaim-superseded store before the pass mutates Jira; refuse an unhealed one.
+
+    A heal mid-pass is unsafe: by the first inbound write the pass has already mutated Jira
+    and holds uncommitted inbound events and binding-state edits, which the stale-clone
+    override's reset would discard (bug unwelcome-persimmon-quahog). So heal here and, when
+    the store still cannot publish, end the pass before any outbound call: RESCHEDULE for a
+    supersession the heal could not move (a failed fetch or busy lock), OPERATIONAL_FAILURE
+    for an unrelated remote. ``None`` means the pass may run.
+    """
+    from rebar._store.freshness import heal_if_superseded
+    from rebar.config import tracker_dir
+
+    try:
+        tracker = tracker_dir(repo_root)
+    except Exception:  # noqa: BLE001 — no resolvable store: the pass's own steps decide
+        return None
+    remaining = heal_if_superseded(tracker, repo_root=repo_root)
+    if remaining is None:
+        return None
+    details: dict[str, object] = {"error": str(remaining.get("reason", "")), "store": "diverged"}
+    ref = remaining.get("remote_ref", "the shared store")
+    if remaining.get("superseded"):
+        message = (
+            f"RESCHEDULE: ticket store DIVERGED from {ref}, superseded by a reclaim the heal "
+            "could not apply yet (fetch failed or write lock busy); no Jira call was made"
+        )
+        return PassResult(_Disposition.RESCHEDULE, details, legacy_message=message)
+    message = (
+        f"ERROR: ticket store DIVERGED from {ref} with no shared ancestor; no Jira call was "
+        "made. Run `rebar store fsck`, then `rebar store maintenance`."
+    )
+    return PassResult(_Disposition.OPERATIONAL_FAILURE, details, legacy_message=message)
 
 
 def _new_pass_id() -> str:

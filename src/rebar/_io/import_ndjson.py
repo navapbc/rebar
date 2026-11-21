@@ -89,6 +89,20 @@ def _rec_sid(rec: dict) -> str:
     return cast(str, rec.get("ticket_id"))
 
 
+def _heal_before_import(tracker: str, repo_root: str | None, *, dry_run: bool) -> None:
+    """Move a reclaim-superseded clone before the import reads the store.
+
+    The id map, dedupe scan and buffered events are then built on the reclaimed baseline
+    (bug unwelcome-persimmon-quahog). A dry run writes nothing, so it does not fetch or move
+    the clone. Anything left unhealed is refused by the flush precheck.
+    """
+    if dry_run:
+        return
+    from rebar._store.freshness import heal_if_superseded
+
+    heal_if_superseded(tracker, repo_root=repo_root)
+
+
 def import_tickets(
     source: Any, *, dry_run: bool = False, repo_root: str | Path | None = None
 ) -> dict:
@@ -108,6 +122,7 @@ def import_tickets(
 
     rr = None if repo_root is None else str(repo_root)
     tracker = str(config.tracker_dir(rr))
+    _heal_before_import(tracker, rr, dry_run=dry_run)
     existing = _scan_existing_source_ids(tracker)
 
     if dry_run:
@@ -157,7 +172,10 @@ def import_tickets(
         final push at the end. All-or-nothing per chunk; a crash mid-flush leaves
         whole-commit-or-none and the source_id re-scan resumes on re-run."""
         for i in range(0, len(buf), _CHUNK):
-            _seam._refuse_unpublishable_store(tracker, repo_root=rr)
+            # Same heal-and-retry as the importer's other mid-run writes.
+            _seam.retry_after_superseded_heal(
+                lambda: _seam._refuse_unpublishable_store(tracker, repo_root=rr), tracker
+            )
             event_append.batch_stage_and_commit(tracker, buf[i : i + _CHUNK])
         buf.clear()
 
