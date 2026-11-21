@@ -38,8 +38,9 @@
 --deselect=tests/unit/test_makefile_worktree.py::test_provisioning_failure_names_the_unprovisioned_worktree
 --deselect=tests/unit/test_predates_gate_guard_parity.py::test_empty_tree_every_guarded_step_skips_cleanly
 --deselect=tests/unit/test_repo_isolation_guard.py::test_a_transient_probe_stall_is_re_sampled_rather_than_reported
---deselect=tests/unit/test_repo_isolation_guard.py::test_commit_guard_fails_explicitly_when_head_times_out
+--deselect=tests/unit/test_repo_isolation_guard.py::test_commit_guard_fails_explicitly_when_the_head_probe_times_out
 --deselect=tests/unit/test_repo_isolation_guard.py::test_git_probe_timeout_ignores_a_test_monkeypatch_of_time_sleep
+--deselect=tests/unit/test_repo_isolation_guard.py::test_real_commit_guard_reads_head_without_starting_git
 --deselect=tests/unit/test_repo_isolation_guard.py::test_session_finish_fails_explicitly_when_porcelain_times_out
 --deselect=tests/unit/test_serena_grep_reminder_hook.py::test_hook_command_resolves_from_a_foreign_cwd
 --deselect=tests/unit/test_session_shims.py::test_claude_code_hook_idempotent_on_refire
