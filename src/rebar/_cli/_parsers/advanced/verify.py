@@ -47,10 +47,13 @@ def build_opcert(*, prog: str) -> argparse.ArgumentParser:
             "trust list is a configuration error. Tickets whose close commit predates --since or "
             "verify.opcert_enforce_since are grandfathered, which means reported but never fail "
             "the gate. Those verify settings and tracker.dir come from the project config "
-            "committed on origin/main, never from the checkout under review, so a change "
-            "cannot widen its own gate. A checkout with a remote but "
-            "no fetched base branch is a configuration error. A checkout with no remote reads "
-            "its working tree."
+            "committed on the reviewed base, never from the checkout under review, so a change "
+            "cannot widen its own gate. The base is the environment's sync.remote (default "
+            "origin) at that remote's default branch (<remote>/HEAD), else <remote>/main, then "
+            "one hop to a <remote>/<branch> that the base's own [snapshot].ref names. "
+            "REBAR_GATE_REF and the checkout's [snapshot].ref are ignored. A checkout with a "
+            "remote but no resolvable base is a configuration error. A checkout with no "
+            "remote reads its working tree."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

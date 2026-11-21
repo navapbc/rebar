@@ -88,6 +88,7 @@ def _clean_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("REBAR_CONFIG", raising=False)
     monkeypatch.delenv("REBAR_VERIFY_TRUSTED_OPCERT_KEYS", raising=False)
+    monkeypatch.delenv("REBAR_SYNC_REMOTE", raising=False)
     config.reset_config_cache()
     yield
     config.reset_config_cache()
@@ -310,3 +311,146 @@ def test_checkout_without_a_remote_keeps_the_working_tree(
     assert base_ref(repo) is None
     assert cfg.verify.require_environment == "box"
     assert "no git remote" in source
+
+
+# ---- base resolution (bug floating-guiltless-oxpecker) ------------------------------------------
+
+
+def _repo_on_branch(tmp_path: Path, branch: str, toml: str, remote: str = "origin") -> Path:
+    """A checkout whose ``<remote>`` has only ``branch``, recorded as ``<remote>/HEAD``."""
+    bare = tmp_path / f"{remote}.git"
+    _git(tmp_path, "init", "-q", "--bare", "-b", branch, str(bare))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", branch)
+    _git(repo, "config", "user.email", "d@e.test")
+    _git(repo, "config", "user.name", "D")
+    (repo / "rebar.toml").write_text(toml, encoding="utf-8")
+    _git(repo, "add", "rebar.toml")
+    _git(repo, "commit", "-q", "-m", "base")
+    _git(repo, "remote", "add", remote, str(bare))
+    _git(repo, "push", "-q", remote, branch)
+    _git(repo, "fetch", "-q", remote)
+    _git(repo, "remote", "set-head", remote, branch)
+    return repo
+
+
+_BOX = '[verify]\nrequire_environment = "box"\n'
+
+
+def _push_branch(repo: Path, branch: str, toml: str, remote: str = "origin") -> None:
+    _git(repo, "checkout", "-q", "-b", branch)
+    (repo / "rebar.toml").write_text(toml, encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", branch)
+    _git(repo, "push", "-q", remote, branch)
+    _git(repo, "fetch", "-q", remote)
+
+
+def test_master_default_branch_is_the_base(tmp_path: Path, _clean_config: None) -> None:
+    repo = _repo_on_branch(tmp_path, "master", _BOX)
+
+    cfg, source, _snapshot = gate_config(str(repo))
+
+    assert source == "refs/remotes/origin/master:rebar.toml"
+    assert cfg.verify.require_environment == "box"
+
+
+def test_master_default_branch_cli_does_not_exit_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _clean_config: None
+) -> None:
+    repo = _repo_on_branch(tmp_path, "master", "[verify]\n")
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    rebar.init_repo(repo_root=str(repo))
+
+    proc = subprocess.run(
+        [*_VERIFY, "--root", str(repo)], capture_output=True, text=True, check=False
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "refs/remotes/origin/master:rebar.toml" in proc.stderr
+
+
+def test_environment_sync_remote_selects_the_remote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _clean_config: None
+) -> None:
+    repo = _repo_on_branch(tmp_path, "trunk", _BOX, remote="upstream")
+    _git(repo, "remote", "add", "origin", str(tmp_path / "nowhere.git"))
+    monkeypatch.setenv("REBAR_SYNC_REMOTE", "upstream")
+
+    cfg, source, _snapshot = gate_config(str(repo))
+
+    assert source == "refs/remotes/upstream/trunk:rebar.toml"
+    assert cfg.verify.require_environment == "box"
+
+
+def test_change_controlled_base_selectors_are_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _clean_config: None
+) -> None:
+    """REBAR_GATE_REF=HEAD, a working-tree [snapshot].ref and [sync].remote all point at
+    the change; none may move the base."""
+    repo = _repo_on_branch(tmp_path, "main", _BOX)
+    _git(repo, "remote", "add", "fork", str(tmp_path / "origin.git"))
+    _git(repo, "fetch", "-q", "fork")
+    _propose_change(repo, '[snapshot]\nref = "HEAD"\n[sync]\nremote = "fork"\n[verify]\n')
+    monkeypatch.setenv("REBAR_GATE_REF", "HEAD")
+
+    cfg, source, _snapshot = gate_config(str(repo))
+
+    assert source == "refs/remotes/origin/main:rebar.toml"
+    assert cfg.verify.require_environment == "box"
+
+
+def test_committed_snapshot_ref_is_followed_once(tmp_path: Path, _clean_config: None) -> None:
+    repo = _repo_on_branch(tmp_path, "main", '[snapshot]\nref = "origin/release"\n')
+    _push_branch(repo, "release", f'[snapshot]\nref = "origin/later"\n{_BOX}')
+    _push_branch(repo, "later", '[verify]\nrequire_environment = "later"\n')
+
+    cfg, source, _snapshot = gate_config(str(repo))
+
+    assert source == "refs/remotes/origin/release:rebar.toml"
+    assert cfg.verify.require_environment == "box"
+
+
+def test_committed_snapshot_ref_of_head_is_ignored(tmp_path: Path, _clean_config: None) -> None:
+    repo = _repo_on_branch(tmp_path, "main", f'[snapshot]\nref = "HEAD"\n{_BOX}')
+
+    cfg, source, _snapshot = gate_config(str(repo))
+
+    assert source == "refs/remotes/origin/main:rebar.toml"
+    assert cfg.verify.require_environment == "box"
+
+
+def test_unfetched_hop_target_fails_closed(tmp_path: Path, _clean_config: None) -> None:
+    repo = _repo_on_branch(tmp_path, "main", '[snapshot]\nref = "origin/release"\n')
+
+    with pytest.raises(config.ConfigError, match="refs/remotes/origin/release, which is not"):
+        gate_config(str(repo))
+
+
+def test_dangling_origin_head_falls_through_to_main(tmp_path: Path, _clean_config: None) -> None:
+    repo = _repo_on_branch(tmp_path, "main", _BOX)
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+
+    _cfg, source, _snapshot = gate_config(str(repo))
+
+    assert source == "refs/remotes/origin/main:rebar.toml"
+
+
+def test_missing_environment_remote_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _clean_config: None
+) -> None:
+    repo = _repo_on_branch(tmp_path, "main", _BOX)
+    monkeypatch.setenv("REBAR_SYNC_REMOTE", "upstream")
+
+    with pytest.raises(config.ConfigError, match="'upstream' is not a configured git remote"):
+        gate_config(str(repo))
+
+
+def test_no_resolvable_base_names_what_was_tried(tmp_path: Path, _clean_config: None) -> None:
+    repo = _repo_on_branch(tmp_path, "trunk", _BOX)
+    _git(repo, "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+
+    with pytest.raises(config.ConfigError) as err:
+        gate_config(str(repo))
+    assert "refs/remotes/origin/HEAD and refs/remotes/origin/main" in str(err.value)
+    assert "git remote set-head origin --auto" in str(err.value)

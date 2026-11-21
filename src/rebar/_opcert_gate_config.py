@@ -11,12 +11,15 @@ project config COMMITTED on the reviewed base branch, the environment, and ``-c`
 The project config in the working tree is never read, and neither is a ``$REBAR_CONFIG``
 pointer. An edit to ``rebar.toml`` still takes effect for gating, but only after it merges.
 
-The base branch is ``refs/remotes/origin/main``, the ref the attested gates already treat as
-reviewed main (:data:`rebar.llm.gate_source.DEFAULT_REF`). A checkout that has a remote but
-no such ref fails closed with :class:`~rebar.config.ConfigError`, naming the fetch that fixes
-it; so does any failure to read the committed file. A checkout with no remote has no
-reviewed branch to defer to and no change under review, so it keeps the working-tree
-configuration.
+The base is the environment's ``sync.remote`` (user config or ``REBAR_SYNC_REMOTE``, never the
+working tree; default ``origin``) at that remote's recorded default branch
+(``refs/remotes/<remote>/HEAD``), else ``<remote>/main``. If the base's own committed config
+sets ``[snapshot].ref`` to another ``<remote>/<branch>``, the gate follows it once.
+``REBAR_GATE_REF`` and the working tree's ``[snapshot].ref`` are ignored: both may say ``HEAD``,
+which here is the change under review. A checkout that has a remote but no resolvable base
+fails closed with :class:`~rebar.config.ConfigError`, naming what it tried and the fix; so does
+any failure to read the committed file. A checkout with no remote has no reviewed branch to
+defer to and no change under review, so it keeps the working-tree configuration.
 
 The environment layer is kept on purpose: ADR 0125 puts the trust list in the verifying
 environment. Keeping that layer, and the gate's own code and workflow, out of the change's
@@ -48,9 +51,8 @@ from rebar._operation_config import (
     compose_operation_snapshot,
 )
 
-#: The remote whose default branch is the reviewed base, and the fallback branch name.
+#: The remote used when the environment names none (the schema default of ``sync.remote``).
 BASE_REMOTE = "origin"
-BASE_REF = f"refs/remotes/{BASE_REMOTE}/main"
 
 _GIT_TIMEOUT_S = 30
 
@@ -58,7 +60,7 @@ _GIT_TIMEOUT_S = 30
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     """Run a read-only git command in ``root``; a git failure surfaces as a ConfigError."""
     try:
-        return subprocess.run(  # raw-git-ok: read-only remote/rev-parse/ls-tree/show
+        return subprocess.run(  # raw-git-ok: read-only remote/rev-parse/symbolic-ref/ls-tree/show
             ["git", "-C", str(root), *args],
             capture_output=True,
             text=True,
@@ -69,25 +71,97 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
         raise ConfigError(f"op-cert gate: git {args[0]} failed in {root}: {exc}") from None
 
 
+def _remotes(root: Path) -> list[str]:
+    """The configured git remotes; a failing ``git remote`` is never read as "no remote"."""
+    listed = _git(root, "remote")
+    if listed.returncode != 0:
+        # Not a repository, a safe.directory refusal, ...
+        raise ConfigError(f"op-cert gate: git remote failed in {root}: {listed.stderr.strip()}")
+    return listed.stdout.split()
+
+
+def _trusted_remote(remotes: list[str]) -> str:
+    """``sync.remote`` from the user and environment layers only, default ``origin``.
+
+    The project layer is skipped: a working-tree ``[sync] remote`` must not pick the base."""
+    strict = _strict_unknown_keys()
+    layers = []
+    user = user_config_path()
+    if user.is_file():
+        raw = _read_toml_table(user, pyproject=False)
+        layers.append(coerce_sparse(raw, source=str(user), strict=strict))
+    layers.append(coerce_sparse(env_overrides(), source="env", strict=strict))
+    name = (merge_sparse(*layers).get("sync") or {}).get("remote") or BASE_REMOTE
+    if name not in remotes:
+        raise ConfigError(
+            f"op-cert gate: sync.remote {name!r} is not a configured git remote "
+            f"(configured: {', '.join(remotes)})"
+        )
+    return name
+
+
+def _resolves(root: Path, ref: str) -> bool:
+    return _git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").returncode == 0
+
+
 def base_ref(root: Path) -> str | None:
     """The reviewed base commit's ref, or ``None`` when the checkout has no remote at all.
 
-    Raises :class:`ConfigError` when a remote exists but neither base ref resolves, because
-    falling back to the working tree there would let the change under review configure its
-    own gate."""
-    remotes = _git(root, "remote")
-    if remotes.returncode != 0:
-        # Not a repository, a safe.directory refusal, ...: never read as "no remote".
-        raise ConfigError(f"op-cert gate: git remote failed in {root}: {remotes.stderr.strip()}")
-    if not remotes.stdout.strip():
+    The remote is the environment's ``sync.remote`` (default ``origin``); the branch is that
+    remote's recorded default branch (``refs/remotes/<remote>/HEAD``), else ``<remote>/main``.
+    ``REBAR_GATE_REF`` and the working tree's ``[snapshot].ref`` are deliberately ignored:
+    both may name ``HEAD``, which here is the change under review. Raises
+    :class:`ConfigError` when a remote exists but no base resolves, because falling back to
+    the working tree there would let the change configure its own gate."""
+    remotes = _remotes(root)
+    if not remotes:
         return None
-    if _git(root, "rev-parse", "--verify", "--quiet", f"{BASE_REF}^{{commit}}").returncode == 0:
-        return BASE_REF
+    remote = _trusted_remote(remotes)
+    tried = [f"refs/remotes/{remote}/HEAD", f"refs/remotes/{remote}/main"]
+    # Report the branch <remote>/HEAD points at, so the source names a real branch.
+    head = _git(root, "symbolic-ref", "--quiet", tried[0]).stdout.strip()
+    for ref in (head, tried[1]):
+        if ref.startswith(f"refs/remotes/{remote}/") and _resolves(root, ref):
+            return ref
     raise ConfigError(
-        f"op-cert gate: cannot find the reviewed base branch {BASE_REF}; the gate reads its "
-        "trust configuration from there, never from the checkout under review. Fetch it "
-        f"first: `git fetch {BASE_REMOTE} +refs/heads/main:{BASE_REF}`"
+        f"op-cert gate: cannot find the reviewed base branch (tried {' and '.join(tried)}); "
+        "the gate reads its trust configuration from there, never from the checkout under "
+        f"review. Record the remote's default branch with `git remote set-head {remote} "
+        f"--auto`, or fetch it, for example `git fetch {remote} "
+        f"+refs/heads/main:refs/remotes/{remote}/main`"
     )
+
+
+def _hop_target(project: dict, remotes: list[str], ref: str) -> str | None:
+    """The base's own committed ``[snapshot].ref``, when it names ``<remote>/<branch>`` of a
+    configured remote and differs from ``ref``; any other form (``HEAD``, a SHA, a local
+    branch) is ignored."""
+    value = (project.get("snapshot") or {}).get("ref")
+    if not isinstance(value, str):
+        return None
+    remote, _, branch = value.strip().removeprefix("refs/remotes/").partition("/")
+    if remote not in remotes or not branch or branch == "HEAD":
+        return None
+    target = f"refs/remotes/{remote}/{branch}"
+    return None if target == ref else target
+
+
+def _reviewed_project(root: Path, ref: str) -> tuple[str, str, dict]:
+    """``(ref, spec, table)`` of the reviewed project config, after at most one hop to the
+    base's own committed ``[snapshot].ref``. The hop target's ``[snapshot].ref`` is not
+    followed, so a committed config cannot chain."""
+    spec, project = _committed_project_layer(root, ref)
+    target = _hop_target(project, _remotes(root), ref)
+    if target is None:
+        return ref, spec, project
+    if not _resolves(root, target):
+        remote, _, branch = target.removeprefix("refs/remotes/").partition("/")
+        raise ConfigError(
+            f"op-cert gate: {spec} sets [snapshot].ref to {target}, which is not fetched; "
+            f"fetch it: `git fetch {remote} +refs/heads/{branch}:{target}`"
+        )
+    spec, project = _committed_project_layer(root, target)
+    return target, spec, project
 
 
 def _committed_toml(root: Path, spec: str) -> dict | None:
@@ -143,7 +217,7 @@ def _base_layers(root_path: Path, ref: str) -> tuple[list[tuple[str, dict]], str
     if user.is_file():
         raw = _read_toml_table(user, pyproject=False)
         layers.append(("user", coerce_sparse(raw, source=str(user), strict=strict)))
-    spec, project = _committed_project_layer(root_path, ref)
+    ref, spec, project = _reviewed_project(root_path, ref)
     layers.append(("project", coerce_sparse(project, source=spec or ref, strict=strict)))
     layers.append(("env", coerce_sparse(env_overrides(), source="env", strict=strict)))
     cli = config._CLI_OVERRIDES
