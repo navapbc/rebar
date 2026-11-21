@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import importlib.util
 import re
-import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -45,7 +44,8 @@ class _FakeSocket:
     calls: ClassVar[list[str]] = []
 
     def __init__(self, family, kind) -> None:
-        assert family == socket.AF_UNIX
+        # Read at call time, so it is the AF_UNIX value each test patched in.
+        assert family == mod.socket.AF_UNIX
 
     def bind(self, path) -> None:
         self.calls.append("bind")
@@ -60,14 +60,18 @@ class _FakeSocket:
         self.calls.append("close")
 
 
-def test_unix_socket_probe_passes_when_bind_listen_and_connect_succeed() -> None:
+def test_unix_socket_probe_passes_when_bind_listen_and_connect_succeed(monkeypatch) -> None:
+    # Windows CPython has no AF_UNIX; the probe would pass without using the factory.
+    monkeypatch.setattr(mod.socket, "AF_UNIX", 1, raising=False)
     _FakeSocket.calls = []
 
     assert mod.unix_socket_probe(socket_factory=_FakeSocket) == (True, "")
     assert _FakeSocket.calls == ["bind", "listen", "connect", "close", "close"]
 
 
-def test_unix_socket_probe_reports_a_denied_bind() -> None:
+def test_unix_socket_probe_reports_a_denied_bind(monkeypatch) -> None:
+    monkeypatch.setattr(mod.socket, "AF_UNIX", 1, raising=False)
+
     class _Denied(_FakeSocket):
         def bind(self, path) -> None:
             raise PermissionError(1, "Operation not permitted")
@@ -79,7 +83,7 @@ def test_unix_socket_probe_reports_a_denied_bind() -> None:
 
 
 def test_unix_socket_probe_passes_where_the_platform_has_no_af_unix(monkeypatch) -> None:
-    monkeypatch.delattr(mod.socket, "AF_UNIX")
+    monkeypatch.delattr(mod.socket, "AF_UNIX", raising=False)
 
     assert mod.unix_socket_probe() == (True, "")
 
