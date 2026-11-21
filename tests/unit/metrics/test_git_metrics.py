@@ -217,21 +217,63 @@ def test_oracle_module_size_trend_uses_historical_caps_and_raw_newline_loc(tmp_p
     }
 
 
+def _fast_import_history(repo: Path, commits: list[tuple[str, dict[str, str]]]) -> list[str]:
+    """Build a linear ``main`` history in ONE ``git fast-import`` and return the commit shas.
+
+    Each ``(iso_timestamp, files)`` entry becomes one commit of the given whole-file
+    contents. One process replaces three per commit (add, commit, rev-parse), so a slow
+    git start cannot push a long history past the per-test budget (rubbery-adamantine-panda).
+    """
+    from datetime import datetime
+
+    stream: list[str] = []
+    for mark, (iso, files) in enumerate(commits, start=1):
+        epoch = int(datetime.fromisoformat(iso).timestamp())
+        message = f"qualified {mark - 1}"
+        stream += [
+            "commit refs/heads/main",
+            f"mark :{mark}",
+            f"committer t <t@e.com> {epoch} +0000",
+            f"data {len(message.encode())}",
+            message,
+        ]
+        if mark > 1:
+            stream.append(f"from :{mark - 1}")
+        for path, content in files.items():
+            stream += [f"M 100644 inline {path}", f"data {len(content.encode())}", content]
+        stream.append("")
+    marks = repo.parent / f"{repo.name}.marks"
+    subprocess.run(
+        ["git", "fast-import", "--quiet", f"--export-marks={marks}"],
+        cwd=repo,
+        input="\n".join(stream) + "\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    by_mark = dict(line.split() for line in marks.read_text().splitlines())
+    return [by_mark[f":{mark}"] for mark in range(1, len(commits) + 1)]
+
+
 def test_oracle_cap_change_events_compares_unsampled_adjacent_revisions(tmp_path):
     from datetime import datetime, timedelta
 
     repo = tmp_path / "repo"
-    _init(repo)
-    changed: list[tuple[str, int, str]] = []
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
     start = datetime.fromisoformat("2026-02-01T00:00:00+00:00")
-    for idx in range(60):
-        cap = 800 if idx < 30 else 750
-        timestamp = (start + timedelta(days=idx)).isoformat()
-        _oracle_write_cap(repo, cap)
-        _oracle_write_module(repo, "m.py", idx + 1)
-        sha = _commit_at(repo, f"qualified {idx}", timestamp)
-        if idx == 30:
-            changed.append((sha, cap, timestamp))
+    history = [
+        (
+            (start + timedelta(days=idx)).isoformat(),
+            {
+                ".github/module-size-limit.txt": f"{800 if idx < 30 else 750}\n",
+                "src/rebar/m.py": "".join(f"line_{i}\n" for i in range(idx + 1)),
+            },
+        )
+        for idx in range(60)
+    ]
+    shas = _fast_import_history(repo, history)
+    changed = [(shas[30], 750, history[30][0])]
 
     events = git_metrics.cap_change_events(str(repo), "2026-02-01", "2026-04-30")
     trend = git_metrics.module_size_trend(str(repo), "2026-02-01", "2026-04-30")
@@ -245,6 +287,58 @@ def test_oracle_cap_change_events_compares_unsampled_adjacent_revisions(tmp_path
     assert len(trend["samples"]) == 50
     assert trend["samples"][0]["max_loc"] == 1
     assert trend["samples"][-1]["max_loc"] == 60
+
+
+def test_history_walk_cat_file_starts_do_not_grow_with_revisions(tmp_path, monkeypatch):
+    """Caps and sampled blobs are read in batches, so the process count stays flat."""
+    from datetime import datetime, timedelta
+
+    real_run = subprocess.run
+
+    def starts_for(revisions: int) -> int:
+        repo = tmp_path / f"repo{revisions}"
+        repo.mkdir()
+        _git(repo, "init", "-q", "-b", "main")
+        start = datetime.fromisoformat("2026-02-01T00:00:00+00:00")
+        _fast_import_history(
+            repo,
+            [
+                (
+                    (start + timedelta(days=idx)).isoformat(),
+                    {".github/module-size-limit.txt": "800\n", "src/rebar/m.py": "x\n" * idx},
+                )
+                for idx in range(1, revisions + 1)
+            ],
+        )
+        calls: list[list[str]] = []
+
+        def counting_run(cmd, *args, **kwargs):
+            calls.append(list(cmd))
+            return real_run(cmd, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(git_metrics.subprocess, "run", counting_run)
+            git_metrics.cap_change_events(str(repo), "2026-02-01", "2026-04-30")
+            git_metrics.module_size_trend(str(repo), "2026-02-01", "2026-04-30")
+        return sum(1 for cmd in calls if cmd[:2] == ["git", "cat-file"])
+
+    assert starts_for(3) == starts_for(12) == 5
+
+
+def test_unreadable_revision_is_a_git_failure_not_a_missing_cap(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _init(repo)
+    _oracle_write_cap(repo, 800)
+    _oracle_write_module(repo, "m.py", 2)
+    _commit_at(repo, "one", "2026-02-02T00:00:00+00:00")
+    monkeypatch.setattr(
+        git_metrics, "_list_commits", lambda _root: [("0" * 40, "2026-02-02T00:00:00+00:00")]
+    )
+
+    result = git_metrics.cap_change_events(str(repo), "2026-02-01", "2026-04-30")
+
+    assert isinstance(result, Unavailable)
+    assert "git cannot read revision" in result.reason
 
 
 # ── held-out oracles (merged from test_git_metrics_heldout) ──
