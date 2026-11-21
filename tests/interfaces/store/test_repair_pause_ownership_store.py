@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -603,20 +602,30 @@ def test_a_slow_local_git_call_does_not_fail_the_repair_pause(
     real_git = shutil.which("git")
     assert real_git is not None
     delayed = tmp_path / "delayed-update-refs"
-    bin_dir = tmp_path / "slowgit"
-    bin_dir.mkdir()
-    shim = bin_dir / "git"
+    shim = tmp_path / "slowgit.py"
+    # The shim runs git as a child rather than exec'ing it: on Windows os.execv returns
+    # to the caller before git finishes, so the caller would read no output.
     shim.write_text(
-        f"#!{sys.executable}\n"
-        "import os, sys, time\n"
+        "import subprocess, sys, time\n"
         "if 'update-ref' in sys.argv[1:]:\n"
         f"    time.sleep({_SLOW_UPDATE_REF_SECS})\n"
         f"    with open({str(delayed)!r}, 'a') as log:\n"
         "        log.write(' '.join(sys.argv[1:]) + '\\n')\n"
-        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n"
+        f"sys.exit(subprocess.call([{real_git!r}, *sys.argv[1:]]))\n"
     )
-    shim.chmod(0o755)
-    monkeypatch.setenv("PATH", os.pathsep.join((str(bin_dir), os.environ["PATH"])))
+    # Route every `git` argv through the shim inside the same timed process-group call, so
+    # the production timeout still bounds the delayed git. A PATH shim named `git` is not
+    # found on Windows, where process creation looks only for git.exe.
+    from rebar._store import gitutil
+
+    real_run_in_group = gitutil._run_in_group
+
+    def run_through_shim(argv, *args, **kwargs):
+        if argv and argv[0] == "git":
+            argv = [sys.executable, str(shim), *argv[1:]]
+        return real_run_in_group(argv, *args, **kwargs)
+
+    monkeypatch.setattr(gitutil, "_run_in_group", run_through_shim)
 
     with pytest.raises(CommandError, match="a reconciler pass is in flight"):
         _doctor_run(monkeypatch, tracker, repo, lambda: None, in_flight=True)
