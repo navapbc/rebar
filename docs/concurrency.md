@@ -485,8 +485,8 @@ Today:
   all live in the CANONICAL store's `.rebar/` — the tracker resolved through symlinks, as
   `_store.lock.canonical_tracker` requires — so every worktree view of one store shares one
   worker lock and one sweep clock instead of each keying its own. `compact.trigger` selects
-  `async` (detach, the default), `always` (inline — for tests/CI) or `off`. Windows is a v1
-  no-op.
+  `async` (detach, the default), `always` (inline — for tests/CI) or `off`. Windows detaches
+  the same way, through `rebar._proc.spawn_detached`.
 
   This does **not** reintroduce the hold that moved compaction out: the P0 was never "a close
   compacts", it was that an operation agents *wait on* held the store lock for minutes. Here
@@ -501,6 +501,9 @@ Today:
   next ticket and runs its end-of-run push, and the stop is logged at WARNING. Within the
   shutdown grace, the server waits for the worker to exit and for the store write lock to be
   free before it exits (bug topnotch-brazen-slug).
+  On Windows SIGTERM is `TerminateProcess` and the stamp carries no process start time, so
+  the server signals nothing: the sweep runs to its end, and the server waits only for the
+  store write lock, which the sweep releases at each ticket boundary.
 - **The standing trigger is `rebar store compact --all`, run out of band on a schedule.** The
   `Compaction Sweep` workflow (`.github/workflows/compact-sweep.yml`) runs it **every 6
   hours** (`cron: '0 */6 * * *'`, also `workflow_dispatch`-able with `dry_run` / `limit`), on

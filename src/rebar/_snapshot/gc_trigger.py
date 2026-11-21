@@ -17,7 +17,6 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -175,10 +174,9 @@ def maybe_gc(repo_root: str | None = None) -> None:
     """Consider detached GC after an attested gate without raising or blocking it.
 
     The trigger resolves existing janitor settings, stats one stamp, holds no ticket-store
-    lock, and never enumerates the store. Windows remains a no-op."""
+    lock, and never enumerates the store. Every platform detaches through
+    :func:`rebar._proc.spawn_detached`."""
     try:
-        if sys.platform == "win32":  # pragma: no cover - POSIX CI
-            return
         cfg = _janitor_config(repo_root)
         if cfg.interval_seconds <= 0:
             return

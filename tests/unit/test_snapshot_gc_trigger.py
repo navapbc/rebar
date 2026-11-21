@@ -361,7 +361,7 @@ def test_the_detached_child_is_anchored_to_the_durable_store_root(
     monkeypatch.setattr(
         _proc,
         "subprocess",
-        types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
+        types.SimpleNamespace(**{**vars(subprocess), "Popen": _fake_popen}),
     )
     gc_trigger._spawn_detached_gc(store, str(repo))
 
@@ -373,4 +373,6 @@ def test_the_detached_child_is_anchored_to_the_durable_store_root(
         "the child's cwd must be the durable anchor derived from the store root"
     )
     assert kwargs.get("stdin") is subprocess.DEVNULL
-    assert kwargs.get("start_new_session") is True
+    # The platform's own detach flags: a new session on POSIX, DETACHED_PROCESS on Windows.
+    for key, value in _proc._detach_kwargs().items():
+        assert kwargs.get(key) == value, f"detach kwarg {key} is {kwargs.get(key)!r}"

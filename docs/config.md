@@ -221,7 +221,7 @@ compact.trigger          = "async"  # async | always | off (env REBAR_COMPACT_TR
                         # `rebar store compact --all` out of band. "always" runs that sweep INLINE instead
                         # (tests/CI, where a detached child would outlive the assertion);
                         # "off" disables it for operators who drive compaction themselves.
-                        # A v1 no-op on Windows. The detached worker logs to the store's
+                        # Windows detaches the same way. The detached worker logs to the store's
                         # .rebar/logs/compact-worker.log, except when the MCP server's close
                         # triggered it: then it logs to the server's stderr (on the box, the
                         # journal: `journalctl -t rebar-mcp`). Not configurable.
