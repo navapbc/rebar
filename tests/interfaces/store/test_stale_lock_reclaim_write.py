@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import os
 import socket
-import subprocess
 import time
 from pathlib import Path
+
+from _python_child import dead_pid
 
 import rebar
 from rebar._store import git_locking, gitutil
@@ -25,9 +26,8 @@ from rebar._store import lock as _lock
 
 
 def _dead_pid() -> int:
-    p = subprocess.Popen(["true"])
-    p.wait()
-    return p.pid
+    """A pid that is provably not running (see tests/_python_child.py)."""
+    return dead_pid()
 
 
 def test_write_reclaims_dead_owner_lock_promptly(rebar_repo: Path):

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 
 import pytest
+from _python_child import dead_pid
 
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _owner
@@ -23,10 +23,8 @@ _OTHER_NS = "4026533117"
 
 
 def _dead_pid() -> int:
-    """A PID that is no longer alive: spawn a trivial child and reap it."""
-    p = subprocess.Popen(["true"])
-    p.wait()
-    return p.pid
+    """A pid that is provably not running (see tests/_python_child.py)."""
+    return dead_pid()
 
 
 def _pose_as(monkeypatch, *, boot_id: str | None, hostname: str, ns: str | None) -> None:
