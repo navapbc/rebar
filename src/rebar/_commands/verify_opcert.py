@@ -104,6 +104,84 @@ def _completion_cert_problem(state, ticket_id, root, required_env, trusted_pairs
     return "" if verdict.verified else f"invalid op-cert ({verdict.verdict}: {verdict.reason})"
 
 
+def _sets_closed(event: dict) -> bool:
+    """Whether one raw event can leave the ticket ``closed``: a STATUS to closed, a CREATE
+    whose genesis status is closed, or an EDIT that writes ``status: closed``."""
+    data = event.get("data") or {}
+    kind = event.get("event_type")
+    if kind in ("STATUS", "CREATE"):
+        return data.get("status") == "closed"
+    if kind == "EDIT":
+        return (data.get("fields") or {}).get("status") == "closed"
+    return False
+
+
+def _may_be_closed(ticket_dir: str) -> bool:
+    """Whether the ticket's raw event files leave any chance that it is closed.
+
+    Read straight from the ticket directory, not from the merged-log walk, because a SNAPSHOT
+    that folded unsigned events contributes nothing to that walk. A SNAPSHOT (compacted
+    history), an unparseable file, no event file at all, or any event that sets ``closed``
+    (see :func:`_sets_closed`) all mean "may be closed". The gate does not re-derive which
+    branch of a forked STATUS chain the reducer keeps: that reduce is what failed here."""
+    import json
+
+    from .verify_authorship import _active_event_files
+
+    names = _active_event_files(ticket_dir)
+    if not names:
+        return True
+    for name in names:
+        try:
+            with open(os.path.join(ticket_dir, name), encoding="utf-8") as fh:
+                event = json.load(fh)
+        except (OSError, ValueError):
+            return True
+        if not isinstance(event, dict):
+            return True
+        if event.get("event_type") == "SNAPSHOT" or _sets_closed(event):
+            return True
+    return False
+
+
+def _gate_ticket_ids(events, tracker: str) -> list[str]:
+    """Every ticket the gate must consider: those in the merged-log walk plus every ticket
+    directory in the store, so a ticket whose compacted history yields no walked event is
+    still enumerated. Gate-exempt and archived tickets stay out, as in the walk."""
+    from .verify_authorship import _is_archived_ticket, _is_gate_exempt_ticket
+
+    ids = {ev.ticket_id for ev in events if ev.ticket_id}
+    try:
+        names = os.listdir(tracker)
+    except OSError:
+        names = []
+    for name in names:
+        ticket_dir = os.path.join(tracker, name)
+        if name.startswith(".") or name in ids or not os.path.isdir(ticket_dir):
+            continue
+        if not (_is_gate_exempt_ticket(ticket_dir) or _is_archived_ticket(ticket_dir)):
+            ids.add(name)
+    return sorted(ids)
+
+
+def _scoped_state(rebar, ticket_id, root, tracker) -> tuple[dict | None, str]:
+    """The closed ticket's state, or ``None`` when it is out of scope, plus why it is unreadable.
+
+    A ticket whose state cannot be reduced is NOT dropped unless its raw events prove it was
+    never closed (:func:`_may_be_closed`): otherwise it stays in scope with an ``unreadable
+    ticket state`` reason, so an enforcing gate fails closed on it (bug
+    scarlet-unsocial-limpkin)."""
+    try:
+        state = rebar.show_ticket(ticket_id, repo_root=root)
+    except Exception as exc:  # noqa: BLE001 — any reduce failure; judged below, never skipped
+        if not _may_be_closed(os.path.join(tracker, ticket_id)):
+            return None, ""
+        return {}, f"unreadable ticket state ({type(exc).__name__}: {exc})"
+    if not isinstance(state, dict) or state.get("status") != "closed":
+        return None, ""
+    return state, ""
+
+
 @guard_parse_errors
 def cli(argv: list[str]) -> int:
     p = build_opcert(prog="rebar verify-opcert")
@@ -168,7 +246,7 @@ def _gate(args, cfg) -> int:
     events = _collect_all(tracker)
     commit_map = authorship.build_introducing_commit_map(repo_root=args.root)
 
-    ticket_ids = sorted({ev.ticket_id for ev in events if ev.ticket_id})
+    ticket_ids = _gate_ticket_ids(events, tracker)
 
     report: list[dict] = []
     problems: list[tuple[str, str, bool]] = []  # (ticket_id, reason, grandfathered)
@@ -178,11 +256,8 @@ def _gate(args, cfg) -> int:
 
     for ticket_id in ticket_ids:
         # IN SCOPE for the completion-verifier lane iff the ticket is CLOSED.
-        try:
-            state = rebar.show_ticket(ticket_id, repo_root=args.root)
-        except Exception:  # noqa: BLE001 — an unreadable ticket is treated as out of scope
-            continue
-        if not isinstance(state, dict) or state.get("status") != "closed":
+        state, unreadable = _scoped_state(rebar, ticket_id, args.root, tracker)
+        if state is None:
             continue
         in_scope += 1
         # Resolve the terminal close STATUS as the enforcement anchor. A compacted or missing
@@ -192,7 +267,7 @@ def _gate(args, cfg) -> int:
             _resolve_commit(anchor, args.root, commit_map) if anchor is not None else None
         )
 
-        reason = (
+        reason = unreadable or (
             _completion_cert_problem(state, ticket_id, args.root, required_env, trusted_pairs)
             if required_env and trusted_pairs is not None
             else "no required environment configured"

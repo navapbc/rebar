@@ -29,6 +29,7 @@ except Exception:  # noqa: BLE001
     _SSH_OK = False
 
 ENV_ID = "trusted-ci@rebar.test"
+_UNREADABLE = "unreadable ticket state (RuntimeError: cannot reduce this ticket)"
 _VERIFY = (sys.executable, "-m", "rebar", "verify-opcert")
 _BASE_SOURCE = re.compile(r"refs/remotes/origin/main:rebar\.toml")
 KIND = "completion-verifier"
@@ -310,3 +311,216 @@ def test_checkout_without_a_remote_keeps_the_working_tree(
     assert base_ref(repo) is None
     assert cfg.verify.require_environment == "box"
     assert "no git remote" in source
+
+
+def _closed_ticket_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str, str]:
+    """A remote-backed store whose main trusts one key, with one closed ticket and one open."""
+    _priv, pub = _keypair(tmp_path, "main-key")
+    repo = _repo_with_origin(tmp_path, _trust_toml(pub))
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", "9" * 18)
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    rebar.init_repo(repo_root=str(repo))
+    closed = rebar.create_ticket("task", "closed work", repo_root=str(repo))
+    rebar.transition(closed, "open", "closed", repo_root=str(repo))
+    still_open = rebar.create_ticket("task", "open work", repo_root=str(repo))
+    return repo, closed, still_open
+
+
+def _break_show_ticket(monkeypatch: pytest.MonkeyPatch, *ticket_ids: str) -> None:
+    real = rebar.show_ticket
+    broken = set(ticket_ids)
+
+    def show(ticket_id, **kw):
+        if ticket_id in broken:
+            raise RuntimeError("cannot reduce this ticket")
+        return real(ticket_id, **kw)
+
+    monkeypatch.setattr(rebar, "show_ticket", show)
+
+
+def _gate(capsys: pytest.CaptureFixture[str], repo: Path, *extra: str) -> tuple[int, str]:
+    from rebar._commands.verify_opcert import cli
+
+    capsys.readouterr()
+    rc = cli(["--root", str(repo), *extra])
+    out = capsys.readouterr()
+    return rc, out.out + out.err
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+def test_unreadable_closed_ticket_fails_an_enforcing_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _clean_config: None,
+) -> None:
+    """Bug scarlet-unsocial-limpkin: a closed ticket whose state cannot be reduced used to drop
+    out of scope, so an enforcing gate printed OK and exited 0."""
+    repo, closed, _open = _closed_ticket_repo(tmp_path, monkeypatch)
+    _break_show_ticket(monkeypatch, closed)
+
+    rc, text = _gate(capsys, repo, "--require-environment", ENV_ID)
+
+    assert rc == 1, text
+    assert f"{closed}: {_UNREADABLE}" in text, text
+    assert "(1 closed ticket(s) in scope)" in text, text
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+def test_unreadable_closed_ticket_is_reported_in_advisory_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _clean_config: None,
+) -> None:
+    repo, closed, _open = _closed_ticket_repo(tmp_path, monkeypatch)
+    _break_show_ticket(monkeypatch, closed)
+
+    rc, text = _gate(capsys, repo)
+
+    assert rc == 0, text
+    assert f"{closed}: {_UNREADABLE}" in text, text
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+def test_unreadable_closed_ticket_before_the_boundary_is_grandfathered(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _clean_config: None,
+) -> None:
+    repo, closed, _open = _closed_ticket_repo(tmp_path, monkeypatch)
+    rebar.create_ticket("task", "later activity", repo_root=str(repo))
+    since = _git(Path(str(config.tracker_dir(str(repo)))), "rev-parse", "HEAD")
+    _break_show_ticket(monkeypatch, closed)
+
+    rc, text = _gate(capsys, repo, "--require-environment", ENV_ID, "--since", since)
+
+    assert rc == 0, text
+    assert f"{closed}: {_UNREADABLE} [grandfathered]" in text, text
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+def test_unreadable_ticket_proven_open_stays_out_of_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _clean_config: None,
+) -> None:
+    """The latest STATUS proves the ticket is not closed, so it is not judged."""
+    repo, _closed, still_open = _closed_ticket_repo(tmp_path, monkeypatch)
+    rebar.transition(still_open, "open", "in_progress", repo_root=str(repo))
+    _break_show_ticket(monkeypatch, still_open)
+
+    rc, text = _gate(capsys, repo)
+
+    assert rc == 0, text
+    assert still_open not in text, text
+    assert "unreadable" not in text, text
+    assert "(1 closed ticket(s) in scope)" in text, text
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+def test_unreadable_ticket_with_any_close_in_history_is_judged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _clean_config: None,
+) -> None:
+    """Closed then reopened: the gate cannot tell which branch of a STATUS fork the reducer
+    keeps when the reduce itself failed, so any close in the history means it is judged."""
+    repo, closed, _open = _closed_ticket_repo(tmp_path, monkeypatch)
+    rebar.reopen(closed, repo_root=str(repo))
+    _break_show_ticket(monkeypatch, closed)
+
+    rc, text = _gate(capsys, repo, "--require-environment", ENV_ID)
+
+    assert rc == 1, text
+    assert f"{closed}: {_UNREADABLE}" in text, text
+
+
+def _write_event(repo: Path, ticket_id: str, kind: str, data: dict) -> None:
+    """Drop one raw event file into a ticket directory (bypassing the writer on purpose)."""
+    import json
+    import uuid
+
+    ticket_dir = Path(str(config.tracker_dir(str(repo)))) / ticket_id
+    ticket_dir.mkdir(parents=True, exist_ok=True)
+    stamp = 9 * 10**18
+    eid = str(uuid.uuid4())
+    event = {"event_type": kind, "timestamp": stamp, "uuid": eid, "data": data}
+    (ticket_dir / f"{stamp}-{eid}-{kind}.json").write_text(json.dumps(event), encoding="utf-8")
+
+
+def _in_progress_ticket(repo: Path) -> str:
+    tid = rebar.create_ticket("task", "in progress work", repo_root=str(repo))
+    rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
+    return tid
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+@pytest.mark.parametrize(
+    ("kind", "data"),
+    [
+        ("SNAPSHOT", {"compiled_state": {"status": "in_progress"}, "source_event_uuids": []}),
+        ("EDIT", {"fields": {"status": "closed"}}),
+        ("CREATE", {"status": "closed", "ticket_type": "task", "title": "x"}),
+    ],
+)
+def test_unreadable_ticket_that_may_be_closed_is_judged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    data: dict,
+    _clean_config: None,
+) -> None:
+    """A SNAPSHOT (compacted, possibly from unsigned events the walk never sees), an EDIT
+    writing status=closed, or a CREATE born closed all leave a chance the ticket is closed."""
+    repo, _closed, _open = _closed_ticket_repo(tmp_path, monkeypatch)
+    tid = _in_progress_ticket(repo)
+    _write_event(repo, tid, kind, data)
+    _break_show_ticket(monkeypatch, tid)
+
+    rc, text = _gate(capsys, repo, "--require-environment", ENV_ID)
+
+    assert rc == 1, text
+    assert f"{tid}: {_UNREADABLE}" in text, text
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+def test_ticket_absent_from_the_walk_is_still_enumerated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _clean_config: None,
+) -> None:
+    """A ticket whose only file is a SNAPSHOT with an empty authorship ledger yields no walked
+    event; listing the store directory still brings it into scope."""
+    repo, _closed, _open = _closed_ticket_repo(tmp_path, monkeypatch)
+    ghost = "0000-1111-2222-3333"
+    _write_event(repo, ghost, "SNAPSHOT", {"compiled_state": {"status": "closed"}})
+    _break_show_ticket(monkeypatch, ghost)
+
+    rc, text = _gate(capsys, repo, "--require-environment", ENV_ID)
+
+    assert rc == 1, text
+    assert f"{ghost}: {_UNREADABLE}" in text, text
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+def test_unreadable_never_closed_ticket_stays_out_of_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _clean_config: None,
+) -> None:
+    """Only a CREATE born open and no other event: the raw files prove it never closed."""
+    repo, _closed, still_open = _closed_ticket_repo(tmp_path, monkeypatch)
+    _break_show_ticket(monkeypatch, still_open)
+
+    rc, text = _gate(capsys, repo, "--require-environment", ENV_ID)
+
+    assert still_open not in text, text
+    assert "(1 closed ticket(s) in scope)" in text, text
+    assert rc == 1, text  # the genuinely closed ticket still lacks a certificate
