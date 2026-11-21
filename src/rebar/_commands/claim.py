@@ -73,7 +73,12 @@ def _review_before_claim(ticket_id: str, tracker: str, repo_root) -> None:
     """For claim --review, check whether the gate applies and whether its signed
     review is current. Run full review only when stale or missing. Non-PASS
     blocks claim. Review runs before the claim's short write lock."""
+    from rebar._store.freshness import heal_if_superseded
     from rebar.reducer import reduce_ticket
+
+    # Move a reclaim-superseded clone before the gate check below reads it as stale and buys
+    # a needless review (bug unwelcome-persimmon-quahog).
+    heal_if_superseded(tracker, repo_root=repo_root)
 
     # repo_root (possibly None -> discover), NOT the tracker's parent: a relocated store
     # would otherwise resolve an empty config and the gate would read as disabled.

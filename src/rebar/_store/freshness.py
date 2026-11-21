@@ -284,21 +284,68 @@ def _remote_supersedes(tracker: str, remote_ref: str) -> bool:
         return False
 
 
-def heal_superseded_clone(tracker: str | os.PathLike[str]) -> None:
+def heal_superseded_clone(
+    tracker: str | os.PathLike[str], *, lock_timeout: int | None = None
+) -> None:
     """Run one sync round so a reclaim-superseded clone moves onto the reclaimed baseline.
 
     The write path calls this only after :func:`write_blocking_divergence` proved the
     supersession, and only without the write lock held: the round fetches, takes the lock
-    and runs the stale-clone override (bug ``smiling-ancient-finwhale``). Best-effort and
+    and runs the stale-clone override (bug ``smiling-ancient-finwhale``). ``lock_timeout``
+    bounds the wait for the write lock (default: the sync round's own). Best-effort and
     never raises; the write's retried precheck refuses whatever it could not move.
     """
     from rebar._store import sync
 
     try:
-        sync.reconverge(tracker)
+        if lock_timeout is None:
+            sync.reconverge(tracker)
+        else:
+            sync.reconverge(tracker, lock_timeout=lock_timeout)
     # The retried precheck still refuses an unhealed store.
     except Exception:
         logger.debug("superseded-clone heal failed; the write precheck decides", exc_info=True)
+
+
+def heal_if_superseded(
+    tracker: str | os.PathLike[str] | None = None,
+    *,
+    repo_root: str | os.PathLike[str] | None = None,
+) -> dict[str, Any] | None:
+    """Heal a proven reclaim-superseded clone before an operation starts; return what remains.
+
+    For writers that cannot heal-and-retry after a refusal: the importer before its reads,
+    a reconciler pass before it mutates Jira, the plan-review start gate and the completion
+    close before their store-freshness gates (bug ``unwelcome-persimmon-quahog``). Probes
+    :func:`write_blocking_divergence` (local git only) and, only for a proven supersession,
+    runs one sync round with the read path's short lock budget so it never waits long.
+    Returns the write-blocking divergence still present afterwards, or ``None``. A remaining
+    one is logged at WARNING; for a supersession it is transient (a failed fetch or a busy
+    lock), for an unrelated remote it is permanent. Never raises.
+    """
+    try:
+        stale = write_blocking_divergence(tracker, repo_root=repo_root)
+        if stale is None or not stale.get("superseded"):
+            return stale
+        from rebar import config
+        from rebar._engine_support import reads
+
+        path = str(tracker) if tracker is not None else str(config.tracker_dir(repo_root))
+        heal_superseded_clone(path, lock_timeout=reads._RECONVERGE_LOCK_TIMEOUT)
+        remaining = write_blocking_divergence(path, repo_root=repo_root)
+    # A broken probe must not block the operation; its own precheck still decides.
+    except Exception:
+        logger.debug("superseded-clone heal probe failed", exc_info=True)
+        return None
+    if remaining is not None:
+        logger.warning(
+            "ticket store still DIVERGED from %s after a heal attempt%s",
+            remaining.get("remote_ref", "the shared store"),
+            " (transient: the fetch failed or the write lock was busy; retry once it clears)"
+            if remaining.get("superseded")
+            else "",
+        )
+    return remaining
 
 
 def stale_gate_message(gate_label: str, ticket_id: str, freshness: dict[str, Any]) -> str:

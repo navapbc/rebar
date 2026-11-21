@@ -853,6 +853,26 @@ could not move (fetch failure, busy lock, failed override) is refused by the ret
 precheck (bug `smiling-ancient-finwhale`, where a busy MCP server stayed inside the read
 throttle window and refused every write).
 
+The other writers reach the same heal in the way their locking allows (bug
+`unwelcome-persimmon-quahog`):
+
+- **Heal and retry after the refusal:** `append_event`, `transition_core`, `claim_core`,
+  `rebar delete` (its whole resolve-through-commit phase, so resolution and the child check
+  see the healed store) and the NDJSON importer's flush.
+- **Heal before they start**, through `freshness.heal_if_superseded` (a local probe; a sync
+  round with the read path's short lock budget only for a proven supersession):
+  - the importer, before its id map and dedupe scan (not for `--dry-run`);
+  - a reconciler pass, before `reconcile_once`. A mid-pass heal would discard the pass's
+    uncommitted inbound events and binding edits after it has already mutated Jira. A store
+    still blocked afterwards ends the pass with no Jira call: RESCHEDULE for a supersession
+    the heal could not apply, an operational failure for an unrelated remote;
+  - the plan-review start gate (`claim`, `claim --review`, start-work transitions);
+  - an unforced close, in its pre-gate refresh, whatever `sync.pull` says.
+- **Never heal:** the read-only gate queries (`store_freshness`, `claim_gate_check`,
+  `review-plan --status`). A `behind` store is still not adopted by a gate. The atomic
+  completion commit cannot retry after a heal, because its receipt's tickets OID must be an
+  ancestor of HEAD; the close heals before its verifier instead.
+
 **Publishing a reclaimed baseline, and rolling it back (ADR 0106 §6).**
 `rebar._commands.reclaim_publish` publishes from a disposable shadow clone only (S1's shadow
 guard refuses anything else). Each publish succeeds only if the remote still holds T0, the

@@ -458,7 +458,9 @@ def _trigger_compaction(
     compact_trigger.maybe_compact(tracker, ticket_id, repo_root=repo_root_str, sweep_log=sweep_log)
 
 
-def _refresh_close_material(tracker: str, current_status: str, force_close: str) -> None:
+def _refresh_close_material(
+    tracker: str, current_status: str, force_close: str, repo_root=None
+) -> None:
     """Sync the clone once before an unforced close reads its gate material (bug 833e-3827).
 
     Read tools refresh at most once a minute, so a clone that serves both reads and closes
@@ -475,8 +477,13 @@ def _refresh_close_material(tracker: str, current_status: str, force_close: str)
     if force_close or current_status == "idea":
         return
     from rebar._engine_support import reads as ticket_reads
+    from rebar._store.freshness import heal_if_superseded
 
     ticket_reads.ensure_fresh(tracker, force=True)
+    # ``sync.pull=off`` skips the refresh above, which was this close's only heal for a
+    # reclaim-superseded clone; its gates would then refuse it as stale (bug
+    # unwelcome-persimmon-quahog). A no-op probe when the clone is not superseded.
+    heal_if_superseded(tracker, repo_root=repo_root)
 
 
 def _hint_disposition_alternative(close_class: str) -> None:
@@ -568,7 +575,7 @@ def close_ticket(
     close_metrics = _new_close_metrics()
     newly_unblocked: list[str] = []
     if target_status == "closed":
-        _refresh_close_material(tracker, current_status, force_close)
+        _refresh_close_material(tracker, current_status, force_close, repo_root)
         batch = _timed_close_phase(
             close_metrics,
             "structural_scan_ms",

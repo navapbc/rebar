@@ -250,46 +250,35 @@ def _rel(tracker: str, path: str) -> str:
     return path[len(prefix) :] if path.startswith(prefix) else path
 
 
-# raw-git-ok: store-maintenance command, seam-internal
-def delete_cli(argv: list[str], *, repo_root=None) -> int:
-    """``rebar delete <id> --user-approved`` entry."""
-    try:
-        fmt, rest = parse_output(argv, "report")
-    except OutputFormatError as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        return 2
-
-    from rebar._cli._parsers.core.delete import build as build_delete
-
-    # Parser of record for delete's accepted grammar; the imperative scan below is
-    # retained because the ticket id is permissive (``--``/option-looking) and the
-    # exact-one-positional arity and ``requires --user-approved`` diagnostics are not a
-    # single argparse spec.
-    build_delete(prog="rebar delete").parse_known_args(rest)
-
-    user_approved = False
-    positional: list[str] = []
-    for a in rest:
-        if a == "--user-approved":
-            user_approved = True
-        else:
-            positional.append(a)
-
-    if len(positional) != 1:
-        sys.stderr.write("Usage: ticket delete <ticket_id> --user-approved\n")
-        return 1
-    raw_id = positional[0]
-    if not raw_id:
-        sys.stderr.write("Error: ticket_id must be non-empty\n")
-        return 1
-    if not user_approved:
-        sys.stderr.write(
-            "Error: ticket delete requires --user-approved flag (this is a destructive operation)\n"
-            "Usage: ticket delete <ticket_id> --user-approved\n"
+# raw-git-ok: rolls back the delete's own staged files, seam-internal
+def _roll_back(tracker: str, written: list[str]) -> None:
+    """Unstage and remove every file a failed delete wrote."""
+    rels = [_rel(tracker, p) for p in written]
+    if rels:
+        subprocess.run(
+            ["git", "-C", tracker, "reset", "-q", "--", *rels],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
         )
-        return 1
+    for p in written:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
-    tracker = str(config.tracker_dir(repo_root))
+
+# raw-git-ok: store-maintenance command, seam-internal
+def _delete_committed(tracker: str, raw_id: str, fmt: str, repo_root) -> int | tuple[str, str]:
+    """Resolve, check, write and commit one delete; return an exit code or the deleted ids.
+
+    One phase, so a reclaim-superseded clone refused by the write precheck can be healed
+    and the whole phase redone on the reclaimed baseline (bug unwelcome-persimmon-quahog):
+    resolution and the child check must see the healed store, not the superseded one.
+    Raises :class:`SupersededStoreRefused` after rolling back; returns other refusals as an
+    exit code having printed them.
+    """
     ticket_id = resolve_ticket_id(raw_id, tracker)
     if ticket_id is None:
         if fmt == "json":
@@ -375,22 +364,66 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         # Roll back: unstage + remove every file this (failed) delete wrote, so the
         # store is left exactly as before — no half-deleted, wedged-on-rerun state.
-        rels = [_rel(tracker, p) for p in written]
-        if rels:
-            subprocess.run(
-                ["git", "-C", tracker, "reset", "-q", "--", *rels],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-            )
-        for p in written:
-            try:
-                os.remove(p)
-            except OSError:
-                pass
+        _roll_back(tracker, written)
+        if isinstance(exc, _seam.SupersededStoreRefused):
+            raise  # the caller heals the clone and retries this whole phase
         sys.stderr.write(exc.message + "\n")
         return exc.returncode
+    return ticket_id, ticket_dir
+
+
+# raw-git-ok: store-maintenance command, seam-internal
+def delete_cli(argv: list[str], *, repo_root=None) -> int:
+    """``rebar delete <id> --user-approved`` entry."""
+    try:
+        fmt, rest = parse_output(argv, "report")
+    except OutputFormatError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 2
+
+    from rebar._cli._parsers.core.delete import build as build_delete
+
+    # Parser of record for delete's accepted grammar; the imperative scan below is
+    # retained because the ticket id is permissive (``--``/option-looking) and the
+    # exact-one-positional arity and ``requires --user-approved`` diagnostics are not a
+    # single argparse spec.
+    build_delete(prog="rebar delete").parse_known_args(rest)
+
+    user_approved = False
+    positional: list[str] = []
+    for a in rest:
+        if a == "--user-approved":
+            user_approved = True
+        else:
+            positional.append(a)
+
+    if len(positional) != 1:
+        sys.stderr.write("Usage: ticket delete <ticket_id> --user-approved\n")
+        return 1
+    raw_id = positional[0]
+    if not raw_id:
+        sys.stderr.write("Error: ticket_id must be non-empty\n")
+        return 1
+    if not user_approved:
+        sys.stderr.write(
+            "Error: ticket delete requires --user-approved flag (this is a destructive operation)\n"
+            "Usage: ticket delete <ticket_id> --user-approved\n"
+        )
+        return 1
+
+    tracker = str(config.tracker_dir(repo_root))
+    from rebar._commands import _seam
+
+    try:
+        outcome = _seam.retry_after_superseded_heal(
+            lambda: _delete_committed(tracker, raw_id, fmt, repo_root), tracker
+        )
+    except _seam.SupersededStoreRefused as exc:
+        sys.stderr.write(exc.message + "\n")
+        return exc.returncode
+    if isinstance(outcome, int):
+        return outcome
+    ticket_id, ticket_dir = outcome
 
     try:
         write_marker(ticket_dir)
