@@ -24669,9 +24669,31 @@
       "updated_at": "2026-09-05T09:32:58Z"
     },
     "358c-cddf-92e7-48b0": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Goal\n\nLand a regression test proving bug reponsible-exposed-okapi's premise false: a reconciler pass that fails mid-apply (a reclaim fetched mid-pass refusing an inbound write, or any exception) loses no inbound import and duplicates no Jira mutation, once the failed pass's uncommitted state is discarded as the production bridge does.\n\n## Approach\n\nTest-only; no production code changes. One new module, `tests/integration/reconciler/test_inbound_import_replayed_after_failed_pass.py`, drives real passes over the stateful fake Jira from `test_reconcile_idempotency.py` (fixtures imported, not copied) with a committed 20-binding tracker. A pass's inbound EDIT write raises after a new issue DIG-2's inbound create wrote its Jira identity markers; then the uncommitted tracker state is discarded, as a fresh checkout would.\n\nMechanism it pins: `applier.apply` applies inbound before outbound, so the failed pass makes no outbound Jira write. The binding walk's level-triggered ADOPT arm (`binding_walk._adopt_stands_down`: a lone marker equal to the deterministic inbound id, with no binding and no local ticket) replays the import on the next pass, gated by the blast-radius breaker (`max_acting_fraction`, default 0.10). Production holds 5953 confirmed bindings, so a failed pass would need more than 595 orphaned imports before the breaker holds them.\n\n## Scope\n\nIn: the new test module only. Out: any reconciler change.\n\n## Testing\n\nThe module itself: (1) for a reclaim refusal and for a RuntimeError, the failed pass's only Jira writes are DIG-2's 2 identity markers; the next pass imports and binds DIG-2 with one CREATE, applies DIG-101's Jira rename, makes no `create_issue`, keeps one `rebar-id:` label; a further pass makes no Jira write and no new event. (2) With 1 confirmed binding the replay is held and `binding_walk_breaker_refused` is logged with an EXCEEDS reason. (3) A marker naming another local id is not adopted. (4) A surviving local import that lost its binding row is not imported a second time. All pass on current main; `make verify` passes.\n\n## Acceptance criteria\n\n- [ ] A regression test shows that after a pass fails with a mid-pass reclaim refusal (and with a RuntimeError) and its uncommitted state is discarded, the next pass imports and binds the orphaned Jira issue with exactly one CREATE event, no `create_issue` call and a single identity label, and a further pass makes no Jira write.\n- [ ] A test shows the failed pass made no Jira write other than the inbound create's 2 identity markers.\n- [ ] Tests show the breaker holds an over-cap replay and logs `binding_walk_breaker_refused`, a marker naming another local id is not adopted, and a surviving local import is not imported twice.\n- [ ] `make verify` passes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Prove a failed bridge pass loses no inbound import"
+      },
       "created_at": "2026-11-21T15:31:42Z",
       "jira_id": "4599776",
       "jira_key": "REB-7346",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-21T15:31:45Z"
     },
@@ -30252,10 +30274,24 @@
     },
     "41e5-5e7c-52f5-43c6": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nDepends on smoking-bereft-boar. That bug gives Windows a real pid liveness probe and removes `_sweep_exited`'s Unix-only `os.WNOHANG` call. Without it, the retire and stale-lock paths this change makes reachable on Windows would misjudge every holder as alive.\n\nDiscovered while triaging breezy-hogged-mastiff. The 13 entries of `.github/windows-sweep-deselect/detached-maintenance.args` belong to this bug.\n\n## Root cause (verified at origin/main 1a11014a3a4 against the Windows JUnit of run 44681457334)\n`compact_trigger.maybe_compact` (compact_trigger.py:374) and `gc_trigger.maybe_gc` (gc_trigger.py:180) return immediately when `sys.platform == \"win32\"`. That is a product gap: on Windows a close never folds a ticket, and an attested gate never runs snapshot GC.\n- The stated reason no longer holds. The docstring says the store lock's `fcntl` import would crash the detached child, but `rebar._store.lock_kernel` has had a Windows (`msvcrt`) leg since 035b7371de8.\n- Every module on these paths guards `import fcntl` with a None fallback (`lock_kernel`, `git_locking`, `repo_snapshot`).\n- The worker locks are `stamped_lock.stamped_file_lock` (O_EXCL files, portable).\n- `rebar._proc._detach_kwargs` already returns `DETACHED_PROCESS | CREATE_NO_WINDOW` on nt, but is documented as \"not reached in v1\".\n- All 13 tests fail only because the gate returns first: they observe no inline fold and no spawn (`assert []`, `0 == 1`).\n\n## Approach\n- `src/rebar/_commands/compact_trigger.py`:\n  - Delete the win32 early return in `maybe_compact`, and replace the \"Windows is a v1 no-op\" docstring sentence with the platform statement (detached on every platform via `spawn_detached`).\n  - `stop_local_sweep` returns None without signalling when `os.name != \"posix\"`. On Windows `os.kill(SIGTERM)` is TerminateProcess, and with no process start time the stamp cannot prove the pid is still the sweep, so a recycled pid could be killed.\n  - The retiring server's `finish()` still waits on the store write lock, which the running sweep releases at each ticket boundary. So on Windows a retire lets the sweep run on instead of stopping it. The docstring says so.\n- `src/rebar/_snapshot/gc_trigger.py`: delete the win32 early return in `maybe_gc` and fix its docstring.\n- `src/rebar/_proc.py`: correct the `_detach_kwargs` docstring (the nt branch is now reached). Flags unchanged.\n- Docs that describe the no-op: `docs/config.md` (`compact.trigger` comment) and `docs/concurrency.md` (the I9b trigger paragraph) now say Windows detaches the same way.\n- After smoking-bereft-boar, a sweep or GC worker that died without releasing its stamped worker lock is reclaimed as soon as its dead pid is proven. Without that, it would wait for the 1 h age ceiling.\n- No config key, env var or flag. POSIX behaviour is unchanged.\n- `.github/windows-sweep-deselect/detached-maintenance.args`: remove each line whose test passes in the Windows validation run. If the file ends up empty, delete it and its `@` line in `.github/workflows/test.yml`; `tests/unit/test_windows_sweep_deselect.py` keeps the 2 in step.\n- New tests in `tests/unit/test_detached_maintenance_windows.py`:\n  - On every host, `stop_local_sweep` sends no signal when `os.name` is patched to \"nt\", even for a stamp naming a live pid.\n  - On Windows only, a real `spawn_detached` child (DETACHED_PROCESS | CREATE_NO_WINDOW) runs after the parent returns and writes a marker file, polled for up to 30 s. That is the end-to-end proof that the nt detach branch works.\n\n## Scope\n- src/rebar/_commands/compact_trigger.py\n- src/rebar/_snapshot/gc_trigger.py\n- src/rebar/_proc.py (docstring only)\n- docs/config.md\n- docs/concurrency.md\n- tests/unit/test_detached_maintenance_windows.py\n- .github/windows-sweep-deselect/detached-maintenance.args\n- .github/workflows/test.yml (only if the args file is deleted)\n\n## Testing\n- The 13 listed tests are the regression proof. Before the change they fail on Windows (JUnit of run 44681457334: e.g. `the CLI close must spawn exactly one sweep, got []`); after it they must pass.\n- Pre-merge Windows validation: on the exact fixed tree (based on main with smoking-bereft-boar merged) with the lines removed, push `tmp/b4-uncommon-cleansable-wren`, dispatch `gh workflow run 294845723 --ref tmp/b4-uncommon-cleansable-wren`, and record the run id and per-test outcomes in a comment. Then delete the tmp branch.\n- AC1 evidence (\"passed in a `sweep (windows)` run on main after the fix\"): the first scheduled `test.yml` run on main whose head contains the merge commit. Its run id and head SHA go in a comment before the close.\n- `make verify` through verify-slot.sh.\n\n## Acceptance Criteria\n- [ ] Every line removed from `detached-maintenance.args` names a test that passed in a `sweep (windows)` run on main after the fix (run id recorded in a comment).\n- [ ] `detached-maintenance.args` is empty and deleted with its reference in `.github/workflows/test.yml`, or each remaining line names a test recorded on this ticket as intentionally unsupported on Windows with the reason.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Windows sweep: out-of-band compaction and snapshot GC are a no-op on Windows, so 13 trigger tests see no spawn"
       },
       "created_at": "2026-11-20T06:41:13Z",
@@ -37356,7 +37392,7 @@
     "51c6-9f1d-595b-411f": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\nDiscovered while triaging breezy-hogged-mastiff, which owns `.github/windows-sweep-deselect/unclassified.args`. These 11 entries move to `.github/windows-sweep-deselect/crlf.args`, which this bug owns.\n\nThe runner's system gitconfig sets `core.autocrlf=true` (diagnostic run 44672240702, step \"Show git config\": `file:C:/Program Files/Git/etc/gitconfig core.autocrlf=true`). Vendored files not pinned `eol=lf` check out with CRLF, so their pinned SHA-256 no longer matches (`test_jira_dc_harness_shape.py`, `test_bridge_provider_wrappers.py`, `test_reconcile_workflow_lint.py`). Text-mode writes and stdin add `\\r`: the plan-replay `objects/info/alternates` path reads back as `objects?` (`test_plan_replay_tier2.py`), `run_git` text stdin hashes differently (`test_run_git_wrapper.py::test_str_input_is_forwarded_to_stdin`), and `sha256sum` sees `'mcp-publisher.tar.gz'$'\\r'` (`test_mcp_publisher_pin.py`). On macOS, `GIT_CONFIG_GLOBAL` with `core.autocrlf=true` reproduces `test_dc_store_copy_bounded_25e0.py` and `test_reclaim_bridge_history.py`.\n\nEvidence: Windows runs on throwaway branch `tmp/w05-remeasure` with origin/main `717c50f8b33` code plus a selection-only workflow change: run 44665461131 (the 242 `unclassified.args` entries; 48 passed, 194 failed or errored) and run 44681457334 (the 194, xdist, JUnit XML with full tracebacks). Both 2026-11-19 PST.\n\nModules:\n- `tests/integration/test_reclaim_bridge_history.py` (1)\n- `tests/unit/evals/test_plan_replay_tier2.py` (4)\n- `tests/unit/reconciler/test_jira_dc_harness_shape.py` (1)\n- `tests/unit/test_dc_store_copy_bounded_25e0.py` (1)\n- `tests/unit/test_mcp_publisher_pin.py` (1)\n- `tests/unit/test_run_git_wrapper.py` (1)\n- `tests/unit/workflow/test_bridge_provider_wrappers.py` (1)\n- `tests/unit/workflow/test_reconcile_workflow_lint.py` (1)\n\n## Approach\nPin the vendored and hashed files `eol=lf` in `.gitattributes`, write LF explicitly where a file or stdin feeds git or a checksum, and decide whether rebar's own git calls pin `core.autocrlf=false` for the tickets store. Remove each line from `crlf.args` as it passes.\n\n## Scope\nTest or product code for the listed modules, plus `.github/windows-sweep-deselect/crlf.args` (remove each fixed line; delete the file and its `@` reference in `.github/workflows/test.yml` once empty).\n\n## Acceptance Criteria\n- [ ] Every line removed from `crlf.args` names a test that passed in a `sweep (windows)` run on main after the fix (run id recorded in a comment).\n- [ ] `crlf.args` is empty and deleted with its reference in `.github/workflows/test.yml`, or each remaining line names a test recorded on this ticket as intentionally unsupported on Windows with the reason.",
+        "description": "## Context / Problem\nDiscovered while triaging breezy-hogged-mastiff. The 11 entries of `.github/windows-sweep-deselect/crlf.args` belong to this bug. Root-cause evidence (Windows JUnit 44681457334, probe run 44900309390, local macOS runs under core.autocrlf=true) is in this ticket's comments. Depends on transhuman-wounded-pangolin for one test (sub-cause 6).\n\n## Root cause (6 sub-causes; 2 in product code)\n1. **Product contract: `gitutil.run_git` / `_run_in_group` pipe str stdin in text mode.** On Windows Python rewrites each `\\n` as `\\r\\n`, so git receives CRLF. `hash-object --stdin` then hashes different bytes. No shipped caller is affected today: `reconciler/_ref_lock.py` already hashes bytes with `text=False`, and `_snapshot/delta_tree.py`'s checkout-index payload is NUL-separated. The fix makes `run_git`'s documented str-stdin contract platform-stable. The same translation makes `update-index --index-info` record nothing (probe run 44900309390), though no product caller does that today. Test: `test_run_git_wrapper::test_str_input_is_forwarded_to_stdin`.\n2. **Product: `llm/evals/plan_replay/tier2.py` writes `objects/info/alternates` in text mode.** The `\\r` stays in the path, the borrowed objects are not found, and `git reset --hard` exits 128. Tests: the 4 `test_plan_replay_tier2` materialize tests.\n3. **Checkout: 2 SHA-256-pinned vendored files carry no eol attribute.** Git for Windows defaults to core.autocrlf=true, so they check out CRLF and their pins fail. The files are `tests/external/live_jira_dc/pycontribs-jira-LICENSE.txt` and `.github/schemas/gitlab-ci.schema.json`. Tests: `test_jira_dc_harness_shape`, `test_bridge_provider_wrappers`, `test_reconcile_workflow_lint`.\n4. **Test harness: `_dc_fixtures.extract_store_snapshot` uses `git archive`, which applies core.autocrlf**, so extracted events come out CRLF. Test: `test_dc_store_copy_bounded_25e0` (this one reproduces on macOS too).\n5. **Test: `test_mcp_publisher_pin._verify` pipes the checksum line in text mode**, so `sha256sum` sees `'mcp-publisher.tar.gz'$'\\r'`.\n6. **Test: `test_reclaim_bridge_history::test_unrelated_remote_ref_movement_does_not_fail_dry_run` injects its ref through a `#!/bin/sh` file named `git` on PATH.** Windows never runs it, so the ref is never created and `rev-parse` exits 128. This is not line endings; it is the shell-stub problem transhuman-wounded-pangolin solves with `tests/_exe_stub.py`.\n\n## Approach\n1. `src/rebar/_store/gitutil.py`: when `text=True` and `input_data` is str:\n   - Encode it with `_GIT_ENCODING`/`_GIT_ERRORS` (the codec text mode used) and run in binary mode with `check=False`.\n   - Decode stdout/stderr with the same codec and subprocess's universal-newline translation (`\\r\\n`\u2192`\\n`, `\\r`\u2192`\\n`), so returned text is identical on POSIX.\n   - Only then apply `check`, raising `CalledProcessError` with the decoded str. A `TimeoutExpired` gets its `output`/`stderr` decoded the same way.\n   - Apply the same in `_run_in_group`.\n   - The bytes-input contract and its TypeError are unchanged.\n2. `tier2.py`: open the alternates file with `newline=\"\\n\"`.\n3. `.gitattributes`: mark the 2 vendored pinned files `-text` so no checkout converts them. Their blobs are LF today (`ls-files --eol` shows `i/lf`), so the bytes are unchanged.\n4. `tests/external/live_jira_dc/_dc_fixtures.py`: run `git -c core.autocrlf=false archive`.\n5. `tests/unit/test_mcp_publisher_pin.py`: pipe the checksum line as bytes.\n6. `test_reclaim_bridge_history.py`, `test_unrelated_remote_ref_movement_does_not_fail_dry_run`:\n   - Build the ls-remote shim with pangolin's `tests/_exe_stub.py` (a Python-body stub that Windows can run) instead of a `#!/bin/sh` file.\n   - Build the child environment as `{**os.environ, \"PATH\": os.pathsep.join([str(wrapper_dir), str(Path(git_executable).parent), os.environ.get(\"PATH\", \"\")]), ...test vars}`, so the stub dir is a real first PATH entry on every OS and Windows keeps SYSTEMROOT/PATHEXT. Today the `:`-joined PATH replaces the whole environment.\n   - This waits for pangolin's change on main.\n- New regression tests:\n  - `tests/unit/test_run_git_stdin_bytes.py`:\n    - With `subprocess.run` spied, a str `input_data` reaches subprocess as encoded bytes with `text` false. The decoded stdout is unchanged (including `\\r\\n`\u2192`\\n`), and a failing `check=True` call raises `CalledProcessError` carrying str.\n    - With `subprocess.Popen` spied, the same holds for `_run_in_group` (reached through `run_git(timeout=...)`).\n  - In `test_plan_replay_tier2`, an assertion that the alternates file contains no `\\r`.\n- No config key, env var or flag.\n- `.github/windows-sweep-deselect/crlf.args`: remove each line whose test passes in the Windows validation run. If the file ends up empty, delete it and its `@` line in `.github/workflows/test.yml`.\n\n## Scope\n- src/rebar/_store/gitutil.py\n- src/rebar/llm/evals/plan_replay/tier2.py\n- .gitattributes\n- tests/external/live_jira_dc/_dc_fixtures.py\n- tests/unit/test_mcp_publisher_pin.py\n- tests/integration/test_reclaim_bridge_history.py\n- tests/unit/test_run_git_stdin_bytes.py\n- tests/unit/evals/test_plan_replay_tier2.py\n- .github/windows-sweep-deselect/crlf.args\n- .github/workflows/test.yml (only if the args file is deleted)\n\n## Testing\n- Pre-merge Windows validation on the exact fixed tree, with the lines removed: push `tmp/b4-neglectful-acceptable-gerbil`, dispatch `gh workflow run 294845723 --ref tmp/b4-neglectful-acceptable-gerbil`, and record the run id in a comment. Then delete the tmp branch.\n- AC1 evidence: the first scheduled `test.yml` run on main whose head contains the merge commit. Its run id goes in a comment before the close.\n- `make verify` through verify-slot.sh.\n\n## Acceptance Criteria\n- [ ] Every line removed from `crlf.args` names a test that passed in a `sweep (windows)` run on main after the fix (run id recorded in a comment).\n- [ ] `crlf.args` is empty and deleted with its reference in `.github/workflows/test.yml`, or each remaining line names a test recorded on this ticket as intentionally unsupported on Windows with the reason.",
         "priority": "Low",
         "status": "To Do",
         "summary": "Windows sweep: 11 tests fail on CRLF from core.autocrlf=true or text-mode newline translation"
@@ -48119,6 +48155,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:55Z"
     },
+    "6c2e-f2d9-6264-4c55": {
+      "created_at": "2026-11-21T16:32:11Z",
+      "jira_id": "4599778",
+      "jira_key": "REB-7348",
+      "state": "confirmed",
+      "updated_at": "2026-11-21T16:32:13Z"
+    },
     "6c34-2d41-5f22-42a6": {
       "baseline": {
         "assignee": null,
@@ -54783,9 +54826,17 @@
       "updated_at": "2026-08-15T15:03:18Z"
     },
     "7b3a-e9a8-a547-4ad6": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nThe Windows sweep on main (run 44911386034, job 136867764314, at a99339e8ce8) failed 2 tests and nothing else (20480 passed): `tests/unit/metrics/test_git_metrics.py::test_history_walk_cat_file_starts_do_not_grow_with_revisions` and `::test_oracle_cap_change_events_compares_unsampled_adjacent_revisions`, both `CalledProcessError: ['git', 'fast-import', '--quiet', '--export-marks=C:\\\\...\\\\repo.marks'] returned non-zero exit status 128`. Both use `_fast_import_history`, added by 863abe7cd19 (rubbery-adamantine-panda). This resets the 3-green-sweep count for charitable-tyrannical-hydra and sporting-feudalist-bluet.\n\n## Root cause (verified)\n`_fast_import_history` passes the fast-import stream with `text=True`. On Windows, Python's text-mode stdin translates every `\\n` to `\\r\\n`. fast-import is line-oriented and byte-counted, so it reads `commit refs/heads/main\\r` and exits 128 (the `data <n>` counts are also off by one per line). The marks path is not the cause.\n\nReproduction on macOS (Nov 21 2026): the same minimal stream fed with LF endings imports (rc 0); with each line ending converted to CRLF, `git fast-import` fails with `fatal: branch name doesn't conform to Git standards: refs/heads/main?` and writes a crash report.\n\n## Approach\nIn `tests/unit/metrics/test_git_metrics.py`, `_fast_import_history` builds the stream as UTF-8 bytes and calls `subprocess.run` without `text=True` (`input=stream.encode(\"utf-8\")`), with `data` counts taken from the encoded byte lengths as before. No newline translation then happens on any platform. No skip: fast-import is cross-platform.\n\n## Scope\n- `tests/unit/metrics/test_git_metrics.py`\n\n## Testing\n- A unit test feeds `_fast_import_history`'s exact stream through a CRLF translation check: it monkeypatches `subprocess.run` to capture `input` and asserts it is `bytes` containing no `\\r`.\n- The 2 failing tests pass on macOS and in a Windows sweep dispatched on a temp branch (`gh workflow run 294845723 --ref tmp/...`), run recorded here, branch deleted afterwards.\n\n## Acceptance Criteria\n- [ ] The 2 tests pass in a Windows sweep dispatched on the change, recorded here.\n- [ ] A test pins that the fast-import stream is sent as bytes with LF line endings.\n- [ ] `make verify` passes and Gerrit gives Verified +1.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Windows sweep: metrics fast-import fixture sends its stream in text mode, so Windows writes CRLF and git fast-import exits 128"
+      },
       "created_at": "2026-11-21T15:31:45Z",
       "jira_id": "4599777",
       "jira_key": "REB-7347",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-21T15:31:48Z"
     },
@@ -104468,6 +104519,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-07T19:35:10Z"
     },
+    "e6f5-f793-67a1-443b": {
+      "created_at": "2026-11-21T16:32:14Z",
+      "jira_id": "4599779",
+      "jira_key": "REB-7349",
+      "state": "confirmed",
+      "updated_at": "2026-11-21T16:32:17Z"
+    },
     "e6f9-e463-a3c3-4d16": {
       "baseline": {
         "assignee": null,
@@ -121718,7 +121776,14 @@
     "1795272329462867001": "__rebar_unknown_comment_id__",
     "1795272548169545001": "__rebar_unknown_comment_id__",
     "1795274100877192001": "__rebar_unknown_comment_id__",
-    "1795274533425330001": "__rebar_unknown_comment_id__"
+    "1795274533425330001": "__rebar_unknown_comment_id__",
+    "1795276346009867001": "__rebar_unknown_comment_id__",
+    "1795276574176988001": "__rebar_unknown_comment_id__",
+    "1795276803890396001": "__rebar_unknown_comment_id__",
+    "1795276838883138001": "__rebar_unknown_comment_id__",
+    "1795276886923822001": "__rebar_unknown_comment_id__",
+    "1795277384533080001": "__rebar_unknown_comment_id__",
+    "1795278320527299001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -127405,6 +127470,8 @@
     "REB-7345": "98a7-07c4-fc4d-4e08",
     "REB-7346": "358c-cddf-92e7-48b0",
     "REB-7347": "7b3a-e9a8-a547-4ad6",
+    "REB-7348": "6c2e-f2d9-6264-4c55",
+    "REB-7349": "e6f5-f793-67a1-443b",
     "REB-735": "6f0a-0c1e-cdf8-4a8d",
     "REB-736": "9408-861a-405d-4131",
     "REB-739": "df42-5932-6178-4376",
