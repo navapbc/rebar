@@ -7,6 +7,7 @@ snapshots that belong to fsck repair.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -507,6 +508,25 @@ def test_operator_no_commit_is_preserved_and_writes_no_journal(
     assert not compact_recovery.pending_intents(str(_tracker(repo))), (
         "a --no-commit fold journaled an intent; recovery would revert the operator's state"
     )
+
+
+def test_a_native_separator_journal_still_finds_its_committed_snapshot(store: Path) -> None:
+    """A journal written with the OS separator (``<tid>\\x-SNAPSHOT.json`` on Windows before
+    the POSIX-form fix) must still be read against HEAD, which names tree paths with ``/``.
+    Read wrongly, a fold that already committed looks abandoned and recovery reverts it."""
+    repo = store
+    tid = _seed(repo, "native separator journal")
+    assert _fold(repo, tid) == 0
+    snap = _snapshots(repo, tid)[0]
+    tracker = str(_tracker(repo))
+    journal = compact_recovery.write_intent(tracker, tid, str(snap), [])
+    record = json.loads(Path(journal).read_text(encoding="utf-8"))
+    record["snapshot"] = os.path.join(tid, snap.name)
+    Path(journal).write_text(json.dumps(record), encoding="utf-8")
+
+    assert compact_recovery.recover_abandoned_folds_locked(tracker) == 0
+    assert snap.exists(), "recovery reverted a committed fold named with the native separator"
+    assert not compact_recovery.pending_intents(tracker)
 
 
 def test_crash_state_is_json_round_trippable(store: Path) -> None:

@@ -146,7 +146,7 @@ def test_both_real_call_sites_resolve_to_a_real_file() -> None:
                 f"{tf_file.relative_to(REPO_ROOT)} references {call.group(1)!r} but the gate "
                 "cannot resolve it -- that call site would be SILENTLY UNGUARDED"
             )
-            resolved[call.group(1)] = str(target.relative_to(REPO_ROOT))
+            resolved[call.group(1)] = target.relative_to(REPO_ROOT).as_posix()
 
     assert resolved == {
         "${path.module}/user_data.sh": "infra/terraform/user_data.sh",

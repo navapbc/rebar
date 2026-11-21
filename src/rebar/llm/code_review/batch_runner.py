@@ -17,7 +17,6 @@ constructs it with the context it assembled; the offline test constructs it dire
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 from rebar.llm.errors import LLMError, LLMUnavailableError
@@ -301,7 +300,7 @@ class CodeReviewBatchRunner(BatchRunner):
                 repo_root,
                 where=f"code-review project criterion {logical_id!r}",
             )
-            expected = Path(".rebar") / "prompts" / f"{prompt_id}.md"
+            expected = f".rebar/prompts/{prompt_id}.md"
             try:
                 prompt = get_prompt(prompt_id, repo_root=repo_root)
             except PromptError as exc:

@@ -100,8 +100,8 @@ def test_agreement_check_raises_naming_both_roots(tmp_path) -> None:
         check_repo_root_agreement(str(discovery), str(resolution), where="unit-seam")
 
     message = str(exc.value)
-    assert str(discovery) in message
-    assert str(resolution) in message
+    assert repr(str(discovery)) in message
+    assert repr(str(resolution)) in message
     assert "unit-seam" in message
 
 
@@ -111,7 +111,7 @@ def test_agreement_check_raises_when_resolution_root_is_none(tmp_path) -> None:
     with pytest.raises(RepoRootMismatchError) as exc:
         check_repo_root_agreement(str(tmp_path), None, where="unit-seam")
 
-    assert str(tmp_path) in str(exc.value)
+    assert repr(str(tmp_path)) in str(exc.value)
 
 
 def test_agreement_check_resolves_the_discovery_root_fallback(tmp_path, monkeypatch) -> None:
@@ -225,8 +225,8 @@ def test_code_review_mismatched_roots_fail_loudly_not_as_prompt_not_found(tmp_pa
         runner.run(_batch_request(str(resolution)), _RecordingAgent())
 
     message = str(exc.value)
-    assert str(discovery) in message
-    assert str(resolution) in message
+    assert repr(str(discovery)) in message
+    assert repr(str(resolution)) in message
 
 
 def test_code_review_none_resolution_root_fails_loudly(tmp_path) -> None:
@@ -291,5 +291,5 @@ def test_plan_review_descriptor_seam_rejects_a_divergent_resolution_root(
         plan_registry._descriptor_from_prompt(_PR_PROJECT_ID, repo_root=root)
 
     message = str(exc.value)
-    assert root in message
-    assert str(other) in message
+    assert repr(root) in message
+    assert repr(str(other)) in message

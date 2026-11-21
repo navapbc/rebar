@@ -173,7 +173,7 @@ class Unresolved:
 def measure(tf_file: Path, root: Path) -> list[Payload | Unresolved]:
     """Measure every ``user_data``/``user_data_base64`` attribute in one ``.tf`` file."""
     text = tf_file.read_text(encoding="utf-8")
-    rel = str(tf_file.relative_to(root))
+    rel = tf_file.relative_to(root).as_posix()
     results: list[Payload | Unresolved] = []
     for attr in _USER_DATA_ATTR.finditer(text):
         name, expression = attr.group(1), attr.group(2)
@@ -195,7 +195,7 @@ def measure(tf_file: Path, root: Path) -> list[Payload | Unresolved]:
             Payload(
                 rel,
                 name,
-                str(template.relative_to(root)),
+                template.relative_to(root).as_posix(),
                 len(body),
                 len(transport),
                 "gzipped" if gzipped else "plain",

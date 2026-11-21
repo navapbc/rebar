@@ -209,8 +209,8 @@ def test_injected_perfect_solver_meets_calibration_metric_contract() -> None:
 
 def test_project_assets_are_explicitly_committed_and_documented() -> None:
     ignore = (Path(REPO_ROOT) / ".gitignore").read_text(encoding="utf-8")
-    assert f"!{_PROMPT_FILE.relative_to(REPO_ROOT)}" in ignore
-    assert f"!{_EVAL_FILE.relative_to(REPO_ROOT)}" in ignore
+    assert f"!{_PROMPT_FILE.relative_to(REPO_ROOT).as_posix()}" in ignore
+    assert f"!{_EVAL_FILE.relative_to(REPO_ROOT).as_posix()}" in ignore
 
     docs = (Path(REPO_ROOT) / "docs" / "llm-framework.md").read_text(encoding="utf-8")
     section = docs.split("Project dogfood: review-phase-boundaries", 1)

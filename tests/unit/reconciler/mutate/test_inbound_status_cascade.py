@@ -137,8 +137,12 @@ def test_inbound_reactivation_cascades_closed_parent(tmp_path, applier):
     )
     # Parent-first ordering: the cascaded parent event is reported BEFORE the
     # child's own STATUS event in the applier's written-events list.
-    parent_paths = [p for p in events if "/jira-dig-1/" in p and p.endswith("-STATUS.json")]
-    child_paths = [p for p in events if "/jira-dig-2/" in p and p.endswith("-STATUS.json")]
+    parent_paths = [
+        p for p in events if Path(p).parent.name == "jira-dig-1" and p.endswith("-STATUS.json")
+    ]
+    child_paths = [
+        p for p in events if Path(p).parent.name == "jira-dig-2" and p.endswith("-STATUS.json")
+    ]
     assert parent_paths and child_paths, f"expected parent+child STATUS paths, got {events}"
     assert events.index(parent_paths[0]) < events.index(child_paths[0])
 
@@ -161,7 +165,7 @@ def test_inbound_reopen_cascades_whole_closed_chain(tmp_path, applier):
     assert _reduced_status(tracker_dir, "jira-dig-10") == "open"
     # Topmost eligible ancestor first: grandparent, then parent, then child.
     chain = ("jira-dig-10", "jira-dig-11", "jira-dig-12")
-    order = [seg for p in events for seg in chain if f"/{seg}/" in p]
+    order = [seg for p in events for seg in chain if Path(p).parent.name == seg]
     assert order == list(chain), f"got {order} from {events}"
 
 

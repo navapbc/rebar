@@ -96,7 +96,10 @@ def test_half_fixed_copy_is_rejected(_rebar_repo_template: Path, tmp_path: Path)
         capture_output=True,
         text=True,
     ).stdout.strip()
-    assert dst_s in common, "precondition: --git-common-dir is green on a half-fixed copy"
+    # git prints C:/... on Windows; compare as POSIX on both sides.
+    assert Path(dst_s).as_posix() in Path(common).as_posix(), (
+        "precondition: --git-common-dir is green on a half-fixed copy"
+    )
 
     with pytest.raises(AssertionError, match="outside itself"):
         assert_store_self_contained(dest)

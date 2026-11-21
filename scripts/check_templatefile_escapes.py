@@ -172,7 +172,7 @@ def resolve_template_path(raw: str, tf_file: Path, root: Path) -> Path | None:
     matches = [
         p
         for p in files_named(root, ("*" + Path(suffix).name,), EXCLUDED_DIRS)
-        if str(p).endswith(suffix)
+        if p.as_posix().endswith(suffix)
     ]
     return matches[0] if len(matches) == 1 else None
 
@@ -208,12 +208,12 @@ def check_repo(root: Path) -> list[Report]:
                 # A call site the gate cannot resolve is a call site the gate cannot CHECK.
                 # Skipping it silently would let the guard exit 0 while leaving the very
                 # breakage it exists to catch unexamined -- a vacuous pass.
-                findings.append(Unresolved(str(tf_file.relative_to(root)), call.group(1)))
+                findings.append(Unresolved(tf_file.relative_to(root).as_posix(), call.group(1)))
                 continue
             allowed = declared_vars(tf_text, call.end()) | BUILTIN_ROOTS
             body_text = template.read_text(encoding="utf-8")
             lines = body_text.split("\n")
-            rel = template.relative_to(root)
+            rel = template.relative_to(root).as_posix()
             # `%{ for k, v in items }` binds k and v for the REST of the loop, and those
             # bindings are read by SEPARATE interpolations (`${k}`) that carry no trace of the
             # directive. Scope therefore has to be tracked across the template, not per
@@ -230,7 +230,7 @@ def check_repo(root: Path) -> list[Report]:
                 in_scope = allowed.union(*scopes) if scopes else allowed
                 for name in referenced_roots(expr):
                     if name not in in_scope:
-                        findings.append(Finding(str(rel), line, col, name, lines[line - 1]))
+                        findings.append(Finding(rel, line, col, name, lines[line - 1]))
                         break
     return findings
 
