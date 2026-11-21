@@ -243,16 +243,39 @@ def _fast_import_history(repo: Path, commits: list[tuple[str, dict[str, str]]]) 
             stream += [f"M 100644 inline {path}", f"data {len(content.encode())}", content]
         stream.append("")
     marks = repo.parent / f"{repo.name}.marks"
+    # Bytes, not text: Windows text-mode stdin rewrites "\n" as "\r\n", which breaks
+    # fast-import's line and byte-count framing (graphicial-dry-shoveler).
     subprocess.run(
         ["git", "fast-import", "--quiet", f"--export-marks={marks}"],
         cwd=repo,
-        input="\n".join(stream) + "\n",
+        input=("\n".join(stream) + "\n").encode("utf-8"),
         check=True,
         capture_output=True,
-        text=True,
     )
-    by_mark = dict(line.split() for line in marks.read_text().splitlines())
+    by_mark = dict(line.split() for line in marks.read_text(encoding="utf-8").splitlines())
     return [by_mark[f":{mark}"] for mark in range(1, len(commits) + 1)]
+
+
+def test_fast_import_stream_is_sent_as_lf_bytes(tmp_path, monkeypatch):
+    """No platform newline translation can reach fast-import's byte-counted stream."""
+    sent: list[object] = []
+    real_run = subprocess.run
+
+    def capture(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "fast-import"]:
+            sent.append(kwargs.get("input"))
+            assert not kwargs.get("text") and "encoding" not in kwargs
+        return real_run(cmd, *args, **kwargs)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    monkeypatch.setattr(subprocess, "run", capture)
+    _fast_import_history(repo, [("2026-02-01T00:00:00+00:00", {"a.txt": "x\ny\n"})])
+
+    (payload,) = sent
+    assert isinstance(payload, bytes)
+    assert b"\r" not in payload
 
 
 def test_oracle_cap_change_events_compares_unsampled_adjacent_revisions(tmp_path):
