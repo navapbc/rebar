@@ -13,8 +13,9 @@ import logging
 import os
 import socket
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -250,20 +251,75 @@ def _signal_zero_probes_liveness() -> bool:
     return os.name == "posix"
 
 
-def _pid_alive(pid: int) -> bool:
-    """Whether *pid* is a live process. ``os.kill(pid, 0)`` probes existence without
-    signalling. A PermissionError means the pid exists but is owned by another user
-    (alive); any other error is treated as alive (conservative — never reclaim on
-    uncertainty).
+# Windows process-probe constants (winnt.h / winerror.h / winbase.h).
+_SYNCHRONIZE = 0x00100000
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_ERROR_INVALID_PARAMETER = 87
+_WAIT_OBJECT_0 = 0
 
-    Where signal 0 is not a probe (:func:`_signal_zero_probes_liveness`), there is no
-    liveness SIGNAL at all, so the answer is the conservative one — "alive" — and the
-    decision falls through to the branches that need positive proof: the caller's held
-    exclusive leg, or the wall-clock age ceiling. That NARROWS reclamation rather than
-    weakening it: nothing is ever reclaimed on less evidence than before, a dead owner is
-    still reclaimed via the exclusive-leg proof in :func:`_stamp_is_stale`, and the
-    ceiling still stops an unprovable stamp wedging the store forever."""
+
+def _load_kernel32() -> tuple[Any, Callable[[], int]]:
+    """Return Windows ``kernel32`` with typed signatures, and its last-error reader.
+
+    ``use_last_error=True`` plus :func:`ctypes.get_last_error` is the reliable way to read a
+    Win32 error through ctypes; ``GetLastError()`` called separately can be overwritten by the
+    runtime between calls. Only called on Windows."""
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    k32.CloseHandle.restype = wintypes.BOOL
+    return k32, ctypes.get_last_error  # type: ignore[attr-defined]
+
+
+def _windows_pid_alive(
+    pid: int, kernel32: Any = None, get_last_error: Callable[[], int] | None = None
+) -> bool:
+    """Whether *pid* is a live process on Windows, asked WITHOUT signalling it.
+
+    ``OpenProcess`` failing with ``ERROR_INVALID_PARAMETER`` means no process has that id, the
+    one answer that proves the pid dead. An exited process still opens while any handle to it
+    remains, so a zero-timeout wait tells exited (``WAIT_OBJECT_0``) from running. A pid of 0
+    or below answers alive without a call: ``OpenProcess`` also fails with 87 for pid 0 (the
+    System Idle Process), and a corrupt stamp must never earn a liveness-based reclaim. Every
+    other outcome (access denied, a failed wait, no ctypes) is "alive", the same conservative
+    answer the POSIX probe gives on uncertainty. *kernel32* and *get_last_error* are
+    injectable so the decision table is testable on any host."""
+    if pid <= 0:
+        return True
+    try:
+        if kernel32 is None or get_last_error is None:
+            kernel32, get_last_error = _load_kernel32()
+        handle = kernel32.OpenProcess(_SYNCHRONIZE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return get_last_error() != _ERROR_INVALID_PARAMETER
+        try:
+            return kernel32.WaitForSingleObject(handle, 0) != _WAIT_OBJECT_0
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001 — never reclaim on uncertainty
+        return True
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether *pid* is a live process. On POSIX ``os.kill(pid, 0)`` probes existence without
+    signalling. A PermissionError means the pid exists but is owned by another user (alive);
+    any other error is treated as alive (conservative — never reclaim on uncertainty).
+
+    Where signal 0 is not a probe (:func:`_signal_zero_probes_liveness`), ``os.kill`` must
+    never be called. On Windows the answer comes from :func:`_windows_pid_alive`, which opens
+    the process instead of signalling it and so can PROVE a holder gone, as on POSIX. On any
+    other such platform there is no liveness signal at all, and the answer is the conservative
+    "alive": the decision then falls through to the branches that need positive proof (the
+    caller's held exclusive leg, or the wall-clock age ceiling)."""
     if not _signal_zero_probes_liveness():
+        if os.name == "nt":
+            return _windows_pid_alive(pid)
         return True
     try:
         os.kill(pid, 0)

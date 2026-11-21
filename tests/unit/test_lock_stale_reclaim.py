@@ -15,10 +15,10 @@ from __future__ import annotations
 import errno as _errno
 import os
 import socket
-import subprocess
 import time as _time
 
 import pytest
+from _python_child import dead_pid
 
 from rebar._store import lock as _lock
 from rebar._store import lock_kernel as _kernel
@@ -26,10 +26,8 @@ from rebar._store import lock_owner as _owner
 
 
 def _dead_pid() -> int:
-    """A PID that is no longer alive: spawn a trivial child and reap it."""
-    p = subprocess.Popen(["true"])
-    p.wait()
-    return p.pid
+    """A pid that is provably not running (see tests/_python_child.py)."""
+    return dead_pid()
 
 
 def _seed_mkdir_lock(tracker, owner: str | None) -> None:

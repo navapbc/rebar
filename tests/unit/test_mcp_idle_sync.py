@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import pytest
+from _python_child import spawn_python, stop
 
 from rebar._store import push_state, sync
 
@@ -160,25 +161,19 @@ def test_a_busy_write_lock_is_logged_with_its_holder(
     store: dict[str, Path], caplog: pytest.LogCaptureFixture
 ) -> None:
     tracker = str(store["tracker"])
-    holder = subprocess.Popen(
-        [sys.executable, "-c", _HOLDER_SRC, tracker],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    holder, holder_pid = spawn_python(_HOLDER_SRC, tracker)
     try:
         assert holder.stdout is not None
         assert holder.stdout.readline().strip() == "holding"
         with caplog.at_level(logging.WARNING):
             outcome = sync.idle_sync(tracker, lock_timeout=1)
     finally:
-        holder.kill()
-        holder.wait(timeout=30)
+        stop(holder, holder_pid)
 
     assert outcome == "lock-busy"
     text = _warnings(caplog)
     assert "lock busy" in text
-    assert f"pid={holder.pid}" in text
+    assert f"pid={holder_pid}" in text
 
 
 def test_an_already_current_store_logs_nothing_at_warning(

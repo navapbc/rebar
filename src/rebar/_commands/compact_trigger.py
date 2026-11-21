@@ -241,11 +241,13 @@ def _sweep_exited(tracker: str, pid: int) -> bool:
     linger as a zombie that signal 0 still finds), gone, or no longer the lock's holder."""
     from rebar._store import lock_owner as _owner
 
-    try:
-        if os.waitpid(pid, os.WNOHANG)[0] == pid:
-            return True
-    except OSError:
-        pass  # not our child: init reaps it, and signal 0 below sees it go
+    wnohang = getattr(os, "WNOHANG", None)  # Unix-only; Windows has no zombie to reap
+    if wnohang is not None:
+        try:
+            if os.waitpid(pid, wnohang)[0] == pid:
+                return True
+        except OSError:
+            pass  # not our child: init reaps it, and the liveness probe below sees it go
     if not _owner._pid_alive(pid):
         return True
     stamp = _read_trigger_stamp(tracker)

@@ -7,10 +7,9 @@ exercises the same path."""
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 
 import pytest
+from _python_child import spawn_python, stop
 
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _owner
@@ -169,15 +168,13 @@ def test_contended_timeout_names_the_holder(tmp_path):
     process holding the lock — times out with a message naming what holds it."""
     tracker = str(tmp_path)
     holder_src = (
-        "import sys, time\n"
+        "import time\n"
         "from rebar._store import lock\n"
         "h = lock.acquire(sys.argv[1], timeout=10, attempts=1)\n"
         "sys.stdout.write('held\\n'); sys.stdout.flush()\n"
         "time.sleep(30)\n"
     )
-    proc = subprocess.Popen(
-        [sys.executable, "-c", holder_src, tracker], stdout=subprocess.PIPE, text=True
-    )
+    proc, pid = spawn_python(holder_src, tracker)
     try:
         assert proc.stdout is not None
         assert proc.stdout.readline().strip() == "held"  # blocking wait: the lock IS taken
@@ -185,14 +182,14 @@ def test_contended_timeout_names_the_holder(tmp_path):
         with pytest.raises(_lock.LockTimeout) as excinfo:
             _lock.acquire(tracker, timeout=1, attempts=1)
     finally:
-        proc.kill()
-        proc.wait()
+        stop(proc, pid)
 
     message = str(excinfo.value)
     # The bash-parity prefix is unchanged, so anything keyed on it still matches...
     assert message.startswith("flock: could not acquire lock after 1s")
     # ...and the holder is NAMED, so diagnosis needs no commit-timeline inference.
-    assert f"pid={proc.pid}" in message
+    # The interpreter's own pid: behind a venv launcher, proc.pid is the launcher's.
+    assert f"pid={pid}" in message
     assert "pid_state=live" in message or "pid_state=unverified-live" in message
     assert excinfo.value.holder is not None
 

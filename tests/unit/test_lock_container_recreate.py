@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import os
 import socket
-import subprocess
 
 import pytest
+from _python_child import dead_pid
 
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _owner
@@ -25,10 +25,8 @@ _NEW_NS = "4026533117"
 
 
 def _dead_pid() -> int:
-    """A PID that is no longer alive: spawn a trivial child and reap it."""
-    p = subprocess.Popen(["true"])
-    p.wait()
-    return p.pid
+    """A pid that is provably not running (see tests/_python_child.py)."""
+    return dead_pid()
 
 
 def _seed(tmp_path, stamp: str) -> str:

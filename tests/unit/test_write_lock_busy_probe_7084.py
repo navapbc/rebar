@@ -17,6 +17,7 @@ from __future__ import annotations
 import errno
 
 import pytest
+from _python_child import spawn_python, stop
 
 from rebar._store import lock as _lock
 from rebar._store import lock_kernel as _kernel
@@ -114,28 +115,21 @@ def test_probe_reports_busy_for_a_contended_fcntl_leg(tmp_path, monkeypatch):
 def test_probe_answers_a_lock_held_by_another_process(tmp_path):
     """The case that matters in the field: the holder is a DIFFERENT process, so the
     fcntl leg is genuinely contended rather than re-entrantly ours."""
-    import subprocess
-    import sys
-
     src = (
-        "import sys, time\n"
         "from rebar._store import lock\n"
         "h = lock.acquire(sys.argv[1], timeout=10, attempts=1)\n"
         "sys.stdout.write('held\\n'); sys.stdout.flush()\n"
-        "time.sleep(30)\n"
+        "import time; time.sleep(30)\n"
     )
-    proc = subprocess.Popen(
-        [sys.executable, "-c", src, str(tmp_path)], stdout=subprocess.PIPE, text=True
-    )
+    proc, pid = spawn_python(src, str(tmp_path))
     try:
         assert proc.stdout is not None
         assert proc.stdout.readline().strip() == "held"
         assert _lock.write_lock_is_busy(str(tmp_path)) is True
     finally:
-        proc.kill()
-        proc.wait()
-
+        stop(proc, pid)
     # The killed holder leaves its mkdir stamp behind, so the store still reads busy —
     # reclamation of an orphan is acquire()'s job (and unchanged by R3), not the probe's.
     assert _lock.write_lock_is_busy(str(tmp_path)) is True
+    assert f"pid={pid}" in _lock.describe_lock_holder(str(tmp_path))
     assert "pid_state=not-running" in _lock.describe_lock_holder(str(tmp_path))
