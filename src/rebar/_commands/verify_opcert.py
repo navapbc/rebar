@@ -104,6 +104,40 @@ def _completion_cert_problem(state, ticket_id, root, required_env, trusted_pairs
     return "" if verdict.verified else f"invalid op-cert ({verdict.verdict}: {verdict.reason})"
 
 
+def _provably_not_closed(events, ticket_id) -> bool:
+    """True only when the raw log positively shows the ticket is not closed now.
+
+    That needs every event parsed (no compacted SNAPSHOT ledger entry, whose ``event`` is
+    ``None``) and a latest STATUS event whose status is not ``closed``. Anything less is
+    unknown, and an unknown ticket is judged, not skipped."""
+    latest = None
+    for ev in events:
+        if ev.ticket_id != ticket_id:
+            continue
+        if ev.event is None:
+            return False
+        if ev.event.get("event_type") == "STATUS":
+            latest = (ev.event.get("data") or {}).get("status")
+    return latest is not None and latest != "closed"
+
+
+def _scoped_state(rebar, ticket_id, root, events) -> tuple[dict | None, str]:
+    """The closed ticket's state, or ``None`` when it is out of scope, plus why it is unreadable.
+
+    A ticket whose state cannot be reduced is NOT dropped unless the log proves it is not
+    closed: otherwise it stays in scope with an ``unreadable ticket state`` reason, so an
+    enforcing gate fails closed on it (bug scarlet-unsocial-limpkin)."""
+    try:
+        state = rebar.show_ticket(ticket_id, repo_root=root)
+    except Exception as exc:  # noqa: BLE001 — any reduce failure; judged below, never skipped
+        if _provably_not_closed(events, ticket_id):
+            return None, ""
+        return {}, f"unreadable ticket state ({type(exc).__name__}: {exc})"
+    if not isinstance(state, dict) or state.get("status") != "closed":
+        return None, ""
+    return state, ""
+
+
 @guard_parse_errors
 def cli(argv: list[str]) -> int:
     p = build_opcert(prog="rebar verify-opcert")
@@ -178,11 +212,8 @@ def _gate(args, cfg) -> int:
 
     for ticket_id in ticket_ids:
         # IN SCOPE for the completion-verifier lane iff the ticket is CLOSED.
-        try:
-            state = rebar.show_ticket(ticket_id, repo_root=args.root)
-        except Exception:  # noqa: BLE001 — an unreadable ticket is treated as out of scope
-            continue
-        if not isinstance(state, dict) or state.get("status") != "closed":
+        state, unreadable = _scoped_state(rebar, ticket_id, args.root, events)
+        if state is None:
             continue
         in_scope += 1
         # Resolve the terminal close STATUS as the enforcement anchor. A compacted or missing
@@ -192,7 +223,7 @@ def _gate(args, cfg) -> int:
             _resolve_commit(anchor, args.root, commit_map) if anchor is not None else None
         )
 
-        reason = (
+        reason = unreadable or (
             _completion_cert_problem(state, ticket_id, args.root, required_env, trusted_pairs)
             if required_env and trusted_pairs is not None
             else "no required environment configured"
