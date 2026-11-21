@@ -82,6 +82,12 @@ def _deleted_path_for_uuid(tracker: str, ticket_id: str, uuid: str) -> tuple[str
     return None
 
 
+#: Pre-images are read with ``cat-file blob``, which takes only an object name. ``git show
+#: <rev>:<path>`` with no ``--`` also stats the argument as a possible filename to rule out
+#: ambiguity, and on Windows a deep tracker path pushes cwd + argument past MAX_PATH, so git
+#: died with "Filename too long" and nothing was restored (bug cold-censorable-armedcrab).
+
+
 def _uuid_fallback(
     tracker: str, ticket_id: str, ticket_dir: str, have: set, *, dry_run: bool
 ) -> list[str]:
@@ -101,7 +107,7 @@ def _uuid_fallback(
         if dry_run:
             out.append(name)
             continue
-        blob = run_git(tracker, "show", f"{commit}^:{path}", check=False, text=False)
+        blob = run_git(tracker, "cat-file", "blob", f"{commit}^:{path}", check=False, text=False)
         if blob.returncode != 0 or not blob.stdout:
             continue
         with open(os.path.join(ticket_dir, name + RETIRED_SUFFIX), "wb") as fh:
@@ -140,7 +146,9 @@ def restore_deleted_sources(
             restored.append(name)
             continue
         try:
-            blob = run_git(tracker, "show", f"{commit}^:{path}", check=False, text=False)
+            blob = run_git(
+                tracker, "cat-file", "blob", f"{commit}^:{path}", check=False, text=False
+            )
         except (OSError, subprocess.SubprocessError):
             continue
         if blob.returncode != 0 or not blob.stdout:
