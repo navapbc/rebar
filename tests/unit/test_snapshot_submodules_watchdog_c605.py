@@ -4,9 +4,9 @@ Bug reluctant-corrupt-whippet: ``repo_snapshot._list_submodules`` parsed the std
 ``git ls-tree`` without checking how the call ended. A watchdog-killed or failed listing has
 empty stdout, so it answered "no submodules", and ``materialize`` wrote that answer to the
 immutable ``<sha>.caveats.json`` sidecar, where every later cache hit trusted it. These tests
-fire the real watchdog the way ``test_snapshot_git_watchdog_d33f`` does: a ``git`` wrapper
-on ``PATH`` replaces ``ls-tree`` with ``exec sleep`` and ``_GIT_TIMEOUT`` is shrunk to 1 s
-while the hang is switched on.
+fire the real watchdog the way ``test_snapshot_git_watchdog_d33f`` does: a ``git`` stub
+on ``PATH`` (``tests/_exe_stub.py``) sleeps in place of ``ls-tree`` and ``_GIT_TIMEOUT`` is
+shrunk to 1 s while the hang is switched on.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _exe_stub import install_exe_stub
 
 from rebar._snapshot import git_fetch, repo_snapshot
 from rebar._snapshot.git_fetch import SnapshotError
@@ -62,21 +63,21 @@ def slow_ls_tree(repo: tuple[str, str], tmp_path: Path, monkeypatch: pytest.Monk
     assert real_git
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    wrapper = bindir / "git"
-    wrapper.write_text(
-        "#!/bin/sh\n"
-        f'if [ -n "$WHIPPET_SLOW" ] && [ "$1" = "-C" ] && [ "$2" = "{root}" ] '
-        '&& [ "$3" = "ls-tree" ]; then\n'
-        "  exec sleep 30\n"
-        "fi\n"
-        # A loaded host: the recovery listing answers, just later than the 1 s slow-path bound.
-        f'if [ -n "$WHIPPET_LOADED" ] && [ "$1" = "-C" ] && [ "$2" = "{root}" ] '
-        '&& [ "$3" = "ls-tree" ]; then\n'
-        "  sleep 2\n"
-        "fi\n"
-        f'exec "{real_git}" "$@"\n'
+    install_exe_stub(
+        bindir,
+        "git",
+        f"""
+        import time
+        if sys.argv[1:4] == ["-C", {root!r}, "ls-tree"]:
+            if os.environ.get("WHIPPET_SLOW"):
+                time.sleep(30)
+                sys.exit(1)
+            # A loaded host: the recovery listing answers, just later than the 1 s bound.
+            if os.environ.get("WHIPPET_LOADED"):
+                time.sleep(2)
+        exec_real([{real_git!r}, *sys.argv[1:]])
+        """,
     )
-    wrapper.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     real_bound = git_fetch._GIT_TIMEOUT
 

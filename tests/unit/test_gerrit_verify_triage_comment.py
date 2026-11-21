@@ -14,6 +14,16 @@ from typing import Any
 
 import pytest
 import yaml
+from _sandbox_capabilities import posix_shell_available
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is a workflow step's bash run script, executed with bash -c and an "
+        "sh stub for gh; no POSIX bash here"
+    ),
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
@@ -156,6 +166,7 @@ def test_normalize_fetches_the_jobs_list_itself(steps: list[dict[str, Any]]) -> 
     assert not any("Snapshot" in str(s.get("name", "")) for s in steps)
 
 
+@_POSIX_SHELL_SUBJECT
 def test_a_failed_jobs_fetch_keeps_the_fail_closed_vote(
     steps: list[dict[str, Any]], tmp_path: Path
 ) -> None:
@@ -164,6 +175,7 @@ def test_a_failed_jobs_fetch_keeps_the_fail_closed_vote(
     assert vote == "vote-type=failure"
 
 
+@_POSIX_SHELL_SUBJECT
 def test_a_not_acquired_jobs_list_casts_no_verdict(
     steps: list[dict[str, Any]], tmp_path: Path
 ) -> None:
@@ -178,6 +190,7 @@ def test_a_not_acquired_jobs_list_casts_no_verdict(
     assert vote == "vote-type=cancelled"
 
 
+@_POSIX_SHELL_SUBJECT
 def test_a_success_conclusion_does_not_fetch_jobs(
     steps: list[dict[str, Any]], tmp_path: Path
 ) -> None:

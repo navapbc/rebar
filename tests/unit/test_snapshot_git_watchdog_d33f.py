@@ -3,8 +3,9 @@
 Bug educatory-toxic-eel: ``git_fetch.git_run`` folded ``TimeoutExpired`` into a private
 rc-124 result, so a timed-out ``git rev-parse`` surfaced as "cannot resolve ref" and a
 timed-out ``git remote`` as "no such remote". These tests fire the real watchdog: a ``git``
-wrapper on ``PATH`` replaces the targeted subcommand with ``exec sleep`` (so the killed child
-is the sleeper itself and nothing is orphaned) and ``_GIT_TIMEOUT`` is shrunk to 1 second.
+stub on ``PATH`` (``tests/_exe_stub.py``) sleeps in place of the targeted subcommand (so the
+killed child is the sleeper itself and nothing is orphaned) and ``_GIT_TIMEOUT`` is shrunk
+to 1 second.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _exe_stub import install_exe_stub
 
 from rebar._snapshot import git_fetch, repo_snapshot
 from rebar._snapshot.git_fetch import SnapshotError, SnapshotRefError
@@ -47,15 +49,18 @@ def slow_git(repo: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert real_git
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    wrapper = bindir / "git"
-    wrapper.write_text(
-        "#!/bin/sh\n"
-        f'if [ "$1" = "-C" ] && [ "$2" = "{repo}" ] && [ "$3" = "$EEL_SLOW_SUBCMD" ]; then\n'
-        "  exec sleep 30\n"
-        "fi\n"
-        f'exec "{real_git}" "$@"\n'
+    install_exe_stub(
+        bindir,
+        "git",
+        f"""
+        import time
+        slow = os.environ.get("EEL_SLOW_SUBCMD")
+        if sys.argv[1:3] == ["-C", {repo!r}] and sys.argv[3:4] == [slow]:
+            time.sleep(30)
+            sys.exit(1)
+        exec_real([{real_git!r}, *sys.argv[1:]])
+        """,
     )
-    wrapper.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(git_fetch, "_GIT_TIMEOUT", _BOUND_S)
 

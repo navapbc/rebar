@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
+from _exe_stub import install_exe_stub
 
 from rebar._snapshot import delta_tree, git_fetch
 from rebar._snapshot import repo_snapshot as rs
@@ -53,16 +54,17 @@ def test_stalled_checkout_index_is_cut_off_and_fails_closed(tmp_path, monkeypatc
     real_git = shutil.which("git")
     assert real_git
     fake_dir = tmp_path / "fakebin"
-    fake_dir.mkdir()
-    fake = fake_dir / "git"
-    fake.write_text(
-        "#!/bin/sh\n"
-        'for a in "$@"; do\n'
-        '  if [ "$a" = "checkout-index" ]; then sleep 20; exit 1; fi\n'
-        "done\n"
-        f'exec "{real_git}" "$@"\n'
+    install_exe_stub(
+        fake_dir,
+        "git",
+        f"""
+        import time
+        if "checkout-index" in sys.argv[1:]:
+            time.sleep(20)
+            sys.exit(1)
+        exec_real([{real_git!r}, *sys.argv[1:]])
+        """,
     )
-    fake.chmod(0o755)
 
     repo = _init_repo(tmp_path / "repo")
     (repo / "a.txt").write_text("A")
@@ -127,7 +129,7 @@ def test_timeout_falls_back_to_full_materialization(tmp_path, monkeypatch):
     assert calls["checkout-index"] >= 1, "the delta path must actually have fired"
     listed = sorted(_git(repo, "ls-tree", "-r", "--name-only", sha).splitlines())
     root = second / ".tickets-tracker"
-    on_disk = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+    on_disk = sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
     assert on_disk == listed, "the fallback full materialization must produce the faithful tree"
 
 

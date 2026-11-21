@@ -9,7 +9,17 @@ import sys
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import posix_shell_available
 from _subprocess_env import subprocess_env
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is the Makefile's lint recipe, whose lines run under /bin/sh with sh"
+        " stubs for the earlier gates; no POSIX shell here"
+    ),
+)
 
 pytestmark = pytest.mark.unit
 
@@ -282,6 +292,7 @@ def _write_executable(path: Path) -> None:
 
 
 # End-to-end gate ownership: execute the committed root Makefile in an isolated tree.
+@_POSIX_SHELL_SUBJECT
 def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None:
     shutil.copy2(REPO_ROOT / "Makefile", tmp_path / "Makefile")
     scripts = tmp_path / "scripts"
