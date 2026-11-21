@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _exe_stub import install_exe_stub
 from _subprocess_env import subprocess_env
 
 from rebar._store import event_append, event_commit_git, gitutil, sync
@@ -76,32 +77,25 @@ def tracker(tmp_path: Path) -> str:
 def slow_index_commit(tracker: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> float:
     """Stall every ``git -C <tracker> … commit`` by the scaled index refresh, then run it.
 
-    A ``git`` wrapper on ``PATH`` hands the commit to ``perl``, which sleeps and then ``exec``s
-    the real git in the same process. A watchdog kill therefore lands on the one process doing
-    the work, sleeping or committing, and nothing is orphaned. Other git calls pass straight
+    A ``git`` stub on ``PATH`` (``tests/_exe_stub.py``) sleeps and then runs the real git. On
+    POSIX it ``exec``s git in the same process; on Windows git runs inside the stub launcher's
+    kill-on-close job. A watchdog kill therefore takes down whatever is doing the work,
+    sleeping or committing, and nothing is orphaned. Other git calls pass straight
     through. Returns the stall in seconds."""
     real_git = shutil.which("git")
-    perl = shutil.which("perl")
     assert real_git
-    if perl is None:
-        pytest.skip("perl is needed to stall git in-process")
     stall = _MEASURED_REFRESH_S * _SCALE
     bindir = tmp_path / "bin"
-    bindir.mkdir()
-    wrapper = bindir / "git"
-    wrapper.write_text(
-        "#!/bin/sh\n"
-        f'if [ "$1" = "-C" ] && [ "$2" = "{tracker}" ]; then\n'
-        '  for a in "$@"; do\n'
-        '    if [ "$a" = "commit" ]; then\n'
-        f"      exec \"{perl}\" -e 'select(undef, undef, undef, shift); exec {{ $ARGV[0] }} @ARGV'"
-        f' "{stall}" "{real_git}" "$@"\n'
-        "    fi\n"
-        "  done\n"
-        "fi\n"
-        f'exec "{real_git}" "$@"\n'
+    install_exe_stub(
+        bindir,
+        "git",
+        f"""
+        import time
+        if sys.argv[1:3] == ["-C", {tracker!r}] and "commit" in sys.argv[3:]:
+            time.sleep({stall!r})
+        exec_real([{real_git!r}, *sys.argv[1:]])
+        """,
     )
-    wrapper.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     return stall
 

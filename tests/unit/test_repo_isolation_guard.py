@@ -25,6 +25,7 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 import _isolation  # noqa: E402
+from _exe_stub import install_exe_stub  # noqa: E402
 from _nested_pytest import run_nested_pytest  # noqa: E402
 from _subprocess_env import subprocess_env  # noqa: E402
 
@@ -46,9 +47,9 @@ def _blocking_git(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     state = tmp_path / f"{operation}.count"
-    shim = bin_dir / "git"
-    shim.write_text(
-        f"#!{sys.executable}\n"
+    install_exe_stub(
+        bin_dir,
+        "git",
         "import os\n"
         "import sys\n"
         "import time\n"
@@ -67,9 +68,8 @@ def _blocking_git(
         "        os.close(1)\n"
         "        os.close(2)\n"
         "        time.sleep(60)\n"
-        f"os.execv({real_git!r}, [{real_git!r}, *args])\n"
+        f"exec_real([{real_git!r}, *args])\n",
     )
-    shim.chmod(0o755)
     env = subprocess_env()
     env["PATH"] = os.pathsep.join((str(bin_dir), env["PATH"]))
     env["PYTHONPATH"] = os.pathsep.join((str(_TESTS_DIR), env.get("PYTHONPATH", "")))
@@ -93,9 +93,9 @@ def _stall_once_git(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     bin_dir.mkdir()
     marker = tmp_path / "stall.marker"
     log = tmp_path / "probes.log"
-    shim = bin_dir / "git"
-    shim.write_text(
-        f"#!{sys.executable}\n"
+    install_exe_stub(
+        bin_dir,
+        "git",
         "import os\n"
         "import sys\n"
         "import time\n"
@@ -113,9 +113,8 @@ def _stall_once_git(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
         "        os.close(1)\n"
         "        os.close(2)\n"
         "        time.sleep(60)\n"
-        f"os.execv({real_git!r}, [{real_git!r}, *args])\n"
+        f"exec_real([{real_git!r}, *args])\n",
     )
-    shim.chmod(0o755)
     env = subprocess_env()
     env["PATH"] = os.pathsep.join((str(bin_dir), env["PATH"]))
     env["PYTHONPATH"] = os.pathsep.join((str(_TESTS_DIR), env.get("PYTHONPATH", "")))

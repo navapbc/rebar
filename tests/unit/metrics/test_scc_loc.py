@@ -16,6 +16,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from _exe_stub import install_exe_stub
 
 from rebar.metrics.analyzer import AnalyzerResult
 from rebar.metrics.registry import Unavailable
@@ -217,14 +218,8 @@ def test_default_runner_executes_scc_and_normalizes_paths(
     source.write_text("print('ok')\n", encoding="utf-8")
 
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    fake_scc = bin_dir / "scc"
     payload = [{"Name": "Python", "Files": [{"Location": str(source), "Lines": 1}]}]
-    fake_scc.write_text(
-        "#!/bin/sh\nprintf '%s\\n' " + repr(json.dumps(payload)) + "\n",
-        encoding="utf-8",
-    )
-    fake_scc.chmod(0o755)
+    install_exe_stub(bin_dir, "scc", f"print({json.dumps(payload)!r})\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
 
     result = _subject().analyze(repo_root)

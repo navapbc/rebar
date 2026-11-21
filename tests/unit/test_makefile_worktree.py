@@ -26,7 +26,17 @@ from itertools import pairwise
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import posix_shell_available
 from _subprocess_env import subprocess_env
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is the Makefile's worktree recipe, whose lines run under /bin/sh "
+        "with sh stubs for git and make; no POSIX shell here"
+    ),
+)
 
 pytestmark = pytest.mark.unit
 
@@ -129,6 +139,7 @@ def _run_worktree(
     )
 
 
+@_POSIX_SHELL_SUBJECT
 def test_provisioning_failure_is_reported_as_failure(tmp_path: Path) -> None:
     # The bug itself: `make venv` failed, `make install` never ran, and the target still
     # exited 0 announcing a ready worktree.
@@ -140,6 +151,7 @@ def test_provisioning_failure_is_reported_as_failure(tmp_path: Path) -> None:
     assert "ERROR" in combined and "provisioning" in combined.lower()
 
 
+@_POSIX_SHELL_SUBJECT
 def test_provisioning_failure_names_the_unprovisioned_worktree(tmp_path: Path) -> None:
     # Held out from the exit-status assertion above: a non-zero exit alone still leaves the
     # caller guessing. The failure has to say which directory is half-built, so the next
@@ -161,6 +173,7 @@ def test_install_failure_is_reported_as_failure(tmp_path: Path) -> None:
     assert SUCCESS_MESSAGE not in combined
 
 
+@_POSIX_SHELL_SUBJECT
 def test_fetch_failure_is_reported_as_failure(tmp_path: Path) -> None:
     # The earliest fallible step. It has its own named handler, so it gets its own
     # contract: a stale-or-absent origin/main must not silently become a worktree
@@ -198,6 +211,7 @@ def test_successful_provisioning_still_succeeds(tmp_path: Path) -> None:
     ]
 
 
+@_POSIX_SHELL_SUBJECT
 def test_default_worktree_path_stays_inside_repo_sandbox(tmp_path: Path) -> None:
     result = _run_worktree(tmp_path, include_dir=False)
 
@@ -248,6 +262,7 @@ RUNBOOK = "docs/local-dev-env.md"
 RAW_GIT_MESSAGE = "does not appear to be a git repository"
 
 
+@_POSIX_SHELL_SUBJECT
 def test_missing_origin_is_named_before_git_fetch_runs(tmp_path: Path) -> None:
     result = _run_worktree(tmp_path, missing_remotes=("origin", "gerrit"))
 
@@ -282,6 +297,7 @@ def test_missing_gerrit_warns_but_still_creates_the_worktree(tmp_path: Path) -> 
     assert RUNBOOK in combined, combined
 
 
+@_POSIX_SHELL_SUBJECT
 def test_both_remotes_present_prints_no_remote_warning(tmp_path: Path) -> None:
     result = _run_worktree(tmp_path)
 

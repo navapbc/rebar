@@ -22,7 +22,16 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from _child_diag import assert_child_was_not_signal_killed  # noqa: E402
-from _sandbox_capabilities import requires_posix_shell  # noqa: E402
+from _sandbox_capabilities import posix_shell_available, requires_posix_shell  # noqa: E402
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is the git-floor gate's bash step script, executed with bash -c and "
+        "an sh stub for git; no POSIX bash here"
+    ),
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
@@ -105,6 +114,7 @@ def test_absent_floor_file_does_not_fail_the_build(tree_without_floor_file: Path
     )
 
 
+@_POSIX_SHELL_SUBJECT
 def test_absent_floor_file_explains_why_it_skipped(tree_without_floor_file: Path) -> None:
     """The skip must name the cause, not just the filename (bug 7e90 acceptance criterion)."""
     output = _run_gate(tree_without_floor_file).stdout.lower()

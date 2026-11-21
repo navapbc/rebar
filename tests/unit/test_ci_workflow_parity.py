@@ -11,8 +11,17 @@ from pathlib import Path
 
 import pytest
 from _nested_pytest import run_nested_pytest
-from _sandbox_capabilities import requires_posix_shell
+from _sandbox_capabilities import posix_shell_available, requires_posix_shell
 from _subprocess_env import subprocess_env
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is the macOS lane's bash run script, executed with bash and an sh "
+        "stub for pytest; no POSIX bash here"
+    ),
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TEST_YML = _ROOT / ".github" / "workflows" / "test.yml"
@@ -812,6 +821,7 @@ def _render_default_suite_body(body: str, os_name: str, python_version: str, tem
     return re.sub(r"\$\{\{(.*?)\}\}", resolve, body)
 
 
+@_POSIX_SHELL_SUBJECT
 def test_macos_default_suite_lane_passes_when_platform_compat_collects_nothing(
     tmp_path: Path,
 ) -> None:

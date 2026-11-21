@@ -15,7 +15,16 @@ import types
 from pathlib import Path
 
 import pytest
-from _sandbox_capabilities import requires_posix_shell
+from _sandbox_capabilities import posix_shell_available, requires_posix_shell
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is a child killed by SIGKILL (a negative returncode), produced by an"
+        " sh script that kills itself; Windows has neither signals nor /bin/sh"
+    ),
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -72,6 +81,7 @@ def test_the_suicide_shim_really_produces_a_signal_killed_child(tmp_path: Path) 
 # ── Site 1 — the Git-floor gate skip oracle ──────────────────────────────────
 
 
+@_POSIX_SHELL_SUBJECT
 def test_git_floor_gate_skip_oracle_rejects_a_signal_killed_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -121,6 +131,7 @@ def test_reconcile_routing_oracle_rejects_a_signal_killed_child(
 # ── Site 3 — the re-dispatch "no warning" oracle ─────────────────────────────
 
 
+@_POSIX_SHELL_SUBJECT
 def test_redispatch_no_warning_oracle_rejects_a_signal_killed_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -164,6 +175,7 @@ def test_pandoc_colour_oracle_rejects_a_signal_killed_child(
 # ── Site 5 — the actionlint fail-fast oracle (Step-7 construct sibling) ──────
 
 
+@_POSIX_SHELL_SUBJECT
 def test_actionlint_fail_fast_oracle_rejects_a_signal_killed_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

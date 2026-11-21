@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from _exe_stub import install_exe_stub
+from _sandbox_capabilities import posix_shell_available
 from _subprocess_env import SubprocessEnv, subprocess_env
 
 # `platform_compat` is load-bearing, not decorative. The macOS gate cell selects
@@ -422,11 +424,11 @@ def test_seatbelt_probe_accepts_a_mechanism_that_denies_the_write(tmp_path, monk
     `probe()` finds no mechanism — every Linux cell — so without this the `return True`
     branch is exercised on no gating lane.
     """
-    stub = tmp_path / "sandbox-exec"
     # Emit the liveness marker and perform no write, which is what a real deny looks
     # like from the outside.
-    stub.write_text(f"#!/bin/sh\necho {sb._PROBE_MARKER}\nexit 0\n", encoding="utf-8")
-    stub.chmod(0o755)
+    stub = install_exe_stub(
+        tmp_path / "bin", "sandbox-exec", f"print({sb._PROBE_MARKER!r})\nsys.exit(0)\n"
+    )
     monkeypatch.setattr(sb.shutil, "which", lambda n: str(stub) if n == "sandbox-exec" else None)
     assert sb._seatbelt_works() is True
 
@@ -815,6 +817,10 @@ def test_the_sandboxed_subprocesses_receive_the_hardened_env():
 # themselves verified on every lane rather than assumed.
 
 
+@pytest.mark.skipif(
+    not posix_shell_available(),
+    reason="the subject is POSIX sh `${VAR:?}` expansion run through /bin/sh, absent here",
+)
 def test_the_shell_guard_aborts_before_the_destructive_line():
     """`"${VAR:?}"` must abort the script BEFORE the line that would delete.
 

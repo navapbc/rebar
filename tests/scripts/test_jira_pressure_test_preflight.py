@@ -11,8 +11,18 @@ import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
-from _sandbox_capabilities import requires_posix_shell
+import pytest
+from _sandbox_capabilities import posix_shell_available, requires_posix_shell
 from _subprocess_env import SubprocessEnv, subprocess_env
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is the bash probe scripts under scripts/jira-pressure-test/, run "
+        "with bash and sh tool stubs; no POSIX shell here"
+    ),
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -284,6 +294,7 @@ def _events(workspace: ProbeWorkspace) -> list[str]:
     return workspace.events.read_text(encoding="utf-8").splitlines()
 
 
+@_POSIX_SHELL_SUBJECT
 def test_each_probe_uses_checkout_tools_after_preflight(tmp_path: Path) -> None:
     failures: list[str] = []
     for probe in PROBES:
@@ -387,6 +398,7 @@ def test_each_probe_rejects_a_missing_adapter_operation_before_mutation(
     assert not failures, "\n".join(failures)
 
 
+@_POSIX_SHELL_SUBJECT
 def test_missing_requirements_stop_both_probes_before_mutation(tmp_path: Path) -> None:
     failures: list[str] = []
     required = (
@@ -416,6 +428,7 @@ def test_missing_requirements_stop_both_probes_before_mutation(tmp_path: Path) -
     assert not failures, "\n".join(failures)
 
 
+@_POSIX_SHELL_SUBJECT
 def test_missing_checkout_tools_and_failed_import_stop_before_mutation(tmp_path: Path) -> None:
     failures: list[str] = []
     for probe in PROBES:
@@ -452,6 +465,7 @@ def test_missing_checkout_tools_and_failed_import_stop_before_mutation(tmp_path:
     assert not failures, "\n".join(failures)
 
 
+@_POSIX_SHELL_SUBJECT
 def test_probe_specific_opt_ins_are_not_interchangeable(tmp_path: Path) -> None:
     failures: list[str] = []
     for probe, other in zip(PROBES, reversed(PROBES), strict=True):
@@ -470,6 +484,7 @@ def test_probe_specific_opt_ins_are_not_interchangeable(tmp_path: Path) -> None:
     assert not failures, "\n".join(failures)
 
 
+@_POSIX_SHELL_SUBJECT
 def test_engine_and_ticket_overrides_remain_supported(tmp_path: Path) -> None:
     failures: list[str] = []
     for probe in PROBES:
@@ -496,6 +511,7 @@ def test_engine_and_ticket_overrides_remain_supported(tmp_path: Path) -> None:
     assert not failures, "\n".join(failures)
 
 
+@_POSIX_SHELL_SUBJECT
 def test_preflight_finishes_before_the_first_mutating_command(tmp_path: Path) -> None:
     failures: list[str] = []
     for probe in PROBES:

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import posix_shell_available
 from _subprocess_env import subprocess_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -220,6 +221,10 @@ def test_no_hook_command_uses_a_relative_path():
         )
 
 
+@pytest.mark.skipif(
+    not posix_shell_available(),
+    reason="runs the hook command as the harness does, through /bin/sh -c; no /bin/sh here",
+)
 def test_hook_command_resolves_from_a_foreign_cwd(tmp_path):
     """The configured command, run exactly as the harness runs it (``/bin/sh -c`` with
     ``$CLAUDE_PROJECT_DIR`` set) from a directory with no ``scripts/``, still emits the

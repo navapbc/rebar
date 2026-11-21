@@ -6,9 +6,8 @@ positive case. Drive absence through PATH instead of bypassing the check."""
 
 from __future__ import annotations
 
-import stat
-
 import pytest
+from _exe_stub import install_exe_stub
 
 from rebar.reconciler.adapters.jira import acli_subprocess
 
@@ -23,10 +22,7 @@ def _path_without_acli(tmp_path, monkeypatch) -> None:
 def _stub_acli_on_path(tmp_path, monkeypatch) -> None:
     """Put an executable stub named `acli` on PATH (positive control)."""
     bindir = tmp_path / "stub_bin"
-    bindir.mkdir()
-    stub = bindir / "acli"
-    stub.write_text("#!/bin/sh\nexit 0\n")
-    stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    install_exe_stub(bindir, "acli", "sys.exit(0)\n")
     monkeypatch.setenv("PATH", str(bindir))
 
 

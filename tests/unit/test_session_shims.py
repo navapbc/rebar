@@ -10,7 +10,16 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _sandbox_capabilities import requires_posix_shell
+from _sandbox_capabilities import posix_shell_available, requires_posix_shell
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is the Claude Code session hook, a bash script run with bash; no "
+        "POSIX bash here"
+    ),
+)
 
 pytestmark = pytest.mark.unit
 
@@ -68,6 +77,7 @@ def test_claude_code_hook_exports_session_and_harness(tmp_path) -> None:
     assert "export AI_AGENT=claude-code" in written
 
 
+@_POSIX_SHELL_SUBJECT
 def test_claude_code_hook_idempotent_on_refire(tmp_path) -> None:
     """Re-firing (e.g. resume, new session_id per G1) replaces this hook's OWN prior exports
     rather than accumulating them, and preserves other hooks' lines."""

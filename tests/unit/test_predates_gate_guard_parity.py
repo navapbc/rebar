@@ -9,8 +9,18 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+from _sandbox_capabilities import posix_shell_available
 from _subprocess_env import subprocess_env
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is the workflows' bash step scripts, executed with bash -c; no POSIX bash here"
+    ),
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -249,6 +259,7 @@ def test_derived_guarded_workflows_cover_the_manual_floor() -> None:
     )
 
 
+@_POSIX_SHELL_SUBJECT
 def test_empty_tree_every_guarded_step_skips_cleanly(tmp_path: Path) -> None:
     """Every guarded body is self-sufficient: exit 0 and say why, on a tree with nothing in it.
 

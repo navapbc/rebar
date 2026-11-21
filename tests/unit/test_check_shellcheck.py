@@ -49,7 +49,9 @@ def _repo(tmp_path: Path, files: dict[str, str]) -> Path:
     for rel, content in files.items():
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        # LF, as git stores a shell script: Windows text mode would write CRLF, which
+        # shellcheck reports as SC1017 and fails every fixture regardless of content.
+        path.write_text(content, encoding="utf-8", newline="\n")
     return tmp_path
 
 

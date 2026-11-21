@@ -20,7 +20,17 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import posix_shell_available
 from _subprocess_env import subprocess_env
+
+# The subject of these tests is inherently POSIX-shell (bug transhuman-wounded-pangolin).
+_POSIX_SHELL_SUBJECT = pytest.mark.skipif(
+    not posix_shell_available(),
+    reason=(
+        "the subject is the Makefile's venv recipe, whose lines run under /bin/sh with an"
+        " sh stub for uv; no POSIX shell here"
+    ),
+)
 
 pytestmark = pytest.mark.unit
 
@@ -167,6 +177,7 @@ def test_make_venv_asks_for_the_pinned_interpreter(tmp_path: Path) -> None:
     assert f"venv --python {_pinned_version()} .venv" in invocation
 
 
+@_POSIX_SHELL_SUBJECT
 def test_make_venv_fails_loudly_rather_than_falling_back(tmp_path: Path) -> None:
     # Held out from the pin assertion above: an unavailable interpreter must be a hard,
     # explanatory failure. A silent fallback to ambient python3 is the original bug.
@@ -180,6 +191,7 @@ def test_make_venv_fails_loudly_rather_than_falling_back(tmp_path: Path) -> None
     assert not (tmp_path / ".venv").exists()
 
 
+@_POSIX_SHELL_SUBJECT
 def test_make_venv_reports_uv_older_than_the_floor_before_python_hint(tmp_path: Path) -> None:
     _, env = _sandbox(tmp_path, uv_exit=1, uv_version="0.12.6")
 

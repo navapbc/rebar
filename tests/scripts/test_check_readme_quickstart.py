@@ -11,6 +11,7 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+from _sandbox_capabilities import posix_shell_available
 
 pytestmark = pytest.mark.scripts
 
@@ -108,6 +109,10 @@ def test_main_fails_on_broken_quickstart_command(tmp_path: Path, monkeypatch):
     assert chk.main([]) != 0
 
 
+@pytest.mark.skipif(
+    not posix_shell_available(),
+    reason="main() runs the README's bash quickstart block under bash; no POSIX bash here",
+)
 def test_main_passes_on_valid_quickstart(tmp_path: Path, monkeypatch):
     """A valid runnable quickstart block makes main() exit 0."""
     readme = _write_readme(

@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+from _exe_stub import install_exe_stub
 from _subprocess_env import subprocess_env
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "metrics_polyglot"
@@ -154,8 +154,7 @@ def git_only_bin(tmp_path: Path) -> Path:
     git = shutil.which("git")
     assert git is not None, "interface tests require git"
     bin_dir = tmp_path / "git-only-bin"
-    bin_dir.mkdir()
-    (bin_dir / "git").symlink_to(git)
+    install_exe_stub(bin_dir, "git", f"exec_real([{git!r}, *sys.argv[1:]])\n")
     return bin_dir
 
 
@@ -186,5 +185,6 @@ def with_path_prefix(bin_dir: Path) -> str:
 
 
 def _write_executable(path: Path, source: str) -> None:
-    path.write_text(source, encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    """Install ``source`` (a ``#!/usr/bin/env python3`` script) as a stub both OSes can spawn."""
+    _shebang, body = source.split("\n", 1)
+    install_exe_stub(path.parent, path.name, body)
