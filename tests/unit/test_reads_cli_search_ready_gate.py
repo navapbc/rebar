@@ -30,7 +30,7 @@ def _tracker_present_without_git(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     tracker = repo / ".tickets-tracker"
     tracker.mkdir()
-    (tracker / "reviewbot-ensure-tickets").write_text("marker\n")
+    (tracker / "reviewbot-ensure-tickets").write_text("marker\n", encoding="utf-8")
     assert tracker.is_dir() and not (tracker / ".git").exists()
     return tracker
 

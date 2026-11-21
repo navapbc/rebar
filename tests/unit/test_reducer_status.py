@@ -102,7 +102,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _status_events(tdir: str) -> list[dict]:
     names = sorted(n for n in os.listdir(tdir) if n.endswith("-STATUS.json"))
-    return [json.loads(Path(tdir, n).read_text()).get("data") or {} for n in names]
+    return [json.loads(Path(tdir, n).read_text(encoding="utf-8")).get("data") or {} for n in names]
 
 
 def test_end_to_end_force_close_reopen_clean_close(store: Path) -> None:

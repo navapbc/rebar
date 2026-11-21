@@ -488,7 +488,7 @@ def test_primary_criteria_manifest_lists_every_id_and_truncates() -> None:
 def test_system_prompts_define_the_finite_per_criterion_bank_loop() -> None:
     from pathlib import Path
 
-    primary = Path("src/rebar/llm/reviewers/completion_verifier.md").read_text()
+    primary = Path("src/rebar/llm/reviewers/completion_verifier.md").read_text(encoding="utf-8")
     successor = cb.successor_system_prompt(None)
     for prompt in (primary, successor):
         compact = " ".join(prompt.split())

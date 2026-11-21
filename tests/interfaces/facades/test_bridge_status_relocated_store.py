@@ -85,7 +85,7 @@ def test_bridge_status_reads_env_id_from_a_relocated_store(
     """AC9/AC15: the env id comes from the CONFIGURED store, not the repo root."""
     store = _relocate(rebar_repo, tmp_path / "outside" / "mcp-tickets")
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(store))
-    local_id = (store / ".env-id").read_text().strip()
+    local_id = (store / ".env-id").read_text(encoding="utf-8").strip()
     _plant_last_pass(rebar_repo, f"local:{local_id}")
 
     status = rebar.bridge_status(repo_root=str(rebar_repo))
@@ -131,7 +131,7 @@ def test_bridge_status_resolves_the_last_pass_detail_file_in_a_relocated_store(
     """
     store = _relocate(rebar_repo, tmp_path / "outside" / "mcp-tickets")
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(store))
-    local_id = (store / ".env-id").read_text().strip()
+    local_id = (store / ".env-id").read_text(encoding="utf-8").strip()
     _plant_last_pass(rebar_repo, f"local:{local_id}")
 
     detail_dir = store / ".bridge_state"
@@ -158,7 +158,7 @@ def test_bridge_status_ignores_stale_reconcile_check_summary_from_configured_sto
 ) -> None:
     store = _relocate(rebar_repo, tmp_path / "outside" / "mcp-tickets")
     monkeypatch.setenv("REBAR_TRACKER_DIR", str(store))
-    local_id = (store / ".env-id").read_text().strip()
+    local_id = (store / ".env-id").read_text(encoding="utf-8").strip()
     _plant_last_pass(rebar_repo, f"local:{local_id}")
 
     detail_dir = store / ".bridge_state"
@@ -189,7 +189,7 @@ def test_bridge_status_still_works_in_the_default_in_tree_layout(
 ) -> None:
     """AC16 CONTROL: the common case is unchanged — no ``REBAR_TRACKER_DIR``, store in tree."""
     monkeypatch.delenv("REBAR_TRACKER_DIR", raising=False)
-    local_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text().strip()
+    local_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text(encoding="utf-8").strip()
     _plant_last_pass(rebar_repo, f"local:{local_id}")
 
     status = rebar.bridge_status(repo_root=str(rebar_repo))
@@ -203,7 +203,7 @@ def test_bridge_status_cli_succeeds_against_a_relocated_store(
 ) -> None:
     """E2E through the real CLI entrypoint — the surface the live report came from."""
     store = _relocate(rebar_repo, tmp_path / "outside" / "mcp-tickets")
-    local_id = (store / ".env-id").read_text().strip()
+    local_id = (store / ".env-id").read_text(encoding="utf-8").strip()
     _plant_last_pass(rebar_repo, f"local:{local_id}")
 
     env = subprocess_env()

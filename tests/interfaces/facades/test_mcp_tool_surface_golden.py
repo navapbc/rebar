@@ -40,7 +40,9 @@ import rebar
 
 pytest.importorskip("mcp")
 
-_GOLDEN = json.loads((Path(__file__).parent / "mcp_tool_surface_golden.json").read_text())
+_GOLDEN = json.loads(
+    (Path(__file__).parent / "mcp_tool_surface_golden.json").read_text(encoding="utf-8")
+)
 
 _DOCSTRINGS_DEDENTED_BY_COMPILER = sys.version_info >= (3, 13)
 

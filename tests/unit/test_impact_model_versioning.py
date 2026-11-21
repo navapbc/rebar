@@ -51,7 +51,7 @@ def _write_sidecar(dirp: Path, rid: str, ticket: str, version) -> None:
     data = {"ticket_id": ticket, "findings": [], "routing": {}}
     if version is not None:
         data["impact_model_version"] = version
-    (d / f"{rid}-REVIEW_RESULT.json").write_text(json.dumps({"data": data}))
+    (d / f"{rid}-REVIEW_RESULT.json").write_text(json.dumps({"data": data}), encoding="utf-8")
 
 
 def test_replay_segments_by_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,7 +131,9 @@ _PLAN_REVIEW_APPROVED_BLOCKING = frozenset(
 
 
 def test_plan_review_blocking_posture_set_is_the_approved_set() -> None:
-    routing = json.loads(Path("src/rebar/llm/plan_review/criteria_routing.json").read_text())
+    routing = json.loads(
+        Path("src/rebar/llm/plan_review/criteria_routing.json").read_text(encoding="utf-8")
+    )
     blocking = {
         name
         for name, entry in routing.items()

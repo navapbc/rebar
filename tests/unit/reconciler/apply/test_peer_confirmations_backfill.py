@@ -71,7 +71,7 @@ def test_unbound_target_is_not_backfilled(pc, tracker):
 def test_existing_but_empty_store_is_not_backfilled(pc, tracker):
     """Emptiness is an operator's choice; absence is an upgrade. Only absence backfills."""
     path = tracker / ".tickets-tracker" / ".bridge_state" / "peer_confirmations.json"
-    path.write_text('{"version": 1, "records": {}}')
+    path.write_text('{"version": 1, "records": {}}', encoding="utf-8")
 
     store = pc.open_store(tracker)
     assert store.was_absent is False

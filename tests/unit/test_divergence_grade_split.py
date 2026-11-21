@@ -121,7 +121,7 @@ def test_incomplete_contrib_stays_below_every_blocking_threshold() -> None:
     routing = json.loads(
         (
             Path(__file__).resolve().parents[2] / "src/rebar/llm/plan_review/criteria_routing.json"
-        ).read_text()
+        ).read_text(encoding="utf-8")
     )
     blocking = [
         v["block_threshold"]
@@ -284,7 +284,7 @@ def test_legacy_ordinal_sidecar_reads_as_is(rebar_repo: Path) -> None:
         ],
     }
     (tracker / "1700000000000000000-aaaa-REVIEW_RESULT.json").write_text(
-        json.dumps({"event_type": "REVIEW_RESULT", "data": legacy})
+        json.dumps({"event_type": "REVIEW_RESULT", "data": legacy}), encoding="utf-8"
     )
     got = sidecar.latest_review_result("t-legacy", repo_root=str(rebar_repo))
     assert got is not None

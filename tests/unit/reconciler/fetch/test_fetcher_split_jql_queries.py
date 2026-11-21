@@ -121,7 +121,7 @@ def test_done_query_capped_at_done_recent_cap(tmp_path, fetcher):
     # The cap may clip the final page, so we count what reaches the snapshot.
     import json as _json
 
-    snapshot = _json.loads(out_path.read_text())
+    snapshot = _json.loads(out_path.read_text(encoding="utf-8"))
     done_in_snapshot = [k for k in snapshot if k.startswith("DIG-DONE-")]
     assert len(done_in_snapshot) == cap, (
         f"Done query should be capped at {cap} issues; "
@@ -144,7 +144,7 @@ def test_active_query_uncapped_consumes_everything_under_ceiling(tmp_path, fetch
 
     import json as _json
 
-    snapshot = _json.loads(out_path.read_text())
+    snapshot = _json.loads(out_path.read_text(encoding="utf-8"))
     active_in_snapshot = [k for k in snapshot if k.startswith("DIG-ACT-")]
     assert len(active_in_snapshot) == 1100, (
         f"Active query should consume all 1100 stub issues; snapshot has {len(active_in_snapshot)}"

@@ -106,7 +106,7 @@ def test_relation_scoped_key_does_not_confirm_a_sibling_relation(peer_confirmati
 def test_corrupt_store_degrades_to_empty_and_does_not_raise(peer_confirmations, tracker):
     """AC8. Fail-OPEN: losing the evidence costs safety, raising costs the pass."""
     path = tracker / ".bridge_state" / "peer_confirmations.json"
-    path.write_text("<<<<<<< HEAD\n{not json at all\n")
+    path.write_text("<<<<<<< HEAD\n{not json at all\n", encoding="utf-8")
 
     store = peer_confirmations.PeerConfirmationStore(str(tracker))
 
@@ -204,7 +204,9 @@ def test_commit_only_peer_confirmations_is_staged_and_committed(tmp_path, monkey
     repo_root = tmp_path
     tracker_dir = repo_root / git_adapter.TRACKER_DIR
     (tracker_dir / ".bridge_state").mkdir(parents=True)
-    (tracker_dir / git_adapter.PEER_CONFIRMATIONS_FILE).write_text('{"version": 1, "records": {}}')
+    (tracker_dir / git_adapter.PEER_CONFIRMATIONS_FILE).write_text(
+        '{"version": 1, "records": {}}', encoding="utf-8"
+    )
     for argv in (
         ["git", "init", "-q", str(tracker_dir)],
         ["git", "-C", str(tracker_dir), "config", "user.name", "ac9-test"],
@@ -410,7 +412,9 @@ def test_store_file_is_json_with_a_schema_version(tmp_path, peer_confirmations):
     store.save()
 
     payload = json.loads(
-        (tmp_path / ".tickets-tracker" / ".bridge_state" / "peer_confirmations.json").read_text()
+        (tmp_path / ".tickets-tracker" / ".bridge_state" / "peer_confirmations.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert payload["version"] == peer_confirmations.SCHEMA_VERSION
     assert list(payload["records"]) == ["A|B|blocks"]

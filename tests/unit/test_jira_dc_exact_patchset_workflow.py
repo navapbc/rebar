@@ -38,7 +38,7 @@ _GERRIT_INPUTS = {
 
 def _load() -> dict:
     assert _WORKFLOW.exists(), f"expected workflow missing: {_WORKFLOW}"
-    return yaml.safe_load(_WORKFLOW.read_text())
+    return yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
 
 
 def _job(doc: dict) -> dict:
@@ -65,7 +65,7 @@ def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def _make_commit(repo: Path, name: str, body: str) -> str:
-    (repo / name).write_text(body)
+    (repo / name).write_text(body, encoding="utf-8")
     _run(["git", "add", name], repo)
     _run(["git", "commit", "-m", f"add {name}"], repo)
     return _run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
@@ -149,7 +149,7 @@ def test_uses_owned_exact_sha_checkout_not_refspec_first_action() -> None:
     checkout = _checkout_step(doc)
     assert checkout["shell"] == "bash"
     assert checkout["env"]["GERRIT_PATCHSET_REVISION"] == "${{ inputs.GERRIT_PATCHSET_REVISION }}"
-    text = _WORKFLOW.read_text()
+    text = _WORKFLOW.read_text(encoding="utf-8")
     assert "lfreleng-actions/checkout-gerrit-change-action@" not in text
 
 
@@ -177,7 +177,7 @@ def test_checkout_script_leaves_head_at_expected_sha(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stdout
     assert _run(["git", "rev-parse", "HEAD"], workspace).stdout.strip() == patchset_2
-    assert f"verified_sha={patchset_2}" in (tmp_path / "github.env").read_text()
+    assert f"verified_sha={patchset_2}" in (tmp_path / "github.env").read_text(encoding="utf-8")
 
 
 @requires_posix_shell

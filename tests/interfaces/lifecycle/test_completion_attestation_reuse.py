@@ -28,7 +28,7 @@ def _git(repo: Path, *args: str) -> str:
 def _enable_gate(repo: Path, *, enabled: bool = True) -> None:
     value = "true" if enabled else "false"
     (repo / "rebar.toml").write_text(
-        f"[verify]\nrequire_completion_verification_for_close = {value}\n"
+        f"[verify]\nrequire_completion_verification_for_close = {value}\n", encoding="utf-8"
     )
 
 
@@ -159,7 +159,7 @@ def test_changed_ref_runs_fresh_verification(
     old_sha = _git(rebar_repo, "rev-parse", "HEAD")
     ticket = _make_ticket(rebar_repo)
     _stored_pass(rebar_repo, ticket, old_sha)
-    (rebar_repo / "later.txt").write_text("later\n")
+    (rebar_repo / "later.txt").write_text("later\n", encoding="utf-8")
     _git(rebar_repo, "add", "later.txt")
     _git(
         rebar_repo,

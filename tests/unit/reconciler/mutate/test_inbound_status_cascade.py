@@ -68,7 +68,7 @@ def _write_ticket(
             "tags": [],
         },
     }
-    (ticket_dir / f"{ts}-{uid}-CREATE.json").write_text(json.dumps(create_event))
+    (ticket_dir / f"{ts}-{uid}-CREATE.json").write_text(json.dumps(create_event), encoding="utf-8")
     if status != "open":
         ts2 = ts + 1
         uid2 = str(_uuid.uuid4())
@@ -80,7 +80,9 @@ def _write_ticket(
             "author": "test",
             "data": {"status": status, "current_status": "open"},
         }
-        (ticket_dir / f"{ts2}-{uid2}-STATUS.json").write_text(json.dumps(status_event))
+        (ticket_dir / f"{ts2}-{uid2}-STATUS.json").write_text(
+            json.dumps(status_event), encoding="utf-8"
+        )
 
 
 def _status_events(tracker_dir: Path, ticket_id: str) -> list[dict]:

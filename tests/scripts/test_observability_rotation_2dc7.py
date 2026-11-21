@@ -32,7 +32,7 @@ _TARGETS = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -83,15 +83,15 @@ def _environment(tmp_path: Path, seeded_offset: int) -> tuple[dict[str, str], di
         # The log counter keeps a bare total; journal counters carry a total and
         # a cursor already discarded by the vacuum.
         if variable == "REPL_OFFSET_FILE":
-            path.write_text(f"{seeded_offset}\n")
+            path.write_text(f"{seeded_offset}\n", encoding="utf-8")
         else:
-            path.write_text(f"{seeded_offset} 3\n")
+            path.write_text(f"{seeded_offset} 3\n", encoding="utf-8")
         paths[variable] = path
     repl_log = tmp_path / "replication.log"
-    repl_log.write_text("[ERROR]\n" * _MARKERS_IN_JOURNAL)
+    repl_log.write_text("[ERROR]\n" * _MARKERS_IN_JOURNAL, encoding="utf-8")
     # Discard the first 500 entries so the saved cursor cannot be sought.
     base_file = tmp_path / "journal-base"
-    base_file.write_text("500\n")
+    base_file.write_text("500\n", encoding="utf-8")
 
     env = observability_env(tmp_path)
     env.update(
@@ -109,7 +109,7 @@ def _environment(tmp_path: Path, seeded_offset: int) -> tuple[dict[str, str], di
 
 def _values(log: Path, target: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts or target not in parts:
             continue
@@ -134,7 +134,7 @@ def test_shrinking_journal_publishes_zero_not_the_remaining_total(
     assert _MARKERS_IN_JOURNAL not in published
     if offset_variable != "REPL_OFFSET_FILE":
         # Reseeding prevents a permanent cursor stall.
-        total, cursor = paths[offset_variable].read_text().split()
+        total, cursor = paths[offset_variable].read_text(encoding="utf-8").split()
         assert (total, cursor) == ("99", "542")
 
 
@@ -145,7 +145,10 @@ def test_markers_after_a_rotation_still_publish(tmp_path: Path) -> None:
     first = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
     # Add one new marker after reseeding.
     journal = Path(env["JOURNAL_FILE"])
-    journal.write_text(journal.read_text() + 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 2}\n')
+    journal.write_text(
+        journal.read_text(encoding="utf-8") + 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 2}\n',
+        encoding="utf-8",
+    )
     second = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
     assert (first.returncode, second.returncode) == (0, 0)

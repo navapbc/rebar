@@ -227,7 +227,7 @@ sys.exit(0)
 
 def _fake_acli_cmd(tmp_path: Path) -> list[str]:
     prog = tmp_path / "fake_acli.py"
-    prog.write_text(_FAKE_ACLI_429_THEN_OK)
+    prog.write_text(_FAKE_ACLI_429_THEN_OK, encoding="utf-8")
     return [sys.executable, str(prog)]
 
 

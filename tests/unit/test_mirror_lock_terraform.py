@@ -20,14 +20,14 @@ _MAIN_TF = Path(__file__).resolve().parents[2] / "infra" / "terraform-github" / 
 def _main_lock_block() -> str:
     """The text of the module from the ``main_lock`` resource onward (main-only, so this
     is the only ruleset resource; the trailing ``output`` block is harmless to include)."""
-    tf = _MAIN_TF.read_text()
+    tf = _MAIN_TF.read_text(encoding="utf-8")
     marker = 'resource "github_repository_ruleset" "main_lock"'
     assert marker in tf, "main_lock ruleset resource is missing"
     return tf.split(marker, 1)[1]
 
 
 def test_module_is_main_only_no_tag_lock() -> None:
-    tf = _MAIN_TF.read_text()
+    tf = _MAIN_TF.read_text(encoding="utf-8")
     assert 'resource "github_repository_ruleset" "main_lock"' in tf
     # tags stay human-pushable (release.yml v* pushes) -> NO tag lock ruleset
     assert 'resource "github_repository_ruleset" "tag_lock"' not in tf
@@ -37,7 +37,7 @@ def test_module_is_main_only_no_tag_lock() -> None:
 
 
 def test_deploy_key_gate_is_a_fail_closed_precondition_not_a_check() -> None:
-    tf = _MAIN_TF.read_text()
+    tf = _MAIN_TF.read_text(encoding="utf-8")
     # a `check` block only emits a WARNING and lets apply proceed — it must be gone.
     assert 'check "deploy_key_present"' not in tf
     # the gate must live as a lifecycle precondition INSIDE the main_lock resource so a

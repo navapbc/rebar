@@ -26,7 +26,7 @@ def _fresh_repo(tmp_path: Path, name: str) -> str:
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.email", "t@e.com"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
-    (repo / "seed.txt").write_text("seed\n")
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
     subprocess.run(["git", "add", "seed.txt"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "--no-verify", "-m", "seed"], cwd=repo, check=True)
     return str(repo)
@@ -52,7 +52,7 @@ def test_transient_index_lock_from_competing_process_self_heals(tmp_path: Path) 
     process succeeds with NO error surfaced. 3s exceeds the pre-9305 total retry budget
     (~2s), so this pins the raised tens-of-seconds budget, not the old one."""
     repo = _fresh_repo(tmp_path, "transient")
-    (Path(repo) / "f.txt").write_text("x\n")
+    (Path(repo) / "f.txt").write_text("x\n", encoding="utf-8")
     lock = _index_lock_path(repo)
 
     # A competing PROCESS creates the lock, holds it ~3s, then releases it — the shape of
@@ -116,9 +116,9 @@ def test_stuck_lock_surfaces_one_actionable_error(
     error naming the contended lock file and the remedy (holder guidance) — not raw git
     stderr alone. Budget shrunk for test speed; the default budget is pinned separately."""
     repo = _fresh_repo(tmp_path, "stuck")
-    (Path(repo) / "f.txt").write_text("x\n")
+    (Path(repo) / "f.txt").write_text("x\n", encoding="utf-8")
     lock = _index_lock_path(repo)
-    lock.write_text("")  # never released: a genuinely stuck lock
+    lock.write_text("", encoding="utf-8")  # never released: a genuinely stuck lock
 
     monkeypatch.setattr(git_locking, "_INDEX_LOCK_ATTEMPTS", 3)
     monkeypatch.setattr(git_locking, "_INDEX_LOCK_BACKOFF_S", 0.05)
@@ -167,7 +167,7 @@ def test_uncontended_write_never_sleeps(tmp_path: Path, monkeypatch: pytest.Monk
     Only rebar's own ``_backoff_sleep`` seam is observed, so stdlib subprocess's
     internal timeout-poll sleep is not miscounted as rebar-added latency."""
     repo = _fresh_repo(tmp_path, "fast")
-    (Path(repo) / "f.txt").write_text("x\n")
+    (Path(repo) / "f.txt").write_text("x\n", encoding="utf-8")
     sleeps: list[float] = []
 
     def counting_sleep(s: float) -> None:
@@ -189,7 +189,7 @@ def test_advisory_lock_serializes_against_competing_holder(tmp_path: Path) -> No
     the seam waits (bounded) and then succeeds once the holder releases — the write is
     serialized behind the peer instead of colliding with it."""
     repo = _fresh_repo(tmp_path, "advisory")
-    (Path(repo) / "f.txt").write_text("x\n")
+    (Path(repo) / "f.txt").write_text("x\n", encoding="utf-8")
 
     # A competing process takes the advisory lock for ~1.5s.
     holder = subprocess.Popen(

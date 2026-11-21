@@ -26,7 +26,7 @@ def _shadow(tmp_path: Path) -> tuple[Path, str, str]:
     tree = h.git(shadow, "rev-parse", f"{t0}^{{tree}}").stdout.strip()
     new_tip = h.git(shadow, "commit-tree", tree, "-m", "checkpoint").stdout.strip()
     (shadow / ".rebar").mkdir()
-    (shadow / ".rebar" / "reclaim-shadow-clone").write_text("disposable\n")
+    (shadow / ".rebar" / "reclaim-shadow-clone").write_text("disposable\n", encoding="utf-8")
     return shadow, t0, new_tip
 
 

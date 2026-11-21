@@ -129,7 +129,7 @@ def test_mapping_json_written_on_jql_hit(applier, tmp_path):
 
     mapping_path = scratch_retention.mapping_path(tmp_path)
     assert mapping_path.exists(), "mapping.json should be created on JQL hit"
-    data = json.loads(mapping_path.read_text())
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
     assert data.get("tick-xyz1") == "DIG-42", (
         f"Expected mapping['tick-xyz1'] == 'DIG-42', got {data!r}"
     )
@@ -139,7 +139,7 @@ def test_mapping_json_preserves_existing_entries(applier, tmp_path):
     """Existing entries in mapping.json are preserved when a new hit is added."""
     mapping_path = scratch_retention.mapping_path(tmp_path)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
-    mapping_path.write_text(json.dumps({"old-id": "DIG-1"}))
+    mapping_path.write_text(json.dumps({"old-id": "DIG-1"}), encoding="utf-8")
 
     existing_issue = {"key": "DIG-99", "fields": {}}
     client = _make_mock_client(search_return=[existing_issue])
@@ -149,7 +149,7 @@ def test_mapping_json_preserves_existing_entries(applier, tmp_path):
         mutation, client, rest_calls=0, repo_root=tmp_path, create_core=_coordinated_create_core
     )
 
-    data = json.loads(mapping_path.read_text())
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
     assert data.get("old-id") == "DIG-1", "Pre-existing entry should be preserved"
     assert data.get("new-id") == "DIG-99", "New hit entry should be added"
 
@@ -199,7 +199,7 @@ def test_manifest_contains_dedup_event_on_hit(applier, tmp_path):
             ticket_plans=_plans([_typed_create("tick-ev1")]),
         )
 
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     events = manifest.get("events", [])
     assert len(events) == 1, f"Expected 1 event, got {len(events)}: {events!r}"
     ev = events[0]
@@ -226,7 +226,7 @@ def test_manifest_events_empty_on_no_hits(applier, tmp_path):
             ticket_plans=_plans([_typed_create("tick-noev1")]),
         )
 
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest.get("events") == [], "No events expected when JQL returns no hits"
 
 
@@ -247,7 +247,7 @@ def test_manifest_events_populated_for_each_hit(applier, tmp_path):
             mutations, pass_id="test-pass-multi", repo_root=tmp_path, ticket_plans=_plans(mutations)
         )
 
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     events = manifest.get("events", [])
     assert len(events) == 2, f"Expected 2 events for 2 hits, got {events!r}"
     local_ids = {e["local_id"] for e in events}
@@ -289,7 +289,7 @@ def test_mapping_write_is_atomic_via_temp_rename(applier, tmp_path):
         "Temp file should be in the same directory as mapping.json"
     )
     # The final mapping.json should contain the correct data
-    data = json.loads(mapping_path.read_text())
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
     assert data.get("tick-atomic1") == "DIG-555"
 
 
@@ -334,7 +334,7 @@ def test_no_partial_mapping_visible_during_write(applier, tmp_path):
 
     # File must exist and be fully parseable
     assert mapping_path.exists()
-    data = json.loads(mapping_path.read_text())
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
     assert isinstance(data, dict)
     assert data["tick-partial1"] == "DIG-200"
 
@@ -352,7 +352,7 @@ def test_load_mapping_returns_empty_dict_for_non_dict_json(
     mapping_path = scratch_retention.mapping_path(tmp_path)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     # Write a JSON list (valid JSON, wrong shape)
-    mapping_path.write_text(json.dumps([1, 2, 3]))
+    mapping_path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
 
     loaded = applier._load_mapping(mapping_path)
     assert loaded == {}, f"_load_mapping must return {{}} for non-dict JSON; got {loaded!r}"

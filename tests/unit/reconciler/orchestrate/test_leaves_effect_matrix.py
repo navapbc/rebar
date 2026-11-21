@@ -102,7 +102,7 @@ def _event_files(tracker_dir: Path, local_id: str) -> list[Path]:
 
 def _read_event(tracker_dir: Path, local_id: str, event_type: str) -> dict:
     for path in _event_files(tracker_dir, local_id):
-        ev = json.loads(path.read_text())
+        ev = json.loads(path.read_text(encoding="utf-8"))
         if ev.get("event_type") == event_type:
             return ev
     raise AssertionError(f"no {event_type} event in {tracker_dir / local_id}")
@@ -324,7 +324,9 @@ def _drive_inbound_update(handler, applier, mut_mod, repo_root):
     assert result.payload["local_id"] == "jira-dig-43"
     tracker = repo_root / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-43") if "EDIT" in p.name
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in _event_files(tracker, "jira-dig-43")
+        if "EDIT" in p.name
     ]
     assert edits, "expected an EDIT event"
     assert edits[-1]["data"]["fields"]["title"] == "Changed title"

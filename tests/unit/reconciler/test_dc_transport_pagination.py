@@ -147,7 +147,9 @@ def _guard_scanned_sources() -> dict[str, str]:
     file with zero call sites — so its offender list was unconditionally empty. A package-
     wide glob cannot be orphaned by the next such move.
     """
-    return {path.name: path.read_text() for path in sorted(_DC_ADAPTER_DIR.glob("*.py"))}
+    return {
+        path.name: path.read_text(encoding="utf-8") for path in sorted(_DC_ADAPTER_DIR.glob("*.py"))
+    }
 
 
 def _search_issues_calls_taking_the_default(sources: dict[str, str]) -> list[str]:
@@ -228,7 +230,7 @@ def _modules_holding_a_search_issues_call() -> dict[str, int]:
     for path in sorted(_DC_ADAPTER_DIR.glob("*.py")):
         calls = [
             node
-            for node in ast.walk(ast.parse(path.read_text()))
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "search_issues"
@@ -510,6 +512,6 @@ def test_ordinary_enrichment_failures_still_fail_open_and_write_the_snapshot(
         out = fetcher.fetch_snapshot(f"18a4-open-{stalling}", repo_root=tmp_path)
 
     assert out.exists(), "an ordinary enrichment failure must still write a degraded snapshot"
-    assert "DC-1" in _json.loads(out.read_text()), (
+    assert "DC-1" in _json.loads(out.read_text(encoding="utf-8")), (
         "the degraded snapshot must still carry the base scan's issues"
     )

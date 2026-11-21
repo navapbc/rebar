@@ -21,7 +21,9 @@ _USAGE = {"input_tokens": 10, "output_tokens": 3, "requests": 1}
 
 
 def _rows(path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 # ── inertness: the whole feature is a no-op unless REBAR_USAGE_LOG is set ────────────────────

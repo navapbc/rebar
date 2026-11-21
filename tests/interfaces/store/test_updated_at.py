@@ -25,7 +25,7 @@ def _snapshot_compiled_state(repo: Path, tid: str) -> dict:
     snaps = glob.glob(str(repo / ".tickets-tracker" / tid / "*-SNAPSHOT.json"))
     assert snaps, "expected a SNAPSHOT after compaction"
     snaps.sort()
-    return json.loads(Path(snaps[-1]).read_text())
+    return json.loads(Path(snaps[-1]).read_text(encoding="utf-8"))
 
 
 def _compact(repo: Path, tid: str) -> None:

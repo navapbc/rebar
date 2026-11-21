@@ -154,7 +154,7 @@ def test_identity_models_discover_no_collaborator_by_getattr() -> None:
 
     offenders = [
         node.func.id
-        for node in ast.walk(ast.parse(path.read_text()))
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "getattr"

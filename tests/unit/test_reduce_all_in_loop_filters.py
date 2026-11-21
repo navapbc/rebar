@@ -55,7 +55,9 @@ class _Event:
             "author": "Test User",
             "data": data,
         }
-        (tdir / f"{self.ts}-{uuid}-{event_type}.json").write_text(json.dumps(payload))
+        (tdir / f"{self.ts}-{uuid}-{event_type}.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
 
 
 def _tid(n: int) -> str:
@@ -92,7 +94,7 @@ def tracker(tmp_path: Path) -> str:
     ev.write(b, "LINK", {"target_id": BLOCKER, "relation": "depends_on"})
     a = create(ARCHIVED, "task", "Archived memory task")
     ev.write(a, "ARCHIVED", {})
-    (a / ".archived").write_text("")
+    (a / ".archived").write_text("", encoding="utf-8")
     d = create(DELETED, "task", "Deleted memory task")
     status(d, "deleted")
     ev.write(d, "ARCHIVED", {})
@@ -104,7 +106,9 @@ def tracker(tmp_path: Path) -> str:
     create(REVIEW, "code_review", "memory code review", description="memory " * 200)
     corrupt = root / CORRUPT
     corrupt.mkdir()
-    (corrupt / "1-00000000-0000-4000-8000-999999999999-CREATE.json").write_text("{not json")
+    (corrupt / "1-00000000-0000-4000-8000-999999999999-CREATE.json").write_text(
+        "{not json", encoding="utf-8"
+    )
 
     bridge = root / ".bridge_state"
     bridge.mkdir()
@@ -114,7 +118,9 @@ def tracker(tmp_path: Path) -> str:
         "aaaa-0000-0000-9999": {"state": "confirmed", "jira_key": "REB-3"},
     }
     reverse = {v["jira_key"]: k for k, v in bindings.items()}
-    (bridge / "bindings.json").write_text(json.dumps({"bindings": bindings, "reverse": reverse}))
+    (bridge / "bindings.json").write_text(
+        json.dumps({"bindings": bindings, "reverse": reverse}), encoding="utf-8"
+    )
     return str(root)
 
 

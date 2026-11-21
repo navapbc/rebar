@@ -244,7 +244,9 @@ def test_project_concurrency_entry_is_additive_only():
     import pathlib
 
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    routing = json.loads((repo_root / ".rebar" / "criteria_routing.json").read_text())
+    routing = json.loads(
+        (repo_root / ".rebar" / "criteria_routing.json").read_text(encoding="utf-8")
+    )
     entry = routing["code_review"]["concurrency"]
     # `.lock` is a noisy substring token absent from the committed high-precision list; it is
     # what a filename like `index.lock` fires through (no redundant `index.lock` token needed).

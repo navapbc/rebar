@@ -44,7 +44,7 @@ def _init_repo(path: Path) -> Path:
 
 
 def _commit(repo: Path, name: str, body: str) -> str:
-    (repo / name).write_text(body)
+    (repo / name).write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", name)
     return _git(repo, "rev-parse", "HEAD")
@@ -103,7 +103,7 @@ def test_evicts_stale_pinned_ticket_store_entry(store):
     )
     entry = store / ("tickets-" + "a" * 40)
     (entry / ".tickets-tracker").mkdir(parents=True)
-    (entry / ".tickets-tracker" / "events.jsonl").write_text("x" * 50)
+    (entry / ".tickets-tracker" / "events.jsonl").write_text("x" * 50, encoding="utf-8")
     old = now - 5000
     os.utime(entry, (old, old))
 
@@ -197,7 +197,7 @@ def test_trash_straggler_redrained(store, repo):
     _populate(repo, store, "a.txt", "x" * 50)
     straggler = store / "trash" / "interrupted-rmtree"
     straggler.mkdir(parents=True)
-    (straggler / "junk").write_text("half-deleted\n")
+    (straggler / "junk").write_text("half-deleted\n", encoding="utf-8")
     # A later janitor pass drains it (run_gc drains trash up front).
     janitor.run_gc(store, config=janitor.JanitorConfig(free_watermark_bytes=1), free_bytes=10**12)
     assert not straggler.exists()
@@ -243,12 +243,12 @@ def test_corrupt_entry_detected_and_self_heals(store, repo):
     sha, entry = _populate(repo, store, "f.txt", "good\n")
     assert janitor.reverify_entry(sha, store) is False  # TOFU baseline
     # Corrupt the materialized content (bit-rot / truncation).
-    (entry / "f.txt").write_text("TAMPERED")
+    (entry / "f.txt").write_text("TAMPERED", encoding="utf-8")
     assert janitor.reverify_entry(sha, store) is True  # detected + discarded
     assert not entry.exists()
     # Self-heal: the next acquire re-materializes faithful content.
     h = cache.acquire(sha, repo_root=str(repo), fetch=False)
-    assert (h.path / "f.txt").read_text() == "good\n"
+    assert (h.path / "f.txt").read_text(encoding="utf-8") == "good\n"
 
 
 def test_reverify_passes_when_unchanged(store, repo):
@@ -287,7 +287,7 @@ def test_janitor_config_reads_snapshot_toml_table(tmp_path, monkeypatch):
     # [snapshot] in the project config resolves (env > file > default); env unset here.
     monkeypatch.delenv("REBAR_GATE_GRACE_SECONDS", raising=False)
     repo = _init_repo(tmp_path / "repo")
-    (repo / "rebar.toml").write_text("[snapshot]\ngrace_seconds = 33\n")
+    (repo / "rebar.toml").write_text("[snapshot]\ngrace_seconds = 33\n", encoding="utf-8")
     cfg = janitor.JanitorConfig.from_env(repo_root=str(repo))
     assert cfg.grace_seconds == 33
 
@@ -312,7 +312,7 @@ def test_adr_records_architecture_and_rejected_pid_lease():
         Path(__file__).resolve().parents[2] / "docs" / "adr" / "0005-snapshot-cache-architecture.md"
     )
     assert adr.is_file()
-    text = adr.read_text().lower()
+    text = adr.read_text(encoding="utf-8").lower()
     assert "delete-on-last-close" in text
     assert "flock" in text and "gc" in text
     assert "pid" in text and "heartbeat" in text and "reject" in text
@@ -632,7 +632,7 @@ def test_max_bytes_resolved_from_env_and_snapshot_table(tmp_path, monkeypatch):
 
     monkeypatch.delenv("REBAR_GATE_MAX_BYTES")
     proj = _init_repo(tmp_path / "proj")
-    (proj / "rebar.toml").write_text("[snapshot]\nmax_bytes = 6789\n")
+    (proj / "rebar.toml").write_text("[snapshot]\nmax_bytes = 6789\n", encoding="utf-8")
     assert janitor.JanitorConfig.from_env(repo_root=str(proj)).max_bytes == 6789
 
 
@@ -667,12 +667,12 @@ def _three_sharing_ticket_entries(repo: Path, store: Path) -> list[Path]:
     _commit(repo, "seed.txt", "seed")
     _git(repo, "checkout", "--quiet", "-b", "tickets")
     for i in range(8):
-        (repo / f"t{i}.json").write_text("T" * 20_000)
+        (repo / f"t{i}.json").write_text("T" * 20_000, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", "tickets base")
     entries = []
     for i in range(3):
-        (repo / f"t{i}.json").write_text("T" * 19_999 + "X")
+        (repo / f"t{i}.json").write_text("T" * 19_999 + "X", encoding="utf-8")
         _git(repo, "add", "-A")
         _git(repo, "commit", "--quiet", "-m", f"delta {i}")
         entries.append(Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False)))
@@ -947,7 +947,7 @@ def test_entry_count_cap_can_be_disabled_and_resolves_from_env_and_table(tmp_pat
     monkeypatch.delenv("REBAR_GATE_MAX_ENTRIES")
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "rebar.toml").write_text("[snapshot]\nmax_entries = 654\n")
+    (proj / "rebar.toml").write_text("[snapshot]\nmax_entries = 654\n", encoding="utf-8")
     assert janitor.JanitorConfig.from_env(repo_root=str(proj)).max_entries == 654
 
 
@@ -986,7 +986,7 @@ def _adjacent_shas(repo: Path, count: int) -> list[str]:
     """``count`` consecutive commits that each change one file of a shared tree, so every
     later SHA builds from the previous entry by hardlink delta."""
     for i in range(5):
-        (repo / f"shared{i}.txt").write_text(f"{i}" * (40 + i))
+        (repo / f"shared{i}.txt").write_text(f"{i}" * (40 + i), encoding="utf-8")
     return [_commit(repo, f"step{n}.txt", "s" * (50 + n)) for n in range(count)]
 
 

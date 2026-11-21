@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_advanced_phase_contract_sections_are_documented() -> None:
-    text = (Path(__file__).parents[2] / "docs/plan-review-gate.md").read_text()
+    text = (Path(__file__).parents[2] / "docs/plan-review-gate.md").read_text(encoding="utf-8")
     for heading in (
         "### Phase/floor manifest contract",
         "### `phase_status` compatibility",

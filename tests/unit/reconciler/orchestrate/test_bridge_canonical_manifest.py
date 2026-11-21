@@ -188,7 +188,8 @@ def test_canonical_uncapped_sync_retains_field_comparable_manifest(
                         {"key": "local-42", "action": "create"},
                     ]
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         return legacy_batch
 
@@ -204,7 +205,7 @@ def test_canonical_uncapped_sync_retains_field_comparable_manifest(
     )
 
     assert isinstance(manifest_path, Path)
-    payload = json.loads(manifest_path.read_text())
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     # The batch form now always carries ticket plans (ADR 0103 S3), so the manifest adds
     # their lifecycle-intents block; the field-comparable body below is unchanged.
     intents = payload.pop("lifecycle_intents")
@@ -268,7 +269,8 @@ def test_canonical_sync_manifest_reports_batch_failures_exactly(
                         {"key": "DIG-42", "action": "update"},
                     ]
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         return batch_path
 
@@ -283,7 +285,7 @@ def test_canonical_sync_manifest_reports_batch_failures_exactly(
         ticket_plans=_plans(mutations, mode=mode_mod.Mode.LIVE),
     )
 
-    payload = json.loads(manifest_path.read_text())
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert payload["applied_count"] == 1
     assert payload["failed_count"] == 1
     assert [entry["target"] for entry in payload["plan"]] == ["DIG-41", "DIG-42"]
@@ -322,7 +324,7 @@ def test_canonical_sync_tally_excludes_suppressed_inbound_mutations(
         return SimpleNamespace(payload={"follow_on": follow_on} if follow_on else {})
 
     def fake_batch(*_args, **_kwargs) -> Path:
-        manifest_path.write_text(json.dumps({"mutations": []}))
+        manifest_path.write_text(json.dumps({"mutations": []}), encoding="utf-8")
         return manifest_path
 
     monkeypatch.setattr(applier, "_apply_typed", fake_typed)
@@ -338,7 +340,7 @@ def test_canonical_sync_tally_excludes_suppressed_inbound_mutations(
         ticket_plans=_plans(mutations, mode=mode_mod.Mode.LIVE),
     )
 
-    payload = json.loads(result_path.read_text())
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
     assert payload["applied_count"] == 1
     assert payload["failed_count"] == 0
     assert [entry["target"] for entry in payload["plan"]] == ["DIG-1", "DIG-2"]
@@ -362,7 +364,8 @@ def test_capped_canonical_sync_reports_plan_tally_and_deferred(tmp_path: Path, m
                         {"key": "DIG-2", "action": "update"},
                     ]
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         return manifest_path
 
@@ -378,7 +381,7 @@ def test_capped_canonical_sync_reports_plan_tally_and_deferred(tmp_path: Path, m
         ticket_plans=_plans(mutations, mode=mode_mod.Mode.LIVE, max_changes=2),
     )
 
-    payload = json.loads(result_path.read_text())
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
     assert payload["max_changes"] == 2
     assert payload["applied_count"] == 1
     assert payload["failed_count"] == 1
@@ -397,7 +400,7 @@ def test_canonical_sync_tally_degrades_safely_when_batch_manifest_is_unreadable(
 
     def fake_batch(*_args, **_kwargs) -> Path:
         if corrupt:
-            manifest_path.write_text("{not-json")
+            manifest_path.write_text("{not-json", encoding="utf-8")
         return manifest_path
 
     monkeypatch.setattr(applier, "_apply_batch", fake_batch)
@@ -413,6 +416,6 @@ def test_canonical_sync_tally_degrades_safely_when_batch_manifest_is_unreadable(
         ),
     )
 
-    payload = json.loads(result_path.read_text())
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
     assert payload["applied_count"] == 1
     assert payload["failed_count"] == 0

@@ -48,7 +48,7 @@ def tracker(tmp_path: Path) -> str:
     _git(td, "init", "-q", "-b", "tickets")
     _git(td, "config", "user.email", "t@e.com")
     _git(td, "config", "user.name", "T")
-    (td / "seed").write_text("seed\n")
+    (td / "seed").write_text("seed\n", encoding="utf-8")
     _git(td, "add", "-A")
     _git(td, "commit", "-q", "-m", "seed")
     return str(td)
@@ -251,7 +251,7 @@ def test_batch_self_heals_preexisting_unmerged_bridge_state(tmp_path):
     _git(td, "config", "user.name", "T")
     bs = td / ".bridge_state"
     bs.mkdir()
-    (bs / "prev_snapshot.json").write_text('{"clean": true}\n')
+    (bs / "prev_snapshot.json").write_text('{"clean": true}\n', encoding="utf-8")
     _git(td, "add", "-A")
     _git(td, "commit", "-q", "-m", "seed")
     rel = ".bridge_state/prev_snapshot.json"
@@ -261,7 +261,9 @@ def test_batch_self_heals_preexisting_unmerged_bridge_state(tmp_path):
     )
     info = f"100644 {b1} 1\t{rel}\n100644 {b2} 2\t{rel}\n100644 {b3} 3\t{rel}\n"
     _git(td, "update-index", "--index-info", _in=info)
-    (bs / "prev_snapshot.json").write_text("<<<<<<< ours\n=======\n>>>>>>> theirs\n")
+    (bs / "prev_snapshot.json").write_text(
+        "<<<<<<< ours\n=======\n>>>>>>> theirs\n", encoding="utf-8"
+    )
     tracker = str(td)
 
     n = event_append.batch_stage_and_commit(

@@ -17,7 +17,7 @@ pytestmark = pytest.mark.scripts
 
 
 def _write(path: Path, body: str) -> None:
-    path.write_text(textwrap.dedent(body))
+    path.write_text(textwrap.dedent(body), encoding="utf-8")
 
 
 @pytest.fixture

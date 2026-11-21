@@ -13,7 +13,7 @@ DOCKERFILE = Path(__file__).resolve().parents[2] / "infra" / "compose" / "Docker
 
 
 def _materialize_entrypoint(tmp_path: Path) -> Path:
-    source = DOCKERFILE.read_text()
+    source = DOCKERFILE.read_text(encoding="utf-8")
     section = source.split("# Data-capture entrypoint", 1)[1]
     start = section.index("RUN set -eux;")
     final = "    chmod +x /usr/local/bin/reviewbot-entrypoint.sh"
@@ -37,10 +37,10 @@ def test_generated_entrypoint_runs_ensure_without_tickets_pat(tmp_path: Path) ->
     quoted_receipt = shlex.quote(str(receipt))
 
     ensure = bin_dir / "reviewbot-ensure-tickets.sh"
-    ensure.write_text(f"#!/bin/sh\necho ensure >> {quoted_receipt}\n")
+    ensure.write_text(f"#!/bin/sh\necho ensure >> {quoted_receipt}\n", encoding="utf-8")
     ensure.chmod(0o755)
     git = bin_dir / "git"
-    git.write_text("#!/bin/sh\necho 'git unexpectedly called' >&2\nexit 97\n")
+    git.write_text("#!/bin/sh\necho 'git unexpectedly called' >&2\nexit 97\n", encoding="utf-8")
     git.chmod(0o755)
 
     env = subprocess_env()
@@ -55,7 +55,7 @@ def test_generated_entrypoint_runs_ensure_without_tickets_pat(tmp_path: Path) ->
     )
 
     assert result.returncode == 0, result.stderr
-    assert receipt.read_text().splitlines() == ["ensure", "app"]
+    assert receipt.read_text(encoding="utf-8").splitlines() == ["ensure", "app"]
 
 
 # ── bug beb1: authorship signing shells out to ssh-keygen, so the image MUST carry it ──────

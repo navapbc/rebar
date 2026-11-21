@@ -176,11 +176,11 @@ def test_unretire_drops_the_key_from_the_retired_set_and_file(
 ) -> None:
     store = _retired_store(binding_store_mod, tmp_path, "loc-1", "DIG-1")
     retired_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings-retired.json"
-    assert "DIG-1" in json.loads(retired_path.read_text())["retired"]
+    assert "DIG-1" in json.loads(retired_path.read_text(encoding="utf-8"))["retired"]
 
     assert store.unretire("DIG-1") is True
     assert not store.is_retired("DIG-1")
-    assert "DIG-1" not in json.loads(retired_path.read_text())["retired"]
+    assert "DIG-1" not in json.loads(retired_path.read_text(encoding="utf-8"))["retired"]
     # Idempotent: un-retiring an unknown key is a no-op, not an error.
     assert store.unretire("DIG-1") is False
 

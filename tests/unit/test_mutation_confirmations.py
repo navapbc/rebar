@@ -278,7 +278,7 @@ def test_revert_confirmation_keeps_event_uuid_and_id(repo: Path) -> None:
     tid = _create(repo)
     _cli("comment", tid, "to be reverted", repo=repo)
     events = sorted((repo / ".tickets-tracker" / tid).glob("*COMMENT.json"))
-    uuid = json.loads(events[-1].read_text())["uuid"]
+    uuid = json.loads(events[-1].read_text(encoding="utf-8"))["uuid"]
     proc = _cli("revert", tid, uuid, repo=repo)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == f"reverted {tid}: event {uuid}"

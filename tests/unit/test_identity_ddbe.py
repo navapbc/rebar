@@ -203,7 +203,7 @@ def test_resolve_dangling_pointer_falls_through_then_none(store: Path) -> None:
     """A pointer to a non-existent id falls through to git-email match (here: none)."""
     ptr = store / ".rebar" / "current_identity"
     ptr.parent.mkdir(parents=True, exist_ok=True)
-    ptr.write_text(json.dumps({"identity_id": "dead-beef-dead-beef"}))
+    ptr.write_text(json.dumps({"identity_id": "dead-beef-dead-beef"}), encoding="utf-8")
     rebar.create_identity("Ada", "nomatch@nowhere.test", repo_root=str(store))
     assert rebar.resolve_current_identity(repo_root=str(store)) is None
 
@@ -269,4 +269,4 @@ def test_cli_identity_use_sets_pointer_e2e(store: Path) -> None:
     assert use.returncode == 0, use.stderr
     ptr = store / ".rebar" / "current_identity"
     assert ptr.is_file()
-    assert json.loads(ptr.read_text())["identity_id"] == ident
+    assert json.loads(ptr.read_text(encoding="utf-8"))["identity_id"] == ident

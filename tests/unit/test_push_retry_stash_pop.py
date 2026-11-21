@@ -59,23 +59,25 @@ def diverged_tracker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     bs = tracker / ".bridge_state"
     bs.mkdir()
     snap = bs / "prev_snapshot.json"
-    snap.write_text(_snap("BASE", "BASE"))
+    snap.write_text(_snap("BASE", "BASE"), encoding="utf-8")
     _git(tracker, "add", "-A")
     _git(tracker, "commit", "-q", "-m", "seed")
     _git(tracker, "push", "-q", "origin", "HEAD:tickets")
     # upstream advances region A and pushes (origin diverges → non-FF)
     subprocess.run(["git", "clone", str(origin), str(up)], check=True, capture_output=True)
     _ident(up)
-    (up / ".bridge_state" / "prev_snapshot.json").write_text(_snap("UPSTREAM", "BASE"))
+    (up / ".bridge_state" / "prev_snapshot.json").write_text(
+        _snap("UPSTREAM", "BASE"), encoding="utf-8"
+    )
     _git(up, "add", "-A")
     _git(up, "commit", "-q", "-m", "upstream region A")
     _git(up, "push", "-q", "origin", "HEAD:tickets")
     # local commits region B (clean-merges vs upstream's region A)
-    snap.write_text(_snap("BASE", "LOCAL"))
+    snap.write_text(_snap("BASE", "LOCAL"), encoding="utf-8")
     _git(tracker, "add", "-A")
     _git(tracker, "commit", "-q", "-m", "local region B")
     # uncommitted WT edit to region A — the stash that will conflict on pop
-    snap.write_text(_snap("LOCAL_WT_A", "LOCAL"))
+    snap.write_text(_snap("LOCAL_WT_A", "LOCAL"), encoding="utf-8")
     return str(tracker)
 
 
@@ -85,7 +87,7 @@ def test_push_retry_pop_conflict_leaves_consistent_worktree(diverged_tracker: st
 
     push.push_tickets_branch(diverged_tracker)  # best-effort; never raises
 
-    content = snap.read_text()
+    content = snap.read_text(encoding="utf-8")
     assert "<<<<<<<" not in content and ">>>>>>>" not in content, (
         "push-retry stash-pop stranded conflict markers in prev_snapshot.json"
     )
@@ -95,7 +97,7 @@ def test_push_retry_pop_conflict_leaves_consistent_worktree(diverged_tracker: st
     json.loads(content)
     # The store must remain WRITABLE — a commit must not be blocked by an unmerged path
     # (this is the "git commit failed while holding lock" symptom).
-    (Path(diverged_tracker) / "after.txt").write_text("x")
+    (Path(diverged_tracker) / "after.txt").write_text("x", encoding="utf-8")
     _git(diverged_tracker, "add", "-A")
     commit = _git(diverged_tracker, "commit", "-m", "post-push write", check=False)
     assert commit.returncode == 0, f"store write blocked after push-retry: {commit.stderr}"
@@ -135,6 +137,6 @@ def test_push_retry_merge_skipped_when_write_lock_busy(
     assert not (Path(diverged_tracker) / ".git" / "MERGE_HEAD").exists()
     assert "push stays pending" in caplog.text
     # The store remains writable — the skipped merge did not wedge the tracker.
-    (Path(diverged_tracker) / "after.txt").write_text("x")
+    (Path(diverged_tracker) / "after.txt").write_text("x", encoding="utf-8")
     _git(diverged_tracker, "add", "-A")
     assert _git(diverged_tracker, "commit", "-m", "post", check=False).returncode == 0

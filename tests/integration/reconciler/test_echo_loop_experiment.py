@@ -71,7 +71,7 @@ def _bindings(repo_root: Path) -> dict:
     p = _tracker(repo_root) / ".bridge_state" / "bindings.json"
     if not p.exists():
         return {}
-    return json.loads(p.read_text())["bindings"]
+    return json.loads(p.read_text(encoding="utf-8"))["bindings"]
 
 
 def _create_event_counts(repo_root: Path) -> dict[str, int]:
@@ -145,7 +145,7 @@ def _drive(rec, reconciler_modules, client, git_repo, monkeypatch, pass_id, n=4)
 
 def _delete_binding(git_repo: Path, local_id: str) -> None:
     p = _tracker(git_repo) / ".bridge_state" / "bindings.json"
-    data = json.loads(p.read_text())
+    data = json.loads(p.read_text(encoding="utf-8"))
     entry = data["bindings"].pop(local_id, None)
     if entry and entry.get("jira_key"):
         data.get("reverse", {}).pop(entry["jira_key"], None)
@@ -478,7 +478,7 @@ def test_inbound_created_ticket_id_format(git_repo, reconciler_modules, monkeypa
 
 def _make_keyless_pending(git_repo: Path, local_id: str, created_at: str) -> None:
     p = _tracker(git_repo) / ".bridge_state" / "bindings.json"
-    data = json.loads(p.read_text())
+    data = json.loads(p.read_text(encoding="utf-8"))
     entry = data["bindings"].get(local_id, {})
     if entry.get("jira_key"):
         data.get("reverse", {}).pop(entry["jira_key"], None)
@@ -525,7 +525,7 @@ def _run_keyless_pending_experiment(
     rec.record("perturbed", git_repo, state, [])
     print(
         "  [perturbed bindings.json] "
-        + (_tracker(git_repo) / ".bridge_state" / "bindings.json").read_text()
+        + (_tracker(git_repo) / ".bridge_state" / "bindings.json").read_text(encoding="utf-8")
     )
 
     for i in range(1, 5):

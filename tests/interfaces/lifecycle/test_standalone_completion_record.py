@@ -31,7 +31,7 @@ def _git(repo: Path, *args: str) -> str:
 def _enable_gate(repo: Path, *, enabled: bool = True) -> None:
     value = "true" if enabled else "false"
     (repo / "rebar.toml").write_text(
-        f"[verify]\nrequire_completion_verification_for_close = {value}\n"
+        f"[verify]\nrequire_completion_verification_for_close = {value}\n", encoding="utf-8"
     )
 
 

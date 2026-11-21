@@ -44,10 +44,10 @@ def test_git_add_never_stages_cache_json(rebar_repo: Path) -> None:
 
     # Stray caches: one at the tracker root, one inside the ticket dir, plus the
     # private temp shape used while atomically publishing each location.
-    (tracker / ".cache.json").write_text('{"stale": true}')
-    (ticket_dir / ".cache.json").write_text('{"stale": true}')
-    (tracker / "..cache.json.root.tmp").write_text('{"partial": true}')
-    (ticket_dir / "..cache.json.ticket.tmp").write_text('{"partial": true}')
+    (tracker / ".cache.json").write_text('{"stale": true}', encoding="utf-8")
+    (ticket_dir / ".cache.json").write_text('{"stale": true}', encoding="utf-8")
+    (tracker / "..cache.json.root.tmp").write_text('{"partial": true}', encoding="utf-8")
+    (ticket_dir / "..cache.json.ticket.tmp").write_text('{"partial": true}', encoding="utf-8")
 
     subprocess.run(["git", "add", "-A"], cwd=tracker, capture_output=True, text=True, check=False)
     staged = _git_out("diff", "--cached", "--name-only", cwd=tracker).splitlines()

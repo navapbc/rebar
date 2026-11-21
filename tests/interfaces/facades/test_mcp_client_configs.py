@@ -104,7 +104,7 @@ def _expand_env(value: str, env: dict[str, str]) -> str:
 
 def load_copilot() -> tuple[str, str]:
     """Return (url, raw Authorization header) from the committed project config."""
-    doc = json.loads((REPO_ROOT / ".mcp.json").read_text())
+    doc = json.loads((REPO_ROOT / ".mcp.json").read_text(encoding="utf-8"))
     entry = doc["mcpServers"]["rebar"]
     assert entry["type"] == "http"
     return entry["url"], entry["headers"]["Authorization"]
@@ -112,7 +112,7 @@ def load_copilot() -> tuple[str, str]:
 
 def load_claude() -> tuple[str, str]:
     """Return (url, raw Authorization header) from the committed project config."""
-    doc = json.loads((REPO_ROOT / ".mcp.json").read_text())
+    doc = json.loads((REPO_ROOT / ".mcp.json").read_text(encoding="utf-8"))
     entry = doc["mcpServers"]["rebar"]
     assert entry["type"] == "http"
     return entry["url"], entry["headers"]["Authorization"]
@@ -120,7 +120,7 @@ def load_claude() -> tuple[str, str]:
 
 def load_codex() -> tuple[str, str]:
     """Return (url, bearer env var NAME) from the committed project codex config."""
-    doc = tomllib.loads((REPO_ROOT / ".codex" / "config.toml").read_text())
+    doc = tomllib.loads((REPO_ROOT / ".codex" / "config.toml").read_text(encoding="utf-8"))
     entry = doc["mcp_servers"]["rebar"]
     return entry["url"], entry["bearer_token_env_var"]
 
@@ -176,7 +176,7 @@ def live_server(tmp_path_factory):
         {"name": "claude", "client_id": "claude", "scopes": [], "token_env": PAT_ENV["claude"]},
     ]
     tokens_file = tmp / "static-tokens.json"
-    tokens_file.write_text(json.dumps({"tokens": records}))
+    tokens_file.write_text(json.dumps({"tokens": records}), encoding="utf-8")
 
     port = _free_port()
     cfg = Config(
@@ -285,7 +285,7 @@ def test_absent_or_invalid_bearer_is_401(live_server):
     ],
 )
 def test_no_secret_committed(relpath, client):
-    text = (EXAMPLES / relpath).resolve().read_text()
+    text = (EXAMPLES / relpath).resolve().read_text(encoding="utf-8")
     # The PAT env var name is referenced.
     assert PAT_ENV[client] in text
     # No TEST/real PAT literal, and no inline bearer secret token.
@@ -309,7 +309,9 @@ def test_serena_entry_is_prebuilt_not_git_build():
     closed its input stream (broken pipe)` on `initialize`. Pinning the entry to the
     `uv tool install`ed binary keeps git and the network off the startup path entirely.
     """
-    entry = json.loads((REPO_ROOT / ".mcp.json").read_text())["mcpServers"]["serena"]
+    entry = json.loads((REPO_ROOT / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"][
+        "serena"
+    ]
     assert entry["type"] == "local"
     assert entry["command"].endswith("/bin/serena")
     assert "start-mcp-server" in entry["args"]
@@ -324,7 +326,7 @@ def _mask_home(tmp_path):
     """A scratch HOME so a client CLI reads only the config we plant (no user config)."""
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".claude.json").write_text("{}")
+    (home / ".claude.json").write_text("{}", encoding="utf-8")
     return home
 
 

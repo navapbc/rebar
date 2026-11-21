@@ -248,7 +248,7 @@ def test_grandchild_process_group_reaped(tmp_path, real_child):
     # The grandchild wrote its PID; its process group must be gone. Poll, because
     # the kill+reap is asynchronous w.r.t. the grandchild actually dying.
     assert pidfile.exists(), "grandchild never recorded its PID"
-    gpid = int(pidfile.read_text())
+    gpid = int(pidfile.read_text(encoding="utf-8"))
     survivors = _wait_until_gone([gpid])
     if survivors:
         # Final cleanup so we never leak in CI, then fail loudly.
@@ -266,14 +266,14 @@ def test_write_not_retried_on_timeout(tmp_path, real_child):
     reads a settled file: a second spawn would be visible however slow the host is.
     """
     counter = tmp_path / "spawns"
-    counter.write_text("")
+    counter.write_text("", encoding="utf-8")
     with pytest.raises(acli_subprocess.AcliTimeoutError):
         acli_subprocess._run_acli(
             [str(counter), str(real_child.ready)],
             acli_cmd=_fake_cmd(_COUNT_THEN_HANG),
             retry_on_timeout=False,
         )
-    assert counter.read_text() == "x", "a timed-out WRITE must not be retried"
+    assert counter.read_text(encoding="utf-8") == "x", "a timed-out WRITE must not be retried"
     assert len(real_child.pids) == 1, f"expected one spawn, got {real_child.pids}"
 
 

@@ -47,7 +47,9 @@ _STATE_DEFAULT = re.compile(
 @cache
 def state_path_defaults(script: Path = SCRIPT) -> dict[str, str]:
     """Return every ``NAME -> /var/lib/rebar/...`` default the script declares."""
-    return {m["name"]: m["default"] for m in _STATE_DEFAULT.finditer(script.read_text())}
+    return {
+        m["name"]: m["default"] for m in _STATE_DEFAULT.finditer(script.read_text(encoding="utf-8"))
+    }
 
 
 def observability_env(tmp_path: Path, overrides: Mapping[str, str] | None = None) -> SubprocessEnv:
@@ -62,7 +64,7 @@ def observability_env(tmp_path: Path, overrides: Mapping[str, str] | None = None
     fallback_bin = tmp_path / "host-stubs"
     fallback_bin.mkdir(parents=True, exist_ok=True)
     docker = fallback_bin / "docker"
-    docker.write_text("#!/usr/bin/env bash\nexit 1\n")
+    docker.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
     docker.chmod(0o755)
 
     env = subprocess_env()

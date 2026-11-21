@@ -37,10 +37,10 @@ def _tickets_repo(tmp_path: Path) -> Path:
     _git(repo.parent, "init", "-q", "-b", "tickets", str(repo))
     _git(repo, "config", "user.email", "t@example.invalid")
     _git(repo, "config", "user.name", "t")
-    (repo / _TRACKED).write_text('{"e":"committed"}')
+    (repo / _TRACKED).write_text('{"e":"committed"}', encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "base")
-    (repo / _LEFTOVER).write_text('{"snapshot":"leftover"}')
+    (repo / _LEFTOVER).write_text('{"snapshot":"leftover"}', encoding="utf-8")
     return repo
 
 
@@ -64,7 +64,9 @@ def test_the_mover_relocates_an_untracked_leftover_and_preserves_its_bytes(
     assert merge_recovery.quarantine_untracked(_git, str(repo), [_LEFTOVER]) is True
 
     assert not (repo / _LEFTOVER).exists(), "the colliding path must be out of the way"
-    preserved = [p for p in _quarantined(repo) if p.read_text() == '{"snapshot":"leftover"}']
+    preserved = [
+        p for p in _quarantined(repo) if p.read_text(encoding="utf-8") == '{"snapshot":"leftover"}'
+    ]
     assert preserved, "the leftover's bytes must survive in quarantine (moved, never deleted)"
 
 
@@ -76,7 +78,7 @@ def test_the_mover_refuses_a_tracked_path_and_moves_nothing(tmp_path: Path) -> N
 
     assert merge_recovery.quarantine_untracked(_git, str(repo), [_LEFTOVER, _TRACKED]) is False
 
-    assert (repo / _TRACKED).read_text() == '{"e":"committed"}'
+    assert (repo / _TRACKED).read_text(encoding="utf-8") == '{"e":"committed"}'
     assert (repo / _LEFTOVER).exists(), "the fence is checked for ALL paths before any move"
     assert _quarantined(repo) == []
 
@@ -88,13 +90,13 @@ def test_syncs_door_now_carries_the_untracked_fence(tmp_path: Path) -> None:
     repo = _tickets_repo(tmp_path)
 
     assert sync._quarantine_untracked(str(repo), [_TRACKED]) is False
-    assert (repo / _TRACKED).read_text() == '{"e":"committed"}'
+    assert (repo / _TRACKED).read_text(encoding="utf-8") == '{"e":"committed"}'
 
 
 def test_the_mover_refuses_an_unresolvable_common_dir(tmp_path: Path) -> None:
     """A quarantine path computed from an empty ``--git-common-dir`` would land INSIDE
     the working tree, so the recovery is refused outright."""
-    (tmp_path / "leftover.json").write_text("x")
+    (tmp_path / "leftover.json").write_text("x", encoding="utf-8")
 
     def blank_common(_path: str, *args: str) -> subprocess.CompletedProcess:
         out = "" if args[:2] == ("rev-parse", "--git-common-dir") else "?? leftover.json\n"
@@ -103,7 +105,9 @@ def test_the_mover_refuses_an_unresolvable_common_dir(tmp_path: Path) -> None:
     assert merge_recovery.quarantine_untracked(blank_common, str(tmp_path), ["leftover.json"]) is (
         False
     )
-    assert (tmp_path / "leftover.json").read_text() == "x", "nothing may move on refusal"
+    assert (tmp_path / "leftover.json").read_text(encoding="utf-8") == "x", (
+        "nothing may move on refusal"
+    )
 
 
 def test_the_mover_refuses_a_path_that_vanished(tmp_path: Path) -> None:

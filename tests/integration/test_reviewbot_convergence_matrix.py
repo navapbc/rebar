@@ -60,8 +60,8 @@ def test_same_epoch_divergence_uses_union_and_preserves_both_event_commits(
     assert result.returncode == 0, result.stderr
     assert is_ancestor(pair.clone, local_event, "HEAD")
     assert is_ancestor(pair.clone, remote_event, "HEAD")
-    assert (pair.clone / "local-event.json").read_text() == "local\n"
-    assert (pair.clone / "remote-event.json").read_text() == "remote\n"
+    assert (pair.clone / "local-event.json").read_text(encoding="utf-8") == "local\n"
+    assert (pair.clone / "remote-event.json").read_text(encoding="utf-8") == "remote\n"
     assert_no_merge_or_stash(pair.clone)
 
 
@@ -76,7 +76,7 @@ def test_local_ahead_before_epoch_rewrite_is_preserved_and_requires_manual_inter
 
     assert result.returncode == 0, result.stderr
     assert rev(pair.clone) == local_event
-    assert (pair.clone / "unpushed.json").read_text() == "keep me\n"
+    assert (pair.clone / "unpushed.json").read_text(encoding="utf-8") == "keep me\n"
     assert rev(pair.clone, "refs/remotes/origin/tickets") == rewritten
     assert "manual" in result.stderr.lower()
     assert "local" in result.stderr.lower()
@@ -215,7 +215,8 @@ def test_epoch_adoption_uses_pinned_commit_when_tracking_ref_moves(tmp_path, mon
         f'    "{real_git}" -C "{pair.clone}" update-ref refs/remotes/origin/tickets {moved}\n'
         "    ;;\n"
         "esac\n"
-        f'exec "{real_git}" "$@"\n'
+        f'exec "{real_git}" "$@"\n',
+        encoding="utf-8",
     )
     shim.chmod(0o755)
 
@@ -247,7 +248,8 @@ def test_under_lock_corrupt_epoch_recheck_refuses_reset(tmp_path, monkeypatch) -
         '    exit "$status"\n'
         "    ;;\n"
         "esac\n"
-        f'exec "{real_git}" "$@"\n'
+        f'exec "{real_git}" "$@"\n',
+        encoding="utf-8",
     )
     shim.chmod(0o755)
 
@@ -277,7 +279,8 @@ def test_under_lock_dirty_worktree_recheck_refuses_reset(tmp_path, monkeypatch) 
         f'    printf "\\n" >> "{compat_record}"\n'
         "    ;;\n"
         "esac\n"
-        f'exec "{real_git}" "$@"\n'
+        f'exec "{real_git}" "$@"\n',
+        encoding="utf-8",
     )
     shim.chmod(0o755)
 
@@ -317,7 +320,8 @@ def test_under_lock_head_change_recheck_preserves_new_local_commit(tmp_path, mon
         "    fi\n"
         "    ;;\n"
         "esac\n"
-        f'exec "{real_git}" "$@"\n'
+        f'exec "{real_git}" "$@"\n',
+        encoding="utf-8",
     )
     shim.chmod(0o755)
 
@@ -344,14 +348,15 @@ def test_unexpected_convergence_failure_still_runs_ensure_registry(tmp_path, mon
         "  exit 42\n"
         "fi\n"
         f'echo ensure >> "{ensure_receipt}"\n'
-        f'exec "{sys.executable}" "$@"\n'
+        f'exec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
     )
     python_shim.chmod(0o755)
 
     result = run_ensure(pair, env_overrides={"REVIEWBOT_PYTHON": str(python_shim)})
 
     assert result.returncode == 0, result.stderr
-    assert ensure_receipt.read_text().splitlines() == ["ensure"]
+    assert ensure_receipt.read_text(encoding="utf-8").splitlines() == ["ensure"]
     assert rev(pair.clone) == local_before
     assert rev(pair.clone, "refs/remotes/origin/tickets") == remote_after
     assert "convergence" in result.stderr.lower()
@@ -363,7 +368,7 @@ def test_under_lock_rebase_guard_refuses_reset(tmp_path, monkeypatch) -> None:
     local_before = rev(pair.clone)
     remote_after = force_epoch_rewrite(pair, "E1")
     merge_head = pair.clone / ".git" / "MERGE_HEAD"
-    merge_head.write_text(remote_after + "\n")
+    merge_head.write_text(remote_after + "\n", encoding="utf-8")
 
     result = run_ensure(pair)
 
@@ -384,7 +389,8 @@ def test_failed_pinned_reset_warns_and_preserves_head(tmp_path, monkeypatch) -> 
     shim_dir.mkdir()
     shim = shim_dir / "git"
     shim.write_text(
-        f'#!/bin/sh\ncase "$*" in\n  *"reset --hard"*) exit 1 ;;\nesac\nexec "{real_git}" "$@"\n'
+        f'#!/bin/sh\ncase "$*" in\n  *"reset --hard"*) exit 1 ;;\nesac\nexec "{real_git}" "$@"\n',
+        encoding="utf-8",
     )
     shim.chmod(0o755)
 

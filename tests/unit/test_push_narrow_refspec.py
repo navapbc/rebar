@@ -67,7 +67,9 @@ def _competing_push(tmp_path: Path, repo: Path) -> None:
     _git(comp, "config", "user.name", "c")
     tdir = comp / "9999-comp-9999-9999"
     tdir.mkdir()
-    (tdir / "1700000000000000000-9999-comp-9999-9999-CREATE.json").write_text('{"side":"comp"}')
+    (tdir / "1700000000000000000-9999-comp-9999-9999-CREATE.json").write_text(
+        '{"side":"comp"}', encoding="utf-8"
+    )
     _git(comp, "add", "-A")
     _git(comp, "commit", "-q", "--no-verify", "-m", "ticket: CREATE competing")
     _git(comp, "push", "-q", "origin", "HEAD:tickets")
@@ -77,7 +79,9 @@ def _local_unpushed_commit(tracker: Path) -> None:
     """A local ticket event committed but not pushed — the commit the loop must land."""
     tdir = tracker / "8888-locl-8888-8888"
     tdir.mkdir()
-    (tdir / "1700000000000000000-8888-locl-8888-8888-CREATE.json").write_text('{"side":"local"}')
+    (tdir / "1700000000000000000-8888-locl-8888-8888-CREATE.json").write_text(
+        '{"side":"local"}', encoding="utf-8"
+    )
     _git(tracker, "add", "-A")
     _git(tracker, "commit", "-q", "--no-verify", "-m", "ticket: CREATE local")
 

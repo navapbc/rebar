@@ -108,7 +108,8 @@ def _event(repo: Path, position: str, event_type: str, *, body: str = "x") -> st
                 "event_type": event_type,
                 "body": body,
             }
-        )
+        ),
+        encoding="utf-8",
     )
     _git(repo, "add", rel)
     _git(repo, "commit", "-q", "-m", f"ticket: {event_type} {TICKET}")
@@ -356,10 +357,10 @@ def test_ledger_attribution_is_unchanged_by_the_batching(
 
     # Sign every event so each one produces a ledger entry.
     for path in paths:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
         data["author_sig"] = "not-a-real-envelope"
         data["author_id"] = "id-1"
-        Path(path).write_text(json.dumps(data))
+        Path(path).write_text(json.dumps(data), encoding="utf-8")
 
     ledger = compact._build_authorship_ledger(paths, None)
     assert len(ledger) == len(paths)
@@ -381,10 +382,10 @@ def test_batching_costs_one_git_walk_not_one_per_event(
     ticket_dir = tracker / TICKET
     paths = sorted(str(p) for p in ticket_dir.glob("*.json"))
     for path in paths:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
         data["author_sig"] = "not-a-real-envelope"
         data["author_id"] = "id-1"
-        Path(path).write_text(json.dumps(data))
+        Path(path).write_text(json.dumps(data), encoding="utf-8")
 
     real_run = subprocess.run
     broad_calls = 0
@@ -444,10 +445,10 @@ def test_a_git_failure_falls_back_to_the_per_event_resolver(
     ticket_dir = tracker / TICKET
     paths = sorted(str(p) for p in ticket_dir.glob("*.json"))
     for path in paths:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
         data["author_sig"] = "not-a-real-envelope"
         data["author_id"] = "id-1"
-        Path(path).write_text(json.dumps(data))
+        Path(path).write_text(json.dumps(data), encoding="utf-8")
 
     expected = {
         e["position"]["position"]: e["position"]["commit_sha"]
@@ -514,15 +515,15 @@ def test_a_git_failure_captures_object_store_forensics(tmp_path: Path) -> None:
     _git(repo, "init", "-q", "-b", "tickets")
     _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "config", "user.name", "T")
-    (repo / "a.json").write_text("a")
+    (repo / "a.json").write_text("a", encoding="utf-8")
     _git(repo, "add", "a.json")
     _git(repo, "commit", "-q", "-m", "base")
     _git(repo, "checkout", "-q", "-b", "side")
-    (repo / "s.json").write_text("s")
+    (repo / "s.json").write_text("s", encoding="utf-8")
     _git(repo, "add", "s.json")
     _git(repo, "commit", "-q", "-m", "side")
     _git(repo, "checkout", "-q", "tickets")
-    (repo / "b.json").write_text("b")
+    (repo / "b.json").write_text("b", encoding="utf-8")
     _git(repo, "add", "b.json")
     _git(repo, "commit", "-q", "-m", "mainline")
     blob = _git(repo, "rev-parse", "HEAD:b.json")

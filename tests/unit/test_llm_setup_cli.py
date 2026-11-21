@@ -33,7 +33,7 @@ def test_setup_writes_config(tmp_path, capsys) -> None:
     rc = main(["llm", "setup", "--write", str(dest)])
     assert rc == 0
     assert "Wrote" in capsys.readouterr().out
-    assert "[tool.rebar.llm]" in dest.read_text()
+    assert "[tool.rebar.llm]" in dest.read_text(encoding="utf-8")
 
 
 def test_setup_no_subcommand_prints_help(capsys) -> None:

@@ -35,7 +35,9 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _ticket_with_impact(repo: Path) -> str:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
     tid = rebar.create_ticket("task", "tree mismatch", description=_DESC, repo_root=str(repo))
     rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
     rebar.set_file_impact(tid, [{"path": "src/x.py", "reason": "touched"}], repo_root=str(repo))

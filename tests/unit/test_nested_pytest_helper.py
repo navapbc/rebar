@@ -25,7 +25,7 @@ def _probe(tmp_path: Path, body: str) -> Path:
     probe_dir = tmp_path / "probe"
     probe_dir.mkdir()
     probe = probe_dir / "test_probe.py"
-    probe.write_text(body)
+    probe.write_text(body, encoding="utf-8")
     return probe
 
 
@@ -259,7 +259,7 @@ def test_the_child_does_not_collect_above_its_test_files_directory(tmp_path: Pat
     own directory, which is what keeps a Windows child out of ``%TEMP%``'s siblings."""
     shared = tmp_path.resolve()
     walked = "raise RuntimeError('collection walked above the test dir')\n"
-    (shared / "conftest.py").write_text(walked)
+    (shared / "conftest.py").write_text(walked, encoding="utf-8")
     cwd = shared / "cwd"
     cwd.mkdir()
     probe = _probe(shared, "def test_ok():\n    pass\n")

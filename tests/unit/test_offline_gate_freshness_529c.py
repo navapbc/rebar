@@ -36,13 +36,13 @@ def _init_tracker(tracker: Path) -> None:
     _git(tracker, "init", "-q")
     _git(tracker, "config", "user.email", "t@e.com")
     _git(tracker, "config", "user.name", "T")
-    (tracker / "seed.json").write_text("{}\n")
+    (tracker / "seed.json").write_text("{}\n", encoding="utf-8")
     _git(tracker, "add", "seed.json")
     _git(tracker, "commit", "-q", "-m", "seed")
 
 
 def _commit_local(tracker: Path, name: str) -> None:
-    (tracker / name).write_text('{"body": "written offline"}\n')
+    (tracker / name).write_text('{"body": "written offline"}\n', encoding="utf-8")
     _git(tracker, "add", name)
     _git(tracker, "commit", "-q", "-m", f"ticket: {name}")
 

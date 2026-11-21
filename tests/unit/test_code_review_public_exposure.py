@@ -85,7 +85,7 @@ def test_public_exposure_detectors_register_on_opengrep():
     # The rule file exists and cites its tfsec/Checkov analog (alignment, not a bridge).
     body = Path(
         "src/rebar/grounding/detectors/builtin/security_iac_public_exposure.yaml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert PREFIX in body
     assert "tfsec" in body and "CKV_AWS" in body
 
@@ -110,8 +110,8 @@ def test_public_exposure_is_a_dedicated_advisory_det_criterion():
 def test_positive_public_exposure_matches(tmp_path):
     from rebar.llm.code_review.detectors import run_detectors
 
-    (tmp_path / "main.tf").write_text(POSITIVE_TF)
-    (tmp_path / "docker-compose.yml").write_text(POSITIVE_COMPOSE)
+    (tmp_path / "main.tf").write_text(POSITIVE_TF, encoding="utf-8")
+    (tmp_path / "docker-compose.yml").write_text(POSITIVE_COMPOSE, encoding="utf-8")
     out = run_detectors(changed_files=["main.tf", "docker-compose.yml"], repo_root=str(tmp_path))
     pe = out.get("public-exposure-without-auth", {"matches": []})
     matched_rules = {m["detector_id"].split(".")[-1] for m in pe["matches"]}
@@ -128,8 +128,8 @@ def test_positive_public_exposure_matches(tmp_path):
 def test_negative_fp_guards_do_not_match(tmp_path):
     from rebar.llm.code_review.detectors import run_detectors
 
-    (tmp_path / "main.tf").write_text(NEGATIVE_TF)
-    (tmp_path / "docker-compose.yml").write_text(NEGATIVE_COMPOSE)
+    (tmp_path / "main.tf").write_text(NEGATIVE_TF, encoding="utf-8")
+    (tmp_path / "docker-compose.yml").write_text(NEGATIVE_COMPOSE, encoding="utf-8")
     out = run_detectors(changed_files=["main.tf", "docker-compose.yml"], repo_root=str(tmp_path))
     pe = out.get("public-exposure-without-auth", {"matches": []})
     # private CIDR, loopback, internal LB, public_ip=false → no public-exposure finding.
@@ -151,7 +151,7 @@ def test_public_exposure_match_stays_advisory(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(registry, "det_criteria", lambda: only)
 
-    (tmp_path / "main.tf").write_text(POSITIVE_TF)
+    (tmp_path / "main.tf").write_text(POSITIVE_TF, encoding="utf-8")
     verdict = {"verdict": "PASS"}
     detectors.apply_failclosed(verdict, changed_files=["main.tf"], repo_root=str(tmp_path))
     assert verdict["verdict"] == "PASS"  # advisory — a match never auto-blocks

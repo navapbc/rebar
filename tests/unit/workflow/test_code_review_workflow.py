@@ -203,7 +203,7 @@ def test_verdict_steps_never_reference_the_escalation_steps():
     the recall/selection side; a flipped recommend_overlays can change WHICH overlays run but can
     never reach the Pass-3 decision. We assert this on the real gate YAML so a future edit that
     wires an escalation output into decide/verdict fails the build."""
-    doc = yaml.safe_load(_GATE.read_text())
+    doc = yaml.safe_load(_GATE.read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in doc["steps"]}
     for sid in ("decide", "verdict"):
         refs = repr(by_id[sid].get("with") or {})
@@ -313,7 +313,7 @@ def test_coach_coverage_omits_violations_key_on_a_clean_run():
 
 
 def test_verdict_step_is_wired_to_the_decide_op_outcome_counts_output():
-    doc = yaml.safe_load(_GATE.read_text())
+    doc = yaml.safe_load(_GATE.read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in doc["steps"]}
     assert (
         by_id["verdict"]["with"]["outcome_counts"] == "${{ steps.decide.outputs.outcome_counts }}"
@@ -324,7 +324,7 @@ def test_overlay_union_already_run_is_wired_to_the_round_a_triggers_output():
     """AC: the Round-B `union` step reads `already_run` from an explicit `with:` input wired to
     the Round-A `triggers` step's output (the one-hop bound) — NOT reconstructed from internal
     state. Asserted structurally on the real gate YAML."""
-    doc = yaml.safe_load(_GATE.read_text())
+    doc = yaml.safe_load(_GATE.read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in doc["steps"]}
     union_with = by_id["union"]["with"]
     assert union_with["already_run"] == "${{ steps.triggers.outputs.to_run }}"
@@ -400,7 +400,7 @@ class _Rec(_ex.RunRecorder):
 
 
 def _run_workflow(recommend, diff_text):
-    doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text()))
+    doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text(encoding="utf-8")))
     rec = _Rec()
     _ex.run_workflow(
         doc,

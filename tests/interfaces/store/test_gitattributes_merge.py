@@ -82,22 +82,24 @@ def test_bindings_json_race_converges_keeping_ours(fresh_repo: Path) -> None:
 
     bridge = tracker / ".bridge_state"
     bridge.mkdir(parents=True, exist_ok=True)
-    (bridge / "bindings.json").write_text('{"v":1}\n')
+    (bridge / "bindings.json").write_text('{"v":1}\n', encoding="utf-8")
     _git(tracker, "add", ".bridge_state/bindings.json")
     assert _git(tracker, "commit", "-q", "--no-verify", "-m", "base bindings").returncode == 0
 
     # A divergent rewrite on a sibling branch (models the other clone's pass).
     assert _git(tracker, "checkout", "-q", "-b", "other").returncode == 0
-    (bridge / "bindings.json").write_text('{"v":2}\n')
+    (bridge / "bindings.json").write_text('{"v":2}\n', encoding="utf-8")
     _git(tracker, "commit", "-aq", "--no-verify", "-m", "other rewrites bindings")
 
     # Our pass rewrites it differently.
     assert _git(tracker, "checkout", "-q", "tickets").returncode == 0
-    (bridge / "bindings.json").write_text('{"v":3}\n')
+    (bridge / "bindings.json").write_text('{"v":3}\n', encoding="utf-8")
     _git(tracker, "commit", "-aq", "--no-verify", "-m", "our pass rewrites bindings")
 
     merge = _git(tracker, "merge", "other", "--no-edit")
     assert merge.returncode == 0, (
         f"bindings.json race wedged the merge:\n{merge.stdout}{merge.stderr}"
     )
-    assert (bridge / "bindings.json").read_text() == '{"v":3}\n', "merge=ours must keep OUR copy"
+    assert (bridge / "bindings.json").read_text(encoding="utf-8") == '{"v":3}\n', (
+        "merge=ours must keep OUR copy"
+    )

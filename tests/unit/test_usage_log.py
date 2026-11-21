@@ -38,7 +38,7 @@ def test_record_appends_jsonl(tmp_path, monkeypatch):
     usage_log.record(
         {"input_tokens": 7, "output_tokens": 2, "cache_read_tokens": 4}, op="completion-verifier"
     )
-    lines = target.read_text().splitlines()
+    lines = target.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     first = json.loads(lines[0])
     assert first["op"] == "plan-reviewer"
@@ -56,7 +56,7 @@ def test_summarize_missing_file():
 
 def test_summarize_empty_file(tmp_path):
     path = tmp_path / "empty.jsonl"
-    path.write_text("")
+    path.write_text("", encoding="utf-8")
     assert usage_log.summarize(str(path)) == "No LLM calls recorded."
 
 
@@ -68,7 +68,8 @@ def test_summarize_aggregates(tmp_path):
         + json.dumps({"op": "a", "input_tokens": 5, "output_tokens": 1, "requests": 1})
         + "\n"
         + json.dumps({"op": "b", "input_tokens": 3, "output_tokens": 3, "requests": 2})
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     out = usage_log.summarize(str(path))
     assert "LLM token usage" in out
@@ -81,7 +82,7 @@ def test_summarize_aggregates(tmp_path):
 
 def test_summarize_skips_malformed_line(tmp_path):
     path = tmp_path / "usage.jsonl"
-    path.write_text(json.dumps({"op": "a", "input_tokens": 1}) + "\nnot-json\n")
+    path.write_text(json.dumps({"op": "a", "input_tokens": 1}) + "\nnot-json\n", encoding="utf-8")
     out = usage_log.summarize(str(path))
     assert "| a | 1 |" in out
 
@@ -90,7 +91,8 @@ def test_summarize_skips_malformed_line(tmp_path):
 def test_cli_summarize(tmp_path, capsys):
     path = tmp_path / "usage.jsonl"
     path.write_text(
-        json.dumps({"op": "a", "input_tokens": 4, "output_tokens": 1, "requests": 1}) + "\n"
+        json.dumps({"op": "a", "input_tokens": 4, "output_tokens": 1, "requests": 1}) + "\n",
+        encoding="utf-8",
     )
     rc = usage_log.main(["summarize", str(path)])
     assert rc == 0
@@ -107,7 +109,7 @@ def test_record_writes_model_provider_timestamp(tmp_path, monkeypatch):
         model="anthropic:claude-opus-4-8",
         provider="anthropic",
     )
-    row = json.loads(target.read_text().splitlines()[0])
+    row = json.loads(target.read_text(encoding="utf-8").splitlines()[0])
     assert row["model"] == "anthropic:claude-opus-4-8"
     assert row["provider"] == "anthropic"
     # UTC ISO-8601, parseable, and explicitly offset-aware.
@@ -122,7 +124,7 @@ def test_record_defaults_omit_model_provider(tmp_path, monkeypatch):
     target = tmp_path / "usage.jsonl"
     monkeypatch.setenv(usage_log.ENV_VAR, str(target))
     usage_log.record({"input_tokens": 1}, op="x")
-    row = json.loads(target.read_text().splitlines()[0])
+    row = json.loads(target.read_text(encoding="utf-8").splitlines()[0])
     assert "model" not in row
     assert "provider" not in row
     assert "timestamp" in row
@@ -219,7 +221,8 @@ def test_summarize_prices_known_rows(tmp_path, monkeypatch):
                 "timestamp": ts,
             }
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     out = usage_log.summarize(str(path))
     assert "est. cost" in out
@@ -242,7 +245,8 @@ def test_summarize_marks_unknown_model_unpriced(tmp_path, monkeypatch, caplog):
         json.dumps({"op": "a", "input_tokens": 1, "model": "known", "requests": 1})
         + "\n"
         + json.dumps({"op": "a", "input_tokens": 1, "model": "mystery-model", "requests": 1})
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     import logging
 
@@ -260,7 +264,10 @@ def test_summarize_pricing_crash_warns_and_marks_unpriced(tmp_path, monkeypatch,
 
     _stub_pricing_module(monkeypatch, calc_price)
     path = tmp_path / "usage.jsonl"
-    path.write_text(json.dumps({"op": "a", "input_tokens": 1, "model": "m", "requests": 1}) + "\n")
+    path.write_text(
+        json.dumps({"op": "a", "input_tokens": 1, "model": "m", "requests": 1}) + "\n",
+        encoding="utf-8",
+    )
     import logging
 
     with caplog.at_level(logging.WARNING, logger="rebar.llm.usage_log"):
@@ -275,7 +282,8 @@ def test_summarize_without_genai_prices_prints_unavailable(tmp_path, monkeypatch
     monkeypatch.setitem(sys.modules, "genai_prices", None)  # forces ImportError
     path = tmp_path / "usage.jsonl"
     path.write_text(
-        json.dumps({"op": "a", "input_tokens": 4, "output_tokens": 1, "requests": 1}) + "\n"
+        json.dumps({"op": "a", "input_tokens": 4, "output_tokens": 1, "requests": 1}) + "\n",
+        encoding="utf-8",
     )
     out = usage_log.summarize(str(path))
     assert "unavailable (install rebar[pricing])" in out
@@ -292,7 +300,8 @@ def test_summarize_old_format_rows_still_summarize(tmp_path, monkeypatch):
     path = tmp_path / "usage.jsonl"
     # Pre-pricing rows: no model/provider/timestamp.
     path.write_text(
-        json.dumps({"op": "a", "input_tokens": 10, "output_tokens": 2, "requests": 1}) + "\n"
+        json.dumps({"op": "a", "input_tokens": 10, "output_tokens": 2, "requests": 1}) + "\n",
+        encoding="utf-8",
     )
     out = usage_log.summarize(str(path))
     assert "| a | 1 | 10 | 2 |" in out
@@ -321,7 +330,7 @@ def test_runner_records_usage_at_seam(tmp_path, monkeypatch):
     PydanticAIRunner(cfg, model_override=FunctionModel(gen)).run(req)
 
     assert target.exists()
-    rows = [json.loads(line) for line in target.read_text().splitlines()]
+    rows = [json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 1
     assert rows[0]["op"] == "v"  # _call_label = reviewers joined
     assert set(usage_log._FIELDS).issubset(rows[0])
@@ -365,7 +374,7 @@ def _run_with_target(tmp_path, monkeypatch, *, target, reviewers=("v",)):
     )
     PydanticAIRunner(cfg, model_override=FunctionModel(gen)).run(req)
 
-    rows = [json.loads(line) for line in log_path.read_text().splitlines()]
+    rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 1
     return rows[0]
 

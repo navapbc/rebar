@@ -146,7 +146,7 @@ def test_verify_mcp_pin_script_and_target() -> None:
     assert (ROOT / "scripts" / "verify_mcp_publisher_pin.py").exists(), (
         "scripts/verify_mcp_publisher_pin.py is missing"
     )
-    assert "verify-mcp-pin" in (ROOT / "Makefile").read_text(), (
+    assert "verify-mcp-pin" in (ROOT / "Makefile").read_text(encoding="utf-8"), (
         "the `make verify-mcp-pin` target is missing"
     )
 

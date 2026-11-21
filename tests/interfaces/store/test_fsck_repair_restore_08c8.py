@@ -81,9 +81,9 @@ def legacy_compacted(rebar_repo: Path):
     comments = sorted(ticket_dir.glob("*-COMMENT.json"))
     assert len(comments) == 2, f"fixture expects two COMMENTs, got {[c.name for c in comments]}"
     victim = comments[0]
-    victim_uuid = json.loads(victim.read_text())["uuid"]
+    victim_uuid = json.loads(victim.read_text(encoding="utf-8"))["uuid"]
     create = next(ticket_dir.glob("*-CREATE.json"))
-    create_uuid = json.loads(create.read_text())["uuid"]
+    create_uuid = json.loads(create.read_text(encoding="utf-8"))["uuid"]
     _commit(tracker, "seed events")
 
     # Legacy delete-style compaction: the folded source is REMOVED and the removal

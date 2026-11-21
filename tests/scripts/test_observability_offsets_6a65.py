@@ -25,7 +25,7 @@ _TARGETS = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -99,7 +99,7 @@ def _environment(tmp_path: Path, target: str) -> tuple[dict[str, str], dict[str,
         path.write_bytes(b"2\n" if variable == "REPL_OFFSET_FILE" else b"2 12\n")
         paths[variable] = path
     repl_log = tmp_path / "replication.log"
-    repl_log.write_text("[ERROR]\n" * 7)
+    repl_log.write_text("[ERROR]\n" * 7, encoding="utf-8")
 
     env = observability_env(tmp_path)
     env.update(
@@ -123,7 +123,7 @@ def _total(state: bytes) -> int:
 
 def _values(log: Path, target: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts or target not in parts:
             continue

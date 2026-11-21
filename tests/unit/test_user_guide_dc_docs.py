@@ -17,7 +17,7 @@ _PYPROJECT = _REPO / "pyproject.toml"
 
 
 def _guide() -> str:
-    return _USER_GUIDE.read_text()
+    return _USER_GUIDE.read_text(encoding="utf-8")
 
 
 def test_the_guide_documents_an_installable_extra() -> None:
@@ -32,7 +32,7 @@ def test_the_guide_documents_an_installable_extra() -> None:
     )
     documented_pkg, documented_extra = match.group(1), match.group(2)
 
-    pyproject = tomllib.loads(_PYPROJECT.read_text())
+    pyproject = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
     assert documented_pkg == pyproject["project"]["name"], (
         f"the guide tells operators to install {documented_pkg!r} but the distribution "
         f"is named {pyproject['project']['name']!r} — the documented command would fail"

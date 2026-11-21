@@ -57,7 +57,7 @@ def test_compact_reclaims_stale_index_lock(rebar_repo: Path) -> None:
     rebar.comment(tid, "note", repo_root=str(rebar_repo))
 
     lock = _index_lock_path(_tracker(rebar_repo))
-    lock.write_text("")  # leftover lock from a crashed git process
+    lock.write_text("", encoding="utf-8")  # leftover lock from a crashed git process
     old = time.time() - (_STALE_S + 60)
     os.utime(lock, (old, old))
 
@@ -78,7 +78,9 @@ def test_compact_rides_out_contended_index_lock(rebar_repo: Path, monkeypatch) -
     rebar.comment(tid, "note", repo_root=str(rebar_repo))
 
     lock = _index_lock_path(_tracker(rebar_repo))
-    lock.write_text("")  # a fresh (young) lock: a live peer mid-write — NOT reclaimable-as-stale
+    lock.write_text(
+        "", encoding="utf-8"
+    )  # a fresh (young) lock: a live peer mid-write — NOT reclaimable-as-stale
 
     attempts: list[tuple[int, int, bool]] = []
     released = {"done": False}

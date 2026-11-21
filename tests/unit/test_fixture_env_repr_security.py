@@ -44,7 +44,8 @@ def test_render_fixture({fixture}):
     value = {value_expr}
     assert value[{_SECRET_NAME!r}] == os.environ[{_SECRET_NAME!r}]
     pytest.fail("render the real fixture argument")
-"""
+""",
+        encoding="utf-8",
     )
     # Put the sentinel first so pytest's bounded mapping repr cannot truncate it.
     child_env = {

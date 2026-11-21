@@ -24,12 +24,14 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _enable_completion_gate(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _in_progress_story(repo: Path) -> tuple[str, str]:
     story = rebar.create_ticket("task", "default-pin story", description=_DESC, repo_root=str(repo))
-    (repo / "story.py").write_text("# story change\n")
+    (repo / "story.py").write_text("# story change\n", encoding="utf-8")
     _git(repo, "add", "story.py")
     _git(repo, "commit", "-q", "-m", f"story change\n\nrebar-ticket: {story}")
     pinned_sha = _git(repo, "rev-parse", "HEAD")
@@ -47,7 +49,7 @@ def test_default_close_signs_the_entry_pin_when_head_moves(
     def racing_verify(ticket_id, *, ref=None, repo_root=None, **kwargs):
         verified = resolve_ref(ref or "HEAD", repo_root, fetch=False)
         root = Path(repo_root)
-        (root / "unrelated.py").write_text("# unrelated concurrent work\n")
+        (root / "unrelated.py").write_text("# unrelated concurrent work\n", encoding="utf-8")
         _git(root, "add", "unrelated.py")
         _git(root, "commit", "-q", "-m", "unrelated concurrent work")
         return {

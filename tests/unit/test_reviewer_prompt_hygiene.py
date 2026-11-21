@@ -115,7 +115,7 @@ def test_no_bare_do_not_only_blocks() -> None:
     assert PLAN_REVIEW_PROMPTS, "no plan_review_*.md reviewer prompts found"
     offenders: dict[str, list[str]] = {}
     for path in PLAN_REVIEW_PROMPTS:
-        bare = bare_do_not_only_blocks(path.read_text())
+        bare = bare_do_not_only_blocks(path.read_text(encoding="utf-8"))
         if bare:
             offenders[path.name] = bare
     assert not offenders, "bare DO-NOT-only blocks remain:\n" + "\n".join(

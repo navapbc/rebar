@@ -996,7 +996,7 @@ def test_sub_horizon_append_orphan_recovered_by_fsck_rebuild(two_clones):
     # Merge-as-union outcome: B's comment file lands in A's ticket dir (union never
     # drops a file the other side added). It now sorts before A's SNAPSHOT.
     dest = tracker_a / seed / b_comment.name
-    dest.write_text(b_comment.read_text())
+    dest.write_text(b_comment.read_text(encoding="utf-8"), encoding="utf-8")
     _git("add", "-A", cwd=tracker_a)
     _git("commit", "-q", "--no-verify", "-m", "merge: union in B orphan", cwd=tracker_a)
 
@@ -1032,7 +1032,7 @@ def test_a3_repair_dry_run_noop_then_live_repair_pretag_and_rollback(two_clones)
     import json as _json
 
     create_file = next(seed_dir.glob("*-CREATE.json"))
-    create_uuid = _json.loads(create_file.read_text())["uuid"]
+    create_uuid = _json.loads(create_file.read_text(encoding="utf-8"))["uuid"]
     compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
     snap_uuid = "aaaaaaaa-1111-2222-3333-444444444444"
     snap_name = f"9000000000000000000-{snap_uuid}-SNAPSHOT.json"
@@ -1046,7 +1046,8 @@ def test_a3_repair_dry_run_noop_then_live_repair_pretag_and_rollback(two_clones)
                 "author": "Test",
                 "data": {"compiled_state": compiled, "source_event_uuids": [create_uuid]},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     _git("add", "-A", cwd=tracker_a)
     _git("commit", "-q", "--no-verify", "-m", "craft: inconsistent snapshot", cwd=tracker_a)
@@ -1081,7 +1082,7 @@ def _craft_inconsistent_snapshot(tracker: Path, seed: str) -> Path:
 
     seed_dir = tracker / seed
     create_file = next(seed_dir.glob("*-CREATE.json"))
-    create_uuid = json.loads(create_file.read_text())["uuid"]
+    create_uuid = json.loads(create_file.read_text(encoding="utf-8"))["uuid"]
     compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
     snap_uuid = "aaaaaaaa-1111-2222-3333-444444444444"
     snap_name = f"9000000000000000000-{snap_uuid}-SNAPSHOT.json"
@@ -1095,7 +1096,8 @@ def _craft_inconsistent_snapshot(tracker: Path, seed: str) -> Path:
                 "author": "Test",
                 "data": {"compiled_state": compiled, "source_event_uuids": [create_uuid]},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     _git("add", "-A", cwd=tracker)
     _git("commit", "-q", "--no-verify", "-m", "craft: inconsistent snapshot", cwd=tracker)
@@ -1280,7 +1282,8 @@ def test_a3_repair_surfaces_missing_create_without_auto_writing(two_clones):
     ghost = tracker_a / "reb-ghost-nocreate"
     ghost.mkdir()
     (ghost / "1000000000000000000-cccccccc-1111-2222-3333-444444444444-COMMENT.json").write_text(
-        json.dumps({"uuid": "cccccccc-1111-2222-3333-444444444444", "event_type": "COMMENT"})
+        json.dumps({"uuid": "cccccccc-1111-2222-3333-444444444444", "event_type": "COMMENT"}),
+        encoding="utf-8",
     )
     _git("add", "-A", cwd=tracker_a)
     _git("commit", "-q", "--no-verify", "-m", "craft: ghost ticket missing CREATE", cwd=tracker_a)
@@ -1313,7 +1316,7 @@ def test_two_clone_compaction_resurrection_no_data_loss_and_repairable(two_clone
     assert not create_file.exists(), "b306: source must be retired, not deleted"
 
     # Merge-as-union with a clone that still held the source resurrects the .json file.
-    create_file.write_text(retired.read_text())
+    create_file.write_text(retired.read_text(encoding="utf-8"), encoding="utf-8")
     _git("add", "-A", cwd=tracker_a)
     _git("commit", "-q", "--no-verify", "-m", "merge: union resurrects source", cwd=tracker_a)
     assert "SNAPSHOT_INCONSISTENT" in _engine_run(repo_a, "store", "fsck", check=False).stdout
@@ -1343,7 +1346,7 @@ def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
     # it. This preserves normal HLC generation while placing the omitted comment before the
     # snapshot, where positional replay drops it.
     create_file = next(seed_dir.glob("*-CREATE.json"))
-    create_uuid = _json.loads(create_file.read_text())["uuid"]
+    create_uuid = _json.loads(create_file.read_text(encoding="utf-8"))["uuid"]
     compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
     _engine_run(repo_a, "comment", seed, "orphan-comment-body")
     snap_uuid = "bbbbbbbb-1111-2222-3333-444444444444"
@@ -1357,7 +1360,8 @@ def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
                 "author": "Test",
                 "data": {"compiled_state": compiled, "source_event_uuids": [create_uuid]},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     assert not any(
         "orphan-comment-body" in (c.get("body") or "")
@@ -1365,7 +1369,7 @@ def test_rebuild_restarts_from_stale_bak_sentinel(two_clones):
     ), "orphan must be dropped before the rebuild"
     # Simulate a crashed prior rebuild: the sentinel is present at entry.
     bak = seed_dir / ".snapshot-rebuild.bak"
-    bak.write_text("stale sentinel from an interrupted rebuild")
+    bak.write_text("stale sentinel from an interrupted rebuild", encoding="utf-8")
 
     did = rebuild_snapshot_from_full_log(str(tracker_a), seed, str(seed_dir), no_commit=True)
 
@@ -1659,7 +1663,7 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
         hlc_now=_B_ORPHAN_TS,
     )
     b_comment = _seed_dir_files(tracker_b, seed, "-COMMENT.json")[-1]
-    b_uuid = json.loads(b_comment.read_text())["uuid"]
+    b_uuid = json.loads(b_comment.read_text(encoding="utf-8"))["uuid"]
     assert "orphan-from-B" in _engine_run(repo_b, "show", seed).stdout
 
     # A compacts seed with a far-future SNAPSHOT ts (horizon 0 → fold everything; the

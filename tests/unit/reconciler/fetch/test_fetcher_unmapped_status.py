@@ -82,7 +82,7 @@ def test_unmapped_jira_status_emits_alert(tmp_path, fetcher):
     ):
         snapshot_path = fetcher.fetch_snapshot("2026-07-06-status-pass", repo_root=tmp_path)
 
-    snapshot = json.loads(snapshot_path.read_text())
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
     assert "DIG-1" in snapshot and "DIG-2" in snapshot
 
     unmapped = [r for r in captured if r.get("kind") == "fetcher-unmapped-jira-status"]

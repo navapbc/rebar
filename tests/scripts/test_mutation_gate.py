@@ -58,7 +58,9 @@ def test_select_reports_the_git_diff_selection_as_stable_json(tmp_path: Path) ->
 
     (repo / "src" / "alpha.py").write_text("VALUE = 2\n", encoding="utf-8")
     (repo / "tests").mkdir()
-    (repo / "tests" / "test_unmapped.py").write_text("def test_placeholder(): pass\n")
+    (repo / "tests" / "test_unmapped.py").write_text(
+        "def test_placeholder(): pass\n", encoding="utf-8"
+    )
     git("add", ".")
     git("commit", "--quiet", "-m", "head")
     head = git("rev-parse", "HEAD")
@@ -378,7 +380,8 @@ timeouts_max = 0
 score_floor = 100.0
 equivalent_fingerprints = []
 """.strip()
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     manifest = gate.load_manifest(manifest_path)
 
@@ -410,7 +413,8 @@ timeouts_max = 0
 score_floor = 100.0
 equivalent_fingerprints = []
 """.strip()
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     manifest = gate.load_manifest(manifest_path)
 

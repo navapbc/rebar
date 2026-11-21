@@ -97,13 +97,13 @@ def test_new_classes_reach_every_single_sourced_consumer(new_class):
 
 
 def test_close_classes_tuple_matches_schema_enum_order():
-    schema = json.loads((_SCHEMA_DIR / "common.schema.json").read_text())
+    schema = json.loads((_SCHEMA_DIR / "common.schema.json").read_text(encoding="utf-8"))
     enum = schema["$defs"]["close_class"]["enum"]
     assert tuple(enum) == txn.CLOSE_CLASSES
 
 
 def test_ticket_state_schema_declares_close_reason():
-    schema = json.loads((_SCHEMA_DIR / "ticket_state.schema.json").read_text())
+    schema = json.loads((_SCHEMA_DIR / "ticket_state.schema.json").read_text(encoding="utf-8"))
     assert "close_reason" in schema["properties"]
 
 

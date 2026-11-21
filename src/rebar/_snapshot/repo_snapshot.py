@@ -163,7 +163,7 @@ def _store_caveats(sha: str, root: Path, lfs: tuple[str, ...], subs: tuple[str, 
 
 def _load_caveats(sha: str, root: Path) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
     try:
-        data = json.loads(_caveats_path(sha, root).read_text())
+        data = json.loads(_caveats_path(sha, root).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     return tuple(data.get("lfs_pointers", [])), tuple(data.get("submodules", []))

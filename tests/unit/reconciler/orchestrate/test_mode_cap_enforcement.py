@@ -117,7 +117,7 @@ def test_dry_run_does_not_invoke_leaves(tmp_path, applier_mod, mode_mod, mutatio
         assert typed_spy.call_count == 0
         assert batch_spy.call_count == 0
 
-    payload = json.loads(Path(manifest_path).read_text())
+    payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     assert payload["mode"] == "dry-run"
     assert payload["applied_count"] == 0
     assert payload["deferred_count"] == 50
@@ -130,7 +130,7 @@ def test_bootstrap_strict_caps_at_10(tmp_path, applier_mod, mode_mod, mutation_m
     snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake = snapshots_dir / "t-strict.manifest.json"
-    fake.write_text("{}")
+    fake.write_text("{}", encoding="utf-8")
     with (
         patch.object(applier_mod, "_apply_typed"),
         patch.object(applier_mod, "_apply_batch", return_value=fake),
@@ -142,7 +142,7 @@ def test_bootstrap_strict_caps_at_10(tmp_path, applier_mod, mode_mod, mutation_m
             mode=mode_mod.Mode.BOOTSTRAP_STRICT,
             ticket_plans=_plans(muts, mode=mode_mod.Mode.BOOTSTRAP_STRICT),
         )
-    payload = json.loads(Path(manifest_path).read_text())
+    payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     assert payload["mode"] == "bootstrap-strict"
     assert payload["applied_count"] == 10
     assert payload["deferred_count"] == 2040
@@ -162,7 +162,7 @@ def test_bootstrap_throttle_caps_at_100(tmp_path, applier_mod, mode_mod, mutatio
     snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake = snapshots_dir / "t-throttle.manifest.json"
-    fake.write_text("{}")
+    fake.write_text("{}", encoding="utf-8")
     with (
         patch.object(applier_mod, "_apply_typed"),
         patch.object(applier_mod, "_apply_batch", return_value=fake),
@@ -174,7 +174,7 @@ def test_bootstrap_throttle_caps_at_100(tmp_path, applier_mod, mode_mod, mutatio
             mode=mode_mod.Mode.BOOTSTRAP_THROTTLE,
             ticket_plans=_plans(muts, mode=mode_mod.Mode.BOOTSTRAP_THROTTLE),
         )
-    payload = json.loads(Path(manifest_path).read_text())
+    payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     assert payload["mode"] == "bootstrap-throttle"
     assert payload["applied_count"] == 100
     assert payload["deferred_count"] == 1950
@@ -188,7 +188,7 @@ def test_live_uncapped(tmp_path, applier_mod, mode_mod, mutation_mod):
     snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake_batch_manifest = snapshots_dir / "t-live.manifest.json"
-    fake_batch_manifest.write_text("{}")  # legacy batch would write this
+    fake_batch_manifest.write_text("{}", encoding="utf-8")  # legacy batch would write this
 
     with (
         patch.object(applier_mod, "_apply_typed") as typed_spy,
@@ -267,7 +267,7 @@ def test_asymmetric_manifest_dry_run_shape(tmp_path, applier_mod, mode_mod, muta
         mode=mode_mod.Mode.DRY_RUN,
         ticket_plans=_plans(muts, mode=mode_mod.Mode.DRY_RUN),
     )
-    payload = json.loads(Path(manifest_path).read_text())
+    payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     assert "outbound" in payload
     assert "totals" in payload["outbound"]
     assert set(payload["outbound"]["totals"].keys()) >= {"create", "update", "delete"}
@@ -283,7 +283,7 @@ def test_asymmetric_manifest_throttle_shape(tmp_path, applier_mod, mode_mod, mut
     snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake = snapshots_dir / "t-throttle-shape.manifest.json"
-    fake.write_text("{}")
+    fake.write_text("{}", encoding="utf-8")
     with (
         patch.object(applier_mod, "_apply_typed"),
         patch.object(applier_mod, "_apply_batch", return_value=fake),
@@ -295,7 +295,7 @@ def test_asymmetric_manifest_throttle_shape(tmp_path, applier_mod, mode_mod, mut
             mode=mode_mod.Mode.BOOTSTRAP_THROTTLE,
             ticket_plans=_plans(muts, mode=mode_mod.Mode.BOOTSTRAP_THROTTLE),
         )
-    payload = json.loads(Path(manifest_path).read_text())
+    payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     assert "outbound" in payload and "totals" in payload["outbound"]
     assert "inbound" in payload and "totals" in payload["inbound"]
     assert "spot_check" in payload
@@ -308,7 +308,7 @@ def test_asymmetric_manifest_live_writes_no_file(tmp_path, applier_mod, mode_mod
     snapshots_dir = scratch_retention.snapshots_dir(tmp_path)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     fake = snapshots_dir / "t-live-nofile.manifest.json"
-    fake.write_text("{}")
+    fake.write_text("{}", encoding="utf-8")
     with (
         patch.object(applier_mod, "_apply_typed"),
         patch.object(applier_mod, "_apply_batch", return_value=fake),
@@ -337,7 +337,7 @@ def test_phase_gate_still_blocks(tmp_path):
     tickets_dir = tmp_path / ".tickets-tracker"
     tickets_dir.mkdir(parents=True, exist_ok=True)
     gate_file = tmp_path / ".reconciler-phase-gate"
-    gate_file.write_text("dry-run\n")
+    gate_file.write_text("dry-run\n", encoding="utf-8")
 
     target = mode_mod.Mode.BOOTSTRAP_STRICT
     # Without a tickets branch, git show must fail closed with
@@ -446,7 +446,7 @@ def test_reconcile_once_legacy_caller_omits_mode_kwarg(
     """
     # Read apply_phase's call shape directly: target_mode=None must omit mode,
     # regardless of reconcile's lazy module loader.
-    reconcile_src = (RECONCILER_DIR / "apply_phase.py").read_text()
+    reconcile_src = (RECONCILER_DIR / "apply_phase.py").read_text(encoding="utf-8")
     # Allow other compatible kwargs while rejecting mode on the legacy branch.
     import re as _re
 
@@ -614,7 +614,7 @@ def test_concurrent_dry_run_produces_separate_manifests(
     assert Path(path_a).exists() and Path(path_b).exists()
 
     # Both must be valid JSON with the pass_id baked in.
-    data_a = json.loads(Path(path_a).read_text())
-    data_b = json.loads(Path(path_b).read_text())
+    data_a = json.loads(Path(path_a).read_text(encoding="utf-8"))
+    data_b = json.loads(Path(path_b).read_text(encoding="utf-8"))
     assert data_a["pass_id"] == "pass-alpha"
     assert data_b["pass_id"] == "pass-beta"

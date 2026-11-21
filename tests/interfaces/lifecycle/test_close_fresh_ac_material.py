@@ -83,7 +83,9 @@ def clones(rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     b = tmp_path / "server"
     subprocess.run(["git", "init", "-q", "-b", "main", str(b)], check=True)
-    (b / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (b / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
     _git(b, "add", "-A")
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "c"],
@@ -100,7 +102,7 @@ def clones(rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert cloned.returncode == 0, cloned.stderr
     _git(tracker_b, "config", "user.email", "t@t")
     _git(tracker_b, "config", "user.name", "t")
-    (tracker_b / ".env-id").write_text(str(uuid.uuid4()))
+    (tracker_b / ".env-id").write_text(str(uuid.uuid4()), encoding="utf-8")
     monkeypatch.setattr(rebar.llm, "verify_completion", _pass)
 
     def edit(description: str) -> None:

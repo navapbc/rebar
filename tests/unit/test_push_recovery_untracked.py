@@ -32,7 +32,7 @@ def _new_tickets_repo(path: Path) -> None:
 def _commit_event(repo: Path, ticket_uuid: str, filename: str, body: str) -> str:
     tdir = repo / ticket_uuid
     tdir.mkdir(parents=True, exist_ok=True)
-    (tdir / filename).write_text(body)
+    (tdir / filename).write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "--no-verify", "-m", f"ticket: {ticket_uuid}")
     return _git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -71,11 +71,11 @@ def _diverged_with_untracked_collision(tmp_path: Path) -> tuple[Path, str, str]:
         tracker, _TRACKED_LOCAL.split("/")[0], _TRACKED_LOCAL.split("/")[1], '{"e":"local"}'
     )
     # The dirty tracked edit the stash must carry across the recovery.
-    (tracker / _TRACKED_LOCAL).write_text(_DIRTY_BODY)
+    (tracker / _TRACKED_LOCAL).write_text(_DIRTY_BODY, encoding="utf-8")
     # The untracked compaction leftover colliding with origin's new file.
     leftover = tracker / _COLLIDE_PATH
     leftover.parent.mkdir(parents=True, exist_ok=True)
-    leftover.write_text(_LOCAL_LEFTOVER_BODY)
+    leftover.write_text(_LOCAL_LEFTOVER_BODY, encoding="utf-8")
     assert _git(tracker, "status", "--porcelain", "--", _COLLIDE_PATH).stdout.startswith("??")
 
     _git(tracker, "fetch", "-q", "origin", "+refs/heads/tickets:refs/remotes/origin/tickets")
@@ -116,7 +116,7 @@ def test_recover_dirty_merge_self_heals_untracked_collision(
     tracker, local_sha, origin_sha = _diverged_with_untracked_collision(tmp_path)
     # A path git does NOT name must be untouched by the recovery.
     tmp_event = tracker / ".tmp-event-12345"
-    tmp_event.write_text("in-flight")
+    tmp_event.write_text("in-flight", encoding="utf-8")
 
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(push, "_git", _counting_git(calls))
@@ -131,21 +131,23 @@ def test_recover_dirty_merge_self_heals_untracked_collision(
     parents = _git(tracker, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()
     assert len(parents) == 3, f"expected a 2-parent merge commit, got parents={parents}"
     # Origin's committed bytes landed at the colliding path.
-    assert (tracker / _COLLIDE_PATH).read_text() == _ORIGIN_BODY
+    assert (tracker / _COLLIDE_PATH).read_text(encoding="utf-8") == _ORIGIN_BODY
     # The leftover's bytes were MOVED (never deleted) into the shared quarantine dir.
     preserved = [
         p
         for p in _quarantine_root(tracker).rglob("*")
-        if p.is_file() and p.read_text(errors="ignore") == _LOCAL_LEFTOVER_BODY
+        if p.is_file() and p.read_text(errors="ignore", encoding="utf-8") == _LOCAL_LEFTOVER_BODY
     ]
     assert preserved, "the untracked leftover's bytes must survive in reconverge-quarantine"
     # The stashed dirty edit is restored, exactly once.
-    assert (tracker / _TRACKED_LOCAL).read_text() == _DIRTY_BODY, "stashed edit lost"
+    assert (tracker / _TRACKED_LOCAL).read_text(encoding="utf-8") == _DIRTY_BODY, (
+        "stashed edit lost"
+    )
     assert len(_stash_applies(calls)) == 1, "stash must be restored exactly once"
     # Exactly ONE retry — never zero, never a second.
     assert len(_merges(calls)) == 2, f"expected 2 merge attempts, got {_merges(calls)}"
     # Unnamed paths untouched.
-    assert tmp_event.read_text() == "in-flight", ".tmp-event-* must not be touched"
+    assert tmp_event.read_text(encoding="utf-8") == "in-flight", ".tmp-event-* must not be touched"
 
 
 def test_recover_dirty_merge_retry_failure_keeps_abort_net_and_restores_stash(
@@ -159,17 +161,17 @@ def test_recover_dirty_merge_retry_failure_keeps_abort_net_and_restores_stash(
     # Both sides ADD conflicting versions of the same tracked file (targeted adds so
     # the untracked collision and the dirty edit stay out of these commits).
     shared = "0000-base-0000-0000/shared.json"
-    (origin / shared).write_text('{"v":"origin"}')
+    (origin / shared).write_text('{"v":"origin"}', encoding="utf-8")
     _git(origin, "add", "--", shared)
     _git(origin, "commit", "-q", "--no-verify", "-m", "origin edit")
     origin_sha = _git(origin, "rev-parse", "HEAD").stdout.strip()
-    (tracker / shared).write_text('{"v":"local"}')
+    (tracker / shared).write_text('{"v":"local"}', encoding="utf-8")
     _git(tracker, "add", "--", shared)
     _git(tracker, "commit", "-q", "--no-verify", "-m", "local edit")
     local_sha = _git(tracker, "rev-parse", "HEAD").stdout.strip()
     _git(tracker, "fetch", "-q", "origin", "+refs/heads/tickets:refs/remotes/origin/tickets")
     assert _git(tracker, "status", "--porcelain", "--", _COLLIDE_PATH).stdout.startswith("??")
-    assert (tracker / _TRACKED_LOCAL).read_text() == _DIRTY_BODY
+    assert (tracker / _TRACKED_LOCAL).read_text(encoding="utf-8") == _DIRTY_BODY
 
     calls: list[tuple[str, ...]] = []
     monkeypatch.setattr(push, "_git", _counting_git(calls))
@@ -180,7 +182,7 @@ def test_recover_dirty_merge_retry_failure_keeps_abort_net_and_restores_stash(
     assert _git(tracker, "merge-base", "--is-ancestor", local_sha, "HEAD").returncode == 0
     assert _git(tracker, "merge-base", "--is-ancestor", origin_sha, "HEAD").returncode != 0
     assert not (tracker / ".git" / "MERGE_HEAD").exists()
-    assert (tracker / _TRACKED_LOCAL).read_text() == _DIRTY_BODY, (
+    assert (tracker / _TRACKED_LOCAL).read_text(encoding="utf-8") == _DIRTY_BODY, (
         "the stash must be restored on the retry-failure path"
     )
     assert len(_stash_applies(calls)) == 1, "stash must be restored exactly once"
@@ -196,27 +198,27 @@ def test_recover_dirty_merge_genuine_conflict_keeps_todays_behavior(
     origin = tmp_path / "origin"
     tracker = tmp_path / "tracker"
     _new_tickets_repo(origin)
-    (origin / "shared.json").write_text('{"v":"base"}')
+    (origin / "shared.json").write_text('{"v":"base"}', encoding="utf-8")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "--no-verify", "-m", "base")
     subprocess.run(["git", "clone", "-q", "-b", "tickets", str(origin), str(tracker)], check=True)
     _git(tracker, "config", "user.email", "t@t")
     _git(tracker, "config", "user.name", "t")
-    (origin / "shared.json").write_text('{"v":"origin"}')
+    (origin / "shared.json").write_text('{"v":"origin"}', encoding="utf-8")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "--no-verify", "-m", "origin edit")
     origin_sha = _git(origin, "rev-parse", "HEAD").stdout.strip()
-    (tracker / "shared.json").write_text('{"v":"local"}')
+    (tracker / "shared.json").write_text('{"v":"local"}', encoding="utf-8")
     _git(tracker, "add", "-A")
     _git(tracker, "commit", "-q", "--no-verify", "-m", "local edit")
     local_sha = _git(tracker, "rev-parse", "HEAD").stdout.strip()
     dirty = tracker / "1111-locl-1111-1111" / "note.json"
     dirty.parent.mkdir(parents=True, exist_ok=True)
-    dirty.write_text('{"e":"dirty-tracked"}')
+    dirty.write_text('{"e":"dirty-tracked"}', encoding="utf-8")
     _git(tracker, "add", "--", "1111-locl-1111-1111/note.json")
     _git(tracker, "commit", "-q", "--no-verify", "-m", "note")
     local_sha = _git(tracker, "rev-parse", "HEAD").stdout.strip()
-    dirty.write_text('{"e":"dirty-tracked","edit":1}')
+    dirty.write_text('{"e":"dirty-tracked","edit":1}', encoding="utf-8")
     _git(tracker, "fetch", "-q", "origin", "+refs/heads/tickets:refs/remotes/origin/tickets")
 
     calls: list[tuple[str, ...]] = []
@@ -228,7 +230,9 @@ def test_recover_dirty_merge_genuine_conflict_keeps_todays_behavior(
     assert _git(tracker, "merge-base", "--is-ancestor", local_sha, "HEAD").returncode == 0
     assert _git(tracker, "merge-base", "--is-ancestor", origin_sha, "HEAD").returncode != 0
     assert not (tracker / ".git" / "MERGE_HEAD").exists()
-    assert dirty.read_text() == '{"e":"dirty-tracked","edit":1}', "stash not restored"
+    assert dirty.read_text(encoding="utf-8") == '{"e":"dirty-tracked","edit":1}', (
+        "stash not restored"
+    )
     assert len(_stash_applies(calls)) == 1
     assert len(_merges(calls)) == 1, "a genuine conflict must never trigger a retry"
     assert not _quarantine_root(tracker).exists(), (
@@ -256,11 +260,11 @@ def test_merge_remote_under_lock_routes_untracked_collision_to_recovery(
         "the locked-merge seam must self-heal the untracked collision too"
     )
     assert _git(tracker, "merge-base", "--is-ancestor", local_sha, "HEAD").returncode == 0
-    assert (tracker / _COLLIDE_PATH).read_text() == _ORIGIN_BODY
+    assert (tracker / _COLLIDE_PATH).read_text(encoding="utf-8") == _ORIGIN_BODY
     preserved = [
         p
         for p in _quarantine_root(tracker).rglob("*")
-        if p.is_file() and p.read_text(errors="ignore") == _LOCAL_LEFTOVER_BODY
+        if p.is_file() and p.read_text(errors="ignore", encoding="utf-8") == _LOCAL_LEFTOVER_BODY
     ]
     assert preserved, "the leftover's bytes must be preserved in quarantine"
 
@@ -342,13 +346,15 @@ class _FakeCore:
 def test_quarantine_refuses_when_common_dir_is_unresolvable(tmp_path: Path) -> None:
     """An empty ``--git-common-dir`` answer must refuse the recovery outright — a
     quarantine path computed from '' would land INSIDE the working tree."""
-    (tmp_path / "leftover.json").write_text("x")
+    (tmp_path / "leftover.json").write_text("x", encoding="utf-8")
     core = _FakeCore(common="", status="?? leftover.json\n")
 
     assert push_recovery._quarantine_untracked_paths(core, str(tmp_path), ["leftover.json"]) is (
         False
     )
-    assert (tmp_path / "leftover.json").read_text() == "x", "nothing may move on refusal"
+    assert (tmp_path / "leftover.json").read_text(encoding="utf-8") == "x", (
+        "nothing may move on refusal"
+    )
 
 
 def test_quarantine_refuses_a_named_path_that_vanished(tmp_path: Path) -> None:

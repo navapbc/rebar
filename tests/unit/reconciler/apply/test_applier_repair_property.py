@@ -168,7 +168,7 @@ def _guard_scanned_sources() -> dict[str, str]:
         path = _RECONCILER_DIR / f"{name}.py"
         if not path.is_file():
             continue
-        sources[name] = path.read_text()
+        sources[name] = path.read_text(encoding="utf-8")
         for module in _imported_module_paths(ast.parse(sources[name])):
             tail = module.rsplit(".", 1)[-1]
             # Only follow siblings inside rebar.reconciler, and never follow invariants

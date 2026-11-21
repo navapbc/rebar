@@ -89,7 +89,9 @@ def test_dirty_tracker_is_committed_and_delivered(
     remote_head = _bare_git(origin, "rev-parse", "tickets").stdout.strip()
     assert remote_head == local_head
     assert _git(tracker, "status", "--porcelain").stdout == ""
-    assert _bare_git(origin, "show", "tickets:dirty-event.json").stdout == event.read_text()
+    assert _bare_git(origin, "show", "tickets:dirty-event.json").stdout == event.read_text(
+        encoding="utf-8"
+    )
     assert _git(tracker, "log", "-1", "--format=%s").stdout.strip() == (
         "chore: commit inbound bridge events"
     )

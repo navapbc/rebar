@@ -25,7 +25,7 @@ def tracker(tmp_path: Path) -> str:
     subprocess.run(["git", "-C", str(td), "config", "user.email", "t@t"], check=True)
     subprocess.run(["git", "-C", str(td), "config", "user.name", "t"], check=True)
     subprocess.run(["git", "-C", str(td), "config", "gc.auto", "0"], check=True)
-    (td / ".keep").write_text("")
+    (td / ".keep").write_text("", encoding="utf-8")
     subprocess.run(["git", "-C", str(td), "add", ".keep"], check=True)
     subprocess.run(["git", "-C", str(td), "commit", "-q", "-m", "init"], check=True)
     return str(td)
@@ -97,7 +97,7 @@ def test_tag_delta_is_a_valid_event_type(tracker: str):
 
 
 def test_rebase_guard_exit_75(tracker: str):
-    Path(tracker, ".git", "MERGE_HEAD").write_text("deadbeef\n")
+    Path(tracker, ".git", "MERGE_HEAD").write_text("deadbeef\n", encoding="utf-8")
     with pytest.raises(lock.RebaseGuard) as ei:
         event_append.stage_and_commit(tracker, "tk", _event())
     assert ei.value.returncode == 75

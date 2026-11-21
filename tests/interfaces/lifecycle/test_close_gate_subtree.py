@@ -34,7 +34,9 @@ _DESC = "Body.\n\n## Acceptance Criteria\n- [x] done\n\n## Context\nc\n"
 
 
 def _enable(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def PASS(ticket_id, **kw):

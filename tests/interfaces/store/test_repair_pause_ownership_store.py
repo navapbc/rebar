@@ -611,7 +611,8 @@ def test_a_slow_local_git_call_does_not_fail_the_repair_pause(
         f"    time.sleep({_SLOW_UPDATE_REF_SECS})\n"
         f"    with open({str(delayed)!r}, 'a') as log:\n"
         "        log.write(' '.join(sys.argv[1:]) + '\\n')\n"
-        f"sys.exit(subprocess.call([{real_git!r}, *sys.argv[1:]]))\n"
+        f"sys.exit(subprocess.call([{real_git!r}, *sys.argv[1:]]))\n",
+        encoding="utf-8",
     )
     # Route every `git` argv through the shim inside the same timed process-group call, so
     # the production timeout still bounds the delayed git. A PATH shim named `git` is not
@@ -632,5 +633,5 @@ def test_a_slow_local_git_call_does_not_fail_the_repair_pause(
 
     assert _ref_lock().read_pause(repo) is None
     # The test exercised the delay: both the pause write and its cleanup went through the shim.
-    calls = delayed.read_text().splitlines()
+    calls = delayed.read_text(encoding="utf-8").splitlines()
     assert len(calls) >= 2, calls

@@ -81,9 +81,9 @@ def _active_snapshot(store: Path, tid: str) -> Path:
 def _freeze(store: Path, tid: str, fields: dict[str, str]) -> None:
     """Write pre-fix close metadata into the ticket's latest SNAPSHOT (and commit it)."""
     path = _active_snapshot(store, tid)
-    event = json.loads(path.read_text())
+    event = json.loads(path.read_text(encoding="utf-8"))
     event["data"]["compiled_state"].update(fields)
-    path.write_text(json.dumps(event))
+    path.write_text(json.dumps(event), encoding="utf-8")
     subprocess.run(["git", "-C", _tracker(store), "add", "-A"], check=True, capture_output=True)
     subprocess.run(
         ["git", "-C", _tracker(store), "commit", "-q", "--no-verify", "-m", "fixture: freeze"],

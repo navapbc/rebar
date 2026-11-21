@@ -187,7 +187,7 @@ def test_the_launch_appears_only_in_the_helper() -> None:
 
 
 def test_the_helper_itself_carries_the_only_launch() -> None:
-    assert len(_launch_lines(ast.parse(_OWNER.read_text()))) == 1
+    assert len(_launch_lines(ast.parse(_OWNER.read_text(encoding="utf-8")))) == 1
 
 
 def test_the_helper_is_defined_exactly_once() -> None:
@@ -213,10 +213,12 @@ def test_a_marker_inside_a_black_split_launch_excuses_it(tmp_path: Path) -> None
         "    ]\n"
         ")\n"
     )
-    offender.write_text(launch.format(marker=""))
+    offender.write_text(launch.format(marker=""), encoding="utf-8")
     assert _unmarked_launches(offender) == [3]
 
-    offender.write_text(launch.format(marker=f"  {_ESCAPE_MARKER} reproduces bug 291e"))
+    offender.write_text(
+        launch.format(marker=f"  {_ESCAPE_MARKER} reproduces bug 291e"), encoding="utf-8"
+    )
     assert _unmarked_launches(offender) == []
 
 
@@ -224,14 +226,16 @@ def test_an_escape_marker_without_a_reason_does_not_excuse_a_launch(tmp_path: Pa
     offender = tmp_path / "test_offender.py"
     offender.write_text(
         "import subprocess, sys\n"
-        f"subprocess.run([sys.executable, '-m', 'pytest'])  {_ESCAPE_MARKER}\n"
+        f"subprocess.run([sys.executable, '-m', 'pytest'])  {_ESCAPE_MARKER}\n",
+        encoding="utf-8",
     )
 
     assert _unmarked_launches(offender) == [2]
 
     offender.write_text(
         "import subprocess, sys\n"
-        f"subprocess.run([sys.executable, '-m', 'pytest'])  {_ESCAPE_MARKER} reproduces bug 291e\n"
+        f"subprocess.run([sys.executable, '-m', 'pytest'])  {_ESCAPE_MARKER} reproduces bug 291e\n",
+        encoding="utf-8",
     )
 
     assert _unmarked_launches(offender) == []
@@ -273,7 +277,7 @@ def test_isolated(target: str) -> None:
 def test_the_pre_fix_violator_is_a_detected_launch(tmp_path: Path) -> None:
     """AC2/AC3. The exact form that evaded this guard is now seen, and only when broken."""
     offender = tmp_path / "test_pre_fix.py"
-    offender.write_text(_PRE_FIX_VIOLATOR)
+    offender.write_text(_PRE_FIX_VIOLATOR, encoding="utf-8")
 
     assert _unmarked_launches(offender) == [14], (
         "the python -c spelling of a nested pytest launch is invisible to this guard again"
@@ -293,10 +297,12 @@ def test_a_dash_c_payload_naming_pytest_is_a_launch(tmp_path: Path) -> None:
         "    ]\n"
         ")\n"
     )
-    offender.write_text(launch.format(marker=""))
+    offender.write_text(launch.format(marker=""), encoding="utf-8")
     assert _unmarked_launches(offender) == [3]
 
-    offender.write_text(launch.format(marker=f"  {_ESCAPE_MARKER} reproduces bug 16e1"))
+    offender.write_text(
+        launch.format(marker=f"  {_ESCAPE_MARKER} reproduces bug 16e1"), encoding="utf-8"
+    )
     assert _unmarked_launches(offender) == []
 
 
@@ -305,7 +311,8 @@ def test_a_dash_c_payload_that_never_names_pytest_is_not_a_launch(tmp_path: Path
     innocent = tmp_path / "test_innocent.py"
     innocent.write_text(
         "import subprocess, sys\n"
-        "subprocess.run([sys.executable, '-c', 'import json; print(json.dumps([1]))'])\n"
+        "subprocess.run([sys.executable, '-c', 'import json; print(json.dumps([1]))'])\n",
+        encoding="utf-8",
     )
 
     assert _unmarked_launches(innocent) == []
@@ -330,10 +337,12 @@ def test_a_bare_console_script_launch_without_a_basetemp_is_a_launch(tmp_path: P
         "    ]\n"
         ")\n"
     )
-    offender.write_text(launch.format(basetemp=""))
+    offender.write_text(launch.format(basetemp=""), encoding="utf-8")
     assert _unmarked_launches(offender) == [5]
 
-    offender.write_text(launch.format(basetemp="\n        '--basetemp',\n        'x',"))
+    offender.write_text(
+        launch.format(basetemp="\n        '--basetemp',\n        'x',"), encoding="utf-8"
+    )
     assert _unmarked_launches(offender) == []
 
 
@@ -345,7 +354,8 @@ def test_a_console_script_on_a_path_that_is_not_argv0_is_not_a_launch(tmp_path: 
         "from pathlib import Path\n"
         "stub = Path('bin') / 'pytest'\n"
         "stub.write_text('#!/bin/sh\\nexit 5\\n')\n"
-        "subprocess.run(['bash', '-c', 'pytest -q'])\n"
+        "subprocess.run(['bash', '-c', 'pytest -q'])\n",
+        encoding="utf-8",
     )
 
     assert _unmarked_launches(innocent) == []

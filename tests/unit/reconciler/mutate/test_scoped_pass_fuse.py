@@ -632,7 +632,7 @@ def test_historical_replay_completed_slice_never_prematurely_stops(fuse_mod, out
         / "reconciler"
         / "rp03_fuse_completed_slice.json"
     )
-    data = json.loads(fixture.read_text())
+    data = json.loads(fixture.read_text(encoding="utf-8"))
     records = data["records"]
     assert data["run_count"] == 1200
     assert len(records) == 1200

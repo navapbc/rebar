@@ -230,7 +230,7 @@ def test_opcert_signing_key_is_isolated_per_store(
 def _honours_posix_modes(directory: Path) -> bool:
     """Whether this platform keeps a chmod 0o600 as 0o600 (Windows reports 0o666 instead)."""
     probe = directory / "mode-probe"
-    probe.write_text("x")
+    probe.write_text("x", encoding="utf-8")
     probe.chmod(0o600)
     return (probe.stat().st_mode & 0o777) == 0o600
 

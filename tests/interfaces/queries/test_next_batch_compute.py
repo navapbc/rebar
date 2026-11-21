@@ -33,7 +33,7 @@ def _write(base: Path, tid: str, idx: int, et: str, data: dict, ts: int) -> None
         "author": "test",
         "data": data,
     }
-    (d / f"{idx:03d}-{et}.json").write_text(json.dumps(evt))
+    (d / f"{idx:03d}-{et}.json").write_text(json.dumps(evt), encoding="utf-8")
 
 
 def _three_tier(base: Path) -> None:

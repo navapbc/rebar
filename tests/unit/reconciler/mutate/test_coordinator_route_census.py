@@ -231,14 +231,14 @@ def test_ac4_duck_and_class_name_dispatch_removed_from_applier():
     """AC4: the production class-name / duck-typed dispatch fallback is GONE from
     applier.py; typed dispatch is selected by an explicit declared protocol ONLY.
     """
-    src = APPLIER_PATH.read_text()
+    src = APPLIER_PATH.read_text(encoding="utf-8")
     assert 'type(mutations).__name__ == "Mutation"' not in src
     assert 'type(m).__name__ == "Mutation"' not in src
     assert '__name__ == "Mutation"' not in src
     assert "isinstance(mutations, MutationShape)" in src
     # The recognizer is an explicit @runtime_checkable declared protocol (AC5), not a
     # class-name/duck fallback.
-    base_src = APPLY_BASE_PATH.read_text()
+    base_src = APPLY_BASE_PATH.read_text(encoding="utf-8")
     assert "runtime_checkable" in base_src
     assert "class MutationShape(Protocol)" in base_src
 
@@ -249,7 +249,7 @@ def test_ac3_obsolete_whole_operation_delete_retry_removed():
     internally; Cloud deliberately issues a delete single-attempt). ``delete_one`` now
     calls the transport directly.
     """
-    src = BATCH_DISPATCH_PATH.read_text()
+    src = BATCH_DISPATCH_PATH.read_text(encoding="utf-8")
     assert "_call_with_retry(client.delete_issue" not in src
     assert "client.delete_issue(" in src
 

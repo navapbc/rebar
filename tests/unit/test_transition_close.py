@@ -260,7 +260,7 @@ def _status_events(repo: Path, ticket_id: str) -> list[dict]:
     tdir = Path(config.tracker_dir(str(repo))) / ticket_id
     paths = sorted(tdir.glob("*-STATUS.json"))
     assert paths, f"no STATUS events found on disk for {ticket_id} under {tdir}"
-    return [json.loads(p.read_text()) for p in paths]
+    return [json.loads(p.read_text(encoding="utf-8")) for p in paths]
 
 
 def test_force_close_reason_is_written_onto_the_close_status_event(repo, monkeypatch):
@@ -531,7 +531,8 @@ def test_a_legacy_close_event_without_the_field_reads_back_absent(tmp_path):
                 "author": "t",
                 "data": {"ticket_type": "task", "title": "legacy"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     (tdir / "200-22222222-2222-2222-2222-222222222222-STATUS.json").write_text(
         json.dumps(
@@ -543,7 +544,8 @@ def test_a_legacy_close_event_without_the_field_reads_back_absent(tmp_path):
                 "author": "t",
                 "data": {"status": "closed", "current_status": "open"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     state = reduce_ticket(str(tdir))

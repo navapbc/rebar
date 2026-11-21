@@ -218,7 +218,7 @@ def test_mixed_create_and_noncreate_plan_records_dicts_failed_not_dispatched(
             [create, update], "pass-mixed-plan", repo_root=tmp_path, ticket_plans=plans
         )
 
-    outcomes = json.loads(Path(manifest_path).read_text())["mutations"]
+    outcomes = json.loads(Path(manifest_path).read_text(encoding="utf-8"))["mutations"]
     assert sorted(o["action"] for o in outcomes) == ["create", "update"]
     for outcome in outcomes:
         assert "unrouted mutation" in str(outcome.get("error")), outcome

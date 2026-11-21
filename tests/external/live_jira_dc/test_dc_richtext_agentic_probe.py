@@ -294,9 +294,13 @@ def _write_artifacts(result: dict[str, Any] | None) -> Path:
         or (source_repo_root() / "jira-dc-richtext-probe")
     )
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "evidence.json").write_text(json.dumps(_EVIDENCE, indent=2, default=str))
+    (out_dir / "evidence.json").write_text(
+        json.dumps(_EVIDENCE, indent=2, default=str), encoding="utf-8"
+    )
     if result is not None:
-        (out_dir / "rca.json").write_text(json.dumps(result, indent=2, default=str))
+        (out_dir / "rca.json").write_text(
+            json.dumps(result, indent=2, default=str), encoding="utf-8"
+        )
     return out_dir
 
 

@@ -102,7 +102,11 @@ def _apply_one(applier_mod, acli_mod, mutation, client, tmp_path, pass_id) -> di
     with patch.object(applier_mod, "_load_acli", return_value=fake):
         applier_mod.apply([mutation], pass_id, repo_root=tmp_path, ticket_plans=_plans([mutation]))
     manifest = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
-    outcomes = json.loads(manifest.read_text()).get("mutations", []) if manifest.is_file() else []
+    outcomes = (
+        json.loads(manifest.read_text(encoding="utf-8")).get("mutations", [])
+        if manifest.is_file()
+        else []
+    )
     return next((o for o in outcomes if o.get("key") == mutation.target), {})
 
 
@@ -168,7 +172,11 @@ def test_create_path_comment_drop_promotes_to_error(applier_mod, acli_mod, tmp_p
     with patch.object(applier_mod, "_load_acli", return_value=fake):
         applier_mod.apply([mutation], pass_id, repo_root=tmp_path, ticket_plans=_plans([mutation]))
     manifest = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
-    outcomes = json.loads(manifest.read_text()).get("mutations", []) if manifest.is_file() else []
+    outcomes = (
+        json.loads(manifest.read_text(encoding="utf-8")).get("mutations", [])
+        if manifest.is_file()
+        else []
+    )
     target = [o for o in outcomes if o.get("local_id") == "create-flagged-comment-fail"]
     assert target, f"expected an outcome for the create; got {outcomes}"
     outcome = target[0]

@@ -68,7 +68,7 @@ def _read_events_of_type(tracker_dir: Path, local_id: str, event_type: str) -> l
     ticket_dir = tracker_dir / local_id
     events = []
     for path in sorted(ticket_dir.glob("*.json")):
-        ev = json.loads(path.read_text())
+        ev = json.loads(path.read_text(encoding="utf-8"))
         if ev.get("event_type") == event_type:
             events.append(ev)
     return events
@@ -235,9 +235,9 @@ def test_inbound_create_get_comments_failure_degrades(applier, mut_mod, fixture_
     create_dir = tracker / local_id
     assert create_dir.is_dir(), "ticket directory must be created"
     all_events = sorted(create_dir.glob("*.json"))
-    assert any(json.loads(p.read_text()).get("event_type") == "CREATE" for p in all_events), (
-        "CREATE event must be written even when get_comments fails"
-    )
+    assert any(
+        json.loads(p.read_text(encoding="utf-8")).get("event_type") == "CREATE" for p in all_events
+    ), "CREATE event must be written even when get_comments fails"
 
     # 0 COMMENT events
     comment_events = _read_events_of_type(tracker, local_id, "COMMENT")

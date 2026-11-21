@@ -381,7 +381,7 @@ def test_integ_cache_warm_before_compaction_returns_correct_state_after(
         },
     }
     (ticket_dir / "1742605210-snapshot-uuid-1234-SNAPSHOT.json").write_text(
-        json.dumps(snapshot_payload)
+        json.dumps(snapshot_payload), encoding="utf-8"
     )
 
     # After compaction — cache must miss (file count changed) and return SNAPSHOT state

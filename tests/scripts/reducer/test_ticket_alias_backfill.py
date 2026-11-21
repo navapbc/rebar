@@ -61,7 +61,7 @@ def _plant_ticket(root: Path, ticket_id: str, alias_in_data: str | None) -> Path
         "author": "test",
         "data": data,
     }
-    (td / f"{ts}-{ev}-CREATE.json").write_text(json.dumps(payload))
+    (td / f"{ts}-{ev}-CREATE.json").write_text(json.dumps(payload), encoding="utf-8")
     return td
 
 
@@ -114,7 +114,7 @@ def test_resolver_malformed_create_json_is_skipped(tmp_path):
     bad = tmp_path / "5555-6666-7777-8888"
     bad.mkdir()
     ts = time.time_ns()
-    (bad / f"{ts}-junk-CREATE.json").write_text("{ not valid json")
+    (bad / f"{ts}-junk-CREATE.json").write_text("{ not valid json", encoding="utf-8")
     assert resolve_ticket_id("good-stored-alias", str(tmp_path)) == good.name
 
 
@@ -123,7 +123,7 @@ def test_resolver_dotfile_dirs_ignored(tmp_path):
     by accident) must not be scanned — they aren't tickets."""
     (tmp_path / ".graph-cache").mkdir()
     (tmp_path / ".graph-cache" / "fake-CREATE.json").write_text(
-        json.dumps({"data": {"alias": "should-not-match"}})
+        json.dumps({"data": {"alias": "should-not-match"}}), encoding="utf-8"
     )
     assert resolve_ticket_id("should-not-match", str(tmp_path)) is None
 
@@ -140,7 +140,9 @@ def _write_bindings(tracker: Path, reverse: dict) -> None:
     """Plant a binding-store reverse index at <tracker>/.bridge_state/bindings.json."""
     bs = tracker / ".bridge_state"
     bs.mkdir(parents=True, exist_ok=True)
-    (bs / "bindings.json").write_text(json.dumps({"version": 1, "reverse": reverse}))
+    (bs / "bindings.json").write_text(
+        json.dumps({"version": 1, "reverse": reverse}), encoding="utf-8"
+    )
 
 
 # Jira keys resolve through the authoritative binding-store reverse index.
@@ -182,7 +184,7 @@ def test_resolver_jira_key_corrupt_bindings_file_returns_none(tmp_path):
     _plant_ticket(tmp_path, "abcd-efab-1234-5678", alias_in_data="some-alias")
     bs = tmp_path / ".bridge_state"
     bs.mkdir()
-    (bs / "bindings.json").write_text("{ not valid json")
+    (bs / "bindings.json").write_text("{ not valid json", encoding="utf-8")
     assert _resolve_via_binding_store("REB-310", str(tmp_path)) is None
     assert resolve_ticket_id("REB-310", str(tmp_path)) is None
 
@@ -204,7 +206,7 @@ def _write_live_shaped_bindings(tracker: Path) -> dict:
     }
     bs = tracker / ".bridge_state"
     bs.mkdir(parents=True, exist_ok=True)
-    (bs / "bindings.json").write_text(json.dumps(doc, indent=2))
+    (bs / "bindings.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
     return doc
 
 
@@ -220,12 +222,12 @@ def test_binding_reverse_conflict_marker_inside_bindings_returns_empty(tmp_path)
     loader still validates the whole file and degrades to ``{}``, never raising."""
     _write_live_shaped_bindings(tmp_path)
     path = tmp_path / ".bridge_state" / "bindings.json"
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     marked = text.replace(
         '"state": "confirmed"', '<<<<<<< ours\n"state": "confirmed"\n=======\n>>>>>>> theirs', 1
     )
     assert marked != text and marked.index("<<<<<<<") < marked.index('"reverse"')
-    path.write_text(marked)
+    path.write_text(marked, encoding="utf-8")
     assert _load_binding_reverse(str(tmp_path)) == {}
     assert _resolve_via_binding_store("REB-0", str(tmp_path)) is None
 
@@ -234,7 +236,7 @@ def test_binding_reverse_non_object_and_bad_encoding_return_empty(tmp_path):
     """A non-object top level and undecodable bytes are corrupt stores, not errors."""
     bs = tmp_path / ".bridge_state"
     bs.mkdir()
-    (bs / "bindings.json").write_text("[]")
+    (bs / "bindings.json").write_text("[]", encoding="utf-8")
     assert _load_binding_reverse(str(tmp_path)) == {}
     (bs / "bindings.json").write_bytes(b'{"reverse": {"REB-1": "\xff\xfe"}}')
     assert _load_binding_reverse(str(tmp_path)) == {}
@@ -301,7 +303,7 @@ def test_scan_alias_no_longer_buckets_jira_keys(tmp_path):
     td.mkdir()
     ts = time.time_ns()
     (td / f"{ts}-x-CREATE.json").write_text(
-        json.dumps({"data": {"alias": "real-alias", "jira_key": "REB-777"}})
+        json.dumps({"data": {"alias": "real-alias", "jira_key": "REB-777"}}), encoding="utf-8"
     )
     # The alias still resolves; the jira_key field does not.
     assert _scan_alias("real-alias", str(tmp_path)) == [td.name]
@@ -322,7 +324,7 @@ def test_resolver_nonzero_exit_propagates_to_resolve_ticket_id(tmp_path, capsys)
     # _scan_alias prints "cannot list ..." and returns None → resolve
     # returns None.
     bad_tracker = tmp_path / ".tickets-tracker"
-    bad_tracker.write_text("not a directory")
+    bad_tracker.write_text("not a directory", encoding="utf-8")
 
     result = resolve_ticket_id("some-alias", str(bad_tracker))
     err = capsys.readouterr().err
@@ -390,7 +392,7 @@ def _plant_snapshot_ticket(
             "source_event_uuids": [],
         },
     }
-    (td / f"{ts}-{ev}-SNAPSHOT.json").write_text(json.dumps(payload))
+    (td / f"{ts}-{ev}-SNAPSHOT.json").write_text(json.dumps(payload), encoding="utf-8")
     return td
 
 

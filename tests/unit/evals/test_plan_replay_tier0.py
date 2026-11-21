@@ -67,7 +67,7 @@ class TrackerBuilder:
         d.mkdir(parents=True, exist_ok=True)
         ev_uuid = str(uuidlib.UUID(int=ts % (2**128)))
         fname = f"{ts}-{ev_uuid}-{event_type}.json"
-        (d / fname).write_text(json.dumps({"data": data}))
+        (d / fname).write_text(json.dumps({"data": data}), encoding="utf-8")
 
     def create(self, ticket_id: str, *, description: str, ts: int | None = None) -> int:
         ts = ts or _next_ts()

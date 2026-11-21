@@ -50,7 +50,7 @@ def _keypair(tmp_path: Path, name: str) -> tuple[str, str]:
         check=True,
         capture_output=True,
     )
-    pub = (tmp_path / f"{name}.pub").read_text().strip()
+    pub = (tmp_path / f"{name}.pub").read_text(encoding="utf-8").strip()
     # authorized-keys line = "<keytype> <keydata> [comment]"; keep type+data.
     parts = pub.split()
     return str(key), f"{parts[0]} {parts[1]}"
@@ -94,7 +94,7 @@ def _keypair_heldout(tmp_path: Path, name: str) -> tuple[str, str]:
         check=True,
         capture_output=True,
     )
-    parts = (tmp_path / f"{name}.pub").read_text().strip().split()
+    parts = (tmp_path / f"{name}.pub").read_text(encoding="utf-8").strip().split()
     return str(key), f"{parts[0]} {parts[1]}"
 
 

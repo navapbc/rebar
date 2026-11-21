@@ -91,7 +91,7 @@ def _commit(repo: Path, message: str = "oracle") -> None:
 
 
 def _enable_gate(repo: Path, gate: str) -> None:
-    (repo / "rebar.toml").write_text(f"[verify]\n{_GATE_KEY[gate]} = true\n")
+    (repo / "rebar.toml").write_text(f"[verify]\n{_GATE_KEY[gate]} = true\n", encoding="utf-8")
 
 
 # ── The contract table ────────────────────────────────────────────────────────

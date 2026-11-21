@@ -14,7 +14,7 @@ _MAKEFILE = _ROOT / "Makefile"
 
 def _lint_recipe() -> str:
     """Return the ``lint:`` target header + its recipe body (tab-indented lines)."""
-    lines = _MAKEFILE.read_text().splitlines()
+    lines = _MAKEFILE.read_text(encoding="utf-8").splitlines()
     start = next(i for i, ln in enumerate(lines) if ln.startswith("lint:"))
     body = [lines[start]]
     for ln in lines[start + 1 :]:

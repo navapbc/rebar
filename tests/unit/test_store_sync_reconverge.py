@@ -32,7 +32,7 @@ def _new_tickets_repo(path: Path) -> None:
 def _commit_event(repo: Path, ticket_uuid: str, filename: str, body: str) -> str:
     tdir = repo / ticket_uuid
     tdir.mkdir(parents=True, exist_ok=True)
-    (tdir / filename).write_text(body)
+    (tdir / filename).write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "--no-verify", "-m", f"ticket: {ticket_uuid}")
     return _git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -77,7 +77,7 @@ def diverged_with_untracked_collision(tmp_path: Path) -> tuple[Path, str, str]:
     # The compaction leftover: the SAME path origin now adds, sitting UNTRACKED locally.
     leftover = tracker / _COLLIDE_PATH
     leftover.parent.mkdir(parents=True, exist_ok=True)
-    leftover.write_text('{"side":"local-untracked-leftover"}')
+    leftover.write_text('{"side":"local-untracked-leftover"}', encoding="utf-8")
     assert _git(tracker, "status", "--porcelain", "--", _COLLIDE_PATH).stdout.startswith("??"), (
         "precondition: the colliding path must be untracked in the working tree"
     )
@@ -128,7 +128,8 @@ def test_reconverge_untracked_leftover_is_preserved_not_destroyed(
     preserved = [
         p
         for p in common_dir.rglob("*")
-        if p.is_file() and p.read_text(errors="ignore") == '{"side":"local-untracked-leftover"}'
+        if p.is_file()
+        and p.read_text(errors="ignore", encoding="utf-8") == '{"side":"local-untracked-leftover"}'
     ]
     assert preserved, (
         "the untracked leftover's bytes were not preserved anywhere under the git dir — "
@@ -144,7 +145,7 @@ def test_reconverge_genuine_content_conflict_still_aborts_and_keeps_local(tmp_pa
     tracker = tmp_path / "tracker"
     _new_tickets_repo(origin)
     # A shared, tracked, MUTABLE root file both sides will edit incompatibly.
-    (origin / "shared.txt").write_text("base\n")
+    (origin / "shared.txt").write_text("base\n", encoding="utf-8")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "--no-verify", "-m", "base shared file")
 
@@ -152,7 +153,7 @@ def test_reconverge_genuine_content_conflict_still_aborts_and_keeps_local(tmp_pa
     _git(tracker, "config", "user.email", "t@t")
     _git(tracker, "config", "user.name", "t")
 
-    (origin / "shared.txt").write_text("origin-change\n")
+    (origin / "shared.txt").write_text("origin-change\n", encoding="utf-8")
     _git(origin, "add", "-A")
     origin_sha = (
         _git(origin, "commit", "-q", "--no-verify", "-m", "origin edit")
@@ -160,7 +161,7 @@ def test_reconverge_genuine_content_conflict_still_aborts_and_keeps_local(tmp_pa
     )
     origin_sha = _git(origin, "rev-parse", "HEAD").stdout.strip()
 
-    (tracker / "shared.txt").write_text("local-change\n")
+    (tracker / "shared.txt").write_text("local-change\n", encoding="utf-8")
     _git(tracker, "add", "-A")
     _git(tracker, "commit", "-q", "--no-verify", "-m", "local edit")
     local_sha = _git(tracker, "rev-parse", "HEAD").stdout.strip()
@@ -233,7 +234,7 @@ def test_reconverge_self_heals_tracked_local_deletion(diverged_with_tracked_dele
 
     # Paths git does NOT name must be untouched by the recovery.
     tmp_event = tracker / ".tmp-event-12345"
-    tmp_event.write_text("in-flight")
+    tmp_event.write_text("in-flight", encoding="utf-8")
 
     sync.reconverge(tracker)
 
@@ -247,11 +248,11 @@ def test_reconverge_self_heals_tracked_local_deletion(diverged_with_tracked_dele
     assert len(parents) == 3, f"expected a 2-parent merge commit, got parents={parents}"
     # The deleted file is back at its merged content (origin's version — the local
     # side never committed a change to it).
-    assert (tracker / _TRACKED_PATH).read_text() == _ORIGIN_BODY, (
+    assert (tracker / _TRACKED_PATH).read_text(encoding="utf-8") == _ORIGIN_BODY, (
         "the worktree-deleted tracked file must be restored at the merged content"
     )
     # Unnamed paths untouched: the in-flight event marker survives verbatim.
-    assert tmp_event.read_text() == "in-flight", ".tmp-event-* must not be touched"
+    assert tmp_event.read_text(encoding="utf-8") == "in-flight", ".tmp-event-* must not be touched"
     # Data-safety: the local commit survives an aggressive prune.
     _git(tracker, "gc", "--prune=now", "--quiet")
     assert _git(tracker, "cat-file", "-e", local_sha).returncode == 0
@@ -263,7 +264,7 @@ def test_reconverge_quarantines_local_modification_then_merges(tmp_path: Path) -
     merge must then complete with the merged (origin) content in the worktree."""
     tracker, local_sha, origin_sha = _diverged_with_tracked_base(tmp_path)
     local_bytes = '{"e":"local-uncommitted-edit"}'
-    (tracker / _TRACKED_PATH).write_text(local_bytes)
+    (tracker / _TRACKED_PATH).write_text(local_bytes, encoding="utf-8")
     assert _git(tracker, "status", "--porcelain", "--", _TRACKED_PATH).stdout.startswith(" M")
 
     sync.reconverge(tracker)
@@ -272,7 +273,7 @@ def test_reconverge_quarantines_local_modification_then_merges(tmp_path: Path) -
         "origin commit not merged — reconverge wedged on the tracked-modification abort"
     )
     assert _git(tracker, "merge-base", "--is-ancestor", local_sha, "HEAD").returncode == 0
-    assert (tracker / _TRACKED_PATH).read_text() == _ORIGIN_BODY
+    assert (tracker / _TRACKED_PATH).read_text(encoding="utf-8") == _ORIGIN_BODY
     # The local bytes are preserved in the quarantine dir (never deleted).
     common_dir = Path(_git(tracker, "rev-parse", "--git-common-dir").stdout.strip())
     if not common_dir.is_absolute():
@@ -281,7 +282,7 @@ def test_reconverge_quarantines_local_modification_then_merges(tmp_path: Path) -
     preserved = [
         p
         for p in quarantine.rglob("*")
-        if p.is_file() and p.read_text(errors="ignore") == local_bytes
+        if p.is_file() and p.read_text(errors="ignore", encoding="utf-8") == local_bytes
     ]
     assert preserved, (
         "the local modification's bytes must be copied into the quarantine dir "
@@ -299,19 +300,19 @@ def test_reconverge_local_changes_recovery_survives_conflict_on_retry(
     tracker, local_sha, origin_sha = _diverged_with_tracked_base(tmp_path)
     # Both sides commit conflicting edits to a shared tracked file.
     origin = tmp_path / "origin"
-    (origin / _TRACKED_DIR / "shared.json").write_text('{"v":"base"}')
+    (origin / _TRACKED_DIR / "shared.json").write_text('{"v":"base"}', encoding="utf-8")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "--no-verify", "-m", "shared base")
     # Tracker needs the shared file too — recreate the same base commit content there
     # via a direct write + commit so both sides then diverge on it.
-    (tracker / _TRACKED_DIR / "shared.json").write_text('{"v":"base"}')
+    (tracker / _TRACKED_DIR / "shared.json").write_text('{"v":"base"}', encoding="utf-8")
     _git(tracker, "add", "-A")
     _git(tracker, "commit", "-q", "--no-verify", "-m", "shared base (local)")
-    (origin / _TRACKED_DIR / "shared.json").write_text('{"v":"origin"}')
+    (origin / _TRACKED_DIR / "shared.json").write_text('{"v":"origin"}', encoding="utf-8")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "--no-verify", "-m", "origin edit")
     origin_sha = _git(origin, "rev-parse", "HEAD").stdout.strip()
-    (tracker / _TRACKED_DIR / "shared.json").write_text('{"v":"local"}')
+    (tracker / _TRACKED_DIR / "shared.json").write_text('{"v":"local"}', encoding="utf-8")
     _git(tracker, "add", "-A")
     _git(tracker, "commit", "-q", "--no-verify", "-m", "local edit")
     local_sha = _git(tracker, "rev-parse", "HEAD").stdout.strip()
@@ -356,7 +357,7 @@ def test_reconverge_unrecognized_local_state_keeps_abort_only(tmp_path: Path) ->
     exactly once, local kept, origin not absorbed, staged bytes untouched."""
     tracker, local_sha, origin_sha = _diverged_with_tracked_base(tmp_path)
     staged_bytes = '{"e":"staged-local-edit"}'
-    (tracker / _TRACKED_PATH).write_text(staged_bytes)
+    (tracker / _TRACKED_PATH).write_text(staged_bytes, encoding="utf-8")
     _git(tracker, "add", "--", _TRACKED_PATH)
     assert _git(tracker, "status", "--porcelain", "--", _TRACKED_PATH).stdout.startswith("M "), (
         "precondition: the tracked path must be a STAGED modification ('M ')"
@@ -377,7 +378,7 @@ def test_reconverge_unrecognized_local_state_keeps_abort_only(tmp_path: Path) ->
 
     assert _git(tracker, "merge-base", "--is-ancestor", local_sha, "HEAD").returncode == 0
     assert _git(tracker, "merge-base", "--is-ancestor", origin_sha, "HEAD").returncode != 0
-    assert (tracker / _TRACKED_PATH).read_text() == staged_bytes, (
+    assert (tracker / _TRACKED_PATH).read_text(encoding="utf-8") == staged_bytes, (
         "an unrecognized local state must be left untouched"
     )
     assert len(merge_calls) == 1, "no retry without a completed recovery"
@@ -395,7 +396,7 @@ def test_restore_local_changes_handles_pure_worktree_deletion(tmp_path: Path) ->
     assert _git(repo, "status", "--porcelain", "--", _TRACKED_PATH).stdout.startswith(" D")
 
     assert sync._restore_local_changes(str(repo), [_TRACKED_PATH]) is True
-    assert (repo / _TRACKED_PATH).read_text() == '{"e":"base"}'
+    assert (repo / _TRACKED_PATH).read_text(encoding="utf-8") == '{"e":"base"}'
     assert _git(repo, "status", "--porcelain").stdout == ""
 
 

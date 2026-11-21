@@ -29,7 +29,7 @@ def repo(tmp_path: Path) -> Path:
     _git("init", "-q", cwd=d)
     _git("config", "user.email", "t@example.com", cwd=d)
     _git("config", "user.name", "T", cwd=d)
-    (d / "f.txt").write_text("hello\n")
+    (d / "f.txt").write_text("hello\n", encoding="utf-8")
     _git("add", "-A", cwd=d)
     _git("commit", "-q", "-m", "c1", cwd=d)
     return d
@@ -100,7 +100,7 @@ def test_a_second_real_commit_is_detected_as_a_mismatch(repo: Path) -> None:
     stale-clone scenario the ticket describes, and the case that would go unnoticed
     if the comparison were accidentally always-true."""
     stale = _head(repo)
-    (repo / "f.txt").write_text("changed\n")
+    (repo / "f.txt").write_text("changed\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "c2", cwd=repo)
     assert _head(repo) != stale

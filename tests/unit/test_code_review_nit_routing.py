@@ -72,7 +72,11 @@ def test_other_advisory_overlays_are_not_nit_suppressed() -> None:
 def test_routing_file_is_valid_json() -> None:
     from importlib import resources
 
-    raw = resources.files("rebar.llm.code_review").joinpath("criteria_routing.json").read_text()
+    raw = (
+        resources.files("rebar.llm.code_review")
+        .joinpath("criteria_routing.json")
+        .read_text(encoding="utf-8")
+    )
     json.loads(raw)  # must parse
 
 

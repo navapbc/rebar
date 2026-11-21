@@ -17,7 +17,7 @@ FORBIDDEN_NAME = "local_to_jira_status"
 
 def test_differ_ast_does_not_reference_local_to_jira_status():
     """AST walk: no Name, Attribute, or ImportFrom references local_to_jira_status."""
-    source = DIFFER_PATH.read_text()
+    source = DIFFER_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
     hits = []
     for node in ast.walk(tree):
@@ -34,7 +34,7 @@ def test_differ_ast_does_not_reference_local_to_jira_status():
 
 def test_differ_source_does_not_contain_string_literal():
     """String-literal grep: catches getattr/dynamic name access via the literal string."""
-    source = DIFFER_PATH.read_text()
+    source = DIFFER_PATH.read_text(encoding="utf-8")
     # A bare literal occurrence would be caught by AST too, but dynamic getattr
     # uses string literals which look like normal strings — so we grep.
     assert FORBIDDEN_NAME not in source, (

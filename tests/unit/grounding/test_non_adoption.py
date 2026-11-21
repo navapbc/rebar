@@ -83,7 +83,7 @@ def test_oracle_contract_is_import_clean_and_callable() -> None:
 
 def test_refute_query_with_ctags_absent_fails_open(tmp_path, monkeypatch) -> None:
     # Missing ctags must abstain(no_tool) without raising.
-    (tmp_path / "x.py").write_text("def f(): pass\n")
+    (tmp_path / "x.py").write_text("def f(): pass\n", encoding="utf-8")
     monkeypatch.setattr(r, "_CTAGS_BIN", "definitely-not-a-real-ctags-xyz")
     r._CACHED_CTAGS_LANGS = None
     rec = oracle.refute_absence({"kind": "symbol", "name": "f"}, repo_root=str(tmp_path))
@@ -96,7 +96,7 @@ def test_refute_query_with_ctags_absent_fails_open(tmp_path, monkeypatch) -> Non
 def test_scan_query_with_engines_absent_fails_open(tmp_path, monkeypatch) -> None:
     # All Engine B binaries pointed at bogus names + offline -> every record is a
     # fail-open abstain (no_tool), never a raise, never a silent no-op.
-    (tmp_path / "app.js").write_text("function f(){ console.log('x'); }\n")
+    (tmp_path / "app.js").write_text("function f(){ console.log('x'); }\n", encoding="utf-8")
     monkeypatch.setattr(engine_b, "_OPENGREP_CANDIDATES", ("bogus-opengrep-xyz",))
     monkeypatch.setattr(engine_b, "_ASTGREP_CANDIDATES", ("bogus-astgrep-xyz",))
     monkeypatch.setattr(engine_b, "_METRIC_CANDIDATES", ("bogus-scc-xyz",))

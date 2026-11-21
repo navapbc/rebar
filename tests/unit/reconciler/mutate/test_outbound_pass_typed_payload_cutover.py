@@ -45,7 +45,7 @@ _CUTOVER_MODULES = (outbound_pass, batch_dispatch)
 
 def test_only_the_named_cutover_modules_import_typed_payloads():
     for module in _PRODUCTION_MODULES:
-        source = Path(inspect.getfile(module)).read_text()
+        source = Path(inspect.getfile(module)).read_text(encoding="utf-8")
         references_typed_payloads = _TYPED_PAYLOAD_MODULE_NAME in source
         if module in _CUTOVER_MODULES:
             assert references_typed_payloads, (

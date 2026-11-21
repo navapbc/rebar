@@ -26,12 +26,18 @@ def _section(text: str, start: str, end: str) -> str:
 
 @pytest.fixture(scope="module")
 def step7() -> str:
-    return _section(_SKILL.read_text(), "## Step 7 — Sweep for siblings", "## Reporting back")
+    return _section(
+        _SKILL.read_text(encoding="utf-8"), "## Step 7 — Sweep for siblings", "## Reporting back"
+    )
 
 
 @pytest.fixture(scope="module")
 def r4() -> str:
-    return _section(_GATE_DOC.read_text(), "## R4 — the necessity probe", "## The CI rigor signal")
+    return _section(
+        _GATE_DOC.read_text(encoding="utf-8"),
+        "## R4 — the necessity probe",
+        "## The CI rigor signal",
+    )
 
 
 def test_step7_routes_the_sibling_set_through_plan_review(step7: str) -> None:
@@ -85,7 +91,7 @@ def test_gate_doc_never_blocks_claims_name_the_escalation_exception(claim: str) 
     escalation. Requiring the claim to be present is what keeps this from
     passing vacuously if the passage is reworded away.
     """
-    stating = [line for line in _GATE_DOC.read_text().splitlines() if claim in line]
+    stating = [line for line in _GATE_DOC.read_text(encoding="utf-8").splitlines() if claim in line]
     assert stating, f"the bug tier's non-blocking default is no longer stated as {claim!r}"
     for line in stating:
         assert "escalat" in line.lower(), (

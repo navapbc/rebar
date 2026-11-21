@@ -40,8 +40,12 @@ def dc_support() -> ModuleType:
 def test_the_collector_finds_a_foreign_base_url_nested_under_dot_rebar(dc_support, tmp_path):
     """Require the collector to expose a second, foreign ``base_url`` when present."""
     (tmp_path / ".rebar").mkdir()
-    (tmp_path / "rebar.toml").write_text(f'[reconciler]\nbase_url = "{_HARNESS_URL}"\n')
-    (tmp_path / ".rebar" / "nested.toml").write_text(f'[reconciler]\nbase_url = "{_FOREIGN_URL}"\n')
+    (tmp_path / "rebar.toml").write_text(
+        f'[reconciler]\nbase_url = "{_HARNESS_URL}"\n', encoding="utf-8"
+    )
+    (tmp_path / ".rebar" / "nested.toml").write_text(
+        f'[reconciler]\nbase_url = "{_FOREIGN_URL}"\n', encoding="utf-8"
+    )
 
     found = dc_support.collect_base_urls(tmp_path)
 
@@ -55,8 +59,12 @@ def test_the_collector_looks_beyond_rebar_toml(dc_support, tmp_path):
     Named separately because "only inspects the one file the fixture wrote" is exactly how an
     assertion ends up comparing a fixture against itself.
     """
-    (tmp_path / "rebar.toml").write_text(f'[reconciler]\nbase_url = "{_HARNESS_URL}"\n')
-    (tmp_path / "pyproject.toml").write_text(f'[tool.rebar]\nbase_url = "{_FOREIGN_URL}"\n')
+    (tmp_path / "rebar.toml").write_text(
+        f'[reconciler]\nbase_url = "{_HARNESS_URL}"\n', encoding="utf-8"
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        f'[tool.rebar]\nbase_url = "{_FOREIGN_URL}"\n', encoding="utf-8"
+    )
 
     found = dc_support.collect_base_urls(tmp_path)
 
@@ -89,7 +97,8 @@ def test_a_missing_snapshot_is_a_hard_error_not_an_empty_dict(dc_support, tmp_pa
 def test_a_recorded_leak_is_reported_so_the_assertion_can_fail(dc_support, tmp_path):
     """Require a credential recorded as inherited to make the leak predicate non-empty."""
     (tmp_path / dc_support.INHERITED_ENV_FILE).write_text(
-        json.dumps({"JIRA_API_TOKEN": "leaked-value", "JIRA_EMAIL": None, "REBAR_SYNC_PUSH": None})
+        json.dumps({"JIRA_API_TOKEN": "leaked-value", "JIRA_EMAIL": None, "REBAR_SYNC_PUSH": None}),
+        encoding="utf-8",
     )
 
     inherited = dc_support.read_inherited_env(tmp_path)
@@ -105,7 +114,7 @@ def test_a_recorded_leak_is_reported_so_the_assertion_can_fail(dc_support, tmp_p
 def test_a_clean_snapshot_reports_no_leak(dc_support, tmp_path):
     """The passing direction, so the assertion is not simply always-red."""
     (tmp_path / dc_support.INHERITED_ENV_FILE).write_text(
-        json.dumps({name: None for name in dc_support.CLOUD_CREDENTIAL_VARS})
+        json.dumps({name: None for name in dc_support.CLOUD_CREDENTIAL_VARS}), encoding="utf-8"
     )
 
     inherited = dc_support.read_inherited_env(tmp_path)

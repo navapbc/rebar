@@ -54,9 +54,9 @@ def _repo(tmp_path: Path) -> Path:
     _git("init", "-q", cwd=repo)
     _git("config", "user.email", "t@e.com", cwd=repo)
     _git("config", "user.name", "T", cwd=repo)
-    (repo / "a.py").write_text("print(1)\n")
+    (repo / "a.py").write_text("print(1)\n", encoding="utf-8")
     (repo / "pkg").mkdir()
-    (repo / "pkg" / "b.py").write_text("x = 2\n")
+    (repo / "pkg" / "b.py").write_text("x = 2\n", encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-qm", "init", cwd=repo)
     return repo
@@ -123,7 +123,7 @@ def _fake_git_dir(tmp_path: Path) -> Path:
     bindir = tmp_path / "fakebin"
     bindir.mkdir()
     shim = bindir / "git"
-    shim.write_text(_FAKE_GIT)
+    shim.write_text(_FAKE_GIT, encoding="utf-8")
     shim.chmod(0o755)
     return bindir
 
@@ -197,8 +197,8 @@ def test_stderr_flood_does_not_deadlock_the_archive_stream(tmp_path: Path) -> No
     done, _ = _drive_snapshot(repo, bindir, mode="stderr_flood")
     assert done.stdout.startswith("OK"), (done.stdout, done.stderr[-2000:])
     dest = Path(done.stdout.split(" ", 1)[1].strip())
-    assert (dest / "a.py").read_text() == "print(1)\n"
-    assert (dest / "pkg" / "b.py").read_text() == "x = 2\n"
+    assert (dest / "a.py").read_text(encoding="utf-8") == "print(1)\n"
+    assert (dest / "pkg" / "b.py").read_text(encoding="utf-8") == "x = 2\n"
 
 
 # ── AC2: a stalled child is bounded AND terminated, not orphaned ─────────────
@@ -225,7 +225,7 @@ def test_stalled_archive_is_bounded_and_the_child_is_reaped(tmp_path: Path) -> N
     assert elapsed < _HARD_BOUND_SECONDS / 2, elapsed
     # And the stalled child is terminated rather than left running.
     assert pidfile.exists(), "the fake git never recorded its pid"
-    stalled_pid = int(pidfile.read_text())
+    stalled_pid = int(pidfile.read_text(encoding="utf-8"))
     deadline = time.monotonic() + 10
     while _alive(stalled_pid) and time.monotonic() < deadline:
         time.sleep(0.1)

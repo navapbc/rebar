@@ -121,7 +121,7 @@ def test_capabilities_module_still_has_no_provider_name_prefix_matching():
 
     import rebar.llm.capabilities as caps_mod
 
-    tree = ast.parse(pathlib.Path(caps_mod.__file__).read_text())
+    tree = ast.parse(pathlib.Path(caps_mod.__file__).read_text(encoding="utf-8"))
 
     # ANTI-VACUITY (bug 8a5e). This guard polices an ABSENCE in ONE module, so it reads
     # identical whether the module is clean or the exact-id table has moved out from under
@@ -294,7 +294,7 @@ def test_failure_module_has_no_provider_name_branch():
 
     import rebar.llm.failure as failure_mod
 
-    source = pathlib.Path(failure_mod.__file__).read_text().lower()
+    source = pathlib.Path(failure_mod.__file__).read_text(encoding="utf-8").lower()
     for banned in ('== "bedrock"', "== 'bedrock'", 'startswith("bedrock")'):
         assert banned not in source, f"provider-name branch in failure.py: {banned}"
 

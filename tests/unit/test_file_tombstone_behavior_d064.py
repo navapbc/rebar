@@ -52,7 +52,7 @@ def test_error_class_file_tombstone_still_raises(
     """Regression guard: the existing error-class behaviour is unchanged."""
     _registry_with(monkeypatch, _file_row(".rebar/config.conf", "error"))
     (tmp_path / ".rebar").mkdir(exist_ok=True)
-    (tmp_path / ".rebar" / "config.conf").write_text("[core]\n")
+    (tmp_path / ".rebar" / "config.conf").write_text("[core]\n", encoding="utf-8")
 
     with pytest.raises(RemovedInputError):
         _resolve(tmp_path)
@@ -65,7 +65,7 @@ def test_warn_class_file_tombstone_warns_instead_of_raising(
     the hand-rolled raise fires regardless of the row's behavior."""
     _registry_with(monkeypatch, _file_row(".rebar/config.conf", "warn"))
     (tmp_path / ".rebar").mkdir(exist_ok=True)
-    (tmp_path / ".rebar" / "config.conf").write_text("[core]\n")
+    (tmp_path / ".rebar" / "config.conf").write_text("[core]\n", encoding="utf-8")
 
     with caplog.at_level(logging.WARNING):
         _resolve(tmp_path)  # must not raise
@@ -82,7 +82,7 @@ def test_a_newly_registered_warn_file_tombstone_is_detected(
     other than ``.rebar/config.conf`` is ignored entirely by the hand-rolled path."""
     _registry_with(monkeypatch, _file_row(".rebar/legacy-settings.conf", "warn"))
     (tmp_path / ".rebar").mkdir(exist_ok=True)
-    (tmp_path / ".rebar" / "legacy-settings.conf").write_text("x = 1\n")
+    (tmp_path / ".rebar" / "legacy-settings.conf").write_text("x = 1\n", encoding="utf-8")
 
     with caplog.at_level(logging.WARNING):
         _resolve(tmp_path)
@@ -97,7 +97,7 @@ def test_a_newly_registered_error_file_tombstone_raises(
 ) -> None:
     _registry_with(monkeypatch, _file_row(".rebar/legacy-settings.conf", "error"))
     (tmp_path / ".rebar").mkdir(exist_ok=True)
-    (tmp_path / ".rebar" / "legacy-settings.conf").write_text("x = 1\n")
+    (tmp_path / ".rebar" / "legacy-settings.conf").write_text("x = 1\n", encoding="utf-8")
 
     with pytest.raises(RemovedInputError):
         _resolve(tmp_path)

@@ -42,7 +42,7 @@ def test_rubric_exists() -> None:
 
 @pytest.mark.parametrize("marker", RUBRIC_REQUIRED)
 def test_rubric_states_every_gate_and_check(marker: str) -> None:
-    assert marker in RUBRIC.read_text(), f"rubric is missing {marker!r}"
+    assert marker in RUBRIC.read_text(encoding="utf-8"), f"rubric is missing {marker!r}"
 
 
 def test_rubric_front_matter_is_tool_enabled_and_named() -> None:
@@ -53,7 +53,7 @@ def test_rubric_front_matter_is_tool_enabled_and_named() -> None:
     `title:` — build_descriptor computes `name = prompt.title or cid`, so without it the
     criterion's rendered name degrades to the bare id `T15`.
     """
-    lines = [ln.strip() for ln in RUBRIC.read_text().splitlines()]
+    lines = [ln.strip() for ln in RUBRIC.read_text(encoding="utf-8").splitlines()]
     assert "execution_mode: agentic" in lines, "rubric must be agentic (tool-using)"
     assert "dimension: overlay-derisk" in lines
     title = [ln for ln in lines if ln.startswith("title:")]
@@ -62,7 +62,7 @@ def test_rubric_front_matter_is_tool_enabled_and_named() -> None:
 
 def test_routing_entry_has_the_required_values() -> None:
     """The KEY existing is not enough — the values are what route the criterion."""
-    entry = json.loads(ROUTING.read_text())["T15"]
+    entry = json.loads(ROUTING.read_text(encoding="utf-8"))["T15"]
     assert entry["exec"] == "AGENT"
     assert entry["facet"] == "overlay-derisk"
     assert entry["overlay_routing"] == "llm", "content-routed by the orchestrator, like T13/T14"

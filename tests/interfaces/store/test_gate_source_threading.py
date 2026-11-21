@@ -33,7 +33,9 @@ class CapturingRunner(FakeRunner):
     def run(self, req):
         self.captured_repo_path = req.config.repo_path
         try:
-            self.captured_sentinel = (Path(req.config.repo_path) / "sentinel.txt").read_text()
+            self.captured_sentinel = (Path(req.config.repo_path) / "sentinel.txt").read_text(
+                encoding="utf-8"
+            )
         except OSError:
             self.captured_sentinel = None
         return super().run(req)
@@ -68,7 +70,7 @@ def repo_with_origin(tmp_path, monkeypatch):
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
 
-    (repo / "sentinel.txt").write_text("from-main\n")
+    (repo / "sentinel.txt").write_text("from-main\n", encoding="utf-8")
     _git(repo, "add", "sentinel.txt")
     _git(repo, "commit", "-q", "-m", "main content")
     _git(repo, "remote", "add", "origin", str(remote))
@@ -78,7 +80,7 @@ def repo_with_origin(tmp_path, monkeypatch):
     # Switch the shared checkout to a DIFFERENT branch with different content — the exact
     # condition that produced the false-negative the epic exists to fix.
     _git(repo, "checkout", "-q", "-b", "other")
-    (repo / "sentinel.txt").write_text("from-other\n")
+    (repo / "sentinel.txt").write_text("from-other\n", encoding="utf-8")
     _git(repo, "add", "sentinel.txt")
     _git(repo, "commit", "-q", "-m", "other content")
     return repo, main_sha
@@ -95,7 +97,7 @@ def test_attested_reads_pinned_ref_regardless_of_checkout_branch(repo_with_origi
     repo, main_sha = repo_with_origin
     eid = _epic(repo)
     # The shared checkout is on `other` (from-other); attested must read origin/main.
-    assert (repo / "sentinel.txt").read_text() == "from-other\n"
+    assert (repo / "sentinel.txt").read_text(encoding="utf-8") == "from-other\n"
 
     runner = CapturingRunner()
     result = rebar.llm.spec_scan.scan_epics_for_spec(
@@ -180,7 +182,7 @@ def test_defaults_resolve_from_snapshot_config_table(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q")
-    (repo / "rebar.toml").write_text("[snapshot]\nref = 'develop'\n")
+    (repo / "rebar.toml").write_text("[snapshot]\nref = 'develop'\n", encoding="utf-8")
     assert gate_source.default_ref(repo_root=str(repo)) == "develop"
 
 
@@ -221,7 +223,7 @@ def test_gate_rematerializes_absent_snapshot(repo_with_origin, gate_tmpdir):
     assert not h1.path.exists()
     h2 = gate_source.resolve_gate_handle("origin/main", "attested", str(repo))
     assert h2.path.is_dir()  # re-materialized, never a partial/absent read
-    assert (h2.path / "sentinel.txt").read_text() == "from-main\n"
+    assert (h2.path / "sentinel.txt").read_text(encoding="utf-8") == "from-main\n"
 
 
 def test_gate_ref_is_read_live_per_call(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

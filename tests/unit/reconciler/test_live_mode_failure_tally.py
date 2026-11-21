@@ -18,7 +18,7 @@ from rebar.reconciler import apply_planning, reconcile, reconcile_helpers, scrat
 
 def _write_manifest(tmp_path: Path, outcomes: list[dict]) -> Path:
     p = tmp_path / "pass.manifest.json"
-    p.write_text(json.dumps({"mutations": outcomes}))
+    p.write_text(json.dumps({"mutations": outcomes}), encoding="utf-8")
     return p
 
 
@@ -89,7 +89,8 @@ def test_live_emit_merges_cutover_tally_deferred_skipped_recovered_degraded(
                     "buckets": {},
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
     mode_mod = _mode_mod()
 
@@ -141,7 +142,7 @@ def test_persist_and_log_counts_failures_in_live_without_a_manifest(
     ctx.mutations = [{"action": "create"}, {"action": "create"}, {"action": "delete"}]
     # Snapshot advance runs before the tally and asserts both paths are set.
     ctx.curr_path = tmp_path / "curr.json"
-    ctx.curr_path.write_text("{}")
+    ctx.curr_path.write_text("{}", encoding="utf-8")
     ctx.prev_path = tmp_path / "prev.json"
 
     # binding_store is absent; its failures are caught and logged, and it does not
@@ -201,7 +202,7 @@ def _live_exit_code(
     ctx.persist = True
     ctx.mutations = outcomes
     ctx.curr_path = tmp_path / "curr.json"
-    ctx.curr_path.write_text("{}")
+    ctx.curr_path.write_text("{}", encoding="utf-8")
     ctx.prev_path = tmp_path / "prev.json"
     ctx.sync_logger = _Logger()
     ctx.manifest_path = None
@@ -415,7 +416,7 @@ def test_cutover_tally_reaches_a_non_zero_exit_end_to_end(
     ctx.persist = True
     ctx.mutations = [{"action": "update"}, {"action": "delete"}]
     ctx.curr_path = tmp_path / "curr.json"
-    ctx.curr_path.write_text("{}")
+    ctx.curr_path.write_text("{}", encoding="utf-8")
     ctx.prev_path = tmp_path / "prev.json"
     ctx.sync_logger = _Logger()
     ctx.manifest_path = None
@@ -489,7 +490,7 @@ def test_cutover_deferred_only_pass_is_degraded_and_exits_nonzero(
     ctx.persist = True
     ctx.mutations = [{"action": "update"}] * 4
     ctx.curr_path = tmp_path / "curr.json"
-    ctx.curr_path.write_text("{}")
+    ctx.curr_path.write_text("{}", encoding="utf-8")
     ctx.prev_path = tmp_path / "prev.json"
     ctx.sync_logger = _Logger()
     ctx.manifest_path = None
@@ -533,7 +534,7 @@ def test_legacy_apply_tally_without_degraded_key_stays_converged(
     ctx.persist = True
     ctx.mutations = [{"action": "update"}]
     ctx.curr_path = tmp_path / "curr.json"
-    ctx.curr_path.write_text("{}")
+    ctx.curr_path.write_text("{}", encoding="utf-8")
     ctx.prev_path = tmp_path / "prev.json"
     ctx.sync_logger = _Logger()
     ctx.manifest_path = None
@@ -879,7 +880,7 @@ def _persist_tally(tmp_path: Path, monkeypatch, apply_tally: dict) -> dict:
         + apply_tally.get("skipped_count", 0)
     )
     ctx.curr_path = tmp_path / "curr.json"
-    ctx.curr_path.write_text("{}")
+    ctx.curr_path.write_text("{}", encoding="utf-8")
     ctx.prev_path = tmp_path / "prev.json"
     ctx.sync_logger = _Logger()
     ctx.manifest_path = None

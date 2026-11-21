@@ -383,7 +383,7 @@ def test_import_materialises_faithfully_and_binds(git_repo, reconciler_modules, 
 
     def _events(local_id: str, kind: str) -> list[dict]:
         return [
-            json.loads(p.read_text())
+            json.loads(p.read_text(encoding="utf-8"))
             for p in sorted((tracker / local_id).glob("*.json"))
             if f"-{kind}." in p.name
         ]
@@ -399,7 +399,9 @@ def test_import_materialises_faithfully_and_binds(git_repo, reconciler_modules, 
     assert create_1["data"]["description"].strip() == "Login flow."
 
     # Binding recorded as confirmed at creation time.
-    bindings = json.loads((tracker / ".bridge_state" / "bindings.json").read_text())["bindings"]
+    bindings = json.loads(
+        (tracker / ".bridge_state" / "bindings.json").read_text(encoding="utf-8")
+    )["bindings"]
     for local_id, jira_key in (
         ("jira-dig-1", "DIG-1"),
         ("jira-dig-2", "DIG-2"),
@@ -452,9 +454,9 @@ def test_out_of_window_alive_pass_reaches_clear_absent_with_no_churn(
     assert result1["mutation_count"] == 3
     tracker = git_repo / ".tickets-tracker"
     bindings_path = tracker / ".bridge_state" / "bindings.json"
-    updated_before = json.loads(bindings_path.read_text())["bindings"]["jira-dig-1"].get(
-        "updated_at"
-    )
+    updated_before = json.loads(bindings_path.read_text(encoding="utf-8"))["bindings"][
+        "jira-dig-1"
+    ].get("updated_at")
 
     _freeze_binding_clocks(monkeypatch)
     state.out_of_window.add("DIG-1")
@@ -470,7 +472,7 @@ def test_out_of_window_alive_pass_reaches_clear_absent_with_no_churn(
     )
     assert result2["mutation_count"] == 0
     assert state.write_calls == []
-    entry = json.loads(bindings_path.read_text())["bindings"]["jira-dig-1"]
+    entry = json.loads(bindings_path.read_text(encoding="utf-8"))["bindings"]["jira-dig-1"]
     assert entry.get("updated_at") == updated_before, (
         "clear_absent on an entry with NO absence counter must not stamp "
         f"updated_at (change gate): {updated_before!r} -> {entry.get('updated_at')!r}"
@@ -514,7 +516,7 @@ def test_out_of_window_404_then_alive_roundtrip_clears_absence(
     state.out_of_window.add("DIG-1")
     state.deleted.add("DIG-1")
     _run_pass(reconciler_modules, state, git_repo, monkeypatch, "rt-pass-404", wire_backend=True)
-    entry = json.loads(bindings_path.read_text())["bindings"]["jira-dig-1"]
+    entry = json.loads(bindings_path.read_text(encoding="utf-8"))["bindings"]["jira-dig-1"]
     assert entry.get("absent_404_count") == 1, (
         f"the 404 GET must record ONE absence via note_absent, got entry: {entry}"
     )
@@ -527,7 +529,7 @@ def test_out_of_window_404_then_alive_roundtrip_clears_absence(
     clear_absent_calls.clear()
     _run_pass(reconciler_modules, state, git_repo, monkeypatch, "rt-pass-alive", wire_backend=True)
     assert "DIG-1" in clear_absent_calls
-    entry = json.loads(bindings_path.read_text())["bindings"]["jira-dig-1"]
+    entry = json.loads(bindings_path.read_text(encoding="utf-8"))["bindings"]["jira-dig-1"]
     assert entry.get("absent_404_count") == 0, (
         f"the alive GET must reset the absence counter (clear_absent TRUE "
         f"branch), got entry: {entry}"

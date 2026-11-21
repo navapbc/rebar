@@ -271,7 +271,8 @@ def test_composition_static_token_without_proxy_identity(tmp_path, monkeypatch):
                     }
                 ]
             }
-        )
+        ),
+        encoding="utf-8",
     )
     cfg = _proxy_config(auth_strategies=("proxy", "static"), auth_static_tokens_file=str(tf))
     app = build_server(cfg).streamable_http_app()

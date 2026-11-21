@@ -27,7 +27,9 @@ def _mk_tracker(tmp_path, tickets: dict[str, str]) -> str:
     for ticket_id, alias in tickets.items():
         d = tracker / ticket_id
         d.mkdir()
-        (d / "0001-CREATE.json").write_text(json.dumps({"data": {"alias": alias}}))
+        (d / "0001-CREATE.json").write_text(
+            json.dumps({"data": {"alias": alias}}), encoding="utf-8"
+        )
     return str(tracker)
 
 

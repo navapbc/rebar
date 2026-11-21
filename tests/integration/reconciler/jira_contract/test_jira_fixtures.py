@@ -28,7 +28,7 @@ def test_fixtures_carry_no_secrets() -> None:
     fixtures = sorted(FIXTURE_DIR.glob("*.json"))
     assert fixtures, f"no fixtures found under {FIXTURE_DIR}"
     for path in fixtures:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         emails = {e for e in _EMAIL_RE.findall(text) if e not in _ALLOWED_EMAILS}
         assert not emails, f"{path.name} leaks email(s): {sorted(emails)}"
         accountids = set(_ACCOUNTID_RE.findall(text))
@@ -51,8 +51,8 @@ def test_fake_routes_fixtures_through_production_fetch(monkeypatch) -> None:
     # enrichment maps), not by a direct fixture read.
     assert "REB-431" in snapshot, "fake search issues did not flow into the snapshot"
 
-    raw_comment = json.loads((FIXTURE_DIR / "comment_map.json").read_text())
-    raw_links = json.loads((FIXTURE_DIR / "issuelinks_map.json").read_text())
+    raw_comment = json.loads((FIXTURE_DIR / "comment_map.json").read_text(encoding="utf-8"))
+    raw_links = json.loads((FIXTURE_DIR / "issuelinks_map.json").read_text(encoding="utf-8"))
 
     entry = snapshot["REB-431"]
     # Nested ``comment`` key (bug 0ee6 shape) — present and VERBATIM (no reshaping).

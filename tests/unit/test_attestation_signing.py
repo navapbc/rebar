@@ -111,7 +111,7 @@ def _git_repo(path: Path) -> Path:
         ["git", "config", "user.name", "t"],
     ):
         subprocess.run(args, cwd=path, check=True)
-    (path / "f.py").write_text("x = 1\n")
+    (path / "f.py").write_text("x = 1\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
     subprocess.run(["git", "commit", "-qm", "c"], cwd=path, check=True)
     return path
@@ -132,7 +132,7 @@ def test_gate_code_version_live_checkout_dirty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     src = _git_repo(tmp_path / "src")
-    (src / "untracked.py").write_text("y = 2\n")  # dirty the working tree
+    (src / "untracked.py").write_text("y = 2\n", encoding="utf-8")  # dirty the working tree
     monkeypatch.setattr("importlib.metadata.version", lambda *a, **k: "1.2.3")
     assert signing.gate_code_version(source_dir=str(src)).endswith("-dirty)")
 
@@ -202,9 +202,9 @@ def test_build_hook_writes_build_info(tmp_path: Path) -> None:
     commit = hatch_build._build_commit(root)
     assert commit and len(commit) >= 4
     target = root / "src" / "rebar" / "_build_info.py"
-    target.write_text(f"COMMIT = {commit!r}\n")
+    target.write_text(f"COMMIT = {commit!r}\n", encoding="utf-8")
     ns: dict = {}
-    exec(target.read_text(), ns)
+    exec(target.read_text(encoding="utf-8"), ns)
     assert ns["COMMIT"] == commit
 
 

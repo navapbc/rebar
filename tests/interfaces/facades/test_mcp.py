@@ -177,9 +177,11 @@ def _make_stale_index_lock(repo):
 
     tracker = Path(repo) / ".tickets-tracker"
     gd = tracker / ".git"
-    gitdir = Path(gd.read_text().split("gitdir:", 1)[1].strip()) if gd.is_file() else gd
+    gitdir = (
+        Path(gd.read_text(encoding="utf-8").split("gitdir:", 1)[1].strip()) if gd.is_file() else gd
+    )
     lock = gitdir / "index.lock"
-    lock.write_text("")
+    lock.write_text("", encoding="utf-8")
     old = time.time() - 600
     os.utime(lock, (old, old))
     return lock
@@ -515,7 +517,9 @@ def test_mcp_transition_ref_targets_and_signs_requested_commit(rebar_repo, monke
 def test_mcp_start_work_force_matches_claim_semantics(
     rebar_repo, force: str | None, forced: bool, audit_reason: str | None
 ) -> None:
-    (rebar_repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
+    (rebar_repo / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_claim = true\n", encoding="utf-8"
+    )
     server = build_server()
     transition_ticket = rebar.create_ticket("task", "transition force", repo_root=str(rebar_repo))
     claim_ticket = rebar.create_ticket("task", "claim force", repo_root=str(rebar_repo))
@@ -597,7 +601,7 @@ def test_mcp_transition_force_drives_completion_bypass(
     ticket = rebar.create_ticket("task", "completion force", repo_root=str(rebar_repo))
     rebar.claim(ticket, repo_root=str(rebar_repo))
     (rebar_repo / "rebar.toml").write_text(
-        "[verify]\nrequire_completion_verification_for_close = true\n"
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
     )
     call = build_server().call_tool(
         "transition_ticket",

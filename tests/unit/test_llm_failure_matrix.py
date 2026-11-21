@@ -533,7 +533,7 @@ def test_force_close_skips_completion_gate(monkeypatch):
 # ── Meta-test: every parametrized id carries a CURRENT(<file>:<line>) marker ───
 def test_every_matrix_case_pins_a_current_source_seam():
     """Require every matrix row to cite its source seam with ``CURRENT(<file>:<line>)``."""
-    src = Path(__file__).read_text()
+    src = Path(__file__).read_text(encoding="utf-8")
     for case in MATRIX:
         assert case.marker.startswith("CURRENT("), case.id
         # <file>:<line> shape — a real source anchor, not a bare description.

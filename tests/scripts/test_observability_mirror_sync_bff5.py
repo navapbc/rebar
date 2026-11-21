@@ -33,7 +33,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -81,7 +81,7 @@ def _environment(
     offsets.mkdir()
     repl_log = tmp_path / "replication.log"
     if repl_log_lines is not None:
-        repl_log.write_text(repl_log_lines)
+        repl_log.write_text(repl_log_lines, encoding="utf-8")
 
     env = observability_env(tmp_path)
     env.update(
@@ -97,7 +97,7 @@ def _environment(
 
 def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts or metric not in parts:
             continue
@@ -180,7 +180,7 @@ def test_replication_errors_still_counts_new_failures(tmp_path: Path) -> None:
 
     assert _values(aws_log, "replication_errors") == [0, 0]
 
-    Path(env["REPL_LOG"]).write_text("[ERROR] push failed\n" * 5)
+    Path(env["REPL_LOG"]).write_text("[ERROR] push failed\n" * 5, encoding="utf-8")
     _run(env)
 
     assert _values(aws_log, "replication_errors") == [0, 0, 2]

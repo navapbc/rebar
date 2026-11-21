@@ -31,7 +31,7 @@ _MATERIALIZER_SOURCES = [
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -49,7 +49,7 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
     (mirror / "infra" / "scripts").mkdir(parents=True)
 
     # Seed deployed-sha so this is neither first-run nor up-to-date.
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
 
     # git stub: the diff whose `--` pathspec names $CHANGED_PATH reports THAT path changed;
     # every other manifest's diff names other files, returns empty, and its block is skipped.

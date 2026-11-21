@@ -93,7 +93,7 @@ def test_package_index_probe_runs_the_build_provenance_command() -> None:
 
     def runner(cmd, **kwargs):
         seen["cmd"], seen["kwargs"] = cmd, kwargs
-        assert "hatchling.build" in (Path(cmd[-1]) / "pyproject.toml").read_text()
+        assert "hatchling.build" in (Path(cmd[-1]) / "pyproject.toml").read_text(encoding="utf-8")
         return _done(0)
 
     assert mod.package_index_probe(runner=runner) == (True, "")

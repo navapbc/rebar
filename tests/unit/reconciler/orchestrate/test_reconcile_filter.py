@@ -207,7 +207,8 @@ class TestReconcileOnceFiltered:
                             "status": {"name": "Done"},
                         },
                     }
-                )
+                ),
+                encoding="utf-8",
             )
             return snapshot_path
 

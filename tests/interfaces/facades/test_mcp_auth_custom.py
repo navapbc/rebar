@@ -57,7 +57,7 @@ NOT_A_VERIFIER_MODULE = textwrap.dedent(
 
 
 def _write_module(tmp_path, name, source):
-    (tmp_path / f"{name}.py").write_text(source)
+    (tmp_path / f"{name}.py").write_text(source, encoding="utf-8")
 
 
 def _custom_config(import_path, **overrides) -> Config:

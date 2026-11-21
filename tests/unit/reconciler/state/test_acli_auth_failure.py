@@ -33,7 +33,7 @@ def _fake_acli(countfile, stderr_text: str) -> list[str]:
 
 
 def _spawn_count(countfile) -> int:
-    return len(countfile.read_text()) if countfile.exists() else 0
+    return len(countfile.read_text(encoding="utf-8")) if countfile.exists() else 0
 
 
 # ---------------------------------------------------------------------------

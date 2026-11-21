@@ -81,7 +81,7 @@ def _write(tracker: Path, ticket: str, event: dict) -> Path:
     d = tracker / ticket
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{event['timestamp']}-{event['uuid']}-{event['event_type']}.json"
-    path.write_text(json.dumps(event, sort_keys=True, separators=(",", ":")))
+    path.write_text(json.dumps(event, sort_keys=True, separators=(",", ":")), encoding="utf-8")
     return path
 
 
@@ -93,7 +93,7 @@ def _keypair(tmp_path: Path, name: str) -> tuple[Path, str]:
         check=True,
         capture_output=True,
     )
-    return key, Path(f"{key}.pub").read_text().strip()
+    return key, Path(f"{key}.pub").read_text(encoding="utf-8").strip()
 
 
 def _foreign_sig(event: dict, key: Path) -> str:
@@ -143,7 +143,9 @@ def _build(tmp_path: Path, *, early_target: bool = False, side_branch: bool = Fa
     _git(tracker, "config", "user.email", "dev@example.com")
     _git(tracker, "config", "user.name", "Dev")
     (tracker / ".rebar").mkdir()
-    (tracker / ".rebar" / "reclaim-shadow-clone").write_text("disposable test clone\n")
+    (tracker / ".rebar" / "reclaim-shadow-clone").write_text(
+        "disposable test clone\n", encoding="utf-8"
+    )
     key_a, pub_a = _keypair(tmp_path, "key-a")
     key_b, pub_b = _keypair(tmp_path, "key-b")
     foreign, _pub_f = _keypair(tmp_path, "foreign")
@@ -354,7 +356,7 @@ def _signed_by(sig: str, pub: str) -> bool:
 
 def _read(tracker: Path, ticket: str, offset: int) -> dict:
     [path] = list((tracker / ticket).glob(f"{_ts(offset)}-*.json"))
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _reduced(tracker: Path) -> dict:
@@ -493,7 +495,7 @@ def test_plan_from_another_tip_is_refused(tmp_path: Path, agent) -> None:
         identity_id=IDENTITY,
         boundary=store.boundary,
     )
-    (store.tracker / TASK_Y / "extra.txt").write_text("moves the tip\n")
+    (store.tracker / TASK_Y / "extra.txt").write_text("moves the tip\n", encoding="utf-8")
     tip = _commit(store.tracker, "later write", datetime.now(UTC))
     _git(store.tracker, "update-ref", "refs/remotes/origin/tickets", tip)
     with pytest.raises(_resign().ResignError, match="tip"):

@@ -67,7 +67,7 @@ def tracker(tmp_path: Path) -> str:
     _git(td, "init", "-q", "-b", "tickets")
     _git(td, "config", "user.email", "t@e.com")
     _git(td, "config", "user.name", "T")
-    (td / "seed").write_text("seed\n")
+    (td / "seed").write_text("seed\n", encoding="utf-8")
     _git(td, "add", "-A")
     _git(td, "commit", "-q", "-m", "seed")
     return str(td)

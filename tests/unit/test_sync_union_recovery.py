@@ -33,7 +33,7 @@ def _commit_event(repo: Path, ticket_uuid: str, body: str) -> str:
     """Write a UUID-named append-only event file and commit it; return its SHA."""
     tdir = repo / ticket_uuid
     tdir.mkdir(parents=True, exist_ok=True)
-    (tdir / f"1700000000000000000-{ticket_uuid}-CREATE.json").write_text(body)
+    (tdir / f"1700000000000000000-{ticket_uuid}-CREATE.json").write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "--no-verify", "-m", f"ticket: CREATE {ticket_uuid}")
     return _git(repo, "rev-parse", "HEAD").stdout.strip()

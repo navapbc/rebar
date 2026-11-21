@@ -280,7 +280,7 @@ def _commit_edit(repo: Path, tid: str, description: str) -> None:
 
 def _stamp_fresh_marker(tracker: Path) -> None:
     """Make the shared throttle think a fetch happened just now."""
-    with open(_marker_path(tracker), "w") as fh:
+    with open(_marker_path(tracker), "w", encoding="utf-8") as fh:
         fh.write(str(int(time.time())))
 
 

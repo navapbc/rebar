@@ -34,7 +34,7 @@ def test_lint_prompt_refs_accepts_catalog_reviewer() -> None:
 def test_lint_prompt_refs_accepts_user_prompt_file(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "my-custom.md").write_text("hi")
+    (pdir / "my-custom.md").write_text("hi", encoding="utf-8")
     assert L.lint_prompt_refs(_agent_wf("my-custom"), repo_root=str(tmp_path)) == []
     # Without the repo_root (so the file isn't found) it is flagged.
     assert L.lint_prompt_refs(_agent_wf("my-custom")) != []

@@ -61,7 +61,7 @@ def test_every_known_state_default_is_parsed() -> None:
 def test_the_parse_covers_every_host_state_line() -> None:
     lines = [
         line
-        for line in SCRIPT.read_text().splitlines()
+        for line in SCRIPT.read_text(encoding="utf-8").splitlines()
         if HOST_STATE_ROOT in line and not line.lstrip().startswith("#")
     ]
     assert len(state_path_defaults()) == len(lines), (len(state_path_defaults()), len(lines))
@@ -69,7 +69,9 @@ def test_the_parse_covers_every_host_state_line() -> None:
 
 def test_the_instance_id_cache_follows_the_redirected_region_cache(tmp_path: Path) -> None:
     """INSTANCE_ID_CACHE carries no literal default; it lives beside REGION_CACHE."""
-    assert 'INSTANCE_ID_CACHE="${INSTANCE_ID_CACHE:-${REGION_CACHE_DIR}/' in SCRIPT.read_text(), (
+    assert 'INSTANCE_ID_CACHE="${INSTANCE_ID_CACHE:-${REGION_CACHE_DIR}/' in SCRIPT.read_text(
+        encoding="utf-8"
+    ), (
         "the script no longer derives INSTANCE_ID_CACHE from REGION_CACHE's directory; "
         "revisit how observability_env redirects it"
     )
@@ -81,7 +83,7 @@ def test_the_instance_id_cache_follows_the_redirected_region_cache(tmp_path: Pat
 def test_every_host_state_literal_is_an_overridable_default() -> None:
     """A hard-coded ``/var/lib/rebar`` path cannot be redirected, so it must not exist."""
     offenders = []
-    for number, line in enumerate(SCRIPT.read_text().splitlines(), start=1):
+    for number, line in enumerate(SCRIPT.read_text(encoding="utf-8").splitlines(), start=1):
         if line.lstrip().startswith("#") or HOST_STATE_ROOT not in line:
             continue
         name = line.split("=", 1)[0]
@@ -120,7 +122,7 @@ def test_the_host_docker_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     if host_docker is None:
         host_bin = tmp_path / "host-bin"
         host_bin.mkdir()
-        (host_bin / "docker").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (host_bin / "docker").write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         (host_bin / "docker").chmod(0o755)
         monkeypatch.setenv("PATH", f"{host_bin}{os.pathsep}{os.environ['PATH']}")
     env = observability_env(tmp_path)
@@ -154,7 +156,7 @@ def _names_script(item: ast.expr, script_names: set[str]) -> bool:
 
 
 def _direct_script_runs(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     script_names = _script_names(tree)
     hits = []
     for node in ast.walk(tree):
@@ -194,7 +196,8 @@ def test_the_scan_detects_a_direct_run(tmp_path: Path) -> None:
             def test_x():
                 subprocess.run(["bash", str(SCRIPT)], env={}, timeout=60)
             """
-        )
+        ),
+        encoding="utf-8",
     )
     assert _direct_script_runs(sample) == ["test_sample.py:4: subprocess.run"]
 
@@ -213,7 +216,9 @@ def test_a_timeout_leaves_no_process_behind(tmp_path: Path) -> None:
     bin_dir.mkdir()
     pid_file = tmp_path / "grandchild.pid"
     stall = bin_dir / "curl"
-    stall.write_text(f'#!/usr/bin/env bash\nsleep 120 &\necho $! > "{pid_file}"\nwait\n')
+    stall.write_text(
+        f'#!/usr/bin/env bash\nsleep 120 &\necho $! > "{pid_file}"\nwait\n', encoding="utf-8"
+    )
     stall.chmod(0o755)
     env = observability_env(tmp_path)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
@@ -221,7 +226,7 @@ def test_a_timeout_leaves_no_process_behind(tmp_path: Path) -> None:
     with pytest.raises(subprocess.TimeoutExpired):
         run_observability(["bash", str(SCRIPT)], env=env, timeout=3)
 
-    grandchild = int(pid_file.read_text())
+    grandchild = int(pid_file.read_text(encoding="utf-8"))
     deadline = time.monotonic() + 10
     while _alive(grandchild) and time.monotonic() < deadline:
         time.sleep(0.1)
@@ -261,5 +266,9 @@ def test_two_script_runs_fit_inside_the_per_test_budget() -> None:
     from _observability_harness import SCRIPT_RUN_TIMEOUT
 
     pyproject = TESTS_DIR.parents[1] / "pyproject.toml"
-    budget = float(tomllib.loads(pyproject.read_text())["tool"]["pytest"]["ini_options"]["timeout"])
+    budget = float(
+        tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["pytest"]["ini_options"][
+            "timeout"
+        ]
+    )
     assert 2 * SCRIPT_RUN_TIMEOUT < budget, (SCRIPT_RUN_TIMEOUT, budget)

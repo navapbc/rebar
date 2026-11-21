@@ -29,7 +29,7 @@ _DAY = 86_400
 def git_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SubprocessEnv:
     """Isolate git from the host's config and give it a fixed identity."""
     empty = tmp_path / "empty-gitconfig"
-    empty.write_text("")
+    empty.write_text("", encoding="utf-8")
     for name in [k for k in os.environ if k.startswith("GIT_")]:
         monkeypatch.delenv(name)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
@@ -84,7 +84,7 @@ def _age_stamp(common: Path, *, git_dir: bool = True) -> None:
     """Record the last expiry pass as more than a day old, so the next write expires."""
     stamp = (common / ".git" if git_dir else common) / event_commit_git._REFLOG_EXPIRE_STAMP
     stamp.parent.mkdir(parents=True, exist_ok=True)
-    stamp.write_text("")
+    stamp.write_text("", encoding="utf-8")
     then = time.time() - event_commit_git._REFLOG_EXPIRE_INTERVAL_S - 1
     os.utime(stamp, (then, then))
 

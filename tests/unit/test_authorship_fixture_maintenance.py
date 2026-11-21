@@ -29,7 +29,9 @@ def test_authorship_history_fixture_keeps_auto_maintenance_foreground(tmp_path: 
     global_config = tmp_path / "hostile-global-gitconfig"
     trace = tmp_path / "trace2.json"
     basetemp = nested_basetemp(tmp_path)
-    global_config.write_text("[gc]\n\tautoDetach = true\n[maintenance]\n\tautoDetach = true\n")
+    global_config.write_text(
+        "[gc]\n\tautoDetach = true\n[maintenance]\n\tautoDetach = true\n", encoding="utf-8"
+    )
     env = subprocess_env()
     env.update(
         {
@@ -55,7 +57,7 @@ def test_authorship_history_fixture_keeps_auto_maintenance_foreground(tmp_path: 
     tracker = trackers[0]
 
     maintenance_children = []
-    for line in trace.read_text().splitlines():
+    for line in trace.read_text(encoding="utf-8").splitlines():
         event = json.loads(line)
         argv = event.get("argv", [])
         if event.get("event") == "child_start" and argv[:3] == ["git", "maintenance", "run"]:

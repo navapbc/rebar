@@ -266,7 +266,7 @@ def dc_store_copy_repo(
         subprocess.run(["git", "config", "user.name", "rebar J11 harness"], cwd=repo, check=True)
 
     _init(work, "main")
-    (work / ".gitignore").write_text(".tickets-tracker/\n")
+    (work / ".gitignore").write_text(".tickets-tracker/\n", encoding="utf-8")
 
     fetch_tickets(source)
     listing = (
@@ -280,9 +280,11 @@ def dc_store_copy_repo(
     extract_store_snapshot(source, tracker, entries)
 
     (work / ".j11-expected-entries.json").write_text(
-        json.dumps(sorted(e for e in entries if is_ticket_entry(e)))
+        json.dumps(sorted(e for e in entries if is_ticket_entry(e))), encoding="utf-8"
     )
-    (work / INHERITED_ENV_FILE).write_text(json.dumps(inherited_env, sort_keys=True))
+    (work / INHERITED_ENV_FILE).write_text(
+        json.dumps(inherited_env, sort_keys=True), encoding="utf-8"
+    )
 
     # SCRUB: every binding/snapshot artifact, matched as a GLOB so a renamed sibling
     # cannot survive merely because its exact name is not enumerated.
@@ -320,7 +322,8 @@ def dc_store_copy_repo(
 
         [jira]
         project = "{jira_dc_project}"
-        """).lstrip()
+        """).lstrip(),
+        encoding="utf-8",
     )
     monkeypatch.setenv("JIRA_PAT", jira_dc_pat)
     monkeypatch.setenv("JIRA_PROJECT", jira_dc_project)

@@ -50,7 +50,7 @@ def canonical_env_records() -> list[EnvRecord]:
 
 def manifest_env_records() -> list[EnvRecord]:
     """Read the environment records advertised by the first package."""
-    data = cast(dict[str, object], json.loads(SERVER_JSON.read_text()))
+    data = cast(dict[str, object], json.loads(SERVER_JSON.read_text(encoding="utf-8")))
     packages = data.get("packages")
     if not isinstance(packages, list) or not packages:
         raise SystemExit("server.json: no packages entry contains environmentVariables")

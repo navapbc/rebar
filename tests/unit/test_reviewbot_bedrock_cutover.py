@@ -38,7 +38,7 @@ _ALARM_NAME = "rebar-bedrock-invoke-client-errors"
 
 
 def _review_bot_service() -> dict:
-    return yaml.safe_load(_COMPOSE.read_text())["services"]["review-bot"]
+    return yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"]["review-bot"]
 
 
 def _review_bot_environment() -> dict[str, str]:

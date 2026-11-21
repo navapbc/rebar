@@ -51,7 +51,8 @@ def test_library_run_by_name(rebar_repo: Path) -> None:
     wf_dir.mkdir(parents=True, exist_ok=True)
     (wf_dir / "named.yaml").write_text(
         'schema_version: "1"\nname: named\nsteps:\n'
-        "  - id: review\n    prompt: code_quality\n    mode: findings\n"
+        "  - id: review\n    prompt: code_quality\n    mode: findings\n",
+        encoding="utf-8",
     )
     res = rebar.run_workflow("named", dry_run=True, repo_root=r)
     assert res["status"] == "succeeded"
@@ -84,7 +85,8 @@ def test_cli_run_then_status(rebar_repo: Path) -> None:
     wf = rebar_repo / "wf.yaml"
     wf.write_text(
         'schema_version: "1"\nname: clidemo\nsteps:\n'
-        "  - id: review\n    prompt: code_quality\n    mode: findings\n"
+        "  - id: review\n    prompt: code_quality\n    mode: findings\n",
+        encoding="utf-8",
     )
     cp = _cli(
         rebar_repo, "workflow", "run", str(wf), "--ticket", tid, "--dry-run", "--output", "json"
@@ -135,7 +137,8 @@ def test_mcp_run_workflow_is_async_and_pollable(
     wf.parent.mkdir(parents=True, exist_ok=True)
     wf.write_text(
         'schema_version: "1"\nname: mcpdemo\nsteps:\n'
-        "  - id: review\n    prompt: code_quality\n    mode: findings\n"
+        "  - id: review\n    prompt: code_quality\n    mode: findings\n",
+        encoding="utf-8",
     )
     srv = build_server()
     threads = _capture_run_threads(monkeypatch)

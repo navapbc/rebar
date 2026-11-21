@@ -81,7 +81,7 @@ def test_explicit_live_cap_retains_exact_audit_partition(
     ]
     fake_manifest = scratch_retention.snapshots_dir(tmp_path) / "cap.manifest.json"
     fake_manifest.parent.mkdir(parents=True)
-    fake_manifest.write_text(json.dumps({"mutations": []}))
+    fake_manifest.write_text(json.dumps({"mutations": []}), encoding="utf-8")
     applied_targets: list[str] = []
 
     def fake_typed(mutation, **_kwargs):
@@ -106,7 +106,7 @@ def test_explicit_live_cap_retains_exact_audit_partition(
         )
 
     assert Path(manifest_path).exists()
-    payload = json.loads(Path(manifest_path).read_text())
+    payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     assert payload["mode"] == "live"
     assert payload["max_changes"] == max_changes
     assert payload["applied_count"] == expected_applied

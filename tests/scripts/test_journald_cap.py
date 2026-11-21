@@ -43,7 +43,7 @@ DEFAULT_CAP = 3 * GIB
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -176,8 +176,8 @@ def test_install_writes_the_dropin_and_restarts_journald(tmp_path: Path) -> None
     env, dropin, systemctl_log = _environment(tmp_path)
     result = _run(env, "--install")
     assert result.returncode == 0, result.stderr
-    assert f"SystemMaxUse={DEFAULT_CAP}" in dropin.read_text()
-    assert "restart systemd-journald" in systemctl_log.read_text()
+    assert f"SystemMaxUse={DEFAULT_CAP}" in dropin.read_text(encoding="utf-8")
+    assert "restart systemd-journald" in systemctl_log.read_text(encoding="utf-8")
 
 
 def test_a_second_install_writes_nothing_and_does_not_restart(tmp_path: Path) -> None:
@@ -186,12 +186,12 @@ def test_a_second_install_writes_nothing_and_does_not_restart(tmp_path: Path) ->
     env, dropin, systemctl_log = _environment(tmp_path)
     assert _run(env, "--install").returncode == 0
     before = dropin.stat().st_mtime_ns
-    systemctl_log.write_text("")
+    systemctl_log.write_text("", encoding="utf-8")
 
     result = _run(env, "--install")
     assert result.returncode == 0, result.stderr
     assert dropin.stat().st_mtime_ns == before
-    assert "restart" not in systemctl_log.read_text()
+    assert "restart" not in systemctl_log.read_text(encoding="utf-8")
 
 
 def test_a_reload_is_never_used_as_evidence_that_the_ceiling_took(tmp_path: Path) -> None:
@@ -203,7 +203,7 @@ def test_a_reload_is_never_used_as_evidence_that_the_ceiling_took(tmp_path: Path
     """
     env, _, systemctl_log = _environment(tmp_path)
     assert _run(env, "--install").returncode == 0
-    assert "reload" not in systemctl_log.read_text()
+    assert "reload" not in systemctl_log.read_text(encoding="utf-8")
 
 
 def test_a_successful_restart_is_not_itself_reported_as_activation(tmp_path: Path) -> None:
@@ -218,7 +218,7 @@ def test_a_successful_restart_is_not_itself_reported_as_activation(tmp_path: Pat
 
     result = _run(env, "--install")
     assert result.returncode == 0, result.stderr
-    assert "restart systemd-journald" in systemctl_log.read_text()
+    assert "restart systemd-journald" in systemctl_log.read_text(encoding="utf-8")
     assert "NOT in effect" in result.stderr
     assert dropin.exists()
 
@@ -312,7 +312,7 @@ def test_the_restart_is_refused_when_journald_has_no_file_descriptor_store(
     result = _run(env, "--install")
     assert result.returncode == 0, result.stderr
     assert dropin.exists()
-    assert "restart" not in systemctl_log.read_text()
+    assert "restart" not in systemctl_log.read_text(encoding="utf-8")
     assert "no file-descriptor store" in result.stderr
     assert "NOT restarting" in result.stderr
 
@@ -336,9 +336,9 @@ def _boot_sandbox(tmp_path: Path, *, install_exit: int) -> tuple[Path, Path, Pat
     """
     scripts = tmp_path / "repo" / "infra" / "scripts"
     scripts.mkdir(parents=True)
-    (scripts / "compose-up.sh").write_text(COMPOSE_UP.read_text())
+    (scripts / "compose-up.sh").write_text(COMPOSE_UP.read_text(encoding="utf-8"), encoding="utf-8")
     calls = tmp_path / "boot-calls.log"
-    calls.write_text("")
+    calls.write_text("", encoding="utf-8")
     _stub(scripts, "journald-cap.sh", f'echo "journald-cap $*" >> "{calls}"\nexit {install_exit}\n')
     _stub(scripts, "docker-storage-cap.sh", f'echo "docker-storage-cap $*" >> "{calls}"\nexit 0\n')
     bindir = tmp_path / "bootbin"
@@ -360,7 +360,7 @@ def test_compose_up_installs_the_journal_ceiling(tmp_path: Path) -> None:
     """Without this call the drop-in only ever exists in the repository."""
     script, bindir, calls = _boot_sandbox(tmp_path, install_exit=0)
     _boot(script, bindir)
-    assert "journald-cap --install" in calls.read_text()
+    assert "journald-cap --install" in calls.read_text(encoding="utf-8")
 
 
 def test_a_failed_ceiling_install_does_not_stop_the_stack_booting(tmp_path: Path) -> None:
@@ -373,7 +373,7 @@ def test_a_failed_ceiling_install_does_not_stop_the_stack_booting(tmp_path: Path
     """
     script, bindir, calls = _boot_sandbox(tmp_path, install_exit=1)
     result = _boot(script, bindir)
-    log = calls.read_text()
+    log = calls.read_text(encoding="utf-8")
     assert "journald-cap --install" in log
     assert "systemctl enable --now docker" in log, (
         f"a failed ceiling install aborted the boot instead of warning:\n{log}"

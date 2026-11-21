@@ -45,7 +45,7 @@ def test_reduce_all_tickets_skips_dir_with_archived_marker(
     )
 
     # Write the .archived marker file (simulates successful marker write after event)
-    (ticket_dir / ".archived").write_text("")
+    (ticket_dir / ".archived").write_text("", encoding="utf-8")
 
     # Spy on reduce_ticket to detect if it was called for our archived dir
     original_reduce_ticket = reducer.reduce_ticket
@@ -175,7 +175,8 @@ def test_cache_hash_differs_with_marker_present(tmp_path: Path) -> None:
                 "author": "Alice",
                 "data": {"ticket_type": "task", "title": "Marker hash test"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     ticket_dir_str = str(ticket_dir)
@@ -222,7 +223,8 @@ def test_cache_hash_stable_when_no_marker_change(tmp_path: Path) -> None:
                 "author": "Alice",
                 "data": {"ticket_type": "task", "title": "Stable hash test"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     ticket_dir_str = str(ticket_dir)
@@ -262,7 +264,7 @@ def test_orphan_marker_removed_and_slow_path_taken(tmp_path: Path, reducer: Modu
 
     # Write a stale .archived marker with NO matching *-ARCHIVED.json event
     marker_path = ticket_dir / ".archived"
-    marker_path.write_text("")
+    marker_path.write_text("", encoding="utf-8")
 
     # Call reduce_all_tickets — self-heal must fire, removing orphan marker
     results = reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=True)
@@ -316,7 +318,7 @@ def test_valid_marker_not_removed(tmp_path: Path, reducer: ModuleType) -> None:
 
     # Write .archived marker (valid — ARCHIVED event is present)
     marker_path = ticket_dir / ".archived"
-    marker_path.write_text("")
+    marker_path.write_text("", encoding="utf-8")
 
     # Call reduce_all_tickets — self-heal must NOT fire for a valid marker
     results = reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=True)
@@ -359,7 +361,7 @@ def test_orphan_marker_cache_miss_on_self_heal(tmp_path: Path, reducer: ModuleTy
 
     # Write stale .archived marker (no ARCHIVED event)
     marker_path = ticket_dir / ".archived"
-    marker_path.write_text("")
+    marker_path.write_text("", encoding="utf-8")
 
     # First call — self-heal fires, marker removed, slow path returns active state
     results_first = reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=True)
@@ -410,7 +412,8 @@ def test_cache_hash_differs_after_marker_removal(tmp_path: Path) -> None:
                 "author": "Alice",
                 "data": {"ticket_type": "task", "title": "Marker removal hash test"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     ticket_dir_str = str(ticket_dir)
@@ -482,7 +485,7 @@ def test_reverted_archived_marker_is_orphan(tmp_path: Path, reducer: ModuleType)
     )
 
     marker_path = ticket_dir / ".archived"
-    marker_path.write_text("")
+    marker_path.write_text("", encoding="utf-8")
 
     # Self-heal must fire and remove the stale marker (REVERT cancels ARCHIVED)
     reducer.reduce_all_tickets(str(tracker_dir), exclude_archived=True)

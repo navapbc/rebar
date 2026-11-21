@@ -55,7 +55,11 @@ def _steps(doc: Any) -> list[dict[str, Any]]:
 
 
 def _steps_using(gate_yaml: Path, op: str) -> list[dict[str, Any]]:
-    return [s for s in _steps(yaml.safe_load(gate_yaml.read_text())) if s.get("uses") == op]
+    return [
+        s
+        for s in _steps(yaml.safe_load(gate_yaml.read_text(encoding="utf-8")))
+        if s.get("uses") == op
+    ]
 
 
 # ══ HAPPY PATH ════════════════════════════════════════════════════════════════════════
@@ -122,7 +126,7 @@ def test_completion_gate_carries_provenance_from_its_verify_step() -> None:
     """The completion gate has the same defect and the same one-wire fix: its `verify` step is an
     agent step, so its outputs already carry the record; `completion_sidecar` reads a key the
     verdict never set."""
-    doc = yaml.safe_load(_COMPLETION_YAML.read_text())
+    doc = yaml.safe_load(_COMPLETION_YAML.read_text(encoding="utf-8"))
     reconcile = [s for s in _steps(doc) if s.get("uses") == "completion_reconcile"]
     assert reconcile, "no completion_reconcile step found"
     for step in reconcile:
@@ -217,7 +221,7 @@ def test_the_wire_reads_the_step_that_actually_holds_the_record(gate_yaml: Path)
     """Guard against wiring the record from the wrong step. Only an AGENT step's outputs are the
     runner result verbatim; a scripted op's outputs are whatever that op chose to return, so
     sourcing provenance from one would silently wire `None` forever."""
-    doc = yaml.safe_load(gate_yaml.read_text())
+    doc = yaml.safe_load(gate_yaml.read_text(encoding="utf-8"))
     by_id = {s.get("id"): s for s in _steps(doc)}
     for step in _steps(doc):
         wired = (step.get("with") or {}).get("provider_provenance")

@@ -62,7 +62,7 @@ def test_is_active_link_same_second_unlink_sorts_after_link(
             "relation": "blocks",
         },
     }
-    with open(src_dir / link_filename, "w") as f:
+    with open(src_dir / link_filename, "w", encoding="utf-8") as f:
         json.dump(link_event, f)
 
     # Write UNLINK event (references link_uuid via data.link_uuid)
@@ -78,7 +78,7 @@ def test_is_active_link_same_second_unlink_sorts_after_link(
             "relation": "blocks",
         },
     }
-    with open(src_dir / unlink_filename, "w") as f:
+    with open(src_dir / unlink_filename, "w", encoding="utf-8") as f:
         json.dump(unlink_event, f)
 
     # Net state stays inactive because LINK replays before its UNLINK.

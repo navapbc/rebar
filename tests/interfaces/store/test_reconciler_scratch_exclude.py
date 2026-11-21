@@ -33,10 +33,12 @@ def fixture_root(tmp_path: Path) -> Path:
     (valid / "1000000000-create.json").write_text(
         json.dumps(
             {"event_type": "CREATE", "data": {"ticket_type": "task", "title": "Fixture ticket"}}
-        )
+        ),
+        encoding="utf-8",
     )
     (scratch / "plan.json").write_text(
-        json.dumps({"scratch": True, "note": "agent planning data — not a ticket event"})
+        json.dumps({"scratch": True, "note": "agent planning data — not a ticket event"}),
+        encoding="utf-8",
     )
     return tmp_path
 

@@ -90,7 +90,9 @@ def test_underspecified_contrib_stays_below_lowest_blocking_threshold() -> None:
     from importlib import resources
 
     routing = json.loads(
-        (resources.files("rebar.llm.plan_review") / "criteria_routing.json").read_text()
+        (resources.files("rebar.llm.plan_review") / "criteria_routing.json").read_text(
+            encoding="utf-8"
+        )
     )
     blocking_thrs = [
         e["block_threshold"]
@@ -245,7 +247,9 @@ def test_plan_v5_advisory_contribs_stay_below_every_blocking_threshold() -> None
     from importlib import resources
 
     routing = json.loads(
-        (resources.files("rebar.llm.plan_review") / "criteria_routing.json").read_text()
+        (resources.files("rebar.llm.plan_review") / "criteria_routing.json").read_text(
+            encoding="utf-8"
+        )
     )
     blocking_thrs = [
         e["block_threshold"]

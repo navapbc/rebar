@@ -63,10 +63,10 @@ def test_timeout_propagates_timeout_expired(tmp_path: Path) -> None:
     pre-commit hook blocks the commit past the timeout (hooks run with no TTY, unlike the
     editor)."""
     repo = _git_repo(tmp_path)
-    (repo / "f.txt").write_text("x")
+    (repo / "f.txt").write_text("x", encoding="utf-8")
     run_git(repo, "add", "f.txt")
     hook = repo / ".git" / "hooks" / "pre-commit"
-    hook.write_text("#!/bin/sh\nsleep 5\n")
+    hook.write_text("#!/bin/sh\nsleep 5\n", encoding="utf-8")
     hook.chmod(0o755)
     with pytest.raises(subprocess.TimeoutExpired):
         run_git(repo, "commit", "-m", "blocked", timeout=0.5)
@@ -76,7 +76,7 @@ def test_env_fully_replaces_environment(tmp_path: Path) -> None:
     """``env`` REPLACES (not augments) the environment: a var set in the parent but absent from
     ``env`` is invisible to git. Asserted via GIT_AUTHOR_NAME which git echoes into a commit."""
     repo = _git_repo(tmp_path)
-    (repo / "f.txt").write_text("x")
+    (repo / "f.txt").write_text("x", encoding="utf-8")
     run_git(repo, "add", "f.txt")
     # Provide a full, minimal env with a distinctive author; PATH is needed for git to run.
     env = {
@@ -98,7 +98,7 @@ def test_str_input_is_forwarded_to_stdin(tmp_path: Path) -> None:
     content = "hello from stdin\n"
     piped = run_git(repo, "hash-object", "--stdin", input_data=content).stdout.strip()
     # Cross-check against git hashing a real file with the same bytes.
-    (repo / "probe").write_text(content)
+    (repo / "probe").write_text(content, encoding="utf-8")
     direct = run_git(repo, "hash-object", str(repo / "probe")).stdout.strip()
     assert piped == direct
 

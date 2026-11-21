@@ -90,7 +90,7 @@ def _ref_payload(git_dir: Path, ref: str) -> dict | None:
 
 def test_matching_durable_success_is_healthy_on_real_cli(rebar_repo: Path) -> None:
     """A real ref record is consumed through the real canonical CLI entrypoint."""
-    local_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text().strip()
+    local_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text(encoding="utf-8").strip()
     _plant_blob(
         rebar_repo,
         LAST_PASS_REF,
@@ -272,7 +272,7 @@ def _refs(repo: Path) -> str:
 def test_canonical_status_is_read_only(
     rebar_repo: Path,
 ) -> None:
-    env_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text().strip()
+    env_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text(encoding="utf-8").strip()
     _record(rebar_repo, environment_id=f"local:{env_id}")
     before_refs = _refs(rebar_repo)
     before_tracker = {
@@ -306,7 +306,7 @@ def test_status_help_is_canonical_while_removed_alias_is_invalid(rebar_repo: Pat
 def test_omitted_max_age_disables_age_failure_and_explicit_age_is_stale(
     rebar_repo: Path,
 ) -> None:
-    env_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text().strip()
+    env_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text(encoding="utf-8").strip()
     _record(rebar_repo, environment_id=f"local:{env_id}")
     no_limit, healthy = _json_status(rebar_repo)
     limited, stale = _json_status(rebar_repo, "--max-age", "1")
@@ -407,7 +407,7 @@ def test_local_identity_requires_nonempty_env_id(rebar_repo: Path, contents: str
     if contents is None:
         env_path.unlink()
     else:
-        env_path.write_text(contents)
+        env_path.write_text(contents, encoding="utf-8")
     completed = _run_cli_heldout(rebar_repo, "bridge", "status", "--json")
     assert completed.returncode != 0
     assert completed.stdout == ""
@@ -439,14 +439,17 @@ def test_matching_rich_detail_is_used_and_mismatch_is_ignored(rebar_repo: Path) 
                 "environment_id": "reconciler",
                 "mutation_count": 4,
             }
-        )
+        ),
+        encoding="utf-8",
     )
     matched, good = _json_status(rebar_repo, "--target", "reconciler")
     assert matched.returncode == 0
     assert good["detail_status"] == "matching"
     assert good["detail"]["mutation_count"] == 4
 
-    detail_path.write_text(json.dumps({"pass_id": "another-pass", "environment_id": "reconciler"}))
+    detail_path.write_text(
+        json.dumps({"pass_id": "another-pass", "environment_id": "reconciler"}), encoding="utf-8"
+    )
     mismatched, stale = _json_status(rebar_repo, "--target", "reconciler")
     assert mismatched.returncode == 0
     assert stale["detail_status"] == "mismatched"

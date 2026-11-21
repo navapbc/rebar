@@ -53,13 +53,13 @@ def _clean_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _class_models(path: Path) -> dict[str, str]:
     """The `[llm.model_classes]` `model` value per class, as written in `path`."""
-    table = tomllib.loads(path.read_text())["llm"]["model_classes"]
+    table = tomllib.loads(path.read_text(encoding="utf-8"))["llm"]["model_classes"]
     return {cls: str(slot["model"]) for cls, slot in table.items()}
 
 
 def _resolved_chains(path: Path) -> dict[str, list[str]]:
     """The ordered primary + fallback targets resolved from ``path``."""
-    table = tomllib.loads(path.read_text())
+    table = tomllib.loads(path.read_text(encoding="utf-8"))
     slots = load_class_slots(str(_REPO)) if path == _REBAR_TOML else None
     if slots is None:
         slots = parse_class_slots(table["llm"]["model_classes"])
@@ -127,8 +127,8 @@ def test_project_default_ids_are_byte_equal_to_the_bedrock_overlay() -> None:
             "These are single-sourced deliberately — update BOTH."
         )
 
-    project_scalar = tomllib.loads(_REBAR_TOML.read_text())["llm"]["model"]
-    overlay_scalar = tomllib.loads(_BEDROCK_TOML.read_text())["llm"]["model"]
+    project_scalar = tomllib.loads(_REBAR_TOML.read_text(encoding="utf-8"))["llm"]["model"]
+    overlay_scalar = tomllib.loads(_BEDROCK_TOML.read_text(encoding="utf-8"))["llm"]["model"]
     assert project_scalar == overlay_scalar, (
         f"rebar.toml's `[llm] model` is {project_scalar!r} but the overlay's is "
         f"{overlay_scalar!r}; the second resolution path must name the same frontier id."

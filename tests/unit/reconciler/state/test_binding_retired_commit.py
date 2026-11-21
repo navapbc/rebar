@@ -80,7 +80,9 @@ def test_retirement_only_change_is_committed(tmp_path, pass_support_mod):
 
     # Commit an initial bindings.json so the live file is already up-to-date
     # and ONLY bindings-retired.json will differ on the retirement pass.
-    (bridge / "bindings.json").write_text(json.dumps({"bindings": {}, "reverse": {}}))
+    (bridge / "bindings.json").write_text(
+        json.dumps({"bindings": {}, "reverse": {}}), encoding="utf-8"
+    )
     subprocess.run(
         ["git", "-C", str(tracker_dir), "add", ".bridge_state/bindings.json"],
         check=True,
@@ -95,7 +97,7 @@ def test_retirement_only_change_is_committed(tmp_path, pass_support_mod):
     # Now write a retirement-only change: bindings-retired.json (new file),
     # bindings.json unchanged.
     (bridge / "bindings-retired.json").write_text(
-        json.dumps({"version": 1, "retired": {"DIG-DEAD": {"local_id": "loc-1"}}})
+        json.dumps({"version": 1, "retired": {"DIG-DEAD": {"local_id": "loc-1"}}}), encoding="utf-8"
     )
 
     ok = pass_support_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-retire")
@@ -114,7 +116,9 @@ def test_no_change_is_noop(tmp_path, pass_support_mod):
     _init_tickets_git_repo(tracker_dir)
     bridge = tracker_dir / ".bridge_state"
     bridge.mkdir(parents=True)
-    (bridge / "bindings.json").write_text(json.dumps({"bindings": {}, "reverse": {}}))
+    (bridge / "bindings.json").write_text(
+        json.dumps({"bindings": {}, "reverse": {}}), encoding="utf-8"
+    )
     subprocess.run(
         ["git", "-C", str(tracker_dir), "add", ".bridge_state/bindings.json"],
         check=True,
@@ -155,10 +159,11 @@ def test_both_files_committed_together(tmp_path, pass_support_mod):
                 "bindings": {"loc-1": {"jira_key": "DIG-9", "state": "confirmed"}},
                 "reverse": {"DIG-9": "loc-1"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     (bridge / "bindings-retired.json").write_text(
-        json.dumps({"version": 1, "retired": {"DIG-OLD": {"local_id": "loc-x"}}})
+        json.dumps({"version": 1, "retired": {"DIG-OLD": {"local_id": "loc-x"}}}), encoding="utf-8"
     )
     ok = pass_support_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-both")
     assert ok is True

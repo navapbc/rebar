@@ -14,7 +14,7 @@ from rebar._store import lock_owner as _owner
 def _seed_stamp(tmp_path, stamp: str) -> str:
     lock_dir = tmp_path / _lock.MKDIR_LOCK_NAME
     lock_dir.mkdir(exist_ok=True)
-    (lock_dir / _owner._MKDIR_OWNER_FILE).write_text(stamp)
+    (lock_dir / _owner._MKDIR_OWNER_FILE).write_text(stamp, encoding="utf-8")
     return str(lock_dir)
 
 
@@ -97,11 +97,11 @@ def test_reclamation_is_label_blind(tmp_path, monkeypatch):
     ``op=`` field never feeds a staleness decision."""
     monkeypatch.setattr(_owner, "_pid_alive", lambda _pid: False)  # dead ⇒ stale
     plain = tmp_path / "plain.lock"
-    plain.write_text(_owner._owner_stamp())
+    plain.write_text(_owner._owner_stamp(), encoding="utf-8")
     with _owner.operation_label("compact-sweep"):
         labelled_stamp = _owner._owner_stamp()
     labelled = tmp_path / "labelled.lock"
-    labelled.write_text(labelled_stamp)
+    labelled.write_text(labelled_stamp, encoding="utf-8")
     assert _owner.stamped_file_is_stale(str(plain)) is True
     assert _owner.stamped_file_is_stale(str(labelled)) == _owner.stamped_file_is_stale(str(plain))
 

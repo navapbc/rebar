@@ -448,11 +448,11 @@ _CORPUS_DIR = _Path(__file__).parent.parent / "fixtures" / "structured_reply_cor
 
 
 def _load_corpus(name: str) -> dict:
-    return _json.loads((_CORPUS_DIR / f"{name}.json").read_text())
+    return _json.loads((_CORPUS_DIR / f"{name}.json").read_text(encoding="utf-8"))
 
 
 def _all_corpus() -> list[dict]:
-    return [_json.loads(p.read_text()) for p in sorted(_CORPUS_DIR.glob("v*.json"))]
+    return [_json.loads(p.read_text(encoding="utf-8")) for p in sorted(_CORPUS_DIR.glob("v*.json"))]
 
 
 def test_selection_recovers_verdict_over_quoted_dep_record():

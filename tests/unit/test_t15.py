@@ -34,7 +34,7 @@ RUBRIC_REQUIRED = (
 
 def test_routing_entry_does_not_pin_a_posture() -> None:
     """Advisory-vs-blocking is the registry default's call, explicitly out of scope here."""
-    entry = json.loads(ROUTING.read_text())["T15"]
+    entry = json.loads(ROUTING.read_text(encoding="utf-8"))["T15"]
     assert "default_posture" not in entry, "posture must be inherited, not pinned by this story"
 
 
@@ -76,7 +76,7 @@ def test_descriptor_loads_with_a_descriptive_name() -> None:
 
 
 def test_regenerated_guide_carries_the_full_t15_section() -> None:
-    guide = (REPO / "docs/plan-review-criteria-guide.md").read_text()
+    guide = (REPO / "docs/plan-review-criteria-guide.md").read_text(encoding="utf-8")
     assert "## T15" in guide
     for marker in ("RISK NAMED", "FAST OUT-OF-LOOP PROOF", "PROVE-THEN-CODIFY", "SCOPED CLEANUP"):
         assert marker in guide, f"regenerated guide missing {marker!r}"

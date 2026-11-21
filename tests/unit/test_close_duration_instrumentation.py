@@ -55,7 +55,7 @@ def test_model_backed_pass_close_preserves_consumption_and_emits_direct_metrics(
         "referencing_commits_found",
     )
     (rebar_repo / "rebar.toml").write_text(
-        "[verify]\nrequire_completion_verification_for_close = true\n"
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
     )
 
     def model_backed_pass(ticket_id: str, **kwargs) -> dict:
@@ -122,7 +122,7 @@ def test_model_backed_fail_close_preserves_consumption_and_emits_direct_metrics(
     )
     verifier_calls = []
     (rebar_repo / "rebar.toml").write_text(
-        "[verify]\nrequire_completion_verification_for_close = true\n"
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
     )
 
     def model_backed_fail(ticket_id: str, **kwargs) -> dict:

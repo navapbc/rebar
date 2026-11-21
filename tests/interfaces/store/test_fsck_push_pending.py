@@ -238,7 +238,7 @@ def _ambient_repo(path: Path, *, sync_remote: str) -> Path:
     for args in (("init", "-q"), ("remote", "add", sync_remote, str(path / "elsewhere.git"))):
         subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, env=env)
     if sync_remote != "origin":
-        (path / "rebar.toml").write_text(f'[sync]\nremote = "{sync_remote}"\n')
+        (path / "rebar.toml").write_text(f'[sync]\nremote = "{sync_remote}"\n', encoding="utf-8")
     return path
 
 

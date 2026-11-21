@@ -75,7 +75,7 @@ def test_banked_verdict_write_round_trips(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "bank" / "crit.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(target, json.dumps({"verdict": "PASS"}, sort_keys=True))
-    assert json.loads(target.read_text())["verdict"] == "PASS"
+    assert json.loads(target.read_text(encoding="utf-8"))["verdict"] == "PASS"
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ def test_two_concurrent_writers_to_one_target_both_publish(tmp_path, monkeypatch
         t.join(timeout=60)
 
     assert errors == [], f"a concurrent writer was lost: {errors!r}"
-    assert target.read_text() in {"alpha", "beta"}
+    assert target.read_text(encoding="utf-8") in {"alpha", "beta"}
     assert [p.name for p in tmp_path.iterdir() if p.name != "cache.json"] == [], (
         "temp residue survived a concurrent publish"
     )
@@ -213,8 +213,8 @@ def test_concurrent_writes_to_distinct_targets_are_unaffected(tmp_path, monkeypa
     for t in threads:
         t.join(timeout=60)
 
-    assert a.read_text() == "one"
-    assert b.read_text() == "two"
+    assert a.read_text(encoding="utf-8") == "one"
+    assert b.read_text(encoding="utf-8") == "two"
 
 
 def test_a_reader_never_observes_a_partially_written_target(tmp_path, monkeypatch) -> None:
@@ -231,11 +231,11 @@ def test_a_reader_never_observes_a_partially_written_target(tmp_path, monkeypatc
 
     def replace(src, dst):
         # Immediately before publication the target must not exist in a partial form.
-        seen.append(len(Path(dst).read_text()) if Path(dst).exists() else -1)
+        seen.append(len(Path(dst).read_text(encoding="utf-8")) if Path(dst).exists() else -1)
         return real_replace(src, dst)
 
     monkeypatch.setattr(fsutil.os, "replace", replace)
     atomic_write(target, payload)
 
     assert seen == [-1], "target existed in a pre-publish state — the write was not atomic"
-    assert len(target.read_text()) == len(payload)
+    assert len(target.read_text(encoding="utf-8")) == len(payload)

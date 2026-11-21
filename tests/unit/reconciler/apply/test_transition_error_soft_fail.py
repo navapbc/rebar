@@ -70,7 +70,7 @@ def _update(key: str, fields: dict, *, local_id: str | None = None, **extra) -> 
 
 
 def _read_manifest_outcomes(manifest_path: Path) -> list[dict]:
-    data = json.loads(Path(manifest_path).read_text())
+    data = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     return data.get("mutations", []) or []
 
 

@@ -195,7 +195,9 @@ def test_schema_describes_correlation_id_not_langfuse(schema: str) -> None:
     verdicts emit null from sites outside this change's scope.
     """
     root = Path(__file__).resolve().parents[2] / "src" / "rebar" / "schemas"
-    desc = json.loads((root / schema).read_text())["properties"]["trace_id"]["description"]
+    desc = json.loads((root / schema).read_text(encoding="utf-8"))["properties"]["trace_id"][
+        "description"
+    ]
     assert "langfuse" not in desc.lower(), desc
     assert "present inside any gate run" not in desc.lower(), desc
     assert "null" in desc.lower(), desc

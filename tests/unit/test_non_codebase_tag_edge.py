@@ -113,7 +113,7 @@ def test_enrichment_parity(tag: str) -> None:
 def test_routing_trigger_fires_on_both_spellings() -> None:
     """The `.rebar` overlay TRIGGER gates whether project.measurement-provenance runs at all.
     Un-widened it does not error — it SILENTLY skips the criterion for the new tag."""
-    routing = json.loads((REPO / ".rebar/criteria_routing.json").read_text())
+    routing = json.loads((REPO / ".rebar/criteria_routing.json").read_text(encoding="utf-8"))
     trigger = routing["plan_review"]["project.measurement-provenance"]["trigger"]
     patterns = [p for entry in trigger for p in entry.get("text_all", [])]
     assert patterns, "criterion lost its deterministic trigger"

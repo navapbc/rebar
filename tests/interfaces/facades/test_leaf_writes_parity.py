@@ -243,7 +243,7 @@ def _event_uuid(tracker: Path, tid: str, suffix: str) -> str:
 
     for p in (tracker / tid).iterdir():
         if p.name.endswith(suffix) and not p.name.startswith("."):
-            return _json.loads(p.read_text())["uuid"]
+            return _json.loads(p.read_text(encoding="utf-8"))["uuid"]
     raise AssertionError(f"no {suffix} event for {tid}")
 
 

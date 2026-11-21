@@ -37,7 +37,9 @@ def _audit(tid: str, repo: Path) -> str:
 
 def test_canonical_transition_force_string_still_bypasses_start_work_gate(rebar_repo: Path) -> None:
     _commit(rebar_repo)
-    (rebar_repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
+    (rebar_repo / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_claim = true\n", encoding="utf-8"
+    )
     tid = _make(rebar_repo)
 
     out = rebar.transition(
@@ -62,7 +64,9 @@ def test_removed_transition_force_aliases_fail_at_the_library_boundary(
     rebar_repo: Path, kwargs: dict[str, object], expected: str
 ) -> None:
     _commit(rebar_repo)
-    (rebar_repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
+    (rebar_repo / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_claim = true\n", encoding="utf-8"
+    )
     tid = _make(rebar_repo)
 
     with pytest.raises(TypeError) as excinfo:

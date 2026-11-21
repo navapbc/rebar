@@ -40,7 +40,7 @@ _FREE_8GIB_2AVAIL = textwrap.dedent(
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -101,7 +101,7 @@ def _environment(
 
 def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts or metric not in parts:
             continue
@@ -116,7 +116,7 @@ def _dimensioned(log: Path, metric: str) -> dict[str, list[int]]:
     blue-green cutover and both legitimately publish to the same dimension in one tick, so
     collapsing them here would hide exactly the case the dimension has to survive."""
     out: dict[str, list[int]] = {}
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts or metric not in parts:
             continue

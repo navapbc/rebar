@@ -599,7 +599,7 @@ def test_the_monkeypatched_surface_is_still_defined_in_conftest(harness) -> None
 def test_the_live_harness_conftest_is_within_the_module_size_cap() -> None:
     """Keep conftest within the hard cap read from ``.github/module-size-limit.txt``."""
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    cap = int((repo_root / ".github" / "module-size-limit.txt").read_text().strip())
+    cap = int((repo_root / ".github" / "module-size-limit.txt").read_text(encoding="utf-8").strip())
     loc = len(_CONFTEST.read_text(encoding="utf-8").splitlines())
     assert loc <= cap, (
         f"tests/external/live_jira_dc/conftest.py is {loc} LOC, over the {cap}-LOC hard cap. "

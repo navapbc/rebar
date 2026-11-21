@@ -25,7 +25,7 @@ class Cassette:
     @classmethod
     def from_file(cls, path: str) -> Cassette:
         records: list[dict] = []
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#"):
@@ -74,7 +74,7 @@ def _self_test() -> int:
         },
     ]
 
-    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
+    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
         for r in sample:
             f.write(json.dumps(r) + "\n")
         path = f.name

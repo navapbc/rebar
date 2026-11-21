@@ -135,7 +135,7 @@ def _ticket(repo: Path, desc: str = _PASSING_DESC) -> str:
 
 
 def _write_config(repo: Path, body: str) -> None:
-    (repo / "rebar.toml").write_text(body)
+    (repo / "rebar.toml").write_text(body, encoding="utf-8")
     rconfig.reset_config_cache()
 
 
@@ -193,8 +193,12 @@ def test_unknown_explicit_value_raises_before_any_llm_call(repo: Path) -> None:
 
 def test_generated_surfaces_omit_the_env_name() -> None:
     root = Path(__file__).resolve().parents[2]
-    assert "REBAR_VERIFY_PLAN_REVIEW_ENGINE" not in (root / "docs" / "env-vars.md").read_text()
-    golden = json.loads((root / "tests" / "golden" / "config_surface.json").read_text())
+    assert "REBAR_VERIFY_PLAN_REVIEW_ENGINE" not in (root / "docs" / "env-vars.md").read_text(
+        encoding="utf-8"
+    )
+    golden = json.loads(
+        (root / "tests" / "golden" / "config_surface.json").read_text(encoding="utf-8")
+    )
     assert "REBAR_VERIFY_PLAN_REVIEW_ENGINE" not in golden["canonical_env_vars"]
     assert "verify.plan_review_engine" in golden["config_keys"]
 

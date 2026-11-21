@@ -195,7 +195,7 @@ def test_landed_but_label_fails_alerts_no_delete_no_postlude(tmp_path):
     # A BRIDGE_ALERT was staged under the tracker root.
     alerts = list((tmp_path / ".tickets-tracker").rglob("*-BRIDGE_ALERT.json"))
     assert alerts, "expected a BRIDGE_ALERT for the identity-write failure"
-    payload = json.loads(alerts[0].read_text())
+    payload = json.loads(alerts[0].read_text(encoding="utf-8"))
     assert payload["data"]["tag"] == "create-identity-write-failed"
 
 
@@ -305,7 +305,7 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "-C", str(path), "config", "user.email", "t@e.com"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "t"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True)
-    (path / ".dummy").write_text("seed")
+    (path / ".dummy").write_text("seed", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", ".dummy"], check=True)
     subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", "seed"], check=True)
 
@@ -315,7 +315,7 @@ def _load_applier(name: str):
 
 
 def _read_manifest(path: Path) -> dict:
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _typed_create(applier, local_id: str, *, summary: str, requires_create=()):

@@ -15,7 +15,7 @@ TARGET = "e" * 40
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -24,13 +24,13 @@ def test_ensure_script_only_change_selects_reviewbot_deploy(tmp_path: Path) -> N
     bin_dir.mkdir()
     state = tmp_path / "state"
     state.mkdir()
-    (state / "deployed-sha").write_text(DEPLOYED + "\n")
+    (state / "deployed-sha").write_text(DEPLOYED + "\n", encoding="utf-8")
     deploy_repo = tmp_path / "deploy"
     (deploy_repo / "infra" / "compose").mkdir(parents=True)
     (deploy_repo / "infra" / "scripts").mkdir(parents=True)
-    (deploy_repo / "infra" / "compose" / ".env").write_text("EXISTING=1\n")
+    (deploy_repo / "infra" / "compose" / ".env").write_text("EXISTING=1\n", encoding="utf-8")
     fetch_secrets = deploy_repo / "infra" / "scripts" / "fetch-secrets.sh"
-    fetch_secrets.write_text("#!/bin/sh\nexit 0\n")
+    fetch_secrets.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     fetch_secrets.chmod(0o755)
     mirror = tmp_path / "mirror"
     (mirror / ".git").mkdir(parents=True)
@@ -90,4 +90,4 @@ def test_ensure_script_only_change_selects_reviewbot_deploy(tmp_path: Path) -> N
     assert command_log.exists(), (
         "a reviewbot-ensure-tickets.sh-only diff did not enter the review-bot deploy branch"
     )
-    assert command_log.read_text().splitlines() == ["compose-up"]
+    assert command_log.read_text(encoding="utf-8").splitlines() == ["compose-up"]

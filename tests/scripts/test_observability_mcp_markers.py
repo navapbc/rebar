@@ -35,7 +35,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -87,7 +87,7 @@ def _environment(
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
 
     journal = tmp_path / "journal.txt"
-    journal.write_text("".join(f"{line}\n" for line in journal_lines))
+    journal.write_text("".join(f"{line}\n" for line in journal_lines), encoding="utf-8")
     _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
     _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
@@ -98,7 +98,7 @@ def _environment(
         # Cursor 0 counts the first journal entries; absent or bare state would
         # cold-start at the tail and publish 0. Replication keeps a bare total.
         for name, path in paths.items():
-            path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
+            path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n", encoding="utf-8")
     env = observability_env(tmp_path)
     env.update(
         {
@@ -109,7 +109,7 @@ def _environment(
             **{name: str(path) for name, path in paths.items()},
         }
     )
-    (tmp_path / "replication.log").write_text("")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
     return env, aws_log, paths
 
 
@@ -117,7 +117,7 @@ def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
     if not log.exists():
         return values
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -145,8 +145,8 @@ def test_each_mcp_marker_counts_into_its_own_metric(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert _values(aws_log, "mcp_retire_cap") == [2]
     assert _values(aws_log, "mcp_mem_abort") == [1]
-    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text().split()[0] == "2"
-    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text().split()[0] == "1"
+    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text(encoding="utf-8").split()[0] == "2"
+    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text(encoding="utf-8").split()[0] == "1"
 
 
 def test_prose_naming_a_marker_is_not_counted(tmp_path: Path) -> None:
@@ -179,7 +179,7 @@ def test_cold_start_seeds_offsets_and_publishes_zero(tmp_path: Path) -> None:
     assert _values(aws_log, "mcp_mem_abort") == [0]
     # A tail cursor keeps inherited journal markers out of the next interval.
     for variable in ("MCP_RETIRE_CAP_OFFSET_FILE", "MCP_MEM_ABORT_OFFSET_FILE"):
-        total, cursor = paths[variable].read_text().split()
+        total, cursor = paths[variable].read_text(encoding="utf-8").split()
         assert total == "0"
         assert cursor
 
@@ -190,11 +190,13 @@ def test_second_run_publishes_only_new_markers(tmp_path: Path) -> None:
 
     first = _run(env)
     journal = Path(env["JOURNAL_FILE"])
-    journal.write_text(journal.read_text() + _mem_abort_marker() + "\n")
+    journal.write_text(
+        journal.read_text(encoding="utf-8") + _mem_abort_marker() + "\n", encoding="utf-8"
+    )
     second = _run(env)
 
     assert (first.returncode, second.returncode) == (0, 0)
     assert _values(aws_log, "mcp_retire_cap") == [1, 0]
     assert _values(aws_log, "mcp_mem_abort") == [1, 1]
-    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text().split()[0] == "1"
-    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text().split()[0] == "2"
+    assert paths["MCP_RETIRE_CAP_OFFSET_FILE"].read_text(encoding="utf-8").split()[0] == "1"
+    assert paths["MCP_MEM_ABORT_OFFSET_FILE"].read_text(encoding="utf-8").split()[0] == "2"

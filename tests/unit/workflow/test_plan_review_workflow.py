@@ -38,7 +38,7 @@ _PERF_AC = _GOOD_AC + "\nWe must cut the p99 latency on the hot path and add a c
 
 
 def _doc() -> dict:
-    return _migrate.migrate_to_current(yaml.safe_load(_WF.read_text()))
+    return _migrate.migrate_to_current(yaml.safe_load(_WF.read_text(encoding="utf-8")))
 
 
 def _state(*, ttype: str = "story", description: str = _GOOD_AC) -> dict:
@@ -180,7 +180,7 @@ def test_workflow_validates_and_lints():
     assert _schema.validate_document(doc) == []
     findings = [
         str(f)
-        for f in _lint.lint_workflow(_WF.read_text(), check_prompts=True)
+        for f in _lint.lint_workflow(_WF.read_text(encoding="utf-8"), check_prompts=True)
         if f.severity != "warning"
     ]
     assert findings == [], findings

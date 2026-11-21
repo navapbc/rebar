@@ -193,7 +193,8 @@ def _write_parse_failure_artifact(
                     "attempts": int(attempts),
                     "timestamp": now.isoformat(),
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         existing = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime)
         for stale in existing[:-20]:

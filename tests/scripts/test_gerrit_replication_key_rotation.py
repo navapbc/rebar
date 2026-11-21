@@ -8,7 +8,7 @@ SETUP_REPLICATION = (
 
 
 def test_deploy_key_rotation_lifecycle_restarts_before_verification_and_retirement() -> None:
-    text = SETUP_REPLICATION.read_text()
+    text = SETUP_REPLICATION.read_text(encoding="utf-8")
     lifecycle = text.split("-- DEPLOY-KEY ROTATION LIFECYCLE --", 1)[1]
 
     restart_index = lifecycle.index("Restart Gerrit")
@@ -20,7 +20,7 @@ def test_deploy_key_rotation_lifecycle_restarts_before_verification_and_retireme
 
 
 def test_setup_replication_warns_key_materialization_also_needs_gerrit_restart() -> None:
-    text = SETUP_REPLICATION.read_text()
+    text = SETUP_REPLICATION.read_text(encoding="utf-8")
 
     assert "deploy key was re-materialised" in text
     assert "Gerrit may keep using a cached SSH key until restart" in text

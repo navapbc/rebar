@@ -18,7 +18,7 @@ from rebar.config import ConfigError, load_config
 
 
 def _write_project_config(tmp_path, body: str):
-    (tmp_path / "rebar.toml").write_text(textwrap.dedent(body))
+    (tmp_path / "rebar.toml").write_text(textwrap.dedent(body), encoding="utf-8")
 
 
 def test_default_backend_is_jira(tmp_path, monkeypatch):

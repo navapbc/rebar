@@ -58,13 +58,13 @@ def _age(tdir: Path, by_ns: int = _HOUR_NS) -> None:
     for path in sorted(tdir.glob("*.json")):
         if path.name.startswith("."):
             continue
-        event = json.loads(path.read_text())
+        event = json.loads(path.read_text(encoding="utf-8"))
         ts = event.get("timestamp")
         if not isinstance(ts, int):
             continue
         event["timestamp"] = ts - by_ns
         rest = path.name.split("-", 1)[1]
-        path.write_text(json.dumps(event))
+        path.write_text(json.dumps(event), encoding="utf-8")
         path.rename(path.parent / f"{event['timestamp']}-{rest}")
 
 
@@ -77,10 +77,10 @@ def _sign_and_commit(repo: Path, tdir: Path) -> None:
     for path in sorted(tdir.glob("*.json")):
         if path.name.startswith("."):
             continue
-        event = json.loads(path.read_text())
+        event = json.loads(path.read_text(encoding="utf-8"))
         event["author_sig"] = "synthetic-dsse-envelope"
         event.setdefault("author_id", "594c-9dcf-5ad6-4e6d")
-        path.write_text(json.dumps(event))
+        path.write_text(json.dumps(event), encoding="utf-8")
     tracker = _tracker(repo)
     subprocess.run(["git", "-C", tracker, "add", "-A"], check=True, capture_output=True)
     subprocess.run(
@@ -296,7 +296,8 @@ def test_the_sweep_commit_does_not_steal_a_concurrent_writers_event(store: Path)
                 "event_type": "COMMENT",
                 "data": {"body": "mid-flight"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     _compact.compact_all_cli([], repo_root=str(repo))
@@ -415,12 +416,12 @@ def _fabricated_signed_event(tdir: Path) -> tuple[str, str]:
     import uuid
 
     template = sorted(tdir.glob("*-COMMENT.json"))[0]
-    event = json.loads(template.read_text())
+    event = json.loads(template.read_text(encoding="utf-8"))
     event["uuid"] = str(uuid.uuid4())
     event["timestamp"] = int(event["timestamp"]) + 7
     event["author_sig"] = "synthetic-dsse-envelope"
     name = f"{event['timestamp']}-{event['uuid']}-COMMENT.json"
-    (tdir / name).write_text(json.dumps(event))
+    (tdir / name).write_text(json.dumps(event), encoding="utf-8")
     return f"{event['timestamp']}-{event['uuid']}", name
 
 
@@ -486,7 +487,9 @@ def _ledger_entry(repo: Path, tid: str, position: str) -> dict:
 
     snapshots = sorted(_tdir(repo, tid).glob("*-SNAPSHOT.json"))
     assert snapshots, "the sweep wrote no SNAPSHOT, so there is no ledger to inspect"
-    ledger = json.loads(snapshots[-1].read_text())["data"]["compiled_state"]["authorship_ledger"]
+    ledger = json.loads(snapshots[-1].read_text(encoding="utf-8"))["data"]["compiled_state"][
+        "authorship_ledger"
+    ]
     matches = [e for e in ledger if e["position"]["position"] == position]
     assert len(matches) == 1, f"expected one ledger entry for {position}, got {len(matches)}"
     return matches[0]

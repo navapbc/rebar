@@ -456,7 +456,7 @@ def test_check_binding_drift_garbage_output_fails_closed(mod: ModuleType, tmp_pa
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 1
-    assert (tmp_path / "gh_out").read_text() == ""
+    assert (tmp_path / "gh_out").read_text(encoding="utf-8") == ""
 
 
 def test_check_binding_drift_operational_exit_two_fails_closed(
@@ -470,7 +470,7 @@ def test_check_binding_drift_operational_exit_two_fails_closed(
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
 
     assert rc == 1
-    assert (tmp_path / "gh_out").read_text() == ""
+    assert (tmp_path / "gh_out").read_text(encoding="utf-8") == ""
 
 
 def test_check_binding_drift_partial_old_shape_fails_closed(
@@ -484,7 +484,7 @@ def test_check_binding_drift_partial_old_shape_fails_closed(
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
 
     assert rc == 1
-    assert (tmp_path / "gh_out").read_text() == ""
+    assert (tmp_path / "gh_out").read_text(encoding="utf-8") == ""
 
 
 def drift_env(tmp_path: Path, **over: str) -> dict[str, str]:
@@ -962,7 +962,7 @@ def test_fsck_empty_stdout_fails_closed(mod_heldout: ModuleType, tmp_path: Path)
     (tmp_path / "gh_out").touch()
     rc = mod_heldout.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 1
-    assert (tmp_path / "gh_out").read_text() == ""
+    assert (tmp_path / "gh_out").read_text(encoding="utf-8") == ""
 
 
 def test_fsck_missing_binding_drift_key(mod_heldout: ModuleType, tmp_path: Path) -> None:
@@ -971,7 +971,7 @@ def test_fsck_missing_binding_drift_key(mod_heldout: ModuleType, tmp_path: Path)
     (tmp_path / "gh_out").touch()
     rc = mod_heldout.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 1
-    assert (tmp_path / "gh_out").read_text() == ""
+    assert (tmp_path / "gh_out").read_text(encoding="utf-8") == ""
 
 
 def test_summary_cell_order_is_canonical(mod_heldout: ModuleType, tmp_path: Path) -> None:

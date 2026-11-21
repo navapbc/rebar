@@ -112,7 +112,7 @@ def _fixture_repo(root: Path) -> Path:
     }.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
+        path.write_text(text, encoding="utf-8")
     git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "add", "-A"], check=True)

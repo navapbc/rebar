@@ -77,7 +77,7 @@ def _make_mutation(mut_mod, *, direction, action, target, payload=None, provenan
 
 def _read_create(tracker_dir: Path, local_id: str) -> dict:
     for path in sorted((tracker_dir / local_id).glob("*.json")):
-        ev = json.loads(path.read_text())
+        ev = json.loads(path.read_text(encoding="utf-8"))
         if ev.get("event_type") == "CREATE":
             return ev
     raise AssertionError(f"no CREATE event in {tracker_dir / local_id}")
@@ -115,7 +115,7 @@ def _write_legacy_create(tmp_path: Path, *, ticket_id: str, author, env_id) -> d
     if env_id is None:
         del event["env_id"]
     (tdir / "1700000000-aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa-CREATE.json").write_text(
-        json.dumps(event)
+        json.dumps(event), encoding="utf-8"
     )
     return reduce_ticket(str(tdir))
 

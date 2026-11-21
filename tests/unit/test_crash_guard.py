@@ -128,7 +128,7 @@ def test_crash_guard_is_noop_when_xdist_hook_is_absent(tmp_path: Path) -> None:
 
 def test_crash_guard_xdist_hook_is_optional_without_xdist() -> None:
     source = Path(__file__).resolve().parents[1] / "_crash_guard.py"
-    module = ast.parse(source.read_text())
+    module = ast.parse(source.read_text(encoding="utf-8"))
     hook = next(
         node
         for node in module.body

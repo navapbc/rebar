@@ -32,7 +32,7 @@ _PROBE_JOBS: dict[str, str] = {
 def _job_run_scripts(workflow: str, job: str) -> list[str]:
     path = _WORKFLOWS_DIR / workflow
     assert path.exists(), f"expected workflow {workflow} is missing"
-    doc = yaml.safe_load(path.read_text())
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
     jobs = doc.get("jobs") or {}
     assert job in jobs, f"{workflow}: job {job!r} not found (jobs: {sorted(jobs)})"
     steps = jobs[job].get("steps") or []

@@ -22,7 +22,7 @@ _DEPLOYED = "d" * 40
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -34,13 +34,13 @@ def _set_health_body(box: dict[str, object], body: str) -> None:
     therefore an idle bot that also passes readiness.
     """
     health_file: Path = box["health_file"]  # type: ignore[assignment]
-    health_file.write_text(body)
+    health_file.write_text(body, encoding="utf-8")
 
 
 def _set_target(box: dict[str, object], sha: str) -> None:
     """Advance the mirror's ``origin/main`` tip, as a new commit landing would."""
     target_file: Path = box["target_file"]  # type: ignore[assignment]
-    target_file.write_text(sha + "\n")
+    target_file.write_text(sha + "\n", encoding="utf-8")
 
 
 def _set_bot_state(box: dict[str, object], token: str) -> None:
@@ -48,7 +48,7 @@ def _set_bot_state(box: dict[str, object], token: str) -> None:
     can present a MID-REDEPLOY bot (``starting``/``restarting``) vs a WEDGED one (``running``,
     the default) to ``bot_unreachable_disposition`` (bug 2f46)."""
     bot_state_file: Path = box["bot_state_file"]  # type: ignore[assignment]
-    bot_state_file.write_text(token)
+    bot_state_file.write_text(token, encoding="utf-8")
 
 
 @pytest.fixture
@@ -64,9 +64,9 @@ def box(tmp_path: Path) -> dict[str, object]:
     deploy_repo = tmp_path / "deploy"
     (deploy_repo / "infra" / "compose").mkdir(parents=True)
     (deploy_repo / "infra" / "scripts").mkdir(parents=True)
-    (deploy_repo / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n")
+    (deploy_repo / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n", encoding="utf-8")
     fs = deploy_repo / "infra" / "scripts" / "fetch-secrets.sh"
-    fs.write_text("#!/usr/bin/env bash\nexit 0\n")
+    fs.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     fs.chmod(0o755)
     mirror = tmp_path / "mirror"
     (mirror / ".git").mkdir(parents=True)  # so autodeploy skips the bootstrap clone
@@ -75,12 +75,12 @@ def box(tmp_path: Path) -> dict[str, object]:
     target_file = tmp_path / "target-sha"
     health_file = tmp_path / "health-body"
     bot_state_file = tmp_path / "bot-state"
-    target_file.write_text("e" * 40 + "\n")
-    health_file.write_text('{"status":"ok","in_flight":0}')
+    target_file.write_text("e" * 40 + "\n", encoding="utf-8")
+    health_file.write_text('{"status":"ok","in_flight":0}', encoding="utf-8")
     # Default: the bot container is up and healthy, so an unreachable /health classifies as
     # WEDGED (the pre-2f46 fail-open behaviour) unless a test sets this to a transient state.
-    bot_state_file.write_text("running")
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    bot_state_file.write_text("running", encoding="utf-8")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
 
     # git stub: the target tip is read from a FILE so a burst can advance it between ticks.
     # diff reports a BOT_PATHS entry only, so the bot block runs and config/probe/certbot
@@ -194,7 +194,7 @@ def _run(box: dict[str, object]) -> subprocess.CompletedProcess[str]:
 
 def _commands(box: dict[str, object]) -> list[str]:
     cmd_log: Path = box["cmd_log"]  # type: ignore[assignment]
-    return cmd_log.read_text().splitlines() if cmd_log.exists() else []
+    return cmd_log.read_text(encoding="utf-8").splitlines() if cmd_log.exists() else []
 
 
 def _markers(result: subprocess.CompletedProcess[str], token: str) -> list[str]:
@@ -220,7 +220,7 @@ def test_a_deploy_that_would_interrupt_a_review_is_deferred(box: dict[str, objec
     assert "tag-save-prev" not in commands, (
         f"nothing may be mutated on a deferred tick, not even the :prev rollback tag\n{context}"
     )
-    assert (state / "deployed-sha").read_text().strip() == _DEPLOYED, (
+    assert (state / "deployed-sha").read_text(encoding="utf-8").strip() == _DEPLOYED, (
         "a deferred deploy must NOT advance deployed-sha, or the box would record work it "
         f"never applied and never retry it.\n{context}"
     )
@@ -241,7 +241,7 @@ def test_an_idle_bot_still_deploys_immediately(box: dict[str, object]) -> None:
     assert "compose-build" in commands and "compose-up" in commands, (
         f"an idle bot must be redeployed on the very first tick\n{context}"
     )
-    assert (state / "deployed-sha").read_text().strip() == "e" * 40, (
+    assert (state / "deployed-sha").read_text(encoding="utf-8").strip() == "e" * 40, (
         f"a successful deploy must advance deployed-sha\n{context}"
     )
     assert not _markers(result, "AUTODEPLOY_DEFERRED"), (
@@ -341,7 +341,7 @@ def test_the_bound_is_not_reset_by_a_new_commit_landing(box: dict[str, object]) 
     # Inject the elapsed episode through its persisted clock seam. Production still reads the
     # real clock; only the fixture timestamp is aged, avoiding a three-second passive wait.
     state: Path = box["state"]  # type: ignore[assignment]
-    (state / "deploy-defer").write_text(f"{int(time.time()) - 3}\n")
+    (state / "deploy-defer").write_text(f"{int(time.time()) - 3}\n", encoding="utf-8")
 
     _set_target(box, "b" * 40)  # a NEW commit lands, as during a burst
     second = _run(box)
@@ -424,7 +424,7 @@ def test_defer_bound_default_outlasts_the_apps_own_per_review_cap() -> None:
     """
     from rebar.review_bot.config import DEFAULT_REVIEW_TIMEOUT_SECONDS
 
-    source = AUTODEPLOY.read_text()
+    source = AUTODEPLOY.read_text(encoding="utf-8")
     match = re.search(r'^DEPLOY_DEFER_MAX="\$\{DEPLOY_DEFER_MAX:-(\d+)\}"', source, re.MULTILINE)
     assert match, "autodeploy.sh must define a DEPLOY_DEFER_MAX default"
     bound = int(match.group(1))
@@ -484,7 +484,7 @@ def test_a_landing_burst_ends_with_the_review_surviving_and_one_deploy(
     assert commands.count("compose-build") == 1, (
         f"the burst must coalesce into ONE deploy, not one per commit\n{context}"
     )
-    assert (state / "deployed-sha").read_text().strip() == burst_tips[-1], (
+    assert (state / "deployed-sha").read_text(encoding="utf-8").strip() == burst_tips[-1], (
         f"and that deploy must land the NEWEST tip of the burst\n{context}"
     )
 
@@ -610,7 +610,7 @@ def test_a_bot_that_is_mid_redeploy_is_deferred_not_recreated_2f46(
     assert not interrupts, (
         f"a mid-redeploy bot must NOT emit signal-unavailable (it was not failed open)\n{context}"
     )
-    assert (state / "deployed-sha").read_text().strip() == _DEPLOYED, (
+    assert (state / "deployed-sha").read_text(encoding="utf-8").strip() == _DEPLOYED, (
         f"a deferred tick must not advance deployed-sha\n{context}"
     )
     assert result.returncode == 0, f"a deferral is a normal outcome, not a failure\n{context}"

@@ -251,7 +251,7 @@ def _fast_import_history(repo: Path, commits: list[tuple[str, dict[str, str]]]) 
         capture_output=True,
         text=True,
     )
-    by_mark = dict(line.split() for line in marks.read_text().splitlines())
+    by_mark = dict(line.split() for line in marks.read_text(encoding="utf-8").splitlines())
     return [by_mark[f":{mark}"] for mark in range(1, len(commits) + 1)]
 
 

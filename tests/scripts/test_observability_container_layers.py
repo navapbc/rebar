@@ -61,7 +61,7 @@ def _share_bytes() -> int:
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -164,8 +164,8 @@ def _environment(
         }
     )
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
-    (tmp_path / "replication.log").write_text("")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
     env.update(env_extra or {})
     return env, aws_log
 
@@ -183,10 +183,10 @@ def _install_units(unit_dir: Path) -> None:
     for line in rendered.splitlines():
         if line.startswith("# ---- "):
             current = unit_dir / line.split()[2]
-            current.write_text("")
+            current.write_text("", encoding="utf-8")
             continue
         if current is not None:
-            with current.open("a") as handle:
+            with current.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
 
 
@@ -198,7 +198,7 @@ def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
     if not log.exists():
         return values
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -217,7 +217,7 @@ def _one(log: Path, metric: str) -> int:
 def _lines_for(log: Path, metric: str) -> list[str]:
     return [
         line
-        for line in log.read_text().splitlines()
+        for line in log.read_text(encoding="utf-8").splitlines()
         if f"--metric-name {metric} " in f"{line} " or line.split()[-1:] == [metric]
     ]
 
@@ -338,7 +338,7 @@ def test_the_probe_never_reaps(tmp_path: Path) -> None:
     env, _ = _environment(tmp_path)
     _run(env)
     log = tmp_path / "docker-calls.log"
-    calls = log.read_text() if log.exists() else ""
+    calls = log.read_text(encoding="utf-8") if log.exists() else ""
     assert "docker rm" not in calls, calls
     assert "prune" not in calls, calls
 

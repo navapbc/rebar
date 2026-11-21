@@ -58,7 +58,7 @@ def _make_fake_snapshot(tmp_path: Path, repo_root: Path, jira_snapshot: dict):
     snapshots_dir = scratch_retention.snapshots_dir(repo_root)
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     snap_path = snapshots_dir / "test.json"
-    snap_path.write_text(json.dumps(jira_snapshot))
+    snap_path.write_text(json.dumps(jira_snapshot), encoding="utf-8")
     return snap_path
 
 
@@ -408,7 +408,7 @@ def test_read_local_tickets_live_path_strips_ambient_sync_pull(tmp_path, monkeyp
     rh = importlib.import_module("rebar.reconciler.pass_support")
 
     fake_cli = tmp_path / "rebar-cli"
-    fake_cli.write_text("#!/bin/sh\n")  # must exist so the CLI branch runs
+    fake_cli.write_text("#!/bin/sh\n", encoding="utf-8")  # must exist so the CLI branch runs
     monkeypatch.setattr("rebar._engine.in_process_cli", lambda: str(fake_cli), raising=False)
 
     captured: dict = {}
@@ -440,7 +440,7 @@ def test_read_local_ticket_full_live_path_strips_ambient_sync_pull(tmp_path, mon
     rd = importlib.import_module("rebar.reconciler.run_differs")
 
     fake_cli = tmp_path / "rebar-cli"
-    fake_cli.write_text("#!/bin/sh\n")
+    fake_cli.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setattr("rebar._engine.in_process_cli", lambda: str(fake_cli), raising=False)
 
     captured: dict = {}

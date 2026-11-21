@@ -72,7 +72,8 @@ def test_validate_bad_file_exits_1(tmp_path, capsys) -> None:
     f = tmp_path / "bad.yaml"
     f.write_text(
         'schema_version: "1"\nname: bad\nsteps:\n'
-        "  - id: a\n    uses: u\n    with:\n      v: ${{ inputs.nope }}\n"
+        "  - id: a\n    uses: u\n    with:\n      v: ${{ inputs.nope }}\n",
+        encoding="utf-8",
     )
     rc = main(["workflow", "validate", str(f)])
     assert rc == 1
@@ -83,7 +84,8 @@ def test_validate_bad_file_exits_1(tmp_path, capsys) -> None:
 def test_validate_json_output(tmp_path, capsys) -> None:
     f = tmp_path / "bad.yaml"
     f.write_text(
-        'schema_version: "1"\nname: bad\nsteps:\n  - id: a\n    uses: u\n    needs: [ghost]\n'
+        'schema_version: "1"\nname: bad\nsteps:\n  - id: a\n    uses: u\n    needs: [ghost]\n',
+        encoding="utf-8",
     )
     rc = main(["workflow", "validate", str(f), "--output", "json"])
     assert rc == 1
@@ -113,7 +115,8 @@ def test_validate_expressions_off(tmp_path, capsys) -> None:
     f = tmp_path / "x.yaml"
     f.write_text(
         'schema_version: "1"\nname: x\ninputs:\n  t: {type: string}\n'
-        "steps:\n  - id: a\n    uses: u\n    with:\n      v: ${{ inputs.t }}\n"
+        "steps:\n  - id: a\n    uses: u\n    with:\n      v: ${{ inputs.t }}\n",
+        encoding="utf-8",
     )
     rc = main(["workflow", "validate", str(f), "--no-expressions"])
     assert rc == 1
@@ -134,7 +137,7 @@ def _leaked(text: str) -> list[str]:
 
 def test_validate_text_output_withholds_credential_value(tmp_path, capsys) -> None:
     f = tmp_path / "leaky.yaml"
-    f.write_text(_LEAKY_WORKFLOW)
+    f.write_text(_LEAKY_WORKFLOW, encoding="utf-8")
     rc = main(["workflow", "validate", str(f)])
     assert rc == 1
     captured = capsys.readouterr()
@@ -144,7 +147,7 @@ def test_validate_text_output_withholds_credential_value(tmp_path, capsys) -> No
 
 def test_validate_json_output_withholds_credential_value(tmp_path, capsys) -> None:
     f = tmp_path / "leaky.yaml"
-    f.write_text(_LEAKY_WORKFLOW)
+    f.write_text(_LEAKY_WORKFLOW, encoding="utf-8")
     rc = main(["workflow", "validate", str(f), "--output", "json"])
     assert rc == 1
     raw = capsys.readouterr().out

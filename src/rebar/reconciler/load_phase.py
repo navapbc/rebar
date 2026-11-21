@@ -193,7 +193,7 @@ def load_snapshots(
     prev_path = prev_dir / "prev_snapshot.json"
     if prev_path.exists():
         try:
-            prev_snapshot: dict = json.loads(prev_path.read_text())
+            prev_snapshot: dict = json.loads(prev_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, ValueError, OSError) as _exc:
             # A corrupt / conflict-marked prev_snapshot must NEVER let the pass
             # proceed with an unknown Jira state — alert + abort (see helper).
@@ -205,7 +205,7 @@ def load_snapshots(
     # snapshot file is written; the differ runs identically on curr_snapshot.
     if persist:
         curr_path = fetcher.fetch_snapshot(pass_id, repo_root)
-        curr_snapshot: dict = json.loads(curr_path.read_text())
+        curr_snapshot: dict = json.loads(curr_path.read_text(encoding="utf-8"))
     else:
         curr_path = None
         curr_snapshot = fetcher.compute_snapshot(pass_id, repo_root)

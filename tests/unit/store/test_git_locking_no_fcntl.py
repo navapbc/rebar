@@ -21,9 +21,9 @@ def test_store_git_op_lock_without_fcntl_executes_unlocked(
 
     protected = tracker / "protected.txt"
     with git_locking._store_git_op_lock(str(tracker)):
-        protected.write_text("ran\n")
+        protected.write_text("ran\n", encoding="utf-8")
 
-    assert protected.read_text() == "ran\n"
+    assert protected.read_text(encoding="utf-8") == "ran\n"
 
 
 def test_fetch_coordination_lock_without_fcntl_executes_unlocked_without_lock_artifact(
@@ -35,9 +35,9 @@ def test_fetch_coordination_lock_without_fcntl_executes_unlocked_without_lock_ar
 
     protected = repo / "protected.txt"
     with git_locking.fetch_coordination_lock(str(repo)):
-        protected.write_text("ran\n")
+        protected.write_text("ran\n", encoding="utf-8")
 
-    assert protected.read_text() == "ran\n"
+    assert protected.read_text(encoding="utf-8") == "ran\n"
     assert not (repo / ".git" / "rebar-fetch.lock").exists()
 
 

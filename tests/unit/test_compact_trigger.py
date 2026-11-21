@@ -57,13 +57,13 @@ def _age_events(tdir: Path, by_ns: int) -> None:
     for path in sorted(tdir.glob("*.json")):
         if path.name.startswith("."):
             continue
-        event = json.loads(path.read_text())
+        event = json.loads(path.read_text(encoding="utf-8"))
         ts = event.get("timestamp")
         if not isinstance(ts, int):
             continue
         event["timestamp"] = ts - by_ns
         rest = path.name.split("-", 1)[1]
-        path.write_text(json.dumps(event))
+        path.write_text(json.dumps(event), encoding="utf-8")
         path.rename(path.parent / f"{event['timestamp']}-{rest}")
 
 

@@ -101,7 +101,8 @@ def _write_git_shim(bin_dir: Path) -> None:
         '    exec "$REAL_GIT" "$@"\n'
         "  fi\n"
         "done\n"
-        'exec "$REAL_GIT" "$@"\n'
+        'exec "$REAL_GIT" "$@"\n',
+        encoding="utf-8",
     )
     shim.chmod(0o755)
 
@@ -181,7 +182,7 @@ def test_async_push_survives_parent_exit_and_lands_event(
     assert _origin_ref(origin) == before, "origin advanced before the push was released"
 
     # 5. Release the push and wait (bounded) for origin to advance.
-    release.write_text("go")
+    release.write_text("go", encoding="utf-8")
     assert _wait_for(lambda: _origin_ref(origin) != before, timeout=15), (
         "async push never landed on origin after release"
     )

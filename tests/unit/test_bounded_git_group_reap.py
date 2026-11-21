@@ -40,7 +40,7 @@ def stalled_git(tmp_path: Path) -> Iterator[Path]:
     bindir = tmp_path / "bin"
     bindir.mkdir()
     fake = bindir / "git"
-    fake.write_text(_FAKE_GIT)
+    fake.write_text(_FAKE_GIT, encoding="utf-8")
     fake.chmod(0o755)
     work = tmp_path / "work"
     work.mkdir()
@@ -50,7 +50,9 @@ def stalled_git(tmp_path: Path) -> Iterator[Path]:
         yield work
     finally:
         os.environ["PATH"] = real_path
-        if (work / "child.pid").exists() and _alive(pid := int((work / "child.pid").read_text())):
+        if (work / "child.pid").exists() and _alive(
+            pid := int((work / "child.pid").read_text(encoding="utf-8"))
+        ):
             os.kill(pid, 9)  # reap the stand-in's child even when the fix is absent
 
 
@@ -64,7 +66,7 @@ def _alive(pid: int) -> bool:
 
 def _assert_group_reaped(work: Path) -> None:
     assert not (work / "pack-1.keep").exists(), "SIGTERM must reach git so it drops its .keep"
-    child = int((work / "child.pid").read_text())
+    child = int((work / "child.pid").read_text(encoding="utf-8"))
     deadline = time.monotonic() + 10
     while _alive(child) and time.monotonic() < deadline:
         time.sleep(0.05)  # an orphaned zombie lingers until init reaps it

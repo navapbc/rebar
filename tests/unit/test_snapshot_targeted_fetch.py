@@ -49,7 +49,7 @@ def clone_with_large_unrelated_branch(tmp_path) -> tuple[Path, str, str]:
     _git(upstream, "config", "uploadpack.allowFilter", "true")
     _git(upstream, "config", "uploadpack.allowAnySHA1InWant", "true")
 
-    (upstream / "code.txt").write_text("hello\n")
+    (upstream / "code.txt").write_text("hello\n", encoding="utf-8")
     _git(upstream, "add", "-A")
     _git(upstream, "commit", "--quiet", "-m", "code")
     main_sha = _git(upstream, "rev-parse", "HEAD")
@@ -59,7 +59,9 @@ def clone_with_large_unrelated_branch(tmp_path) -> tuple[Path, str, str]:
     big = upstream / "events"
     big.mkdir()
     for i in range(_TICKETS_FILE_COUNT):
-        (big / f"e{i}.json").write_text('{{"n": {}, "pad": "{}"}}\n'.format(i, "x" * 800))
+        (big / f"e{i}.json").write_text(
+            '{{"n": {}, "pad": "{}"}}\n'.format(i, "x" * 800), encoding="utf-8"
+        )
     _git(upstream, "add", "-A")
     _git(upstream, "commit", "--quiet", "-m", "tickets")
     tickets_sha = _git(upstream, "rev-parse", "HEAD")

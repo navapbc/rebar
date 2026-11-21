@@ -128,7 +128,7 @@ def _core_transport_members() -> set[str]:
     """The audit applied to every core reconciler module."""
     found: set[str] = set()
     for p in sorted(_REC.glob("*.py")):
-        found |= _transport_members(ast.parse(p.read_text()))
+        found |= _transport_members(ast.parse(p.read_text(encoding="utf-8")))
     return found
 
 

@@ -18,7 +18,7 @@ from rebar._store import lock_owner as _owner
 def _seed_stamp(tmp_path, stamp: str) -> str:
     lock_dir = tmp_path / _lock.MKDIR_LOCK_NAME
     lock_dir.mkdir(exist_ok=True)
-    (lock_dir / _owner._MKDIR_OWNER_FILE).write_text(stamp)
+    (lock_dir / _owner._MKDIR_OWNER_FILE).write_text(stamp, encoding="utf-8")
     return str(lock_dir)
 
 

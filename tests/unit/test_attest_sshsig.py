@@ -37,10 +37,10 @@ def _keypair(tmp_path):
         ["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "attest-test", "-f", str(key), "-q"],
         check=True,
     )
-    pub = (tmp_path / "id_ed25519.pub").read_text().split()
+    pub = (tmp_path / "id_ed25519.pub").read_text(encoding="utf-8").split()
     allowed_signers = tmp_path / "allowed_signers"
-    allowed_signers.write_text(f"{PRINCIPAL} {pub[0]} {pub[1]}\n")
-    return str(key), allowed_signers.read_text()
+    allowed_signers.write_text(f"{PRINCIPAL} {pub[0]} {pub[1]}\n", encoding="utf-8")
+    return str(key), allowed_signers.read_text(encoding="utf-8")
 
 
 def test_ssh_keygen_version_detected() -> None:
@@ -74,7 +74,7 @@ def _gen_key(tmp_path, name: str):
         ["ssh-keygen", "-t", "ed25519", "-N", "", "-C", name, "-f", str(key), "-q"],
         check=True,
     )
-    pub = (tmp_path / f"{name}.pub").read_text().split()
+    pub = (tmp_path / f"{name}.pub").read_text(encoding="utf-8").split()
     return str(key), pub[0], pub[1]  # key_path, key_type, key_b64
 
 

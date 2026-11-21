@@ -128,7 +128,11 @@ def _maintenance_diagnosis(trace: Path, tracker: str) -> str:
         verdict = "git ran auto-maintenance, but not as a descendant of any traced commit"
     gc_log = _git(tracker, "rev-parse", "--git-path", "gc.log").stdout.strip()
     gc_path = Path(gc_log) if os.path.isabs(gc_log) else Path(tracker) / gc_log
-    gc_text = gc_path.read_text(errors="replace")[:500] if gc_path.is_file() else "<absent>"
+    gc_text = (
+        gc_path.read_text(errors="replace", encoding="utf-8")[:500]
+        if gc_path.is_file()
+        else "<absent>"
+    )
     return (
         f"{verdict}.\n  maintenance processes: {maintenance or 'none'}"
         f"\n  commits (sid, exit t_abs): {commits or 'none'}"

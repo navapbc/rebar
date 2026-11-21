@@ -98,7 +98,7 @@ def test_modifyitems_skips_plain_module() -> None:
 
 
 def _load_workflow() -> dict:
-    return yaml.safe_load(_WORKFLOW_PATH.read_text())
+    return yaml.safe_load(_WORKFLOW_PATH.read_text(encoding="utf-8"))
 
 
 def _on_block(wf: dict) -> dict:

@@ -184,7 +184,7 @@ def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType)
     )
 
     inode_after_warm = cache_file.stat().st_ino
-    hash_after_warm = json.loads(cache_file.read_text())["dir_hash"]
+    hash_after_warm = json.loads(cache_file.read_text(encoding="utf-8"))["dir_hash"]
 
     # Delete the COMMENT file — changes directory listing → cache miss
     comment_file.unlink()
@@ -206,7 +206,7 @@ def test_cache_invalidated_on_file_deletion(tmp_path: Path, reducer: ModuleType)
         ".cache.json must be rewritten (atomic_write publishes a new inode) after the "
         "cache-miss recompute triggered by file deletion"
     )
-    envelope = json.loads(cache_file.read_text())
+    envelope = json.loads(cache_file.read_text(encoding="utf-8"))
     assert envelope["dir_hash"] != hash_after_warm, "the rewritten cache must key the new listing"
     assert len(envelope["state"]["comments"]) == 0, "the rewritten cache must hold the new state"
 
@@ -323,7 +323,7 @@ def test_cache_miss_on_same_filename_content_change(tmp_path: Path, reducer: Mod
             "parent_id": None,
         },
     }
-    create_path.write_text(json.dumps(original_payload))
+    create_path.write_text(json.dumps(original_payload), encoding="utf-8")
 
     # First call — warm cache
     state1 = reducer.reduce_ticket(ticket_dir)
@@ -338,7 +338,7 @@ def test_cache_miss_on_same_filename_content_change(tmp_path: Path, reducer: Mod
             "title": "Updated title after content change",
         },
     }
-    create_path.write_text(json.dumps(updated_payload))
+    create_path.write_text(json.dumps(updated_payload), encoding="utf-8")
 
     # Second call — content changed; cache must be invalidated → recompute
     state2 = reducer.reduce_ticket(ticket_dir)
@@ -383,7 +383,7 @@ def test_cache_miss_on_same_size_inplace_rewrite(tmp_path: Path, reducer: Module
     blob_b = json.dumps(_payload(title_b))
     assert len(blob_a) == len(blob_b), "Setup: blobs must be equal byte length"
 
-    create_path.write_text(blob_a)
+    create_path.write_text(blob_a, encoding="utf-8")
 
     # First call — warm cache.
     state1 = reducer.reduce_ticket(ticket_dir)
@@ -405,7 +405,7 @@ def test_cache_miss_on_same_size_inplace_rewrite(tmp_path: Path, reducer: Module
     )
 
     # In-place same-size overwrite + mtime bump (simulating a git checkout).
-    create_path.write_text(blob_b)
+    create_path.write_text(blob_b, encoding="utf-8")
     st = create_path.stat()
     os.utime(create_path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
     assert create_path.stat().st_size == st.st_size, "rewrite must be same size"

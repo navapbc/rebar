@@ -30,7 +30,7 @@ _HEALTH_POLL_GRANULARITY_SECONDS = 5
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -48,15 +48,15 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
     mirror = tmp_path / "mirror"
     (mirror / ".git").mkdir(parents=True)  # so autodeploy skips the bootstrap clone
 
-    (deploy_repo / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n")
+    (deploy_repo / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n", encoding="utf-8")
     # The rsync'd TARGET copy autodeploy invokes before `compose up`; succeed so the deploy
     # reaches the health gate (this test is about the gate, not about secrets).
     fs = deploy_repo / "infra" / "scripts" / "fetch-secrets.sh"
-    fs.write_text("#!/usr/bin/env bash\nexit 0\n")
+    fs.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     fs.chmod(0o755)
 
     cmd_log = tmp_path / "cmd-log"
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
 
     # git stub: report a change ONLY for a BOT_PATHS entry (src/rebar/), so the review-bot
     # rebuild+health block runs and the config/probe/certbot blocks stay skipped.
@@ -137,7 +137,7 @@ def test_bot_unhealthy_records_container_log_tail_in_the_deploy_journal(
     result = _run(deploy_box["env"])  # type: ignore[arg-type]
     journal = result.stdout + result.stderr
     cmd_log: Path = deploy_box["cmd_log"]  # type: ignore[assignment]
-    lines = cmd_log.read_text().splitlines() if cmd_log.exists() else []
+    lines = cmd_log.read_text(encoding="utf-8").splitlines() if cmd_log.exists() else []
     context = f"rc={result.returncode}\nlog={lines}\njournal:\n{journal}"
 
     assert _BOT_STDERR_SENTINEL in journal, (
@@ -201,7 +201,7 @@ def test_bot_unhealthy_still_rolls_back_to_prev_failsafe(
     result = _run(deploy_box["env"])  # type: ignore[arg-type]
     cmd_log: Path = deploy_box["cmd_log"]  # type: ignore[assignment]
     state: Path = deploy_box["state"]  # type: ignore[assignment]
-    lines = cmd_log.read_text().splitlines() if cmd_log.exists() else []
+    lines = cmd_log.read_text(encoding="utf-8").splitlines() if cmd_log.exists() else []
     context = f"rc={result.returncode}\nlog={lines}\nstderr:\n{result.stderr}"
 
     match = re.search(r"^AUTODEPLOY_ERROR (\{.*\})$", result.stderr, re.MULTILINE)
@@ -222,7 +222,7 @@ def test_bot_unhealthy_still_rolls_back_to_prev_failsafe(
     assert (state / "deploy-backoff").exists(), (
         f"a failed deploy must record a SHA-keyed backoff\n{context}"
     )
-    assert (state / "deployed-sha").read_text().strip() == _DEPLOYED, (
+    assert (state / "deployed-sha").read_text(encoding="utf-8").strip() == _DEPLOYED, (
         f"the deployed SHA must NOT advance past a failed deploy\n{context}"
     )
 
@@ -237,7 +237,9 @@ def test_health_timeout_default_outlasts_the_store_lock_budget() -> None:
     lock_budget = _lock._DEFAULT_TIMEOUT * _lock._DEFAULT_ATTEMPTS
     floor = lock_budget + _HEALTH_POLL_GRANULARITY_SECONDS
 
-    match = re.search(r'HEALTH_TIMEOUT="\$\{HEALTH_TIMEOUT:-(\d+)\}"', AUTODEPLOY.read_text())
+    match = re.search(
+        r'HEALTH_TIMEOUT="\$\{HEALTH_TIMEOUT:-(\d+)\}"', AUTODEPLOY.read_text(encoding="utf-8")
+    )
     assert match, "autodeploy.sh must define an env-overridable HEALTH_TIMEOUT default"
     default = int(match.group(1))
 

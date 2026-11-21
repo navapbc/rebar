@@ -17,7 +17,7 @@ RUBRIC_PATH = ROOT / "src/rebar/llm/reviewers/plan_review_T11.md"
 
 
 def _rubric_text() -> str:
-    return RUBRIC_PATH.read_text()
+    return RUBRIC_PATH.read_text(encoding="utf-8")
 
 
 def _post_rollback_paragraph() -> str:

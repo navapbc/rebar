@@ -40,7 +40,9 @@ def _event(repo: Path, ts: int, event_uuid: str, event_type: str, data: dict) ->
         "env_id": "test-env",
         "data": data,
     }
-    path.write_text(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
+    path.write_text(
+        json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
     return path
 
 
@@ -182,7 +184,7 @@ def test_dry_run_refuses_a_non_empty_workdir(tmp_path: Path) -> None:
     source = _source(tmp_path, old_days=45)
     work = tmp_path / "work"
     work.mkdir()
-    (work / "leftover").write_text("x")
+    (work / "leftover").write_text("x", encoding="utf-8")
 
     with pytest.raises(reclaim_dry_run.DryRunError, match="non-empty workdir"):
         reclaim_dry_run.run_dry_run(source, "tickets", work, horizon_days=30)

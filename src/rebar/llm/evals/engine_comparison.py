@@ -383,7 +383,7 @@ def run(
         results = _results(labels_path, rows, items, dry_run=False)
         if out is not None:
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
+            out.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return results or _results(labels_path, rows, items, dry_run=False)
 
 

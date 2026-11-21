@@ -28,9 +28,9 @@ _FIXTURE = (
 
 
 def _load_fixture():
-    store = json.loads((_FIXTURE / "bindings.json").read_text())
-    snapshot = json.loads((_FIXTURE / "snapshot.json").read_text())
-    locals_ = json.loads((_FIXTURE / "locals.json").read_text())
+    store = json.loads((_FIXTURE / "bindings.json").read_text(encoding="utf-8"))
+    snapshot = json.loads((_FIXTURE / "snapshot.json").read_text(encoding="utf-8"))
+    locals_ = json.loads((_FIXTURE / "locals.json").read_text(encoding="utf-8"))
     return store, snapshot, locals_
 
 

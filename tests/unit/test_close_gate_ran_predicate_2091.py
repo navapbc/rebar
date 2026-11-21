@@ -31,7 +31,7 @@ def cfg_root(tmp_path):
     root.mkdir()
 
     def write(text: str) -> str:
-        pathlib.Path(root, "rebar.toml").write_text(text)
+        pathlib.Path(root, "rebar.toml").write_text(text, encoding="utf-8")
         config.reset_config_cache()
         return str(root)
 

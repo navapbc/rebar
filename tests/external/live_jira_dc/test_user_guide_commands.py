@@ -71,7 +71,7 @@ def _fail_if_extra_missing_while_harness_is_up() -> None:
 
 def _documented_toml_block() -> str:
     """Parse the documented DC TOML block so the guide itself remains the test subject."""
-    text = _USER_GUIDE.read_text()
+    text = _USER_GUIDE.read_text(encoding="utf-8")
     for block in re.findall(r"```toml\n(.*?)```", text, re.DOTALL):
         if "jira-datacenter" in block and "tool.rebar.reconciler" in block:
             return block
@@ -109,7 +109,7 @@ def documented_repo(
     block = re.sub(r'project\s*=\s*"[^"]*"', f'project = "{jira_dc_project}"', block)
     block = block.replace("[tool.rebar.jira]", "allow_insecure = true\n\n[tool.rebar.jira]")
 
-    (rebar_repo / "pyproject.toml").write_text(block)
+    (rebar_repo / "pyproject.toml").write_text(block, encoding="utf-8")
     monkeypatch.setenv("JIRA_PAT", jira_dc_pat)
     return rebar_repo
 
@@ -180,7 +180,9 @@ def test_the_documented_setup_refuses_to_read_the_pat_from_config(
     from rebar._engine import engine_env
 
     pyproject = documented_repo / "pyproject.toml"
-    pyproject.write_text(pyproject.read_text() + f'\njira_pat = "{jira_dc_pat}"\n')
+    pyproject.write_text(
+        pyproject.read_text(encoding="utf-8") + f'\njira_pat = "{jira_dc_pat}"\n', encoding="utf-8"
+    )
     monkeypatch.delenv("JIRA_PAT", raising=False)
 
     env = engine_env(str(documented_repo))

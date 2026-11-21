@@ -15,7 +15,7 @@ def test_failure_rendering_does_not_expose_ambient_environment(tmp_path: Path) -
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
     fake_bash = fake_bin / "bash"
-    fake_bash.write_text("#!/bin/sh\nexit 91\n")
+    fake_bash.write_text("#!/bin/sh\nexit 91\n", encoding="utf-8")
     fake_bash.chmod(0o755)
     env = {
         "REBAR_DEBUG_SENTINEL": sentinel,

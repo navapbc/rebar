@@ -131,7 +131,7 @@ class TestFetchTicketsRetries:
 
 def test_store_copy_fixture_leaves_no_swallowed_diagnostic(dc_fixtures: ModuleType) -> None:
     """Parsed fixture calls must not pair ``capture_output`` with ``check``."""
-    tree = ast.parse(_FIXTURES.read_text())
+    tree = ast.parse(_FIXTURES.read_text(encoding="utf-8"))
     offenders = [
         node.lineno
         for node in ast.walk(tree)
@@ -154,7 +154,7 @@ def _init_tickets_repo(tracker: Path) -> None:
     subprocess.run(["git", "config", "user.email", "u@example.invalid"], cwd=tracker, check=True)
     subprocess.run(["git", "config", "user.name", "unit"], cwd=tracker, check=True)
     (tracker / "aaaa-bbbb-cccc-dddd").mkdir()
-    (tracker / "aaaa-bbbb-cccc-dddd" / "events.jsonl").write_text("{}\n")
+    (tracker / "aaaa-bbbb-cccc-dddd" / "events.jsonl").write_text("{}\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=tracker, check=True)
     subprocess.run(["git", "commit", "-q", "--no-verify", "-m", "seed"], cwd=tracker, check=True)
 
@@ -168,13 +168,13 @@ class TestBridgeStateScrub:
     ) -> None:
         tracker = tmp_path / "t"
         (tracker / ".bridge_state" / "bridge_alerts").mkdir(parents=True)
-        (tracker / ".bridge_state" / "projects.json").write_text("{}")
+        (tracker / ".bridge_state" / "projects.json").write_text("{}", encoding="utf-8")
         # a renamed sibling: caught by the GLOB, not an enumerated exact name.
-        (tracker / ".bridge_state.bak").write_text("x")
+        (tracker / ".bridge_state.bak").write_text("x", encoding="utf-8")
         # a NESTED artifact: caught only because the sweep is recursive (rglob), matching
         # the isolation cell's own `tracker.rglob('.bridge_state*')` assertion.
         (tracker / "sub").mkdir()
-        (tracker / "sub" / ".bridge_state.tmp").write_text("y")
+        (tracker / "sub" / ".bridge_state.tmp").write_text("y", encoding="utf-8")
         (tracker / "keep").mkdir()
 
         removed = dc_fixtures.scrub_bridge_state(tracker)

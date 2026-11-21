@@ -30,8 +30,8 @@ twine==6.1.0 \\
 def _run(lock_text: str, freeze_text: str, tmp_path: Path) -> subprocess.CompletedProcess:
     lock = tmp_path / "release-requirements.txt"
     freeze = tmp_path / "freeze.txt"
-    lock.write_text(lock_text)
-    freeze.write_text(freeze_text)
+    lock.write_text(lock_text, encoding="utf-8")
+    freeze.write_text(freeze_text, encoding="utf-8")
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--lock", str(lock), "--freeze", str(freeze)],
         capture_output=True,

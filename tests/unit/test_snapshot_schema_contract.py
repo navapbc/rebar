@@ -34,7 +34,7 @@ def _validator():
 
 
 def _entries() -> dict[str, Any]:
-    return json.loads(FIXTURE.read_text())
+    return json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 
 def _valid_entry() -> dict[str, Any]:

@@ -24,7 +24,7 @@ pytestmark = pytest.mark.unit
 def loose_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A repo with more loose objects than ``loose-objects``' auto threshold (100)."""
     empty = tmp_path / "empty-gitconfig"
-    empty.write_text("")
+    empty.write_text("", encoding="utf-8")
     for name in [k for k in os.environ if k.startswith("GIT_")]:
         monkeypatch.delenv(name)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
@@ -43,7 +43,7 @@ def loose_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _blob(tmp_path: Path, i: int) -> str:
     path = tmp_path / f"b{i}"
-    path.write_text(f"blob {i}\n")
+    path.write_text(f"blob {i}\n", encoding="utf-8")
     return str(path)
 
 

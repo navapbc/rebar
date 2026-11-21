@@ -187,8 +187,8 @@ def test_a_fold_in_a_clone_matches_a_fold_in_place(rebar_repo: Path, tmp_path: P
     local_snaps = sorted(_tdir(repo, tid).glob("*-SNAPSHOT.json"))
     assert clone_snaps and local_snaps, "both folds must have written a SNAPSHOT"
 
-    clone_state = json.loads(clone_snaps[0].read_text())["data"]["compiled_state"]
-    local_state = json.loads(local_snaps[0].read_text())["data"]["compiled_state"]
+    clone_state = json.loads(clone_snaps[0].read_text(encoding="utf-8"))["data"]["compiled_state"]
+    local_state = json.loads(local_snaps[0].read_text(encoding="utf-8"))["data"]["compiled_state"]
 
     assert clone_state.get("authorship_ledger") == local_state.get("authorship_ledger"), (
         "a clone-side fold produced a different authorship ledger — the sweep would attest "

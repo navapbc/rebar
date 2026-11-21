@@ -679,7 +679,7 @@ def test_t8_metric_adapter_regression_routes_real_gap_to_e2() -> None:
     assert "E2" in {c["id"] for c in single}
 
     e2_path = Path(__file__).parents[2] / "src/rebar/llm/reviewers/plan_review_E2.md"
-    e2_rubric = e2_path.read_text()
+    e2_rubric = e2_path.read_text(encoding="utf-8")
     assert "source/provenance" in e2_rubric
     assert "computation or aggregation protocol" in e2_rubric
     assert "route them here, not through an LLM overlay" in e2_rubric

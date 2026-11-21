@@ -35,7 +35,7 @@ def _function_source(name: str) -> str:
 
     The extraction test fails if a refactor moves or renames it.
     """
-    text = SCRIPT.read_text()
+    text = SCRIPT.read_text(encoding="utf-8")
     match = re.search(rf"^{re.escape(name)}\(\) \{{\n(?:.*?\n)*?\}}$", text, re.MULTILINE)
     assert match is not None, f"{name} not found in {SCRIPT}"
     return match.group(0)

@@ -146,7 +146,7 @@ class _GitSpawns:
 
 
 def _throttle(s: types.SimpleNamespace) -> None:
-    s.marker.write_text(str(int(time.time())))
+    s.marker.write_text(str(int(time.time())), encoding="utf-8")
 
 
 def _unthrottle(s: types.SimpleNamespace) -> None:

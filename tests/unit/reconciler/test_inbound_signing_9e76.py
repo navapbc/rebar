@@ -58,7 +58,7 @@ def _keypair(tmp_path: Path) -> tuple[str, str]:
         check=True,
         capture_output=True,
     )
-    parts = (tmp_path / "botkey.pub").read_text().strip().split()
+    parts = (tmp_path / "botkey.pub").read_text(encoding="utf-8").strip().split()
     return str(key), f"{parts[0]} {parts[1]}"
 
 

@@ -58,7 +58,7 @@ def _init_git_repo(path: Path) -> None:
     subprocess.run(["git", "-C", str(path), "config", "user.email", "test@example.com"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "test"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "commit.gpgsign", "false"], check=True)
-    (path / ".dummy").write_text("seed")
+    (path / ".dummy").write_text("seed", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", ".dummy"], check=True)
     subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", "seed"], check=True)
 
@@ -182,7 +182,7 @@ def test_manifest_has_correct_shape(tmp_path, applier):
             mutations, pass_id, repo_root=tmp_path, ticket_plans=_plans(mutations)
         )
 
-    data = json.loads(manifest_path.read_text())
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert "pass_id" in data, "Manifest missing 'pass_id' field"
     assert "mutation_count" in data, "Manifest missing 'mutation_count' field"
     assert "mutations" in data, "Manifest missing 'mutations' field"
@@ -203,7 +203,7 @@ def test_empty_mutations_produces_manifest_with_zero_count(tmp_path, applier):
         manifest_path = applier.apply([], pass_id, repo_root=tmp_path, ticket_plans=_plans([]))
 
     assert manifest_path.exists(), "Manifest must be written even for empty mutations"
-    data = json.loads(manifest_path.read_text())
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert data["mutation_count"] == 0, f"Expected mutation_count=0, got {data['mutation_count']}"
     assert data["mutations"] == [], f"Expected empty mutations list, got {data['mutations']}"
 

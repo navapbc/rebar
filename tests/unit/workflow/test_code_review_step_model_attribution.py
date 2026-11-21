@@ -138,7 +138,7 @@ class _Rec(_ex.RunRecorder):
 
 def _run_gate() -> _RecordingRunner:
     """Run the REAL gate document offline, with the production agent step in place."""
-    doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text()))
+    doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text(encoding="utf-8")))
     runner = _RecordingRunner()
     cfg = LLMConfig(model=_CFG_MODEL, runner="fake")
     _ex.run_workflow(

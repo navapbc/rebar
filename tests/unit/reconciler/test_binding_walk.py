@@ -97,7 +97,9 @@ def test_class_a_already_done_retires_binding(tmp_path: Path) -> None:
     assert bs.is_retired("REB-9")
     assert bs.get_jira_key("loc-A2") is None
     data = json.loads(
-        (tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings-retired.json").read_text()
+        (tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings-retired.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert data["retired"]["REB-9"]["reason"] == "local_terminal"
     assert data["retired"]["REB-9"]["local_id"] == "loc-A2"
@@ -167,7 +169,7 @@ def test_class_c_confirmed_404_retires_after_grace(tmp_path: Path) -> None:
     assert bs.is_retired("REB-530"), "must retire at GRACE consecutive confirmed-404s"
     assert "REB-530" in retired
     retired_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings-retired.json"
-    data = json.loads(retired_path.read_text())
+    data = json.loads(retired_path.read_text(encoding="utf-8"))
     assert "REB-530" in data["retired"]
     assert data["retired"]["REB-530"]["local_id"] == "loc-C"
 

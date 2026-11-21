@@ -27,10 +27,10 @@ _PINNED_A_TEST = "PINNED_A_TEST = 'the --ref A test body'\n"
 
 
 def _write_tree(root: Path, body: str, *, test_body: str | None) -> None:
-    (root / _PATH).write_text(body)
+    (root / _PATH).write_text(body, encoding="utf-8")
     if test_body is not None:
         (root / "tests").mkdir()
-        (root / _TEST_PATH).write_text(test_body)
+        (root / _TEST_PATH).write_text(test_body, encoding="utf-8")
 
 
 def _fixture(tmp_path: Path) -> tuple[str, str]:

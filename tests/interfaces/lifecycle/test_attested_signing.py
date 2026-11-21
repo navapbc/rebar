@@ -24,11 +24,13 @@ def _git(repo: Path, *a: str) -> None:
 
 
 def _enable(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _commit(repo: Path) -> None:
-    (repo / "f.txt").write_text("x\n")
+    (repo / "f.txt").write_text("x\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.email=t@e.com", "-c", "user.name=T", "commit", "-q", "-m", "c")
 

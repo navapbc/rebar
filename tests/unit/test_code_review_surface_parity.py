@@ -109,7 +109,7 @@ def test_surface_parity_prompt_is_canonical_front_matter_fixed_point():
 def test_base_reviewer_catalog_lists_surface_parity():
     import re
 
-    body = pathlib.Path("src/rebar/llm/reviewers/code-review-base.md").read_text()
+    body = pathlib.Path("src/rebar/llm/reviewers/code-review-base.md").read_text(encoding="utf-8")
     listed = set(re.findall(r"^- `([a-z0-9-]+)` —", body, flags=re.MULTILINE))
     assert "surface-parity" in listed
     # the whole catalog stays EXACTLY the OVERLAY_IDS set (the no-drift invariant).
@@ -118,7 +118,7 @@ def test_base_reviewer_catalog_lists_surface_parity():
 
 # ── the finder is actually DISPATCHED — wired into both gate batches ────────────────────────
 def test_surface_parity_finder_dispatched_in_round_a_and_round_b():
-    doc = yaml.safe_load(_GATE.read_text())
+    doc = yaml.safe_load(_GATE.read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in doc["steps"]}
     round_a = {c["prompt"]: c["when"] for c in by_id["round_a"]["batch"]["criteria"]}
     round_b = {c["prompt"]: c["when"] for c in by_id["round_b"]["batch"]["criteria"]}
@@ -133,7 +133,7 @@ def test_surface_parity_finder_dispatched_in_round_a_and_round_b():
 
 
 def test_failover_finder_dispatched_in_round_a_and_round_b():
-    doc = yaml.safe_load(_GATE.read_text())
+    doc = yaml.safe_load(_GATE.read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in doc["steps"]}
     round_a = {c["prompt"]: c["when"] for c in by_id["round_a"]["batch"]["criteria"]}
     round_b = {c["prompt"]: c["when"] for c in by_id["round_b"]["batch"]["criteria"]}

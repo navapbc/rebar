@@ -44,7 +44,7 @@ def test_add_dependency_cross_story_redirects_to_story_level(
     # Verify the LINK event targets epic-other (unchanged target)
     found_redirect = False
     for lf in link_files:
-        with open(lf) as f:
+        with open(lf, encoding="utf-8") as f:
             ev = json.load(f)
         if ev.get("data", {}).get("target_id") == "epic-other":
             found_redirect = True
@@ -147,7 +147,7 @@ def test_add_dependency_same_parent_still_works(graph: ModuleType, tmp_path: Pat
     # Verify the LINK targets task-q (original target unchanged)
     found = False
     for lf in link_files:
-        with open(lf) as f:
+        with open(lf, encoding="utf-8") as f:
             ev = json.load(f)
         if ev.get("data", {}).get("target_id") == "task-q":
             found = True

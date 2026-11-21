@@ -58,7 +58,7 @@ def test_the_scan_catches_each_shape(tmp_path: Path) -> None:
     )
     probe_path = tmp_path / "src" / "rebar" / "probe.py"
     probe_path.parent.mkdir(parents=True)
-    probe_path.write_text(sample)
+    probe_path.write_text(sample, encoding="utf-8")
     found = _hits(probe_path, root=tmp_path / "src" / "rebar")
     assert [h.split(" ", 1)[1] for h in found] == [
         "claude-sonnet-4-6",

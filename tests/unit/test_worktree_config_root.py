@@ -52,14 +52,14 @@ def checkouts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple
     _git(main, "init", "-q")
     _git(main, "config", "user.email", "t@e")
     _git(main, "config", "user.name", "T")
-    (main / "README").write_text("x\n")
+    (main / "README").write_text("x\n", encoding="utf-8")
     _git(main, "add", "README")
     _git(main, "commit", "-q", "-m", "init")
     worktree = (tmp_path / "wt").resolve()
     _git(main, "worktree", "add", "-q", "-b", "wt", str(worktree))
-    (main / "rebar.toml").write_text(_MAIN_TOML)
+    (main / "rebar.toml").write_text(_MAIN_TOML, encoding="utf-8")
     (main / "custom-store").mkdir()
-    (worktree / "rebar.toml").write_text(_WORKTREE_TOML)
+    (worktree / "rebar.toml").write_text(_WORKTREE_TOML, encoding="utf-8")
 
     for name in ("REBAR_TRACKER_DIR", "REBAR_CONFIG", "REBAR_SYNC_PUSH"):
         monkeypatch.delenv(name, raising=False)
@@ -127,13 +127,14 @@ def _write_main(main: Path, *, branch: str = "mainbranch", remote: str = "mainre
     (main / "rebar.toml").write_text(
         f'[tracker]\ndir = "custom-store"\nbranch = "{branch}"\n\n'
         f'[sync]\npush = "off"\nremote = "{remote}"\n\n'
-        "[llm]\nmain_only_unknown_key = 1\n"
+        "[llm]\nmain_only_unknown_key = 1\n",
+        encoding="utf-8",
     )
     config.reset_config_cache()
 
 
 def _push_always_in(worktree: Path) -> None:
-    (worktree / "rebar.toml").write_text('[sync]\npush = "always"\n')
+    (worktree / "rebar.toml").write_text('[sync]\npush = "always"\n', encoding="utf-8")
     config.reset_config_cache()
 
 
@@ -237,7 +238,7 @@ def test_peer_tracker_dir_keeps_absolute_tracker_dir(tmp_path: Path) -> None:
     _git(root, "init", "-q")
     elsewhere = (tmp_path / "store").resolve()
     # A TOML literal string: a Windows path's backslashes are not escapes there.
-    (root / "rebar.toml").write_text(f"[tracker]\ndir = '{elsewhere}'\n")
+    (root / "rebar.toml").write_text(f"[tracker]\ndir = '{elsewhere}'\n", encoding="utf-8")
     config.reset_config_cache()
 
     assert config.peer_tracker_dir(root) == elsewhere

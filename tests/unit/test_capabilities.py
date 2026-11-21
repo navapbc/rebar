@@ -185,7 +185,7 @@ def _declared_extras() -> set[str]:
     for parent in root.parents:
         pp = parent / "pyproject.toml"
         if pp.exists():
-            data = tomllib.loads(pp.read_text())
+            data = tomllib.loads(pp.read_text(encoding="utf-8"))
             extras = set(data["project"]["optional-dependencies"])
             extras.discard("dev")
             return extras

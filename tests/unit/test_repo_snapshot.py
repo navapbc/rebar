@@ -59,32 +59,34 @@ def _isolate_store(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------------------
 def test_materialize_byte_matches_committed_tree_including_export_ignore(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "keep.txt").write_text("hello\n")
+    (repo / "keep.txt").write_text("hello\n", encoding="utf-8")
     (repo / "sub").mkdir()
-    (repo / "sub" / "nested.py").write_text("x = 1\n")
+    (repo / "sub" / "nested.py").write_text("x = 1\n", encoding="utf-8")
     # A path git-archive would DROP (export-ignore) but a faithful snapshot KEEPS.
-    (repo / "secret.txt").write_text("present\n")
-    (repo / ".gitattributes").write_text("secret.txt export-ignore\n")
+    (repo / "secret.txt").write_text("present\n", encoding="utf-8")
+    (repo / ".gitattributes").write_text("secret.txt export-ignore\n", encoding="utf-8")
     # A path git-archive would REWRITE via export-subst; committed bytes must survive.
-    (repo / "ver.txt").write_text("$Format:%H$\n")
-    (repo / ".gitattributes").write_text("secret.txt export-ignore\nver.txt export-subst\n")
+    (repo / "ver.txt").write_text("$Format:%H$\n", encoding="utf-8")
+    (repo / ".gitattributes").write_text(
+        "secret.txt export-ignore\nver.txt export-subst\n", encoding="utf-8"
+    )
     sha = _commit_all(repo)
 
     handle = rs.materialize(sha, repo_root=str(repo), fetch=False)
     snap = handle.path
-    assert (snap / "keep.txt").read_text() == "hello\n"
-    assert (snap / "sub" / "nested.py").read_text() == "x = 1\n"
+    assert (snap / "keep.txt").read_text(encoding="utf-8") == "hello\n"
+    assert (snap / "sub" / "nested.py").read_text(encoding="utf-8") == "x = 1\n"
     # export-ignore file IS present (faithful, not git archive)
-    assert (snap / "secret.txt").read_text() == "present\n"
+    assert (snap / "secret.txt").read_text(encoding="utf-8") == "present\n"
     # export-subst NOT applied — committed placeholder preserved verbatim
-    assert (snap / "ver.txt").read_text() == "$Format:%H$\n"
+    assert (snap / "ver.txt").read_text(encoding="utf-8") == "$Format:%H$\n"
     assert handle.signable is True
     assert handle.sha == sha
 
 
 def test_attested_handle_is_signable_local_is_not(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "f.txt").write_text("a\n")
+    (repo / "f.txt").write_text("a\n", encoding="utf-8")
     _commit_all(repo)
     local = rs.materialize(source_mode="local", repo_root=str(repo))
     assert local.signable is False
@@ -99,8 +101,8 @@ def test_attested_handle_is_signable_local_is_not(tmp_path):
 def test_lfs_pointer_detected_not_served_as_content(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:abc123\nsize 12345\n"
-    (repo / "big.bin").write_text(pointer)
-    (repo / "plain.txt").write_text("not a pointer\n")
+    (repo / "big.bin").write_text(pointer, encoding="utf-8")
+    (repo / "plain.txt").write_text("not a pointer\n", encoding="utf-8")
     sha = _commit_all(repo)
 
     handle = rs.materialize(sha, repo_root=str(repo), fetch=False)
@@ -112,7 +114,7 @@ def test_lfs_pointer_detected_not_served_as_content(tmp_path):
 
 def test_submodule_gitlink_omitted_and_recorded(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "top.txt").write_text("top\n")
+    (repo / "top.txt").write_text("top\n", encoding="utf-8")
     _commit_all(repo, "base")
     base_sha = _git(repo, "rev-parse", "HEAD")
     # Fabricate a gitlink (mode 160000) entry pointing at a commit, without a real
@@ -134,7 +136,7 @@ def test_submodule_gitlink_omitted_and_recorded(tmp_path):
     assert not (handle.path / "vendor" / "sub").exists() or not any(
         (handle.path / "vendor" / "sub").iterdir()
     )
-    assert (handle.path / "top.txt").read_text() == "top\n"
+    assert (handle.path / "top.txt").read_text(encoding="utf-8") == "top\n"
 
 
 # --------------------------------------------------------------------------------------
@@ -142,7 +144,7 @@ def test_submodule_gitlink_omitted_and_recorded(tmp_path):
 # --------------------------------------------------------------------------------------
 def test_no_tmp_left_after_successful_materialize(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "f.txt").write_text("a\n")
+    (repo / "f.txt").write_text("a\n", encoding="utf-8")
     sha = _commit_all(repo)
     rs.materialize(sha, repo_root=str(repo), fetch=False)
     tmp_dir = rs.store_root() / "tmp"
@@ -154,8 +156,8 @@ def test_sweep_tmp_clears_crashed_build(tmp_path):
     store = rs.store_root()
     crashed = store / "tmp" / "build-deadbeef-xyz"
     crashed.mkdir(parents=True)
-    (crashed / "partial").write_text("half\n")
-    (store / "tmp" / "build-deadbeef-xyz.index").write_text("idx\n")
+    (crashed / "partial").write_text("half\n", encoding="utf-8")
+    (store / "tmp" / "build-deadbeef-xyz.index").write_text("idx\n", encoding="utf-8")
     removed = rs.sweep_tmp()
     assert removed == 2
     assert not crashed.exists()
@@ -163,7 +165,7 @@ def test_sweep_tmp_clears_crashed_build(tmp_path):
 
 def test_cache_hit_reuses_entry(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "f.txt").write_text("a\n")
+    (repo / "f.txt").write_text("a\n", encoding="utf-8")
     sha = _commit_all(repo)
     h1 = rs.materialize(sha, repo_root=str(repo), fetch=False)
     h2 = rs.materialize(sha, repo_root=str(repo), fetch=False)
@@ -186,7 +188,7 @@ def test_store_root_honors_gate_tmpdir(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------------------
 def test_missing_credential_fetch_raises_descriptive_error(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "f.txt").write_text("a\n")
+    (repo / "f.txt").write_text("a\n", encoding="utf-8")
     _commit_all(repo)
     # Point origin at a non-existent remote so fetch fails "could not read from remote".
     _git(repo, "remote", "add", "origin", str(tmp_path / "nonexistent-remote.git"))
@@ -198,7 +200,7 @@ def test_missing_credential_fetch_raises_descriptive_error(tmp_path):
 
 def test_unresolvable_ref_fails_closed(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "f.txt").write_text("a\n")
+    (repo / "f.txt").write_text("a\n", encoding="utf-8")
     _commit_all(repo)
     with pytest.raises(rs.SnapshotRefError):
         rs.materialize("no-such-ref-xyz", repo_root=str(repo), fetch=False)
@@ -216,7 +218,7 @@ def test_malicious_ref_in_targeted_fetch_does_not_execute(tmp_path):
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "--quiet", str(remote))
     repo = _init_repo(tmp_path / "repo")
-    (repo / "f.txt").write_text("a\n")
+    (repo / "f.txt").write_text("a\n", encoding="utf-8")
     _commit_all(repo)
     _git(repo, "remote", "add", "origin", str(remote))
     _git(repo, "push", "--quiet", "origin", "HEAD:refs/heads/main")
@@ -240,16 +242,16 @@ def test_invalid_source_mode_rejected(tmp_path):
 # --------------------------------------------------------------------------------------
 def test_concurrent_different_shas_no_index_contention(tmp_path):
     repo = _init_repo(tmp_path / "repo")
-    (repo / "f.txt").write_text("v1\n")
+    (repo / "f.txt").write_text("v1\n", encoding="utf-8")
     sha1 = _commit_all(repo, "v1")
-    (repo / "f.txt").write_text("v2\n")
+    (repo / "f.txt").write_text("v2\n", encoding="utf-8")
     sha2 = _commit_all(repo, "v2")
     # Leave a clean working tree + index; the materializations must not disturb it.
     before_status = _git(repo, "status", "--porcelain")
 
     def go(sha: str) -> tuple[str, str]:
         h = rs.materialize(sha, repo_root=str(repo), fetch=False)
-        return sha, (h.path / "f.txt").read_text()
+        return sha, (h.path / "f.txt").read_text(encoding="utf-8")
 
     with ThreadPoolExecutor(max_workers=2) as ex:
         results = dict(ex.map(go, [sha1, sha2, sha1, sha2]))
@@ -300,7 +302,7 @@ def test_adjacent_tickets_shas_reuse_unchanged_blobs(tmp_path):
     wall-clock, and it is measured on observable on-disk output rather than any internal.
     """
     repo = _init_repo(tmp_path / "repo")
-    (repo / "seed.txt").write_text("seed\n")
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
     _commit_all(repo, "seed")
     _git(repo, "checkout", "--quiet", "-b", "tickets")
 
@@ -308,14 +310,14 @@ def test_adjacent_tickets_shas_reuse_unchanged_blobs(tmp_path):
     tickets = repo / "tickets"
     tickets.mkdir()
     for i in range(40):
-        (tickets / f"t{i:03d}.json").write_text(payload)
+        (tickets / f"t{i:03d}.json").write_text(payload, encoding="utf-8")
     _commit_all(repo, "tickets base")
 
     store = rs.store_root()
     shas: list[str] = []
     for i in range(4):
         # Exactly ONE file changes per commit — the shape of a real tickets commit.
-        (tickets / f"t{i:03d}.json").write_text(payload[:-1] + "X")
+        (tickets / f"t{i:03d}.json").write_text(payload[:-1] + "X", encoding="utf-8")
         shas.append(_commit_all(repo, f"one-file delta {i}"))
         rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False)
 
@@ -345,7 +347,7 @@ def test_adjacent_tickets_shas_reuse_unchanged_blobs(tmp_path):
         assert on_disk == sorted(listed), f"entry {i} tree does not match {sha[:8]}"
         for rel in listed:
             want = _git(repo, "show", f"{sha}:{rel}")
-            assert (root / rel).read_text().rstrip("\n") == want.rstrip("\n"), (
+            assert (root / rel).read_text(encoding="utf-8").rstrip("\n") == want.rstrip("\n"), (
                 f"entry {i} content diverges at {rel}"
             )
 
@@ -362,23 +364,23 @@ def test_donor_untracked_files_do_not_leak_into_a_new_entry(tmp_path):
     path while still looking green on a clean fixture. This test makes that fixture dirty.
     """
     repo = _init_repo(tmp_path / "repo")
-    (repo / "seed.txt").write_text("seed\n")
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
     _commit_all(repo, "seed")
     _git(repo, "checkout", "--quiet", "-b", "tickets")
     tickets = repo / "tickets"
     tickets.mkdir()
     for i in range(6):
-        (tickets / f"t{i}.json").write_text("T" * 500)
+        (tickets / f"t{i}.json").write_text("T" * 500, encoding="utf-8")
     _commit_all(repo, "tickets base")
 
     first = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
 
     # Simulate what a real read does to a published entry, post-materialization.
     donor_tracker = first / ".tickets-tracker" / "tickets"
-    (donor_tracker / ".cache.json").write_text('{"derived": true}')
-    (donor_tracker / "..cache.json.abc.tmp").write_text("transient")
+    (donor_tracker / ".cache.json").write_text('{"derived": true}', encoding="utf-8")
+    (donor_tracker / "..cache.json.abc.tmp").write_text("transient", encoding="utf-8")
 
-    (tickets / "t0.json").write_text("T" * 499 + "X")
+    (tickets / "t0.json").write_text("T" * 499 + "X", encoding="utf-8")
     sha = _commit_all(repo, "one-file delta")
     second = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
     assert second != first
@@ -406,18 +408,20 @@ def test_write_lock_never_shares_an_inode_between_entries(tmp_path):
     fcntl = pytest.importorskip("fcntl")
 
     repo = _init_repo(tmp_path / "repo")
-    (repo / "seed.txt").write_text("seed\n")
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
     _commit_all(repo, "seed")
     _git(repo, "checkout", "--quiet", "-b", "tickets")
     tickets = repo / "tickets"
     tickets.mkdir()
     for i in range(6):
-        (tickets / f"t{i}.json").write_text("T" * 500)
-    (repo / ".ticket-write.lock").write_text("")  # the store's advisory write lock
+        (tickets / f"t{i}.json").write_text("T" * 500, encoding="utf-8")
+    (repo / ".ticket-write.lock").write_text(
+        "", encoding="utf-8"
+    )  # the store's advisory write lock
     _commit_all(repo, "tickets base")
 
     first = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
-    (tickets / "t0.json").write_text("T" * 499 + "X")
+    (tickets / "t0.json").write_text("T" * 499 + "X", encoding="utf-8")
     _commit_all(repo, "one-file delta")
     second = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
     assert second != first, "adjacent SHAs are distinct entries"
@@ -437,7 +441,7 @@ def test_write_lock_never_shares_an_inode_between_entries(tmp_path):
     )
 
     # The harm the separation exists to prevent, exercised directly.
-    with open(lock_a) as handle_a, open(lock_b) as handle_b:
+    with open(lock_a, encoding="utf-8") as handle_a, open(lock_b, encoding="utf-8") as handle_b:
         fcntl.flock(handle_a, fcntl.LOCK_EX)
         try:
             fcntl.flock(handle_b, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -468,14 +472,14 @@ def test_adjacent_code_shas_reuse_unchanged_blobs(tmp_path):
     src = repo / "src"
     src.mkdir()
     for i in range(40):
-        (src / f"m{i:03d}.py").write_text(payload)
+        (src / f"m{i:03d}.py").write_text(payload, encoding="utf-8")
     _commit_all(repo, "code base")
 
     store = rs.store_root()
     shas: list[str] = []
     for i in range(4):
         # Exactly ONE file changes per commit — the shape of a real code commit.
-        (src / f"m{i:03d}.py").write_text(payload[:-1] + "X")
+        (src / f"m{i:03d}.py").write_text(payload[:-1] + "X", encoding="utf-8")
         sha = _commit_all(repo, f"one-file delta {i}")
         shas.append(sha)
         rs.materialize(sha, repo_root=str(repo), fetch=False)
@@ -506,6 +510,6 @@ def test_adjacent_code_shas_reuse_unchanged_blobs(tmp_path):
         assert on_disk == sorted(listed), f"entry {i} tree does not match {sha[:8]}"
         for rel in listed:
             want = _git(repo, "show", f"{sha}:{rel}")
-            assert (root / rel).read_text().rstrip("\n") == want.rstrip("\n"), (
+            assert (root / rel).read_text(encoding="utf-8").rstrip("\n") == want.rstrip("\n"), (
                 f"entry {i} content diverges at {rel}"
             )

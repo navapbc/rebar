@@ -52,7 +52,7 @@ def signed_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         check=True,
         capture_output=True,
     )
-    parts = (tmp_path / "id_ed25519.pub").read_text().strip().split()
+    parts = (tmp_path / "id_ed25519.pub").read_text(encoding="utf-8").strip().split()
     ident = rebar.create_identity(
         "Ada", "ada@example.com", keys=[f"{parts[0]} {parts[1]}"], repo_root=str(r)
     )

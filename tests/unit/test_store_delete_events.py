@@ -45,7 +45,7 @@ def tracker(tmp_path: Path) -> str:
     _git(td, "init", "-q", "-b", "tickets")
     _git(td, "config", "user.email", "t@e.com")
     _git(td, "config", "user.name", "T")
-    (td / "seed").write_text("seed\n")
+    (td / "seed").write_text("seed\n", encoding="utf-8")
     _git(td, "add", "-A")
     _git(td, "commit", "-q", "-m", "seed")
     return str(td)
@@ -86,7 +86,7 @@ def test_does_not_sweep_unrelated_staged_file(tracker):
     # Simulate a concurrent writer that has staged (git add) an event but not committed it.
     foreign = Path(tracker) / "other" / "foreign.json"
     foreign.parent.mkdir(parents=True, exist_ok=True)
-    foreign.write_text("{}")
+    foreign.write_text("{}", encoding="utf-8")
     _git(tracker, "add", "--", "other/foreign.json")
 
     event_append.delete_events(tracker, rels[:1], "prune: REVIEW_RESULT sidecar for tk")

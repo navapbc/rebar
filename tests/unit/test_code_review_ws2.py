@@ -173,7 +173,7 @@ def test_failover_prompt_is_canonical_front_matter_fixed_point():
 def test_verify_prompt_embeds_verifier_rules_scaffold_and_regrounds_on_diff():
     from rebar.llm.review_kernel import VERIFIER_RULES_SCAFFOLD
 
-    body = pathlib.Path("src/rebar/llm/reviewers/code-review-verify.md").read_text()
+    body = pathlib.Path("src/rebar/llm/reviewers/code-review-verify.md").read_text(encoding="utf-8")
     assert VERIFIER_RULES_SCAFFOLD in body, (
         "verify prompt must embed VERIFIER_RULES_SCAFFOLD verbatim"
     )
@@ -198,7 +198,7 @@ def test_unversioned_break_is_version_signal_gated_on_both_surfaces():
     the three signals and the managed-removal=>FALSE rule (the two pass-2 surfaces the
     verifier reads)."""
     desc = _code_severity_model().model_fields["unversioned_published_contract_break"].description
-    body = pathlib.Path("src/rebar/llm/reviewers/code-review-verify.md").read_text()
+    body = pathlib.Path("src/rebar/llm/reviewers/code-review-verify.md").read_text(encoding="utf-8")
     for surface in (desc, body):
         for token in ("major version bump", "deprecation cycle", "CHANGELOG breaking-change"):
             assert token in surface, f"missing version-signal token {token!r}"
@@ -212,7 +212,7 @@ def test_verify_prompt_keys_removed_public_symbol_on_export():
     fields = _code_severity_model().model_fields
     assert fields["removed_public_symbol"].default is False  # abstain-safe
     assert fields["version_signal_present"].default is False
-    body = pathlib.Path("src/rebar/llm/reviewers/code-review-verify.md").read_text()
+    body = pathlib.Path("src/rebar/llm/reviewers/code-review-verify.md").read_text(encoding="utf-8")
     assert "removed_public_symbol" in body
     assert "version_signal_present" in body
     for token in ("__all__", "CLI command", "MCP tool"):

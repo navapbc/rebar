@@ -34,7 +34,7 @@ def _repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "init"], cwd=repo, check=True)
     tracker = repo / ".tickets-tracker"
     tracker.mkdir()
-    (tracker / ".env-id").write_text("local-test\n")
+    (tracker / ".env-id").write_text("local-test\n", encoding="utf-8")
     return repo
 
 
@@ -140,6 +140,6 @@ def test_real_ref_fence_progress_classifies_running_or_crashed(
     )
 
     assert rc == 0
-    outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    outputs = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
     assert outputs["stale"] == stale
     assert word in outputs["status_msg"].lower()

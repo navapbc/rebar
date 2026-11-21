@@ -41,7 +41,7 @@ def _write_event(
         "data": data,
     }
     path = ticket_dir / filename
-    path.write_text(json.dumps(payload))
+    path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
 

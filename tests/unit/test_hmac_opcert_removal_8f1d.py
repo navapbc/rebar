@@ -183,7 +183,7 @@ def test_authorship_verification_still_passes_post_removal(store: Path, tmp_path
         check=True,
         capture_output=True,
     )
-    pub = (tmp_path / "alice.pub").read_text().strip()
+    pub = (tmp_path / "alice.pub").read_text(encoding="utf-8").strip()
     a = rebar.create_identity("Alice", "alice@example.com", keys=[pub], repo_root=str(store))
 
     payload = b'{"uuid":"e1","author_id":"' + a.encode() + b'","data":{"x":1}}'

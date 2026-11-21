@@ -42,7 +42,7 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _commit(repo: Path, name: str) -> str:
-    (repo / name).write_text(name + "\n")
+    (repo / name).write_text(name + "\n", encoding="utf-8")
     _git(repo, "add", name)
     _git(repo, "commit", "-q", "-m", name)
     return _git(repo, "rev-parse", "HEAD")
@@ -76,14 +76,15 @@ def first_run_box(tmp_path: Path) -> dict[str, object]:
             esac
             exec "{real_git}" "$@"
             """
-        )
+        ),
+        encoding="utf-8",
     )
     wrapper.chmod(0o755)
     # flock/timeout are GNU-only; macOS runners lack them. The container tools are inert so a
     # tick that gets past the seed never touches the host's real docker daemon.
-    (bin_dir / "timeout").write_text('#!/usr/bin/env bash\nshift; exec "$@"\n')
+    (bin_dir / "timeout").write_text('#!/usr/bin/env bash\nshift; exec "$@"\n', encoding="utf-8")
     for tool in ("flock", "docker", "curl", "rsync", "systemctl"):
-        (bin_dir / tool).write_text("#!/usr/bin/env bash\nexit 0\n")
+        (bin_dir / tool).write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     for tool in ("flock", "timeout", "docker", "curl", "rsync", "systemctl"):
         (bin_dir / tool).chmod(0o755)
 
@@ -116,7 +117,7 @@ def _run(
     deploy_repo = box["deploy_repo"]
     assert isinstance(deploy_repo, Path)
     if marker is not None:
-        (deploy_repo / ".deployed_ref").write_text(marker + "\n")
+        (deploy_repo / ".deployed_ref").write_text(marker + "\n", encoding="utf-8")
     result = subprocess.run(
         ["bash", str(AUTODEPLOY)],
         env=box["env"],  # type: ignore[arg-type]
@@ -128,7 +129,7 @@ def _run(
     state = box["state"]
     assert isinstance(state, Path)
     sha_file = state / "deployed-sha"
-    seeded = sha_file.read_text().strip() if sha_file.exists() else ""
+    seeded = sha_file.read_text(encoding="utf-8").strip() if sha_file.exists() else ""
     return result, seeded
 
 
@@ -180,11 +181,11 @@ def test_existing_deployed_sha_ignores_marker(first_run_box: dict[str, object]) 
     state = first_run_box["state"]
     assert isinstance(state, Path)
     main_b = str(first_run_box["main_b"])
-    (state / "deployed-sha").write_text(main_b + "\n")
+    (state / "deployed-sha").write_text(main_b + "\n", encoding="utf-8")
     # Pre-populate the component markers too, so the tick reaches its up-to-date exit before
     # any docker work.
-    (state / "mcp-deployed-sha").write_text(main_b + "\n")
-    (state / "bot-deployed-sha").write_text(main_b + "\n")
+    (state / "mcp-deployed-sha").write_text(main_b + "\n", encoding="utf-8")
+    (state / "bot-deployed-sha").write_text(main_b + "\n", encoding="utf-8")
     result, seeded = _run(first_run_box, f"{str(first_run_box['side_s'])[:9]} (feat/x)")
     assert seeded == main_b, _context(result)
     assert "first run" not in result.stdout, _context(result)

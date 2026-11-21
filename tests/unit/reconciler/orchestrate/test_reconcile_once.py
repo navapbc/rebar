@@ -230,7 +230,7 @@ def test_live_pass_persists_prev_snapshot_as_a_bare_key_set(
         reconcile_mod.reconcile_once("key-set-shape", repo_root=tmp_path)
 
     prev_path = tmp_path / ".tickets-tracker" / ".bridge_state" / "prev_snapshot.json"
-    persisted = json.loads(prev_path.read_text())
+    persisted = json.loads(prev_path.read_text(encoding="utf-8"))
 
     assert persisted == {"DIG-1": {}, "DIG-2": {}}
     assert prev_path.stat().st_size <= 64 * 1024

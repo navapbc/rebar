@@ -82,7 +82,7 @@ def _committed(tracker: str, ticket_id: str) -> bool:
 def test_stale_index_lock_is_reclaimed_and_write_succeeds(tmp_path: Path) -> None:
     tracker = _fresh_tracker(tmp_path, "stale")
     lock = _index_lock_path(tracker)
-    lock.write_text("")  # a leftover lock from a crashed git process
+    lock.write_text("", encoding="utf-8")  # a leftover lock from a crashed git process
     old = time.time() - (_STALE_S + 60)
     os.utime(lock, (old, old))
 
@@ -110,7 +110,7 @@ def test_contended_index_lock_cleared_during_backoff_succeeds(
     """
     tracker = _fresh_tracker(tmp_path, "contended")
     lock = _index_lock_path(tracker)
-    lock.write_text("")  # a *fresh* lock: a live peer mid-write
+    lock.write_text("", encoding="utf-8")  # a *fresh* lock: a live peer mid-write
     released: list[int] = []
 
     def release_on_first_failure(attempt: int, result: subprocess.CompletedProcess) -> None:
@@ -141,7 +141,7 @@ def test_unlocked_reclaim_preserves_young_lock_but_force_reclaims_orphan(tmp_pat
 
     tracker = _fresh_tracker(tmp_path, "young")
     lock = _index_lock_path(tracker)
-    lock.write_text("")  # fresh mtime (age ~0), never released
+    lock.write_text("", encoding="utf-8")  # fresh mtime (age ~0), never released
 
     _reclaim_if_stale_index_lock(tracker, force=False)
     assert lock.exists(), "unlocked reclaim must leave a young lock intact (possible live peer)"

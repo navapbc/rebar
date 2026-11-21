@@ -153,7 +153,7 @@ def _store_text(repo: Path) -> str:
     for path in repo.rglob("*"):
         if path.is_file():
             try:
-                chunks.append(path.read_text(errors="replace"))
+                chunks.append(path.read_text(errors="replace", encoding="utf-8"))
             except OSError:  # pragma: no cover - defensive
                 continue
     return "\n".join(chunks)
@@ -295,7 +295,10 @@ def test_force_override_lands_the_write_and_records_it_as_forced(
     assert len(comments) == 1, "the forced write must land"
 
     tracker = _tracker(rebar_repo)
-    events = [json.loads(p.read_text()) for p in sorted((tracker / ticket).glob("*-COMMENT.json"))]
+    events = [
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in sorted((tracker / ticket).glob("*-COMMENT.json"))
+    ]
     assert len(events) == 1
     override = events[0]["data"].get("secret_override")
     assert override, "a forced write must be recorded as forced"
@@ -315,7 +318,7 @@ def test_a_clean_write_carries_no_override_marker(ticket: str, rebar_repo: Path)
     """Distinguishability runs both ways: a clean write is unmarked."""
     leaf.comment(ticket, "nothing to see here", repo_root=str(rebar_repo))
     tracker = _tracker(rebar_repo)
-    event = json.loads(next((tracker / ticket).glob("*-COMMENT.json")).read_text())
+    event = json.loads(next((tracker / ticket).glob("*-COMMENT.json")).read_text(encoding="utf-8"))
     assert "secret_override" not in event["data"]
 
 
@@ -452,7 +455,7 @@ def test_the_inbound_jira_translate_routes_through_the_shared_seam() -> None:
     import importlib
 
     module = importlib.import_module("rebar.reconciler.inbound_translate")
-    source = Path(module.__file__).read_text()
+    source = Path(module.__file__).read_text(encoding="utf-8")
     assert "_seam.finalize_event(" in source
     assert "_seam._apply_authorship(" not in source
 

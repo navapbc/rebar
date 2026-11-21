@@ -28,13 +28,15 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _enable_completion_gate(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _story_on_a_tracked_branch(repo: Path) -> tuple[str, str]:
     """A story whose own commit (A) carries its trailer, with ``origin/main`` tracking A."""
     story = rebar.create_ticket("task", "raced story", description=_DESC, repo_root=str(repo))
-    (repo / "story.py").write_text("# story change\n")
+    (repo / "story.py").write_text("# story change\n", encoding="utf-8")
     _git(repo, "add", "story.py")
     _git(repo, "commit", "-q", "-m", f"story change\n\nrebar-ticket: {story}")
     a = _git(repo, "rev-parse", "HEAD")
@@ -56,7 +58,7 @@ def test_symbolic_ref_close_pins_across_a_concurrent_fetch(
         verified = resolve_ref(ref or "HEAD", repo_root, fetch=False)
         # ...then a concurrent `git fetch` elsewhere advances origin/main A -> B under us.
         root = Path(repo_root)
-        (root / "unrelated.py").write_text("# someone else's landed work\n")
+        (root / "unrelated.py").write_text("# someone else's landed work\n", encoding="utf-8")
         _git(root, "add", "unrelated.py")
         _git(root, "commit", "-q", "-m", "unrelated work landed on main")
         _git(root, "update-ref", _TRACKING, _git(root, "rev-parse", "HEAD"))
@@ -90,7 +92,7 @@ def test_symbolic_ref_close_reports_a_signed_completion_signature(
     def racing_verify(ticket_id, *, ref=None, repo_root=None, **kwargs):
         verified = resolve_ref(ref or "HEAD", repo_root, fetch=False)
         root = Path(repo_root)
-        (root / "unrelated.py").write_text("# someone else's landed work\n")
+        (root / "unrelated.py").write_text("# someone else's landed work\n", encoding="utf-8")
         _git(root, "add", "unrelated.py")
         _git(root, "commit", "-q", "-m", "unrelated work landed on main")
         _git(root, "update-ref", _TRACKING, _git(root, "rev-parse", "HEAD"))

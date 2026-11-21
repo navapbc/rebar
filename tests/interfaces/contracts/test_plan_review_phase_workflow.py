@@ -12,10 +12,14 @@ ROOT = Path(__file__).parents[3]
 
 def test_phase_is_required_by_both_workflow_contracts() -> None:
     precheck = json.loads(
-        (ROOT / "src/rebar/schemas/plan_review_precheck_output.schema.json").read_text()
+        (ROOT / "src/rebar/schemas/plan_review_precheck_output.schema.json").read_text(
+            encoding="utf-8"
+        )
     )
     decide = json.loads(
-        (ROOT / "src/rebar/schemas/plan_review_decide_input.schema.json").read_text()
+        (ROOT / "src/rebar/schemas/plan_review_decide_input.schema.json").read_text(
+            encoding="utf-8"
+        )
     )
     enum = {"type": "string", "enum": ["planning", "execution"]}
     for schema in (precheck, decide):
@@ -26,7 +30,9 @@ def test_phase_is_required_by_both_workflow_contracts() -> None:
 
 
 def test_both_decide_branches_receive_precheck_phase() -> None:
-    workflow = yaml.safe_load((ROOT / "src/rebar/llm/workflow/gates/plan-review.yaml").read_text())
+    workflow = yaml.safe_load(
+        (ROOT / "src/rebar/llm/workflow/gates/plan-review.yaml").read_text(encoding="utf-8")
+    )
     decide_steps = []
 
     def walk(value):

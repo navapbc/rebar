@@ -27,7 +27,7 @@ _DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 
 def _dockerfile_digest() -> str:
     """The ONE place the harness image is pinned: the vendored Dockerfile's FROM line."""
-    for line in _HARNESS_DOCKERFILE.read_text().splitlines():
+    for line in _HARNESS_DOCKERFILE.read_text(encoding="utf-8").splitlines():
         if line.startswith("FROM"):
             found = _DIGEST_RE.search(line)
             if found:
@@ -37,7 +37,7 @@ def _dockerfile_digest() -> str:
 
 def _load() -> dict:
     assert _WORKFLOW.exists(), f"expected workflow missing: {_WORKFLOW}"
-    return yaml.safe_load(_WORKFLOW.read_text())
+    return yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
 
 
 def test_dispatch_only_no_push_pr_or_schedule() -> None:
@@ -69,7 +69,7 @@ def test_boots_the_same_digest_pinned_harness_dockerfile() -> None:
     place the base image is pinned by digest — rather than a second, independently-pinned
     (and driftable) image reference."""
     assert _HARNESS_DOCKERFILE.exists(), f"harness Dockerfile missing: {_HARNESS_DOCKERFILE}"
-    dockerfile_text = _HARNESS_DOCKERFILE.read_text()
+    dockerfile_text = _HARNESS_DOCKERFILE.read_text(encoding="utf-8")
     assert "@sha256:" in dockerfile_text.splitlines()[0] or any(
         line.startswith("FROM") and "@sha256:" in line for line in dockerfile_text.splitlines()
     ), f"{_HARNESS_DOCKERFILE} no longer pins its base image by digest"
@@ -142,7 +142,9 @@ def test_reported_digest_follows_a_repinned_dockerfile(tmp_path: Path) -> None:
     """
     other = "sha256:" + "ab" * 32
     repinned = tmp_path / "Dockerfile"
-    repinned.write_text(f"# a re-pinned harness\nFROM addono/jira-software-standalone@{other}\n")
+    repinned.write_text(
+        f"# a re-pinned harness\nFROM addono/jira-software-standalone@{other}\n", encoding="utf-8"
+    )
     done = _run_map_script("--print-digest", "--dockerfile", str(repinned))
     assert done.returncode == 0, f"--print-digest failed: {done.stderr}"
     assert done.stdout.strip() == other, (
@@ -161,7 +163,7 @@ def test_reported_digest_is_unknown_when_the_dockerfile_stops_pinning(tmp_path: 
     metadata detail would throw away the evidence the run exists to collect.
     """
     unpinned = tmp_path / "Dockerfile"
-    unpinned.write_text("FROM addono/jira-software-standalone:latest\n")
+    unpinned.write_text("FROM addono/jira-software-standalone:latest\n", encoding="utf-8")
     done = _run_map_script("--print-digest", "--dockerfile", str(unpinned))
     assert done.returncode == 0, f"exited {done.returncode} instead of reporting unknown"
     assert "Traceback" not in done.stderr, f"crashed on an unpinned Dockerfile: {done.stderr}"
@@ -176,7 +178,7 @@ def test_committed_map_records_the_digest_it_was_measured_against() -> None:
     """
     assert _MAP_DOC.exists(), f"committed capability map missing: {_MAP_DOC}"
     digest = _dockerfile_digest()
-    assert digest in _MAP_DOC.read_text(), (
+    assert digest in _MAP_DOC.read_text(encoding="utf-8"), (
         f"{_MAP_DOC} does not record the currently-pinned harness digest ({digest}). Either "
         f"the map was never told which image it measured, or the Dockerfile has been re-pinned "
         f"since — in which case every answer in that doc now describes an image nothing runs. "
@@ -220,7 +222,7 @@ _PROBE_WORKFLOW = _ROOT / ".github" / "workflows" / "jira-dc-epic-link-probe.yml
 
 def _load_probe() -> dict:
     assert _PROBE_WORKFLOW.exists(), f"expected workflow missing: {_PROBE_WORKFLOW}"
-    return yaml.safe_load(_PROBE_WORKFLOW.read_text())
+    return yaml.safe_load(_PROBE_WORKFLOW.read_text(encoding="utf-8"))
 
 
 def test_probe_is_dispatch_only_no_push_pr_or_schedule() -> None:
@@ -254,7 +256,7 @@ def test_probe_does_not_invoke_the_capability_map() -> None:
     re-running it to settle two narrow questions would be slow, billable, and would risk
     churning landed data. Asserted on the workflow text so the constraint survives an edit.
     """
-    text = _PROBE_WORKFLOW.read_text()
+    text = _PROBE_WORKFLOW.read_text(encoding="utf-8")
     assert "jira_dc_capability_map.py" not in text, (
         "the probe workflow invokes the capability-map script — it must run ONLY the targeted "
         "deterministic probe (scripts/jira_dc_epic_link_clear_probe.py)"
@@ -413,7 +415,7 @@ def test_script_adds_no_pre_create_field_wait() -> None:
     creates the project. Such a wait would block on work the agent has not yet
     performed.
     """
-    text = _MAP_SCRIPT.read_text()
+    text = _MAP_SCRIPT.read_text(encoding="utf-8")
     assert "await_required_fields(" not in text, (
         "scripts/jira_dc_capability_map.py calls await_required_fields — that wait is "
         "post-project-create ONLY, and nothing in this script creates a project before the "
@@ -457,7 +459,7 @@ def _drive_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answer: dict, i
 
     out = tmp_path / "out"
     code = mod.main(["--output-dir", str(out), "--base-url", "http://jira.invalid"])
-    return code, json.loads((out / "run_metadata.json").read_text()), out
+    return code, json.loads((out / "run_metadata.json").read_text(encoding="utf-8")), out
 
 
 def test_main_fails_and_records_unverified_on_an_unvouchable_absence(

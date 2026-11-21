@@ -15,11 +15,11 @@ _AGENTS = _ROOT / "AGENTS.md"
 
 
 def _guide_text() -> str:
-    return _GUIDE.read_text().lower()
+    return _GUIDE.read_text(encoding="utf-8").lower()
 
 
 def test_agents_md_links_to_the_guide():
-    text = _AGENTS.read_text()
+    text = _AGENTS.read_text(encoding="utf-8")
     assert "chatgpt-agent-guide.md" in text
 
 
@@ -54,7 +54,9 @@ def test_guide_names_rebar_import_as_the_only_sanctioned_ingest_mechanism():
 def test_guide_fallback_fields_match_export_schema_required_array():
     import json
 
-    schema = json.loads((_ROOT / "src/rebar/schemas/export.schema.json").read_text())
+    schema = json.loads(
+        (_ROOT / "src/rebar/schemas/export.schema.json").read_text(encoding="utf-8")
+    )
     required = schema["required"]
     text = _guide_text()
     for field in required:

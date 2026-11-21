@@ -193,7 +193,7 @@ def test_the_alert_does_not_claim_the_issue_was_deleted(store, tmp_path) -> None
         )
 
     alerts = list((tmp_path / ".tickets-tracker").rglob("*BRIDGE_ALERT.json"))
-    body = json.loads(alerts[0].read_text())
+    body = json.loads(alerts[0].read_text(encoding="utf-8"))
     blob = json.dumps(body).lower()
     assert "deleted" not in blob, (
         f"the alert still claims the issue was deleted, which is no longer true: {body!r}"

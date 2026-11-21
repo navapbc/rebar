@@ -36,7 +36,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -71,14 +71,14 @@ def _environment(tmp_path: Path, data_mount: Path) -> tuple[dict[str, str], Path
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
 
     journal = tmp_path / "journal.txt"
-    journal.write_text("")
+    journal.write_text("", encoding="utf-8")
     _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
     _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
 
     env = observability_env(tmp_path)
     env.update(
@@ -92,7 +92,7 @@ def _environment(tmp_path: Path, data_mount: Path) -> tuple[dict[str, str], Path
             **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
         }
     )
-    (tmp_path / "replication.log").write_text("")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
     return env, aws_log, logger_log
 
 
@@ -100,7 +100,7 @@ def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
     if not log.exists():
         return values
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -138,7 +138,7 @@ def test_clean_site_only_volume_publishes_zero(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert _values(aws_log, METRIC) == [0]
-    assert "debris_bytes=0" in logger_log.read_text()
+    assert "debris_bytes=0" in logger_log.read_text(encoding="utf-8")
 
 
 def test_planted_evidence_directory_is_detected_and_named(tmp_path: Path) -> None:
@@ -155,7 +155,7 @@ def test_planted_evidence_directory_is_detected_and_named(tmp_path: Path) -> Non
     # >= the planted payload (directory entries add their own blocks), and well under the
     # 256 KiB of legitimate `site/` content plus the payload — proving `site/` was excluded.
     assert 512 * 1024 <= published[0] < 700 * 1024
-    logged = logger_log.read_text()
+    logged = logger_log.read_text(encoding="utf-8")
     assert "rebar-quiet-window-evidence" in logged
     assert "investigation output does not belong here" in logged
 
@@ -171,7 +171,7 @@ def test_multiple_debris_entries_are_summed(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert _values(aws_log, METRIC)[0] >= 512 * 1024
-    logged = logger_log.read_text()
+    logged = logger_log.read_text(encoding="utf-8")
     assert "rebar-quiet-window-evidence" in logged
     assert "profiling-scratch" in logged
 
@@ -186,7 +186,7 @@ def test_hidden_debris_is_not_missed(tmp_path: Path) -> None:
 
     assert result.returncode == 0
     assert _values(aws_log, METRIC)[0] >= 256 * 1024
-    assert ".epoch-probe-scratch" in logger_log.read_text()
+    assert ".epoch-probe-scratch" in logger_log.read_text(encoding="utf-8")
 
 
 def test_absent_mount_publishes_nothing_rather_than_a_reassuring_zero(tmp_path: Path) -> None:

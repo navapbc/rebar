@@ -139,7 +139,7 @@ def test_legacy_plan_v2_sidecar_reads_as_is(rebar_repo: Path) -> None:
             }
         ],
     }
-    (tracker / "100-REVIEW_RESULT.json").write_text(json.dumps({"data": legacy}))
+    (tracker / "100-REVIEW_RESULT.json").write_text(json.dumps({"data": legacy}), encoding="utf-8")
     got = sidecar.latest_review_result("t-legacy", repo_root=str(rebar_repo))
     assert got is not None
     assert got["impact_model_version"] == "plan-v2"

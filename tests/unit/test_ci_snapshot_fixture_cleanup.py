@@ -51,11 +51,11 @@ def _git(*args: str, cwd: Path) -> None:
 def test_cross_module_snapshot_is_read_only(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    (tmp_path.parent / "adjacent.txt").write_text("keep\n")
+    (tmp_path.parent / "adjacent.txt").write_text("keep\n", encoding="utf-8")
     _git("init", cwd=repo)
     _git("config", "user.email", "test@example.com", cwd=repo)
     _git("config", "user.name", "Test User", cwd=repo)
-    (repo / "a.py").write_text("x = 1\n")
+    (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
     _git("add", "a.py", cwd=repo)
     _git("commit", "-m", "initial", cwd=repo)
 
@@ -89,7 +89,7 @@ def test_completed_snapshot_test_leaves_basetemp_removable(
     assert result.returncode == 0, result.stdout + result.stderr
     assert basetemp.is_dir()
     if selected_node.endswith("::test_cross_module_snapshot_is_read_only"):
-        assert (basetemp / "adjacent.txt").read_text() == "keep\n"
+        assert (basetemp / "adjacent.txt").read_text(encoding="utf-8") == "keep\n"
 
     if sys.version_info >= (3, 12):
         shutil.rmtree(basetemp, onexc=_clear_git_readonly_and_retry)
@@ -106,9 +106,9 @@ def test_snapshot_cleanup_tolerates_disappearing_tracker_lock(
     tracker.mkdir(parents=True)
     snapshot_root = tmp_path / "repo" / ".rebar" / "run_snapshots"
     (snapshot_root / "sha" / "result.json").parent.mkdir(parents=True)
-    (snapshot_root / "sha" / "result.json").write_text("{}\n")
+    (snapshot_root / "sha" / "result.json").write_text("{}\n", encoding="utf-8")
     adjacent = tmp_path / "adjacent.txt"
-    adjacent.write_text("keep\n")
+    adjacent.write_text("keep\n", encoding="utf-8")
 
     handle = lock.acquire(tracker, timeout=1, attempts=1)
     lock_dir = tracker / lock.MKDIR_LOCK_NAME
@@ -152,7 +152,7 @@ def test_snapshot_cleanup_tolerates_disappearing_tracker_lock(
 
     assert released
     assert not snapshot_root.exists()
-    assert adjacent.read_text() == "keep\n"
+    assert adjacent.read_text(encoding="utf-8") == "keep\n"
 
 
 def test_snapshot_cleanup_does_not_hide_other_scan_errors(
@@ -184,7 +184,7 @@ def test_snapshot_cleanup_ignores_ambient_path_flavour(
     snapshot_root = tmp_path / "repo" / ".rebar" / "run_snapshots"
     result = snapshot_root / "sha" / "result.json"
     result.parent.mkdir(parents=True)
-    result.write_text("{}\n")
+    result.write_text("{}\n", encoding="utf-8")
     adjacent = tmp_path / "adjacent.txt"
     adjacent.write_bytes(b"keep\n")
 

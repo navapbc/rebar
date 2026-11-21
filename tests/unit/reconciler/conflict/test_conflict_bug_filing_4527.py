@@ -56,7 +56,7 @@ def _pending(**over):
 
 def _cli(tmp_path: Path) -> Path:
     cli = tmp_path / "rebar-cli"
-    cli.write_text("#!/bin/sh\n")
+    cli.write_text("#!/bin/sh\n", encoding="utf-8")
     return cli
 
 

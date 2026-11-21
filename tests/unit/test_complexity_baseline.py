@@ -736,19 +736,19 @@ def forked_repo(tmp_path: Path) -> Path:
         _git(repo, "config", k, v)
     baseline = repo / ".github" / "complexity-baseline.json"
 
-    baseline.write_text(_baseline_bytes({_KEY: 19}))
+    baseline.write_text(_baseline_bytes({_KEY: 19}), encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "fork point: ceiling 19")
     _git(repo, "branch", "-M", "main")
     fork_point = _git(repo, "rev-parse", "HEAD")
 
     _git(repo, "checkout", "-qb", "feature")  # branches here, never touches the baseline
-    (repo / "unrelated.txt").write_text("work\n")
+    (repo / "unrelated.txt").write_text("work\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "unrelated work")
 
     _git(repo, "checkout", "-q", "main")
-    baseline.write_text(_baseline_bytes({_KEY: 17}))  # main LOWERS the ceiling
+    baseline.write_text(_baseline_bytes({_KEY: 17}), encoding="utf-8")  # main LOWERS the ceiling
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "lower the ceiling to 17")
 
@@ -838,12 +838,12 @@ def test_no_merge_base_falls_back_to_the_tip_and_says_so(tmp_path: Path, monkeyp
     _git(repo.parent, "init", "-q", str(repo))
     for k, v in (("user.email", "t@example.com"), ("user.name", "T")):
         _git(repo, "config", k, v)
-    (repo / "a.txt").write_text("a\n")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "main")
     _git(repo, "branch", "-M", "main")
     _git(repo, "checkout", "-q", "--orphan", "detached")  # no shared history with main
-    (repo / "b.txt").write_text("b\n")
+    (repo / "b.txt").write_text("b\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "orphan")
     monkeypatch.setattr(ccb, "REPO_ROOT", repo)

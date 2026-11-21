@@ -133,7 +133,7 @@ def test_writer_without_explicit_environment_uses_stable_local_identity(
     released: list[dict | None] = []
     _install_main_stubs(monkeypatch, remote, released, "CONVERGED")
     monkeypatch.delenv("REBAR_ENV_ID", raising=False)
-    local_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text().strip()
+    local_id = (rebar_repo / ".tickets-tracker" / ".env-id").read_text(encoding="utf-8").strip()
 
     rc = reconciler_main.main(["sync", "--repo-root", str(rebar_repo)])
 

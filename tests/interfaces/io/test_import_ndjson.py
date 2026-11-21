@@ -179,7 +179,9 @@ def test_imported_close_respects_completion_verification_gate(tmp_path: Path, mo
     assert rebar.show_ticket(task, repo_root=str(src))["status"] == "closed"
 
     dst = _fresh_repo(tmp_path, "dst")
-    (dst / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (dst / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
     verifier_calls: list[str] = []
 
     def unavailable(ticket_id: str, **_kwargs) -> dict:

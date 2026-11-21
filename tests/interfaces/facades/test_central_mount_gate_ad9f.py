@@ -69,7 +69,9 @@ def test_verify_commit_ticket_auto_mounts_in_fresh_clone(
     clone, tid = clone_with_origin_tickets
     # Enable the gate so the command actually RESOLVES the id against the store (with the gate
     # off it short-circuits before any store access, which wouldn't exercise the mount).
-    (clone / "rebar.toml").write_text("[verify]\nrequire_ticket_for_commit = true\n")
+    (clone / "rebar.toml").write_text(
+        "[verify]\nrequire_ticket_for_commit = true\n", encoding="utf-8"
+    )
     _use_clone(clone, monkeypatch)
 
     code = main(["verify-commit-ticket", "--message", f"{tid}: the work"])

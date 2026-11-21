@@ -98,7 +98,9 @@ def test_one_store_maps_both_projects(rehearsal_store: Path) -> None:
     assert mapping[DIG_PROJECT]["repos"] == DIG_REPOS, "DIG has the wrong repo list"
 
     # The mapping record lives on the S3-backed tickets branch of one store.
-    record = json.loads((work / ".tickets-tracker" / ".bridge_state" / "projects.json").read_text())
+    record = json.loads(
+        (work / ".tickets-tracker" / ".bridge_state" / "projects.json").read_text(encoding="utf-8")
+    )
     assert set(record["projects"]) == {REB_PROJECT, DIG_PROJECT}
 
 
@@ -207,7 +209,9 @@ def test_s3_store_roundtrips_with_mapping_intact(rehearsal_store: Path, tmp_path
     clone = tmp_path / "s3-clone"
     git_run(["git", "clone", remote_url, str(clone)], cwd=tmp_path)
 
-    cloned_record = json.loads((clone / ".bridge_state" / "projects.json").read_text())
+    cloned_record = json.loads(
+        (clone / ".bridge_state" / "projects.json").read_text(encoding="utf-8")
+    )
     assert set(cloned_record["projects"]) == {REB_PROJECT, DIG_PROJECT}, (
         f"the S3 round-trip lost the mapping; cloned projects={sorted(cloned_record['projects'])}"
     )

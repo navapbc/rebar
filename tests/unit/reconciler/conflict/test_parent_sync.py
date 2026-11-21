@@ -450,7 +450,7 @@ class TestApplierInboundCreateParent:
         assert ticket_dir.exists(), f"Ticket dir not created: {ticket_dir}"
         events = list(ticket_dir.glob("*-CREATE.json"))
         assert events, f"No CREATE event found in {ticket_dir}"
-        create_data = json.loads(events[0].read_text())
+        create_data = json.loads(events[0].read_text(encoding="utf-8"))
         # parent_id should be populated from the parent key resolution
         assert create_data["data"].get("parent_id") == "jira-dig-59", (
             f"Expected parent_id='jira-dig-59', got: {create_data['data']}"
@@ -500,7 +500,9 @@ class TestApplierInboundUpdateParent:
                 "tags": [],
             },
         }
-        (ticket_dir / f"{ts}-{uid}-CREATE.json").write_text(json.dumps(create_event))
+        (ticket_dir / f"{ts}-{uid}-CREATE.json").write_text(
+            json.dumps(create_event), encoding="utf-8"
+        )
 
         mut = mm.Mutation(
             direction=mm.MutationDirection.inbound,
@@ -530,7 +532,7 @@ class TestApplierInboundUpdateParent:
         assert edit_events, f"No EDIT event found in {ticket_dir}"
         found_parent = False
         for ef in edit_events:
-            ed = json.loads(ef.read_text())
+            ed = json.loads(ef.read_text(encoding="utf-8"))
             if "parent_id" in (ed.get("data", {}).get("fields", {})):
                 found_parent = True
                 assert ed["data"]["fields"]["parent_id"] == "jira-dig-NEW"
@@ -617,7 +619,7 @@ class TestFetcherParentEnrichment:
 
         import json
 
-        snapshot = json.loads(output_path.read_text())
+        snapshot = json.loads(output_path.read_text(encoding="utf-8"))
         assert "DIG-90" in snapshot, f"DIG-90 missing from snapshot: {list(snapshot.keys())}"
         # After enrichment, the snapshot entry should have a parent field
         assert snapshot["DIG-90"].get("parent") == {"key": "DIG-91"}, (
@@ -654,6 +656,6 @@ class TestFetcherParentEnrichment:
 
         import json
 
-        snapshot = json.loads(output_path.read_text())
+        snapshot = json.loads(output_path.read_text(encoding="utf-8"))
         # Snapshot was still written despite failure
         assert "DIG-95" in snapshot, f"Snapshot should still contain DIG-95: {snapshot}"

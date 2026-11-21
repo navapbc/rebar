@@ -51,7 +51,7 @@ def tracker_with_unmerged_bridge_state(tmp_path: Path) -> str:
     _git(td, "config", "user.name", "T")
     bs = td / ".bridge_state"
     bs.mkdir()
-    (bs / "prev_snapshot.json").write_text('{"clean": true}\n')
+    (bs / "prev_snapshot.json").write_text('{"clean": true}\n', encoding="utf-8")
     _git(td, "add", "-A")
     _git(td, "commit", "-q", "-m", "seed")
     # Synthesize an unmerged index entry (stages 1/2/3) with no MERGE_HEAD.
@@ -60,7 +60,7 @@ def tracker_with_unmerged_bridge_state(tmp_path: Path) -> str:
     info = f"100644 {b1} 1\t{rel}\n100644 {b2} 2\t{rel}\n100644 {b3} 3\t{rel}\n"
     _git(td, "update-index", "--index-info", _in=info)
     (bs / "prev_snapshot.json").write_text(
-        '<<<<<<< ours\n{"ours":2}\n=======\n{"theirs":3}\n>>>>>>> theirs\n'
+        '<<<<<<< ours\n{"ours":2}\n=======\n{"theirs":3}\n>>>>>>> theirs\n', encoding="utf-8"
     )
     assert _git(td, "ls-files", "-u", rel).stdout.strip() != "", "fixture must create a UU"
     return str(td)
@@ -100,11 +100,11 @@ def _tracker_with_unmerged(tmp_path: Path, rel: str, *, seed_path: bool) -> str:
     _git(td, "config", "user.email", "t@e.com")
     _git(td, "config", "user.name", "T")
     (td / ".bridge_state").mkdir()
-    (td / ".bridge_state" / "prev_snapshot.json").write_text("{}\n")
+    (td / ".bridge_state" / "prev_snapshot.json").write_text("{}\n", encoding="utf-8")
     if seed_path:
         p = td / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("seed\n")
+        p.write_text("seed\n", encoding="utf-8")
     _git(td, "add", "-A")
     _git(td, "commit", "-q", "-m", "seed")
     b1, b2, b3 = (_hash_object(td, c) for c in ("base\n", "ours\n", "theirs\n"))
@@ -112,7 +112,7 @@ def _tracker_with_unmerged(tmp_path: Path, rel: str, *, seed_path: bool) -> str:
     _git(td, "update-index", "--index-info", _in=info)
     f = td / rel
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text("<<<<<<< ours\nours\n=======\ntheirs\n>>>>>>> theirs\n")
+    f.write_text("<<<<<<< ours\nours\n=======\ntheirs\n>>>>>>> theirs\n", encoding="utf-8")
     assert _git(td, "ls-files", "-u", rel).stdout.strip() != "", "fixture must create a UU"
     return str(td)
 

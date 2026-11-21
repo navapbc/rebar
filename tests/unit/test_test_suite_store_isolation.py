@@ -37,7 +37,7 @@ def test_nested_pytest_does_not_clean_shared_numbered_temp_root(
     for number in range(4):
         (shared_root / f"pytest-{number}").mkdir(parents=True)
     sentinel = shared_root / "pytest-0" / "belongs-to-another-run"
-    sentinel.write_text("must survive\n")
+    sentinel.write_text("must survive\n", encoding="utf-8")
     entries_before = {path.name for path in shared_root.iterdir()}
     assert sentinel.is_file()
 
@@ -45,7 +45,7 @@ def test_nested_pytest_does_not_clean_shared_numbered_temp_root(
     assert_nodes_do_not_mutate_external_store(tmp_path, node_id)
 
     assert sentinel.is_file(), "nested pytest deleted another run's temp tree"
-    assert sentinel.read_text() == "must survive\n"
+    assert sentinel.read_text(encoding="utf-8") == "must survive\n"
     assert {path.name for path in shared_root.iterdir()} == entries_before
 
 

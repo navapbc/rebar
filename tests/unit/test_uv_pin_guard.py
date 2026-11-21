@@ -240,7 +240,9 @@ def test_missing_local_action_is_rejected(tree: Path) -> None:
 def test_manifest_source_in_local_action_is_rejected(tree: Path) -> None:
     """The replacement action must not regain setup-uv's raw manifest fetch."""
     action = tree / ".github" / "actions" / "setup-uv" / "action.yml"
-    action.write_text(action.read_text(encoding="utf-8") + "\n# raw.githubusercontent.com\n")
+    action.write_text(
+        action.read_text(encoding="utf-8") + "\n# raw.githubusercontent.com\n", encoding="utf-8"
+    )
     result = _run(tree)
     assert result.returncode == 1
     assert "raw.githubusercontent.com" in result.stderr

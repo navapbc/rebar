@@ -365,7 +365,7 @@ def _runner_scanned_sources() -> dict[str, str]:
         path = pkg / f"{name}.py"
         if not path.is_file():
             continue
-        sources[name] = path.read_text()
+        sources[name] = path.read_text(encoding="utf-8")
         for node in ast.walk(ast.parse(sources[name])):
             if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("rebar.llm"):
                 tail = (node.module or "").rsplit(".", 1)[-1]

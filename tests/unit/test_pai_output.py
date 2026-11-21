@@ -280,7 +280,7 @@ def test_pai_output_adds_no_scheduling_usage_or_persistence():
 
     from rebar.llm import pai_output
 
-    src = Path(pai_output.__file__).read_text()
+    src = Path(pai_output.__file__).read_text(encoding="utf-8")
     imported: set[str] = set()
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.ImportFrom) and node.module:

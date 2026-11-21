@@ -38,7 +38,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -91,7 +91,7 @@ def _environment(
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
 
     journal = tmp_path / "journal.txt"
-    journal.write_text("".join(f"{line}\n" for line in journal_lines))
+    journal.write_text("".join(f"{line}\n" for line in journal_lines), encoding="utf-8")
     _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
     _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
@@ -102,7 +102,7 @@ def _environment(
         # Cursor 0 counts the first journal entries; absent or bare state would
         # cold-start at the tail and publish 0. The replication log keeps a bare total.
         for name, path in paths.items():
-            path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
+            path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n", encoding="utf-8")
     env = observability_env(tmp_path)
     env.update(
         {
@@ -113,20 +113,20 @@ def _environment(
             **{name: str(path) for name, path in paths.items()},
         }
     )
-    (tmp_path / "replication.log").write_text("")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
     return env, aws_log, paths
 
 
 def _state_total(path: Path) -> str:
     """Read the cumulative total from cursor-backed state."""
-    return path.read_text().split()[0]
+    return path.read_text(encoding="utf-8").split()[0]
 
 
 def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
     if not log.exists():
         return values
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -169,7 +169,7 @@ def test_second_run_publishes_only_the_new_markers(tmp_path: Path) -> None:
 
     first = _run(env)
     journal = Path(env["JOURNAL_FILE"])
-    journal.write_text(journal.read_text() + _marker() + "\n")
+    journal.write_text(journal.read_text(encoding="utf-8") + _marker() + "\n", encoding="utf-8")
     second = _run(env)
 
     assert (first.returncode, second.returncode) == (0, 0)
@@ -249,7 +249,9 @@ def test_persistence_second_run_publishes_only_the_new_markers(tmp_path: Path) -
 
     first = _run(env)
     journal = Path(env["JOURNAL_FILE"])
-    journal.write_text(journal.read_text() + _persist_marker(4) + "\n")
+    journal.write_text(
+        journal.read_text(encoding="utf-8") + _persist_marker(4) + "\n", encoding="utf-8"
+    )
     second = _run(env)
 
     assert (first.returncode, second.returncode) == (0, 0)
@@ -283,7 +285,7 @@ def _dimensioned(log: Path, metric: str, mount: str) -> list[int]:
     so a test that ignored dimensions could not tell the two publishers apart.
     """
     values: list[int] = []
-    for line in log.read_text().splitlines() if log.exists() else []:
+    for line in log.read_text(encoding="utf-8").splitlines() if log.exists() else []:
         parts = line.split()
         if "--metric-name" not in parts or parts[parts.index("--metric-name") + 1] != metric:
             continue
@@ -295,7 +297,7 @@ def _dimensioned(log: Path, metric: str, mount: str) -> list[int]:
 
 def _dimensioned_scratch_volume(log: Path, metric: str, mount: str, volume_id: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines() if log.exists() else []:
+    for line in log.read_text(encoding="utf-8").splitlines() if log.exists() else []:
         parts = line.split()
         if "--metric-name" not in parts or parts[parts.index("--metric-name") + 1] != metric:
             continue
@@ -314,7 +316,7 @@ def _scratch_env(tmp_path: Path, *, mounted: bool) -> tuple[dict[str, str], Path
     scratch = tmp_path / "gate-scratch"
     scratch.mkdir()
     if mounted:
-        (scratch / ".gate-scratch-mounted").write_text("")
+        (scratch / ".gate-scratch-mounted").write_text("", encoding="utf-8")
     env["GATE_SCRATCH_MOUNT"] = str(scratch)
     return env, aws_log, scratch
 
@@ -323,7 +325,7 @@ def test_scratch_volume_join_failure_publishes_unknown_every_tick(tmp_path: Path
     env, aws_log, scratch = _scratch_env(tmp_path, mounted=True)
     volume_id = "vol-06780b8557d1416b7"
     volume_id_file = tmp_path / "gate-scratch-volume-id"
-    volume_id_file.write_text(volume_id)
+    volume_id_file.write_text(volume_id, encoding="utf-8")
     env["GATE_SCRATCH_VOLUME_ID_FILE"] = str(volume_id_file)
     _stub(tmp_path / "bin", "lsblk", "exit 2")
 
@@ -338,7 +340,7 @@ def test_scratch_volume_join_success_publishes_one_every_tick(tmp_path: Path) ->
     env, aws_log, scratch = _scratch_env(tmp_path, mounted=True)
     volume_id = "vol-06780b8557d1416b7"
     volume_id_file = tmp_path / "gate-scratch-volume-id"
-    volume_id_file.write_text(volume_id)
+    volume_id_file.write_text(volume_id, encoding="utf-8")
     env["GATE_SCRATCH_VOLUME_ID_FILE"] = str(volume_id_file)
     _stub(
         tmp_path / "bin",
@@ -357,7 +359,7 @@ def test_scratch_volume_join_mismatch_publishes_zero_every_tick(tmp_path: Path) 
     env, aws_log, scratch = _scratch_env(tmp_path, mounted=True)
     volume_id = "vol-06780b8557d1416b7"
     volume_id_file = tmp_path / "gate-scratch-volume-id"
-    volume_id_file.write_text(volume_id)
+    volume_id_file.write_text(volume_id, encoding="utf-8")
     env["GATE_SCRATCH_VOLUME_ID_FILE"] = str(volume_id_file)
     _stub(
         tmp_path / "bin",
@@ -404,7 +406,9 @@ def test_the_probe_reads_the_same_marker_the_gate_refusal_reads(tmp_path: Path) 
     from rebar.llm import gate_admission as ga
 
     code = "\n".join(
-        line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("#")
+        line
+        for line in SCRIPT.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
     )
     assert ga._SCRATCH_MOUNTED_MARKER in code
     assert "mountpoint" not in code

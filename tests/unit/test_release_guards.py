@@ -124,11 +124,11 @@ def test_cli_mcp_registry_description_exit_codes(tmp_path: Path) -> None:
     import json
 
     ok_path = tmp_path / "server_ok.json"
-    ok_path.write_text(json.dumps({"description": "short"}))
+    ok_path.write_text(json.dumps({"description": "short"}), encoding="utf-8")
     assert rg.main(["mcp-registry-description", "--server-json", str(ok_path)]) == 0
 
     bad_path = tmp_path / "server_bad.json"
-    bad_path.write_text(json.dumps({"description": "x" * 101}))
+    bad_path.write_text(json.dumps({"description": "x" * 101}), encoding="utf-8")
     assert rg.main(["mcp-registry-description", "--server-json", str(bad_path)]) == 1
 
 
@@ -156,19 +156,19 @@ def repo(tmp_path: Path):
     r = tmp_path / "r"
     r.mkdir()
     _git(r, "init", "-q", "-b", "main")
-    (r / "f").write_text("a")
+    (r / "f").write_text("a", encoding="utf-8")
     _git(r, "add", ".")
     _git(r, "commit", "-qm", "A")
     sha_a = _git(r, "rev-parse", "HEAD")
-    (r / "f").write_text("b")
+    (r / "f").write_text("b", encoding="utf-8")
     _git(r, "commit", "-qam", "B")
     sha_b = _git(r, "rev-parse", "HEAD")
-    (r / "f").write_text("c")
+    (r / "f").write_text("c", encoding="utf-8")
     _git(r, "commit", "-qam", "C")
     sha_c = _git(r, "rev-parse", "HEAD")
     # A sibling commit forked off A, never merged into main.
     _git(r, "checkout", "-q", "-b", "side", sha_a)
-    (r / "g").write_text("d")
+    (r / "g").write_text("d", encoding="utf-8")
     _git(r, "add", ".")
     _git(r, "commit", "-qm", "D")
     sha_d = _git(r, "rev-parse", "HEAD")
@@ -249,10 +249,10 @@ def test_env_preflight_branch_policy_extra_branch_fails() -> None:
 
 # ── CLI smoke (exit codes) ────────────────────────────────────────────────────
 def test_cli_version_lockstep_exit_codes(tmp_path: Path) -> None:
-    (tmp_path / "pyproject.toml").write_text(_PYPROJECT.format(v="0.7.2"))
+    (tmp_path / "pyproject.toml").write_text(_PYPROJECT.format(v="0.7.2"), encoding="utf-8")
     import json
 
-    (tmp_path / "server.json").write_text(json.dumps(_server("0.7.2", ["0.7.2"])))
+    (tmp_path / "server.json").write_text(json.dumps(_server("0.7.2", ["0.7.2"])), encoding="utf-8")
     ok = rg.main(
         [
             "version-lockstep",

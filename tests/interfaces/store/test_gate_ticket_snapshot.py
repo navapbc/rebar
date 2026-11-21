@@ -56,7 +56,7 @@ def repo_with_origin(tmp_path, monkeypatch):
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
 
-    (repo / "sentinel.txt").write_text("from-main\n")
+    (repo / "sentinel.txt").write_text("from-main\n", encoding="utf-8")
     _git(repo, "add", "sentinel.txt")
     _git(repo, "commit", "-q", "-m", "main content")
     _git(repo, "remote", "add", "origin", str(remote))
@@ -148,11 +148,11 @@ def _detach_tracker_as_clone(repo: Path) -> str:
     remote = _git(tracker, "remote", "get-url", "origin")
     # `.env-id` is gitignored — it is local state, not branch content — so a clone would not
     # carry it and every write would refuse with "ticket system not initialized".
-    env_id = (tracker / ".env-id").read_text()
+    env_id = (tracker / ".env-id").read_text(encoding="utf-8")
     _git(tracker, "push", "-q", "origin", "tickets")
     _git(repo, "worktree", "remove", "--force", ".tickets-tracker")
     subprocess.run(["git", "clone", "-q", "-b", "tickets", remote, str(tracker)], check=True)
-    (tracker / ".env-id").write_text(env_id)
+    (tracker / ".env-id").write_text(env_id, encoding="utf-8")
     _git(tracker, "config", "user.email", "t@example.com")
     _git(tracker, "config", "user.name", "Test")
     _git(tracker, "config", "commit.gpgsign", "false")
@@ -196,7 +196,7 @@ def test_fetch_true_pin_loses_nothing_that_origin_holds(repo_with_origin, gate_t
     _git(peer, "config", "user.email", "peer@example.com")
     _git(peer, "config", "user.name", "Peer")
     _git(peer, "config", "commit.gpgsign", "false")
-    (peer / "from-peer.marker").write_text("written by another agent\n")
+    (peer / "from-peer.marker").write_text("written by another agent\n", encoding="utf-8")
     _git(peer, "add", "from-peer.marker")
     _git(peer, "commit", "-q", "-m", "peer event")
     _git(peer, "push", "-q", "origin", "tickets")

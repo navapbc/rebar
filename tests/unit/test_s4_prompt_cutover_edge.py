@@ -27,7 +27,7 @@ def test_gate_doc_quotes_the_live_coach_template_verbatim() -> None:
     # The doc renders `{subject}` filled in, so compare the stable head and tail fragments.
     head = template.split("{subject}")[0].strip()
     tail = template.split("{subject}")[-1].strip()
-    doc = (REPO / "docs/plan-review-gate.md").read_text()
+    doc = (REPO / "docs/plan-review-gate.md").read_text(encoding="utf-8")
     assert head in doc, f"gate doc lost the move-14 template head: {head!r}"
     assert tail in doc, f"gate doc lost the move-14 template tail: {tail!r}"
 
@@ -37,7 +37,7 @@ def test_both_registry_rules_recognize_the_canonical_tag() -> None:
     `acceptance_items_classified` (the classification vocabulary) and
     `evidence_kind_matches_tag`, which FIRES on an untagged external outcome — left stale it
     would flag a correctly `[non-codebase]`-tagged criterion as untagged."""
-    blob = REGISTRY.read_text()
+    blob = REGISTRY.read_text(encoding="utf-8")
     for rule in ("acceptance_items_classified", "evidence_kind_matches_tag"):
         assert rule in blob, f"{rule} missing from the registry"
     data = json.loads(blob)
@@ -70,7 +70,7 @@ def test_both_registry_rules_recognize_the_canonical_tag() -> None:
 def test_recognition_prompts_teach_both_spellings(path: str) -> None:
     """Recognition-side prompts classify text the author already wrote, which may use either
     spelling. Teaching only one makes the LLM disagree with the deterministic matcher."""
-    body = (REPO / path).read_text()
+    body = (REPO / path).read_text(encoding="utf-8")
     assert "[non-codebase]" in body
     # A bare `operator-attested` substring is NOT sufficient evidence: these prompts also use
     # `operator-attested` as the name of the evidence KIND (the wire value), which is a
@@ -92,7 +92,7 @@ def test_contract_digests_were_deliberately_recomputed() -> None:
     )
 
     for path, (expected_digest, expected_count) in CONTRACT_DIGESTS.items():
-        lines = _contract_lines((REPO / path).read_text())
+        lines = _contract_lines((REPO / path).read_text(encoding="utf-8"))
         assert len(lines) == expected_count, (
             f"{path}: pinned count {expected_count} but found {len(lines)}"
         )
@@ -112,6 +112,6 @@ def test_contract_selector_still_matches_the_cutover_text() -> None:
         "src/rebar/llm/reviewers/plan_review_E6.md",
         "src/rebar/llm/plan_review/coach_moves.py",
     ):
-        assert _contract_lines((REPO / path).read_text()), (
+        assert _contract_lines((REPO / path).read_text(encoding="utf-8")), (
             f"{path}: selector matched NO contract lines after cutover"
         )

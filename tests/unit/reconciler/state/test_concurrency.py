@@ -40,7 +40,7 @@ def tmp_git_repo(tmp_path: Path) -> Path:
         capture_output=True,
     )
     readme = tmp_path / "README.md"
-    readme.write_text("hello\n")
+    readme.write_text("hello\n", encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(tmp_path), "add", "README.md"],
         check=True,

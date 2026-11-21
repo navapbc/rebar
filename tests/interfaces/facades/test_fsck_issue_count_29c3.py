@@ -63,7 +63,7 @@ def _seed_missing_create(repo: Path, ticket_id: str = "aaaa-bbbb-cccc-dddd") -> 
     d = repo / ".tickets-tracker" / ticket_id
     d.mkdir(parents=True, exist_ok=True)
     (d / "0001-comment.json").write_text(
-        json.dumps({"type": "COMMENT", "ticket_id": ticket_id, "body": "orphan"})
+        json.dumps({"type": "COMMENT", "ticket_id": ticket_id, "body": "orphan"}), encoding="utf-8"
     )
     return ticket_id
 

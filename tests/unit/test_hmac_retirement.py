@@ -78,7 +78,7 @@ def _hmac_snapshot_ticket(store: Path) -> str:
     tracker = _tracker(store)
     resolved = rebar.show_ticket(tid, repo_root=str(store))["ticket_id"]
     tdir = tracker / resolved
-    uuids = [json.loads(f.read_text()).get("uuid") for f in tdir.glob("*.json")]
+    uuids = [json.loads(f.read_text(encoding="utf-8")).get("uuid") for f in tdir.glob("*.json")]
     record = _legacy_attestation(resolved)
     compiled = {
         "ticket_id": resolved,

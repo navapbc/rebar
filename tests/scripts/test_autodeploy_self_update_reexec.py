@@ -156,12 +156,12 @@ esac
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
 def _install_script(dst: Path, *, with_mcp_marker: bool, with_bot_marker: bool) -> None:
-    text = AUTODEPLOY.read_text()
+    text = AUTODEPLOY.read_text(encoding="utf-8")
     if with_mcp_marker:
         assert _ANCHOR in text, "mcp_run_new anchor line moved; update _ANCHOR"
         text = text.replace(_ANCHOR, _INJECT, 1)
@@ -169,7 +169,7 @@ def _install_script(dst: Path, *, with_mcp_marker: bool, with_bot_marker: bool) 
         assert _BOT_ANCHOR in text, "review-bot deploy anchor moved; update _BOT_ANCHOR"
         text = text.replace(_BOT_ANCHOR, _BOT_INJECT, 1)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text(text)
+    dst.write_text(text, encoding="utf-8")
     dst.chmod(0o755)
 
 
@@ -194,9 +194,9 @@ def _make_box(
     deploy = tmp_path / "deploy"
     (deploy / "infra" / "compose").mkdir(parents=True)
     (deploy / "infra" / "scripts").mkdir(parents=True)
-    (deploy / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n")
+    (deploy / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n", encoding="utf-8")
     fetch = deploy / "infra" / "scripts" / "fetch-secrets.sh"
-    fetch.write_text("#!/usr/bin/env bash\nexit 0\n")
+    fetch.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     fetch.chmod(0o755)
     mirror = tmp_path / "mirror"
     (mirror / ".git").mkdir(parents=True)
@@ -212,16 +212,16 @@ def _make_box(
 
     cmd_log = tmp_path / "cmd-log"
     target_file = tmp_path / "target-sha"
-    target_file.write_text(_TARGET + "\n")
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    target_file.write_text(_TARGET + "\n", encoding="utf-8")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
 
     upstream = tmp_path / "mcp-upstream.conf"
-    upstream.write_text("server 127.0.0.1:8091;\n")
-    (dstate / "gerrit-id").write_text("gerrit-abc123\n")
-    (dstate / "health-8000").write_text('{"in_flight":0}')
+    upstream.write_text("server 127.0.0.1:8091;\n", encoding="utf-8")
+    (dstate / "gerrit-id").write_text("gerrit-abc123\n", encoding="utf-8")
+    (dstate / "health-8000").write_text('{"in_flight":0}', encoding="utf-8")
     # the boot backend on 8091 so the free blue/green port is 8092
-    (dstate / "containers").write_text("compose-mcp-1|8091|running|\n")
-    (dstate / "health-8091").write_text('{"in_flight":0}')
+    (dstate / "containers").write_text("compose-mcp-1|8091|running|\n", encoding="utf-8")
+    (dstate / "health-8091").write_text('{"in_flight":0}', encoding="utf-8")
 
     _stub(
         bin_dir,
@@ -305,7 +305,7 @@ def _run(box: dict[str, object]) -> subprocess.CompletedProcess[str]:
 
 def _cmds(box: dict[str, object]) -> list[str]:
     log: Path = box["cmd_log"]  # type: ignore[assignment]
-    return log.read_text().splitlines() if log.exists() else []
+    return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
 def _run_lines(cmds: list[str]) -> list[str]:
@@ -319,7 +319,7 @@ def _bot_build_lines(cmds: list[str]) -> list[str]:
 def _marker_file(box: dict[str, object], name: str) -> str:
     p: Path = box["state"]  # type: ignore[assignment]
     f = p / name
-    return f.read_text().strip() if f.exists() else ""
+    return f.read_text(encoding="utf-8").strip() if f.exists() else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -407,8 +407,8 @@ def test_component_marker_behind_global_current_still_rolls(box: dict[str, objec
     documented recovery for a mis-stamped component). The tick must recompute the component delta
     and roll mcp, not exit early at 'up to date; no-op'."""
     state: Path = box["state"]  # type: ignore[assignment]
-    (state / "deployed-sha").write_text(_TARGET + "\n")  # global current
-    (state / "mcp-deployed-sha").write_text(_DEPLOYED + "\n")  # component behind
+    (state / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # global current
+    (state / "mcp-deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")  # component behind
 
     result = _run(box)
     cmds = _cmds(box)

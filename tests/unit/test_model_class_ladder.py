@@ -212,7 +212,7 @@ def test_plan_review_yaml_ladder_carries_no_literal_model_id() -> None:
 
     from rebar.llm.model_classes import CLASS_NAMES
 
-    doc = yaml.safe_load(_PLAN_REVIEW_YAML.read_text())
+    doc = yaml.safe_load(_PLAN_REVIEW_YAML.read_text(encoding="utf-8"))
     ladders = _collect_ladders(doc)
     assert ladders, "no model_ladder found in plan-review.yaml — the AC would pass vacuously"
     for ladder in ladders:
@@ -312,7 +312,7 @@ def test_config_py_does_not_import_model_classes_at_module_level() -> None:
     """AC: the import-cycle guard. `model_classes` imports `config` at module scope and its own
     docstring forbids the reverse, so `config.resolve_model` must import LAZILY inside the
     function body."""
-    module = ast.parse(_CONFIG_PY.read_text())
+    module = ast.parse(_CONFIG_PY.read_text(encoding="utf-8"))
     offenders = [
         ast.unparse(node)
         for node in module.body

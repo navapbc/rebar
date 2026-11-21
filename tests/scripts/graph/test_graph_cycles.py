@@ -240,7 +240,7 @@ def test_cycle_detection_ignores_suggestions_dir(tmp_path: Path) -> None:
     suggestion_file = (
         suggestions_dir / "1778262194332-b25af26e-4e7d6a27-ad27-4d6a-8184-5f894b522b0e.json"
     )
-    suggestion_file.write_text(json.dumps(suggestion_payload))
+    suggestion_file.write_text(json.dumps(suggestion_payload), encoding="utf-8")
 
     # Capture stderr to detect any spurious warnings
     captured_stderr = io.StringIO()

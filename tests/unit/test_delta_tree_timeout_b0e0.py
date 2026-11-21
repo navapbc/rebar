@@ -67,7 +67,7 @@ def test_stalled_checkout_index_is_cut_off_and_fails_closed(tmp_path, monkeypatc
     )
 
     repo = _init_repo(tmp_path / "repo")
-    (repo / "a.txt").write_text("A")
+    (repo / "a.txt").write_text("A", encoding="utf-8")
     sha = _commit_all(repo, "seed")
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -97,13 +97,13 @@ def test_timeout_falls_back_to_full_materialization(tmp_path, monkeypatch):
     """AC2: a timeout returns ``False`` from ``_apply_delta`` rather than raising out of it,
     so the caller's full-materialization fallback runs and still yields the faithful tree."""
     repo = _init_repo(tmp_path / "repo")
-    (repo / "seed.txt").write_text("seed")
+    (repo / "seed.txt").write_text("seed", encoding="utf-8")
     _commit_all(repo, "seed")
     _git(repo, "checkout", "--quiet", "-b", "tickets")
     tdir = repo / "tickets"
     tdir.mkdir()
     for i in range(6):
-        (tdir / f"t{i}.json").write_text("T" * 500)
+        (tdir / f"t{i}.json").write_text("T" * 500, encoding="utf-8")
     _commit_all(repo, "tickets base")
 
     first = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
@@ -121,7 +121,7 @@ def test_timeout_falls_back_to_full_materialization(tmp_path, monkeypatch):
     # checkout-index through git_fetch.git_run, not through delta_tree.run_git.
     monkeypatch.setattr(delta_tree, "run_git", timing_out_run_git)
 
-    (tdir / "t0.json").write_text("T" * 499 + "X")
+    (tdir / "t0.json").write_text("T" * 499 + "X", encoding="utf-8")
     sha = _commit_all(repo, "one-file delta")
     second = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
     assert second != first

@@ -90,7 +90,9 @@ def test_the_store_copy_is_complete_and_scrubbed(dc_store_copy_repo: Path) -> No
     """
     tracker = dc_store_copy_repo / ".tickets-tracker"
     copied = {p.name for p in tracker.iterdir() if _is_ticket_entry(p.name)}
-    expected = set(json.loads((dc_store_copy_repo / ".j11-expected-entries.json").read_text()))
+    expected = set(
+        json.loads((dc_store_copy_repo / ".j11-expected-entries.json").read_text(encoding="utf-8"))
+    )
 
     assert copied, "the store copy is EMPTY — extraction landed somewhere the reconciler cannot see"
     assert copied == expected, (

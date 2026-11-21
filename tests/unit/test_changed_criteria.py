@@ -97,7 +97,9 @@ def test_no_rubric_change_selects_nothing_and_makes_no_model_call(tmp_path: Path
     base = _git(repo, "rev-parse", "HEAD")
     (repo / "README.md").write_text("no rubric here\n", encoding="utf-8")
     (repo / "src" / "rebar" / "llm" / "evals").mkdir(parents=True, exist_ok=True)
-    (repo / "src/rebar/llm/evals/changed_criteria.py").write_text("# code, not a rubric\n")
+    (repo / "src/rebar/llm/evals/changed_criteria.py").write_text(
+        "# code, not a rubric\n", encoding="utf-8"
+    )
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "non-rubric edits")
 

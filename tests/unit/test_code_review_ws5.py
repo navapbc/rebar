@@ -85,7 +85,7 @@ def test_detectors_from_file_fails_closed_on_broken_yaml(tmp_path):
     from rebar.grounding.detectors.registry import _detectors_from_file
 
     broken = tmp_path / "broken.yaml"
-    broken.write_text("rules: [unclosed\n")
+    broken.write_text("rules: [unclosed\n", encoding="utf-8")
     detectors, reason = _detectors_from_file(broken)
     assert detectors == []
     assert reason == "parse_error"
@@ -105,11 +105,11 @@ def test_detectors_from_file_skips_rule_missing_id_keeps_others(tmp_path):
     src = next(
         Path(d.source_path) for d in load_registry() if os.path.basename(d.source_path) == family
     )
-    doc = yaml.safe_load(src.read_text())
+    doc = yaml.safe_load(src.read_text(encoding="utf-8"))
     dropped_id = doc["rules"][0].pop("id")  # break exactly one rule
     assert dropped_id in full_ids
     mangled = tmp_path / family
-    mangled.write_text(yaml.safe_dump(doc))
+    mangled.write_text(yaml.safe_dump(doc), encoding="utf-8")
     detectors, _ = _detectors_from_file(mangled)
     got = {d.id for d in detectors}
     assert got == full_ids - {dropped_id}
@@ -297,7 +297,8 @@ def _write_sarif(path, *, uri, rule_id="github-pat"):
                     }
                 ]
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
 
@@ -366,7 +367,7 @@ def test_planted_secret_blocks_end_to_end_real_gitleaks():
         _secrets.choice(_string.ascii_letters + _string.digits) for _ in range(36)
     )  # gitleaks:allow — assembled at runtime, no committed literal
     with tempfile.TemporaryDirectory() as t:
-        Path(t, "app.py").write_text(f'GH = "{fake_pat}"\n')
+        Path(t, "app.py").write_text(f'GH = "{fake_pat}"\n', encoding="utf-8")
         out = detectors.run_detectors(changed_files=["app.py"], repo_root=t)
         matches = out.get("secret-detection", {}).get("matches", [])
         assert matches, "real gitleaks should surface the planted secret"
@@ -405,8 +406,8 @@ def test_repo_gitleaks_config_allowlists_doc_throwaway_but_not_real_secret():
             if with_config:
                 # Auto-discovered by gitleaks from the --source root (the detector's real path).
                 _shutil.copy(repo_config, Path(t, ".gitleaks.toml"))
-            Path(t, "doc_example.md").write_text(throwaway_line)
-            Path(t, "app.py").write_text(f'GH = "{fake_pat}"\n')
+            Path(t, "doc_example.md").write_text(throwaway_line, encoding="utf-8")
+            Path(t, "app.py").write_text(f'GH = "{fake_pat}"\n', encoding="utf-8")
             out = detectors.run_detectors(changed_files=["doc_example.md", "app.py"], repo_root=t)
             matches = out.get("secret-detection", {}).get("matches", [])
             return {m["location"]["file"] for m in matches}
@@ -740,7 +741,7 @@ def test_semgrep_bad_hash_install_failure_is_rejected(tmp_path, monkeypatch):
 
     mod = _load_review_scanners()
     req = tmp_path / "requirements.txt"
-    req.write_text("semgrep==1.145.0 \\\n    --hash=sha256:" + "0" * 64 + "\n")
+    req.write_text("semgrep==1.145.0 \\\n    --hash=sha256:" + "0" * 64 + "\n", encoding="utf-8")
     entry = mod.PlatformEntry("linux/amd64", "8.30.1", "x64", "", "0" * 64, "", "1.145.0", req)
 
     class FakeBuilder:
@@ -951,8 +952,12 @@ def test_scanner_workflow_is_shared_by_mirror_and_gerrit_voting():
     scanner_workflow = yaml.safe_load(scanner_text)
     assert scanner_workflow["jobs"]["scanner-integration"]["runs-on"] == "ubuntu-latest"
 
-    test_yml = yaml.safe_load((root / ".github" / "workflows" / "test.yml").read_text())
-    gerrit = yaml.safe_load((root / ".github" / "workflows" / "gerrit-verify.yaml").read_text())
+    test_yml = yaml.safe_load(
+        (root / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
+    )
+    gerrit = yaml.safe_load(
+        (root / ".github" / "workflows" / "gerrit-verify.yaml").read_text(encoding="utf-8")
+    )
     assert (
         test_yml["jobs"]["scanner-integration"]["uses"]
         == "./.github/workflows/_scanner-integration.yml"
@@ -971,7 +976,7 @@ def test_scanner_workflow_is_shared_by_mirror_and_gerrit_voting():
     assert "env.WORKFLOW_CONCLUSION" not in conclusion
 
     gerrit_scanner = yaml.safe_load(
-        (root / ".github" / "workflows" / "gerrit-scanner-verify.yml").read_text()
+        (root / ".github" / "workflows" / "gerrit-scanner-verify.yml").read_text(encoding="utf-8")
     )
     assert (
         gerrit_scanner["jobs"]["scanner-integration"]["uses"]

@@ -59,7 +59,7 @@ def bedrock_classes(monkeypatch):
 def _step(gate_yaml: Path, step_id: str) -> dict[str, Any]:
     """The raw step mapping for `step_id`, read from the gate definition itself so the test
     cannot drift from the shipped YAML."""
-    doc = yaml.safe_load(gate_yaml.read_text())
+    doc = yaml.safe_load(gate_yaml.read_text(encoding="utf-8"))
     for step in doc.get("steps", []) or []:
         if step.get("id") == step_id:
             return step
@@ -69,7 +69,7 @@ def _step(gate_yaml: Path, step_id: str) -> dict[str, Any]:
 def _engine_resolved_model(gate_yaml: Path, step_id: str, cfg: LLMConfig) -> str:
     """What `workflow/runs.py` would resolve for this step: the real precedence function applied
     to the step's declared `model:` and the workflow-level default."""
-    doc = yaml.safe_load(gate_yaml.read_text())
+    doc = yaml.safe_load(gate_yaml.read_text(encoding="utf-8"))
     step = _step(gate_yaml, step_id)
     return resolve_model(cfg, step=step.get("model"), workflow=doc.get("model"))
 
