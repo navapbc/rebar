@@ -88,7 +88,7 @@ def rehearsal_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
     git_run(["git", "init", "-q", "-b", "main"], cwd=work)
     git_run(["git", "config", "user.email", "rehearsal@example.invalid"], cwd=work)
     git_run(["git", "config", "user.name", "rebar cloud-s3 rehearsal"], cwd=work)
-    (work / "rebar.toml").write_text('[jira]\nproject = "REB"\n')
+    (work / "rebar.toml").write_text('[jira]\nproject = "REB"\n', encoding="utf-8")
 
     monkeypatch.setenv("REBAR_ROOT", str(work))
     monkeypatch.setenv("REBAR_SYNC_PUSH", "off")

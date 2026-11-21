@@ -99,7 +99,8 @@ def dc_rebar_repo(
 
         [jira]
         project = "{jira_dc_project}"
-        """).lstrip()
+        """).lstrip(),
+        encoding="utf-8",
     )
     # The PAT is env-only by design (never a config key, so it cannot be committed).
     # `engine_env` builds the subprocess environment as `dict(os.environ)`, so setting it

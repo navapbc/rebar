@@ -250,7 +250,7 @@ def run(repo: Path, store_ref: str, pre_a3_ref: str) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="rebar-a3-corpus-") as temp_name:
         temp = Path(temp_name)
         corpus_path = temp / "corpus.json"
-        corpus_path.write_text(json.dumps(corpus, sort_keys=True))
+        corpus_path.write_text(json.dumps(corpus, sort_keys=True), encoding="utf-8")
         forward = _run_worker(script, corpus_path, repo)
         pre_a3_root = temp / "pre-a3"
         pre_a3_root.mkdir()

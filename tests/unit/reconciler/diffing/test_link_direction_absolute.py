@@ -30,7 +30,9 @@ class StubBindingStore:
 
 
 def _live_fields(key: str) -> dict:
-    return json.loads((GROUND_TRUTH / f"{key}_issuelinks.json").read_text())["fields"]
+    return json.loads((GROUND_TRUTH / f"{key}_issuelinks.json").read_text(encoding="utf-8"))[
+        "fields"
+    ]
 
 
 # local_id <-> jira_key for the captured cluster

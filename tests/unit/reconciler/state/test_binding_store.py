@@ -126,9 +126,9 @@ class TestPersistence:
         assert not any(name.endswith(".tmp") for name in files)
 
         # Verify content is valid JSON
-        with open(bridge_dir / "bindings.json") as f:
+        with open(bridge_dir / "bindings.json", encoding="utf-8") as f:
             data = json.load(f)
-        with open(bridge_dir / "get_rotation.json") as f:
+        with open(bridge_dir / "get_rotation.json", encoding="utf-8") as f:
             rotation = json.load(f)
         # Version 2 adds the ADR 0026 per-binding baseline (epic 3006-e198); a
         # version-1 store without baselines still reads (back-compat).

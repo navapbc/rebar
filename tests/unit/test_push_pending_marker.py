@@ -69,19 +69,21 @@ def rejecting_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
 
     # Seed a shared base and publish it, so origin/tickets EXISTS — the incident shape (a
     # diverging branch), not a first-push-of-a-new-branch.
-    (tracker / "seed.json").write_text("{}\n")
+    (tracker / "seed.json").write_text("{}\n", encoding="utf-8")
     _git(tracker, "add", "seed.json")
     _git(tracker, "commit", "-q", "-m", "seed")
     _git(tracker, "push", "-q", "origin", "HEAD:tickets")
     _git(tracker, "fetch", "-q", "origin", "+refs/heads/tickets:refs/remotes/origin/tickets")
 
     hook = origin / "hooks" / "pre-receive"
-    hook.write_text(_DECLINE_HOOK)
+    hook.write_text(_DECLINE_HOOK, encoding="utf-8")
     hook.chmod(0o755)
     _bare_git(origin, "config", "core.hooksPath", str(origin / "hooks"))
 
     # One local-only commit: the write whose push will be rejected.
-    (tracker / "evidence.json").write_text('{"body": "written during the outage"}\n')
+    (tracker / "evidence.json").write_text(
+        '{"body": "written during the outage"}\n', encoding="utf-8"
+    )
     _git(tracker, "add", "evidence.json")
     _git(tracker, "commit", "-q", "-m", "ticket: COMMENT evidence")
 
@@ -130,7 +132,7 @@ def test_the_marker_clears_once_a_push_lands(rejecting_origin: tuple[Path, Path]
     push.push_tickets_branch(str(tracker))
     assert push_state.read_status(str(tracker))["state"] == "pending", "setup did not go pending"
 
-    allow_flag.write_text("")  # the outage ends, server-side
+    allow_flag.write_text("", encoding="utf-8")  # the outage ends, server-side
     push.push_tickets_branch(str(tracker))
 
     assert push_state.read_status(str(tracker)) == {"state": "ok"}
@@ -162,7 +164,7 @@ def test_the_async_path_records_the_failure_its_stderr_discards(
         "the DETACHED async push left no trace: its stderr goes to /dev/null, so with no "
         "marker the failure is undeliverable to every caller on this path"
     )
-    recorded = json.loads(marker.read_text())
+    recorded = json.loads(marker.read_text(encoding="utf-8"))
     assert recorded["state"] == "pending"
     assert "GH013" in recorded["detail"] or "declined" in recorded["detail"]
 
@@ -229,7 +231,7 @@ def test_a_corrupt_marker_reports_ok_rather_than_a_phantom_outage(tmp_path: Path
     """A broken diagnostic must not convince a caller that a healthy store is broken."""
     tracker = tmp_path / "t"
     (tracker / ".git").mkdir(parents=True)
-    (tracker / ".git" / push_state.MARKER).write_text("{not json")
+    (tracker / ".git" / push_state.MARKER).write_text("{not json", encoding="utf-8")
     assert push_state.read_status(str(tracker)) == {"state": "ok"}
 
 
@@ -244,7 +246,7 @@ def test_the_marker_follows_a_linked_worktrees_gitdir_pointer(tmp_path: Path) ->
     real_git = tmp_path / "real.git"
     real_git.mkdir()
     tracker.mkdir()
-    (tracker / ".git").write_text(f"gitdir: {real_git}\n")
+    (tracker / ".git").write_text(f"gitdir: {real_git}\n", encoding="utf-8")
 
     push_state.record_failure(str(tracker), "final-push-rejected", "declined", "origin/tickets")
 

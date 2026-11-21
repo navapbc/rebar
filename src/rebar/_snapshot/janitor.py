@@ -276,7 +276,7 @@ def reverify_entry(sha: str, root: Path | None = None) -> bool:
     digest_path = root / f"{sha}.integrity"
     current = _entry_digest(entry)
     try:
-        stored = digest_path.read_text().strip()
+        stored = digest_path.read_text(encoding="utf-8").strip()
     except OSError:
         stored = ""
     if not stored:

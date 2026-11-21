@@ -53,7 +53,7 @@ class TrackerBuilder:
         d.mkdir(parents=True, exist_ok=True)
         ev_uuid = str(uuidlib.UUID(int=ts % (2**128)))
         fname = f"{ts}-{ev_uuid}-{event_type}.json"
-        (d / fname).write_text(json.dumps({"data": data}))
+        (d / fname).write_text(json.dumps({"data": data}), encoding="utf-8")
 
     def create(self, ticket_id: str, *, description: str, ts: int | None = None) -> int:
         ts = ts or _next_ts()
@@ -362,7 +362,7 @@ def test_build_labels_writes_a_hash_keyed_file_and_load_labels_round_trips(tmp_p
     assert out_path.exists()
     report_path = out_dir / f"labels-report-{manifest['content_hash']}.md"
     assert report_path.exists()
-    assert "Plan-review outcome labels" in report_path.read_text()
+    assert "Plan-review outcome labels" in report_path.read_text(encoding="utf-8")
 
     loaded = labels.load_labels(
         str(out_path), store_roots={"main": str(tracker.path)}, cache_dir=tmp_path / "cache"
@@ -410,7 +410,7 @@ def test_build_labels_ticket_labels_reflect_escaped_defect_via_stub(tmp_path):
     )
     assert loaded[0]["ticket_labels"]["escaped_defect"] is True
 
-    report = (out_dir / f"labels-report-{manifest['content_hash']}.md").read_text()
+    report = (out_dir / f"labels-report-{manifest['content_hash']}.md").read_text(encoding="utf-8")
     assert "escaped_defect: 1" in report
 
 
@@ -420,7 +420,7 @@ def test_load_labels_refuses_a_stale_hash(tmp_path):
 
     stale_path = tmp_path / "labels_out" / "labels-deadbeefdeadbeef.jsonl"
     stale_path.parent.mkdir(parents=True, exist_ok=True)
-    stale_path.write_text("")
+    stale_path.write_text("", encoding="utf-8")
 
     with pytest.raises(labels.LabelsHashMismatch):
         labels.load_labels(

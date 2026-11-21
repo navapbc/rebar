@@ -39,7 +39,7 @@ def _init_repo(path: Path) -> Path:
 
 
 def _commit(repo: Path, name: str, body: str) -> str:
-    (repo / name).write_text(body)
+    (repo / name).write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", name)
     return _git(repo, "rev-parse", "HEAD")
@@ -77,7 +77,7 @@ def test_in_process_single_flight(store, repo, monkeypatch):
 
     def go(_):
         h = cache.acquire(sha, repo_root=str(repo), fetch=False)
-        return (h.path / "f.txt").read_text()
+        return (h.path / "f.txt").read_text(encoding="utf-8")
 
     with ThreadPoolExecutor(max_workers=4) as ex:
         results = list(ex.map(go, range(4)))
@@ -137,9 +137,9 @@ def test_cross_process_single_flight(store, repo, tmp_path):
     ]
     for p in procs:
         assert p.wait(timeout=30) == 0
-    builds = marker.read_text().count("build") if marker.exists() else 0
+    builds = marker.read_text(encoding="utf-8").count("build") if marker.exists() else 0
     assert builds == 1, f"cross-process flock should collapse to ONE build, got {builds}"
-    assert (rs.entry_path(sha, store) / "f.txt").read_text() == "v1\n"
+    assert (rs.entry_path(sha, store) / "f.txt").read_text(encoding="utf-8") == "v1\n"
 
 
 # --------------------------------------------------------------------------------------
@@ -184,7 +184,7 @@ def test_open_reader_survives_eviction_then_relookup_misses(store, repo):
     # The entry is gone from the canonical path; a new lookup cleanly misses + re-heals.
     assert not dest.exists()
     h2 = cache.acquire(sha, repo_root=str(repo), fetch=False)
-    assert (h2.path / "f.txt").read_text() == "content\n"
+    assert (h2.path / "f.txt").read_text(encoding="utf-8") == "content\n"
 
 
 def test_open_in_snapshot_raises_cache_miss_on_enoent(store, repo):
@@ -205,7 +205,7 @@ def test_deleted_entry_self_heals(store, repo):
     assert not dest.exists()
     h = cache.acquire(sha, repo_root=str(repo), fetch=False)
     assert dest.exists()
-    assert (h.path / "f.txt").read_text() == "v\n"
+    assert (h.path / "f.txt").read_text(encoding="utf-8") == "v\n"
 
 
 # --------------------------------------------------------------------------------------
@@ -228,7 +228,7 @@ def test_no_pid_or_heartbeat_lease_in_module():
     # No PID-based lease: the recency/liveness model is touch-on-read mtime + POSIX
     # delete-on-last-close, never a process-id heartbeat. Assert no getpid() CALL exists
     # (the prose may mention the rejected lease; an actual call would be the smell).
-    src = Path(cache.__file__).read_text()
+    src = Path(cache.__file__).read_text(encoding="utf-8")
     assert "getpid(" not in src and "kill(" not in src
 
 

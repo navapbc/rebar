@@ -51,13 +51,13 @@ def scratch_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from rebar import _config_sources
 
     monkeypatch.setattr(_config_sources, "user_config_path", lambda: tmp_path / "absent.toml")
-    (base / "rebar.toml").write_text("[snapshot]\nmax_concurrent_gates = 2\n")
+    (base / "rebar.toml").write_text("[snapshot]\nmax_concurrent_gates = 2\n", encoding="utf-8")
 
     def declare() -> None:
-        (parent / ga._SCRATCH_REQUIRED_MARKER).write_text("")
+        (parent / ga._SCRATCH_REQUIRED_MARKER).write_text("", encoding="utf-8")
 
     def mount() -> None:
-        (base / ga._SCRATCH_MOUNTED_MARKER).write_text("")
+        (base / ga._SCRATCH_MOUNTED_MARKER).write_text("", encoding="utf-8")
 
     def unmount() -> None:
         (base / ga._SCRATCH_MOUNTED_MARKER).unlink()
@@ -160,7 +160,7 @@ def test_proof_without_declaration_also_admits(scratch_host) -> None:
 
 
 def _tf_text() -> str:
-    return (TF_DIR / "main.tf").read_text()
+    return (TF_DIR / "main.tf").read_text(encoding="utf-8")
 
 
 def test_terraform_declares_a_dedicated_gate_scratch_volume() -> None:
@@ -198,7 +198,7 @@ def test_user_data_receives_and_mounts_the_scratch_volume() -> None:
     at plan time.
     """
     main = _tf_text()
-    script = (TF_DIR / "user_data.sh").read_text()
+    script = (TF_DIR / "user_data.sh").read_text(encoding="utf-8")
     # Whitespace-insensitive: `terraform fmt` aligns the `=` inside the map, so pinning
     # the exact run of spaces would make a later key rename fail this test for formatting.
     assert re.search(r"gate_scratch_volume_id\s*=\s*aws_ebs_volume\.gate_scratch\.id", main)
@@ -209,14 +209,14 @@ def test_user_data_receives_and_mounts_the_scratch_volume() -> None:
 
 def test_user_data_fails_loud_when_the_scratch_mount_did_not_take() -> None:
     """A silently-unmounted scratch volume is the failure mode this whole story removes."""
-    script = (TF_DIR / "user_data.sh").read_text()
+    script = (TF_DIR / "user_data.sh").read_text(encoding="utf-8")
     assert "mountpoint -q" in script
     assert ga._SCRATCH_MOUNTED_MARKER in script
     assert ga._SCRATCH_REQUIRED_MARKER in script
 
 
 def test_variables_declare_the_scratch_size_and_mount() -> None:
-    src = (TF_DIR / "variables.tf").read_text()
+    src = (TF_DIR / "variables.tf").read_text(encoding="utf-8")
     assert 'variable "gate_scratch_volume_size_gb"' in src
     assert 'variable "gate_scratch_mount"' in src
     assert SCRATCH_MOUNT in src
@@ -226,17 +226,17 @@ def test_variables_declare_the_scratch_size_and_mount() -> None:
 
 
 def _review_bot_service() -> dict:
-    doc = yaml.safe_load(COMPOSE.read_text())
+    doc = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
     return doc["services"]["review-bot"]
 
 
 def _mcp_service() -> dict:
-    doc = yaml.safe_load(COMPOSE.read_text())
+    doc = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
     return doc["services"]["mcp"]
 
 
 def _autodeploy_mcp_run_new() -> str:
-    src = AUTODEPLOY.read_text()
+    src = AUTODEPLOY.read_text(encoding="utf-8")
     match = re.search(r"^mcp_run_new\(\) \{\n(?P<body>.*?)^\}", src, re.MULTILINE | re.DOTALL)
     assert match is not None
     return match.group("body")
@@ -263,7 +263,7 @@ def test_the_scratch_bind_carries_the_declaration_marker_into_the_container() ->
     or not — the guard would then never fire, which is worse than not having it.
     """
     volumes = _review_bot_service()["volumes"]
-    parent = str(Path(SCRATCH_MOUNT).parent)
+    parent = str(PurePosixPath(SCRATCH_MOUNT).parent)
     assert any(str(v).startswith(f"{parent}:{parent}") for v in volumes), volumes
 
 
@@ -271,7 +271,8 @@ def test_gate_admission_knows_the_compose_configured_dedicated_path() -> None:
     """Compose's REBAR_GATE_TMPDIR is now itself an arming source for the refusal."""
     env = _review_bot_service()["environment"]
     assert env["REBAR_GATE_TMPDIR"] == SCRATCH_MOUNT
-    assert str(ga._CANONICAL_GATE_SCRATCH_MOUNT) == SCRATCH_MOUNT
+    # A container path: POSIX on every host, so compare it in POSIX form.
+    assert ga._CANONICAL_GATE_SCRATCH_MOUNT.as_posix() == SCRATCH_MOUNT
 
 
 def test_mcp_snapshot_store_and_clone_tmp_both_move_to_scratch() -> None:
@@ -284,7 +285,7 @@ def test_mcp_snapshot_store_and_clone_tmp_both_move_to_scratch() -> None:
 
 def test_mcp_scratch_bind_carries_the_declaration_marker_into_the_container() -> None:
     volumes = _mcp_service()["volumes"]
-    parent = str(Path(SCRATCH_MOUNT).parent)
+    parent = str(PurePosixPath(SCRATCH_MOUNT).parent)
     assert any(str(v).startswith(f"{parent}:{parent}") for v in volumes), volumes
 
 
@@ -303,7 +304,7 @@ def test_autodeploy_mcp_run_new_routes_gate_scratch_to_the_parent_bind() -> None
 
 
 def test_observability_publishes_the_scratch_mount_metrics() -> None:
-    src = (REPO_ROOT / "infra" / "scripts" / "observability.sh").read_text()
+    src = (REPO_ROOT / "infra" / "scripts" / "observability.sh").read_text(encoding="utf-8")
     assert "GATE_SCRATCH_MOUNT" in src
     assert "gate_scratch_mounted" in src
     assert SCRATCH_MOUNT in src

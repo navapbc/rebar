@@ -76,18 +76,18 @@ def test_legitimate_declared_variable_is_accepted(tmp_path: Path) -> None:
     the feature, not the defect.
     """
     (tmp_path / "main.tf").write_text(
-        'x = templatefile("${path.module}/t.sh", {\n  data_volume_id = "v"\n})\n'
+        'x = templatefile("${path.module}/t.sh", {\n  data_volume_id = "v"\n})\n', encoding="utf-8"
     )
-    (tmp_path / "t.sh").write_text('echo "${data_volume_id}"\n')
+    (tmp_path / "t.sh").write_text('echo "${data_volume_id}"\n', encoding="utf-8")
     assert check_repo(tmp_path) == []
 
 
 def test_undeclared_reference_is_rejected(tmp_path: Path) -> None:
     """The defect shape: a name the call site does not declare."""
     (tmp_path / "main.tf").write_text(
-        'x = templatefile("${path.module}/t.sh", {\n  data_volume_id = "v"\n})\n'
+        'x = templatefile("${path.module}/t.sh", {\n  data_volume_id = "v"\n})\n', encoding="utf-8"
     )
-    (tmp_path / "t.sh").write_text("# reduces to ${!PARAMS[@]}\n")
+    (tmp_path / "t.sh").write_text("# reduces to ${!PARAMS[@]}\n", encoding="utf-8")
     findings = check_repo(tmp_path)
     assert len(findings) == 1
     assert findings[0].root == "PARAMS"
@@ -97,21 +97,25 @@ def test_undeclared_reference_is_rejected(tmp_path: Path) -> None:
 def test_escaping_the_defect_clears_the_finding(tmp_path: Path) -> None:
     """RED -> GREEN on the minimal reproduction, so the gate's teeth are pinned to the
     escaping itself and not to some incidental property of the file."""
-    (tmp_path / "main.tf").write_text('x = templatefile("${path.module}/t.sh", {\n  a = "v"\n})\n')
+    (tmp_path / "main.tf").write_text(
+        'x = templatefile("${path.module}/t.sh", {\n  a = "v"\n})\n', encoding="utf-8"
+    )
     template = tmp_path / "t.sh"
 
-    template.write_text("# reduces to ${!PARAMS[@]}\n")
+    template.write_text("# reduces to ${!PARAMS[@]}\n", encoding="utf-8")
     assert len(check_repo(tmp_path)) == 1, "unescaped form must be a finding (RED)"
 
-    template.write_text("# reduces to $${!PARAMS[@]}\n")
+    template.write_text("# reduces to $${!PARAMS[@]}\n", encoding="utf-8")
     assert check_repo(tmp_path) == [], "escaped form must clear the finding (GREEN)"
 
 
 def test_comments_are_not_exempt(tmp_path: Path) -> None:
     """The whole point of the bug: `#` means nothing to templatefile(). A gate that skipped
     comment lines would have let dd30 through."""
-    (tmp_path / "main.tf").write_text('x = templatefile("${path.module}/t.sh", {\n  a = "v"\n})\n')
-    (tmp_path / "t.sh").write_text("#!/usr/bin/env bash\n# ${UNDECLARED}\n")
+    (tmp_path / "main.tf").write_text(
+        'x = templatefile("${path.module}/t.sh", {\n  a = "v"\n})\n', encoding="utf-8"
+    )
+    (tmp_path / "t.sh").write_text("#!/usr/bin/env bash\n# ${UNDECLARED}\n", encoding="utf-8")
     assert [f.root for f in check_repo(tmp_path)] == ["UNDECLARED"]
 
 
@@ -160,10 +164,10 @@ def test_non_literal_path_resolves_by_unique_suffix(tmp_path: Path) -> None:
     """The ``${var.X}`` fallback: strip the interpolated prefix, match the remaining suffix."""
     (tmp_path / "mod").mkdir()
     (tmp_path / "mod" / "main.tf").write_text(
-        'x = templatefile("${var.source_root}/tpl/c.js.tftpl", {\n  a = "v"\n})\n'
+        'x = templatefile("${var.source_root}/tpl/c.js.tftpl", {\n  a = "v"\n})\n', encoding="utf-8"
     )
     (tmp_path / "src" / "tpl").mkdir(parents=True)
-    (tmp_path / "src" / "tpl" / "c.js.tftpl").write_text("k = ${b}\n")
+    (tmp_path / "src" / "tpl" / "c.js.tftpl").write_text("k = ${b}\n", encoding="utf-8")
 
     findings = check_repo(tmp_path)
     assert [f.root for f in findings] == ["b"], (
@@ -187,7 +191,7 @@ def test_an_unresolvable_templatefile_path_is_reported_not_silently_skipped(
     catch unexamined -- the exit code could not distinguish 'clean' from 'never looked'.
     """
     (tmp_path / "main.tf").write_text(
-        'x = templatefile("${var.nowhere}/absent-template.sh", {\n  a = "b"\n})\n'
+        'x = templatefile("${var.nowhere}/absent-template.sh", {\n  a = "b"\n})\n', encoding="utf-8"
     )
     findings = check_repo(tmp_path)
     assert len(findings) == 1, "an unresolvable call site must be REPORTED, not skipped"
@@ -197,11 +201,13 @@ def test_an_unresolvable_templatefile_path_is_reported_not_silently_skipped(
 
 def test_an_ambiguous_suffix_match_is_reported_not_silently_skipped(tmp_path: Path) -> None:
     """Two files matching the stripped suffix is ambiguous, and ambiguity must not pass."""
-    (tmp_path / "main.tf").write_text('x = templatefile("${var.root}/dup.sh", {\n  a = "b"\n})\n')
+    (tmp_path / "main.tf").write_text(
+        'x = templatefile("${var.root}/dup.sh", {\n  a = "b"\n})\n', encoding="utf-8"
+    )
     (tmp_path / "one").mkdir()
     (tmp_path / "two").mkdir()
-    (tmp_path / "one" / "dup.sh").write_text("# clean\n")
-    (tmp_path / "two" / "dup.sh").write_text("# clean\n")
+    (tmp_path / "one" / "dup.sh").write_text("# clean\n", encoding="utf-8")
+    (tmp_path / "two" / "dup.sh").write_text("# clean\n", encoding="utf-8")
     findings = check_repo(tmp_path)
     assert [type(f) for f in findings] == [Unresolved]
 
@@ -213,10 +219,12 @@ def test_template_directives_are_not_reported_as_undeclared_roots(tmp_path: Path
     construction; flagging them would make every legitimate directive a false positive.
     """
     (tmp_path / "main.tf").write_text(
-        'x = templatefile("${path.module}/t.sh", {\n  enable = true\n  items = []\n})\n'
+        'x = templatefile("${path.module}/t.sh", {\n  enable = true\n  items = []\n})\n',
+        encoding="utf-8",
     )
     (tmp_path / "t.sh").write_text(
-        "%{ if enable }on%{ else }off%{ endif }\n%{ for k, v in items }${k}=${v}\n%{ endfor }\n"
+        "%{ if enable }on%{ else }off%{ endif }\n%{ for k, v in items }${k}=${v}\n%{ endfor }\n",
+        encoding="utf-8",
     )
     findings = check_repo(tmp_path)
     assert findings == [], f"directives must not be flagged, got {[f.render() for f in findings]}"
@@ -226,8 +234,10 @@ def test_dot_terraform_is_excluded_from_the_repo_scan(tmp_path: Path) -> None:
     """`terraform init` vendors third-party templates into .terraform; they are not ours."""
     vendored = tmp_path / ".terraform" / "modules" / "vendor"
     vendored.mkdir(parents=True)
-    (vendored / "main.tf").write_text('x = templatefile("${path.module}/t.sh", {\n  a = "b"\n})\n')
-    (vendored / "t.sh").write_text("# reduces to ${!THEIRS[@]}\n")
+    (vendored / "main.tf").write_text(
+        'x = templatefile("${path.module}/t.sh", {\n  a = "b"\n})\n', encoding="utf-8"
+    )
+    (vendored / "t.sh").write_text("# reduces to ${!THEIRS[@]}\n", encoding="utf-8")
     assert check_repo(tmp_path) == [], "vendored .terraform templates must not be scanned"
 
 
@@ -244,11 +254,11 @@ _UNDECLARED_TEMPLATE = "echo ${UNDECLARED}\n"
 
 def test_git_ignored_scratch_terraform_is_not_scanned(tmp_path: Path) -> None:
     """A `.tf` call site under the git-ignored `.rebar/scratch` is not the repo's to judge."""
-    (tmp_path / ".gitignore").write_text(".rebar/*\n")
+    (tmp_path / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
     scratch = tmp_path / ".rebar" / "scratch" / "x"
     scratch.mkdir(parents=True)
-    (scratch / "main.tf").write_text(_UNDECLARED_CALL)
-    (scratch / "t.sh").write_text(_UNDECLARED_TEMPLATE)
+    (scratch / "main.tf").write_text(_UNDECLARED_CALL, encoding="utf-8")
+    (scratch / "t.sh").write_text(_UNDECLARED_TEMPLATE, encoding="utf-8")
     _git(tmp_path, "init", "--quiet")
     assert check_repo(tmp_path) == []
 
@@ -256,14 +266,16 @@ def test_git_ignored_scratch_terraform_is_not_scanned(tmp_path: Path) -> None:
 def test_tracked_terraform_is_still_scanned_beside_ignored_scratch(tmp_path: Path) -> None:
     """Positive control: the tracked copy is reported, and the ignored duplicate of its
     template does not make template resolution ambiguous."""
-    (tmp_path / ".gitignore").write_text(".rebar/*\n")
+    (tmp_path / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
     # `${var.root}` is resolved by a unique suffix match over the tree, which is the search
     # an ignored duplicate used to make ambiguous.
-    (tmp_path / "main.tf").write_text(_UNDECLARED_CALL.replace("${path.module}", "${var.root}"))
-    (tmp_path / "t.sh").write_text(_UNDECLARED_TEMPLATE)
+    (tmp_path / "main.tf").write_text(
+        _UNDECLARED_CALL.replace("${path.module}", "${var.root}"), encoding="utf-8"
+    )
+    (tmp_path / "t.sh").write_text(_UNDECLARED_TEMPLATE, encoding="utf-8")
     scratch = tmp_path / ".rebar" / "scratch" / "x"
     scratch.mkdir(parents=True)
-    (scratch / "t.sh").write_text(_UNDECLARED_TEMPLATE)
+    (scratch / "t.sh").write_text(_UNDECLARED_TEMPLATE, encoding="utf-8")
     _git(tmp_path, "init", "--quiet")
     _git(tmp_path, "add", ".gitignore", "main.tf", "t.sh")
     assert [(type(f).__name__, getattr(f, "root", None)) for f in check_repo(tmp_path)] == [
@@ -272,8 +284,8 @@ def test_tracked_terraform_is_still_scanned_beside_ignored_scratch(tmp_path: Pat
 
 
 def test_untracked_nonignored_terraform_is_still_scanned(tmp_path: Path) -> None:
-    (tmp_path / ".gitignore").write_text(".rebar/*\n")
-    (tmp_path / "main.tf").write_text(_UNDECLARED_CALL)
-    (tmp_path / "t.sh").write_text(_UNDECLARED_TEMPLATE)
+    (tmp_path / ".gitignore").write_text(".rebar/*\n", encoding="utf-8")
+    (tmp_path / "main.tf").write_text(_UNDECLARED_CALL, encoding="utf-8")
+    (tmp_path / "t.sh").write_text(_UNDECLARED_TEMPLATE, encoding="utf-8")
     _git(tmp_path, "init", "--quiet")
     assert [getattr(f, "root", None) for f in check_repo(tmp_path)] == ["UNDECLARED"]

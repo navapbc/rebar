@@ -27,7 +27,9 @@ _PROVENANCE = (
 
 
 def _enable(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _commit(repo: Path) -> None:

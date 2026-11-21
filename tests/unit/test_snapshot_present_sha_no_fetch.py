@@ -51,7 +51,7 @@ def clone_with_present_sha(tmp_path) -> tuple[Path, str, str, str]:
     _git(upstream, "config", "uploadpack.allowFilter", "true")
     _git(upstream, "config", "uploadpack.allowAnySHA1InWant", "true")
 
-    (upstream / "code.txt").write_text("hello\n")
+    (upstream / "code.txt").write_text("hello\n", encoding="utf-8")
     _git(upstream, "add", "-A")
     _git(upstream, "commit", "--quiet", "-m", "code")
     present_sha = _git(upstream, "rev-parse", "HEAD")
@@ -60,7 +60,9 @@ def clone_with_present_sha(tmp_path) -> tuple[Path, str, str, str]:
     big = upstream / "events"
     big.mkdir()
     for i in range(_TICKETS_FILE_COUNT):
-        (big / f"e{i}.json").write_text('{{"n": {}, "pad": "{}"}}\n'.format(i, "x" * 800))
+        (big / f"e{i}.json").write_text(
+            '{{"n": {}, "pad": "{}"}}\n'.format(i, "x" * 800), encoding="utf-8"
+        )
     _git(upstream, "add", "-A")
     _git(upstream, "commit", "--quiet", "-m", "tickets")
     tickets_sha = _git(upstream, "rev-parse", "HEAD")
@@ -83,7 +85,7 @@ def clone_with_present_sha(tmp_path) -> tuple[Path, str, str, str]:
     )
 
     # A NEW upstream commit the clone has never seen — genuinely absent locally.
-    (upstream / "code.txt").write_text("hello again\n")
+    (upstream / "code.txt").write_text("hello again\n", encoding="utf-8")
     _git(upstream, "add", "-A")
     _git(upstream, "commit", "--quiet", "-m", "later")
     absent_sha = _git(upstream, "rev-parse", "HEAD")

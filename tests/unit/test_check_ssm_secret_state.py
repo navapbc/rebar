@@ -114,10 +114,10 @@ def test_reverting_one_param_returns_to_red(tmp_path: Path) -> None:
     """Mutation teeth: reverting a migrated param to value + ignore_changes re-arms the gate."""
     tf = tmp_path / "infra" / "terraform"
     tf.mkdir(parents=True)
-    (tf / "a.tf").write_text(_WRITE_ONLY)
+    (tf / "a.tf").write_text(_WRITE_ONLY, encoding="utf-8")
     assert check_repo(tmp_path) == [], "write-only tree must be GREEN"
 
-    (tf / "a.tf").write_text(_SEEDED_SECRET)
+    (tf / "a.tf").write_text(_SEEDED_SECRET, encoding="utf-8")
     findings = check_repo(tmp_path)
     assert findings, "reverting one param to value + ignore_changes must be RED"
     assert all(isinstance(f, Finding) for f in findings)

@@ -39,7 +39,7 @@ def _releases(repo: Path, tid: str) -> list[str]:
 def _release_deltas(repo: Path, tid: str) -> list[dict]:
     out = []
     for f in sorted(glob.glob(os.path.join(str(repo), ".tickets-tracker", tid, "*.json"))):
-        with open(f) as fh:
+        with open(f, encoding="utf-8") as fh:
             event = json.load(fh)
         if event.get("event_type") == "RELEASE_DELTA":
             out.append(event["data"])

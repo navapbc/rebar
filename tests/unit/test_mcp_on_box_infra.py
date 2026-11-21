@@ -63,7 +63,7 @@ def test_compose_has_mcp_service_with_http_posture_env() -> None:
     """AC1/AC2 wiring: the `mcp` service builds from Dockerfile.mcp and sets the
     fail-closed HTTP posture env the ADR decided (transport, TLS-at-edge, allowlists,
     static auth)."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     svc = doc["services"]["mcp"]
     assert svc["build"]["context"] == "../.."
     assert svc["build"]["dockerfile"] == "infra/compose/Dockerfile.mcp"
@@ -86,7 +86,7 @@ def test_compose_mcp_advertises_a_non_empty_issuer_url() -> None:
     ``AuthSettings(issuer_url=...)`` which pydantic rejects when empty, so the compose
     env MUST define a non-empty ``REBAR_MCP_AUTH_ISSUER_URL`` (it has no fallback to
     ``RESOURCE_SERVER_URL``). Its absence crash-loops the container on a fresh deploy."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     env = doc["services"]["mcp"]["environment"]
     assert "REBAR_MCP_AUTH_ISSUER_URL" in env, (
         "mcp service env omits REBAR_MCP_AUTH_ISSUER_URL; AuthSettings will fail to "
@@ -98,14 +98,14 @@ def test_compose_mcp_advertises_a_non_empty_issuer_url() -> None:
 def test_compose_mcp_publishes_dedicated_loopback_port_8091() -> None:
     """AC3-adjacent: the service publishes ONLY on host loopback, on the dedicated
     port 8091 (not clashing with gerrit 8080 / opcert 8090)."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     ports = doc["services"]["mcp"]["ports"]
     assert ports == ["127.0.0.1:8091:8091"]
 
 
 def test_compose_mcp_has_health_check_against_health_endpoint() -> None:
     """AC1: the service healthcheck must be a real /health probe, not token text."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     argv = healthcheck_test_argv(doc["services"]["mcp"]["healthcheck"]["test"])
     assert any("/health" in part for part in argv)
     assert_socket_healthcheck_semantics(argv)
@@ -114,7 +114,7 @@ def test_compose_mcp_has_health_check_against_health_endpoint() -> None:
 def test_compose_mcp_stop_grace_covers_the_module_shutdown_budget() -> None:
     """AC4: stop_grace_period >= DEFAULT_SHUTDOWN_GRACE_SECONDS so Docker never
     SIGKILLs a container mid-drain."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     grace = _duration_to_seconds(doc["services"]["mcp"]["stop_grace_period"])
     assert grace >= DEFAULT_SHUTDOWN_GRACE_SECONDS
 
@@ -122,7 +122,7 @@ def test_compose_mcp_stop_grace_covers_the_module_shutdown_budget() -> None:
 def test_compose_mcp_declares_mcp_paths_for_autodeploy_detector() -> None:
     """The autodeploy change-detector paths (foxterrier) are declared as a comment so
     the downstream slice can consume them."""
-    raw = _COMPOSE.read_text()
+    raw = _COMPOSE.read_text(encoding="utf-8")
     assert "MCP_PATHS" in raw
 
 
@@ -132,14 +132,14 @@ def test_compose_mcp_declares_mcp_paths_for_autodeploy_detector() -> None:
 def test_dockerfile_mcp_builds_locked_with_agents_and_mcp_extras() -> None:
     """AC1/AC2: Dockerfile.mcp installs through the committed uv.lock with the agents +
     mcp extras (same recipe as Dockerfile.opcert)."""
-    text = _DOCKERFILE.read_text()
+    text = _DOCKERFILE.read_text(encoding="utf-8")
     assert "uv sync --locked --no-dev --extra agents --extra mcp" in text
     assert "FROM python:3.12-slim" in text
 
 
 def test_dockerfile_mcp_has_healthcheck_hitting_health() -> None:
     """AC1: the FINAL shipped stage healthcheck must probe MCP /health semantically."""
-    argv = final_stage_healthcheck_argv(_DOCKERFILE.read_text())
+    argv = final_stage_healthcheck_argv(_DOCKERFILE.read_text(encoding="utf-8"))
     assert any("/health" in part for part in argv)
     assert_socket_healthcheck_semantics(argv)
 
@@ -166,7 +166,7 @@ def test_healthcheck_oracle_rejects_url_print_commands() -> None:
 
 def test_dockerfile_mcp_boots_rebar_mcp() -> None:
     """CMD boots rebar-mcp (HTTP via env)."""
-    assert 'CMD ["rebar-mcp"]' in _DOCKERFILE.read_text()
+    assert 'CMD ["rebar-mcp"]' in _DOCKERFILE.read_text(encoding="utf-8")
 
 
 _ACLI_HOST = "acli.atlassian.com"
@@ -231,7 +231,7 @@ def test_dockerfile_mcp_provisions_pinned_acli_on_path() -> None:
     must be pinned (no floating "latest"), sha256-verified, arch-aware (the deploy box is
     arm64 while CI is amd64), and land on PATH — so removing it can never regress silently.
     """
-    text = _DOCKERFILE.read_text()
+    text = _DOCKERFILE.read_text(encoding="utf-8")
 
     # Sourced from the same Atlassian download host CI pins against.
     _assert_acli_downloaded_from_atlassian(text)
@@ -265,7 +265,7 @@ def test_dockerfile_mcp_provisions_pinned_acli_on_path() -> None:
 def test_nginx_has_named_mcp_upstream_from_materialized_glob_include() -> None:
     """AC3: a NAMED `upstream rebar_mcp` whose server line is a materialized glob
     include (the atomic-flip seam) — NOT a hardcoded proxy_pass host:port."""
-    text = _NGINX.read_text()
+    text = _NGINX.read_text(encoding="utf-8")
     m = re.search(r"upstream\s+rebar_mcp\s*\{(.*?)\}", text, re.DOTALL)
     assert m, "named `upstream rebar_mcp` block not found"
     body = m.group(1)
@@ -280,7 +280,7 @@ def test_nginx_mcp_location_proxies_to_the_named_upstream() -> None:
     `}`) so it cannot latch onto prose. The previous `location\\s+/mcp\\b[^{]*\\{`
     matched the words "location /mcp" inside a COMMENT and then ran forward to the
     next `{`, capturing whichever block happened to follow. Assertions unchanged."""
-    text = _NGINX.read_text()
+    text = _NGINX.read_text(encoding="utf-8")
     m = re.search(r"^[ \t]*location\s+/mcp\s*\{(.*?)^[ \t]*\}", text, re.DOTALL | re.MULTILINE)
     assert m, "`location /mcp` block not found"
     body = m.group(1)
@@ -294,7 +294,7 @@ def test_nginx_mcp_location_proxies_to_the_named_upstream() -> None:
 def test_committed_seed_supplies_the_default_backend() -> None:
     """AC3: the committed seed supplies exactly the loopback backend 127.0.0.1:8091."""
     assert _SEED.is_file()
-    assert re.search(r"server\s+127\.0\.0\.1:8091\s*;", _SEED.read_text())
+    assert re.search(r"server\s+127\.0\.0\.1:8091\s*;", _SEED.read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------- installer wiring
@@ -304,7 +304,7 @@ def test_materialize_script_is_executable_and_installs_only_if_absent() -> None:
     """AC3: the fresh-boot installer exists, is executable, copies the committed seed to
     the nginx include path only-if-absent (never clobbering a flip), and reloads nginx."""
     assert _MATERIALIZE.is_file() and os.access(_MATERIALIZE, os.X_OK)
-    text = _MATERIALIZE.read_text()
+    text = _MATERIALIZE.read_text(encoding="utf-8")
     assert "mcp-upstream.conf" in text
     # only-if-absent guard: it checks for the target file before copying.
     assert re.search(r"if\s+\[\s+-f\s+\"\$NGINX_UPSTREAM_FILE\"\s+\]", text)
@@ -315,7 +315,7 @@ def test_materialize_script_is_executable_and_installs_only_if_absent() -> None:
 def test_compose_up_wires_the_mcp_upstream_materialize_call() -> None:
     """AC3: compose-up.sh calls materialize-mcp-upstream.sh (non-fatal WARN) before
     `docker compose up`, beside the opcert-guard call."""
-    text = _COMPOSE_UP.read_text()
+    text = _COMPOSE_UP.read_text(encoding="utf-8")
     assert "materialize-mcp-upstream.sh" in text
     # non-fatal pattern: guarded by `if ! bash ...; then WARN`.
     pattern = r"if\s+!\s+bash\s+\"\$\{REPO_ROOT\}/infra/scripts/materialize-mcp-upstream\.sh\""
@@ -381,7 +381,7 @@ _MCP_TICKETS_VOLUME = "gerrit_mcp_tickets"
 def test_compose_mcp_mounts_the_tracker_volume_and_points_rebar_at_it() -> None:
     """The `mcp` service mounts the persistent ticket store and sets REBAR_TRACKER_DIR to
     that same in-container path, so the tools do not fall back to the WORKDIR."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     svc = doc["services"]["mcp"]
     assert svc["environment"]["REBAR_TRACKER_DIR"] == _MCP_TICKETS_DIR
     assert f"{_MCP_TICKETS_VOLUME}:{_MCP_TICKETS_DIR}" in svc["volumes"]
@@ -389,13 +389,13 @@ def test_compose_mcp_mounts_the_tracker_volume_and_points_rebar_at_it() -> None:
 
 def test_compose_mcp_passes_the_tickets_pat_through() -> None:
     """The clone credential reaches the container as MCP_TICKETS_PAT (blank is fine)."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     assert "MCP_TICKETS_PAT" in doc["services"]["mcp"]["environment"]
 
 
 def test_compose_declares_the_mcp_tickets_volume_external() -> None:
     """external:true so `docker compose down -v` cannot destroy accumulated ticket events."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     assert doc["volumes"][_MCP_TICKETS_VOLUME]["external"] is True
 
 
@@ -403,7 +403,7 @@ def test_compose_up_creates_the_mcp_tickets_site_subdir() -> None:
     """SITE_SUBDIRS is the single source of truth for the external volumes; config-check.sh
     check 5 diffs it against the compose file, so a compose volume without this entry fails
     CI (the incident-2731 drift class)."""
-    text = _COMPOSE_UP.read_text()
+    text = _COMPOSE_UP.read_text(encoding="utf-8")
     m = re.search(r'^SITE_SUBDIRS="([^"]*)"', text, re.MULTILINE)
     assert m, "SITE_SUBDIRS assignment not found"
     assert "mcp-tickets" in m.group(1).split()
@@ -412,7 +412,7 @@ def test_compose_up_creates_the_mcp_tickets_site_subdir() -> None:
 def test_dockerfile_mcp_entrypoint_provisions_the_ticket_store() -> None:
     """The image ships an ENTRYPOINT that clones the `tickets` branch into the tracker dir
     and converges it into a writable store via the SHARED review-bot ensure script."""
-    text = _DOCKERFILE.read_text()
+    text = _DOCKERFILE.read_text(encoding="utf-8")
     entrypoint = _ENTRYPOINT.read_text(encoding="utf-8")
     assert re.search(r"^ENTRYPOINT\s+\[", text, re.MULTILINE), "no ENTRYPOINT declared"
     assert f"REBAR_TRACKER_DIR={_MCP_TICKETS_DIR}" in text
@@ -436,7 +436,7 @@ def test_autodeploy_mcp_run_new_mounts_the_same_ticket_store() -> None:
 def test_fetch_secrets_materializes_the_mcp_tickets_pat() -> None:
     """The PAT is read from the SSM leaf via the OPTIONAL helper (blank ⇒ clone deferred)
     and emitted into the generated .env the mcp container reads."""
-    text = _FETCH_SECRETS.read_text()
+    text = _FETCH_SECRETS.read_text(encoding="utf-8")
     assert "get_param_optional mcp-tickets-pat" in text
     assert "MCP_TICKETS_PAT=${mcp_tickets_pat}" in text
 
@@ -707,7 +707,7 @@ def test_absent_jira_credentials_never_abort_the_secrets_fetch() -> None:
 
 def test_compose_mcp_declares_every_jira_variable() -> None:
     """The mcp service documents all four inputs rather than leaving them implicit in .env."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     env = doc["services"]["mcp"]["environment"]
     for key in _JIRA_ENV:
         assert key in env, f"the mcp service must declare {key}"
@@ -853,7 +853,7 @@ def test_compose_mcp_sets_both_bedrock_region_vars() -> None:
     Without them, boto3 has no region even with IMDS available (a574, 9249).
     Rebar's region reaches BedrockProvider and signed provenance.
     AWS_DEFAULT_REGION supplies bare boto3 callers."""
-    svc = yaml.safe_load(_COMPOSE.read_text())["services"]["mcp"]
+    svc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"]["mcp"]
     env = svc["environment"]
     for var in _MCP_REGION_VARS:
         assert env.get(var), (
@@ -913,7 +913,7 @@ def test_autodeploy_mcp_run_new_trusts_the_edge_forwarded_proto() -> None:
 
 def _server_443_block() -> str:
     """The body of the port-443 TLS server block."""
-    text = _NGINX.read_text()
+    text = _NGINX.read_text(encoding="utf-8")
     start = text.index("listen 443 ssl;")
     return text[start:]
 
@@ -923,7 +923,7 @@ def test_nginx_serves_the_documented_mcp_slash_url_without_redirecting() -> None
 
     proxy_pass must include the app's /mcp path so Starlette cannot redirect or
     produce a downgradeable Location header. A prefix location alone misses this."""
-    text = _NGINX.read_text()
+    text = _NGINX.read_text(encoding="utf-8")
     for external in ("/mcp/", "/mcp"):
         pattern = r"location\s+=\s+" + re.escape(external) + r"\s*\{(.*?)\n    \}"
         m = re.search(pattern, text, re.DOTALL)
@@ -943,7 +943,7 @@ def test_nginx_upgrades_any_plaintext_location_from_the_mcp_upstream() -> None:
     Rules cover forwarded-Host and upstream-address forms in each MCP location.
     They stay location-scoped. Server-level rules would replace proxy_redirect
     default on /review/ and /opcert/, risking their relative redirects."""
-    text = _NGINX.read_text()
+    text = _NGINX.read_text(encoding="utf-8")
     for header, pattern in (
         ("exact `= /mcp/`", r"location\s+=\s+/mcp/\s*\{(.*?)\n    \}"),
         ("exact `= /mcp`", r"location\s+=\s+/mcp\s*\{(.*?)\n    \}"),
@@ -973,7 +973,7 @@ def _render_nginx(review_bot_port: str = "8081") -> str:
 
     This matches envsubst without requiring gettext in CI and preserves nginx's
     other variables while tests inspect the configuration nginx actually parses."""
-    return _NGINX.read_text().replace("${REVIEW_BOT_PORT}", review_bot_port)
+    return _NGINX.read_text(encoding="utf-8").replace("${REVIEW_BOT_PORT}", review_bot_port)
 
 
 def test_nginx_routes_the_advertised_resource_metadata_url_to_the_mcp_app() -> None:
@@ -1043,7 +1043,7 @@ def test_compose_mcp_trusts_the_edge_forwarded_proto() -> None:
     Otherwise it emits http absolute URLs. Trust-all is bounded by the port's
     host-loopback publication and nginx's literal X-Forwarded-Proto override.
     """
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     env = doc["services"]["mcp"]["environment"]
     assert "FORWARDED_ALLOW_IPS" in env, (
         "the mcp service must set FORWARDED_ALLOW_IPS or uvicorn drops nginx's "
@@ -1153,7 +1153,7 @@ def test_compose_sibling_services_trust_the_edge_forwarded_proto(service: str) -
     FORWARDED_ALLOW_IPS their absolute URLs, including slash redirects, use http.
     Use * because the implicit gateway can drift. Host-loopback ports and nginx's
     literal X-Forwarded-Proto override bound the trust."""
-    env = yaml.safe_load(_COMPOSE.read_text())["services"][service]["environment"]
+    env = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"][service]["environment"]
     assert "FORWARDED_ALLOW_IPS" in env, (
         f"the {service} service must set FORWARDED_ALLOW_IPS or uvicorn drops nginx's "
         f"X-Forwarded-Proto and the app emits http:// absolute URLs"
@@ -1224,7 +1224,7 @@ def test_review_bot_redirect_surface_is_same_app_only() -> None:
     override, or cross-route RedirectResponse may silently change that premise."""
     sources = list(_REVIEW_BOT_DIR.glob("*.py"))
     assert sources, "no review_bot sources found — the guard would be vacuous"
-    blob = "\n".join(p.read_text() for p in sources)
+    blob = "\n".join(p.read_text(encoding="utf-8") for p in sources)
     assert "RedirectResponse" not in blob, (
         "review_bot emits a RedirectResponse: re-verify the /review/ prefix-restore rewrite "
         "cannot corrupt an off-/review/ or cross-host Location (bug 4d8c residual)"
@@ -1234,7 +1234,7 @@ def test_review_bot_redirect_surface_is_same_app_only() -> None:
             f"review_bot sets `{needle}`: the /review/ prefix-restore rewrite assumes the app "
             f"is mounted at root with default slash redirects — re-verify (bug 4d8c residual)"
         )
-    dockerfile = _REVIEWBOT_DOCKERFILE.read_text()
+    dockerfile = _REVIEWBOT_DOCKERFILE.read_text(encoding="utf-8")
     assert "--root-path" not in dockerfile, (
         "Dockerfile.reviewbot mounts the app under --root-path: the /review/ prefix-restore "
         "rewrite assumes root mounting — re-verify (bug 4d8c residual)"

@@ -16,7 +16,7 @@ SCRIPT = REPO_ROOT / "infra" / "gerrit" / "feature-branch-inventory.sh"
 
 
 def _write_executable(path: Path, body: str) -> None:
-    path.write_text(body)
+    path.write_text(body, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
@@ -90,7 +90,7 @@ esac
 """,
     )
     bash_env = tmp_path / "bash-env"
-    bash_env.write_text("exit 0\n")
+    bash_env.write_text("exit 0\n", encoding="utf-8")
     monkeypatch.setenv("BASH_ENV", str(bash_env))
     env = os.environ | {
         "PATH": f"{fakebin}:{os.environ['PATH']}",
@@ -115,7 +115,7 @@ esac
         f"returncode={result.returncode}\n"
         f"stdout={result.stdout!r}\n"
         f"stderr={result.stderr!r}\n"
-        f"git calls={calls.read_text() if calls.exists() else '<none>'!r}"
+        f"git calls={calls.read_text(encoding='utf-8') if calls.exists() else '<none>'!r}"
     )
 
 

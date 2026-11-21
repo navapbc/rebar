@@ -153,7 +153,7 @@ def _calls_sys_exit(path: Path) -> list[int]:
     exit decision belongs. Only exits reachable when the module is IMPORTED matter
     here.
     """
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     skip: set[int] = set()
     for node in ast.walk(tree):
         if _is_main_guard(node):

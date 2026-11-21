@@ -106,7 +106,7 @@ def _trim_comments(comment_map: dict[str, Any], cap: int) -> dict[str, Any]:
 def _write(name: str, payload: Any) -> Path:
     _FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
     path = _FIXTURE_DIR / name
-    path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n")
+    path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return path
 
 

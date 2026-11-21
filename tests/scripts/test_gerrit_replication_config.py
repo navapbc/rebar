@@ -6,7 +6,7 @@ REPLICATION_CONFIG = Path(__file__).resolve().parents[2] / "infra" / "gerrit" / 
 
 
 def _github_remote_body() -> str:
-    text = REPLICATION_CONFIG.read_text()
+    text = REPLICATION_CONFIG.read_text(encoding="utf-8")
     return text.split('[remote "github"]', 1)[1].split("[replication]", 1)[0]
 
 

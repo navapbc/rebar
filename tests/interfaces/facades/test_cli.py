@@ -53,7 +53,7 @@ def offline_acli_env(tmp_path: Path) -> dict[str, str]:
     bindir = tmp_path / "offline-bin"
     bindir.mkdir()
     acli = bindir / "acli"
-    acli.write_text("#!/bin/sh\necho '[]'\nexit 0\n")
+    acli.write_text("#!/bin/sh\necho '[]'\nexit 0\n", encoding="utf-8")
     acli.chmod(acli.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     return {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
 

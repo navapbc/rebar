@@ -77,7 +77,7 @@ def test_stale_index_lock_not_reclaimed_when_inode_replaced_midflight(
     lock_file = _resolved_index_lock(tracker)
 
     # A provably-stale lock (old mtime) — the reclaim path will judge it stale.
-    lock_file.write_text("stale-owner")
+    lock_file.write_text("stale-owner", encoding="utf-8")
     old = time.time() - (gitutil._INDEX_LOCK_STALE_S + 60)
     os.utime(lock_file, (old, old))
 
@@ -89,7 +89,9 @@ def test_stale_index_lock_not_reclaimed_when_inode_replaced_midflight(
 
     def _peer_replaces_lock() -> None:
         lock_file.unlink()
-        lock_file.write_text(fresh_marker)  # fresh mtime (inode number may be reused by the OS)
+        lock_file.write_text(
+            fresh_marker, encoding="utf-8"
+        )  # fresh mtime (inode number may be reused by the OS)
 
     monkeypatch.setattr(git_locking, "_reclaim_probe", _peer_replaces_lock)
 
@@ -97,7 +99,7 @@ def test_stale_index_lock_not_reclaimed_when_inode_replaced_midflight(
 
     # The peer's fresh LIVE lock must survive — reclamation must have aborted the unlink.
     assert lock_file.exists(), "the peer's fresh live index.lock was wrongly reclaimed"
-    assert lock_file.read_text() == fresh_marker
+    assert lock_file.read_text(encoding="utf-8") == fresh_marker
 
 
 def test_stationary_stale_index_lock_is_still_reclaimed(rebar_repo: Path):
@@ -107,7 +109,7 @@ def test_stationary_stale_index_lock_is_still_reclaimed(rebar_repo: Path):
     tracker = str(rebar_repo / ".tickets-tracker")
     lock_file = _resolved_index_lock(tracker)
 
-    lock_file.write_text("stale-owner")
+    lock_file.write_text("stale-owner", encoding="utf-8")
     old = time.time() - (gitutil._INDEX_LOCK_STALE_S + 60)
     os.utime(lock_file, (old, old))
 

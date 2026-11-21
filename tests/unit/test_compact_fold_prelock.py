@@ -88,11 +88,11 @@ def _age_and_commit(repo: Path, tid: str) -> None:
     for path in sorted(tdir.glob("*.json")):
         if path.name.startswith("."):
             continue
-        event = json.loads(path.read_text())
+        event = json.loads(path.read_text(encoding="utf-8"))
         event["timestamp"] -= _HOUR_NS
         rest = path.name.split("-", 1)[1]
         path.unlink()
-        (tdir / f"{event['timestamp']}-{rest}").write_text(json.dumps(event))
+        (tdir / f"{event['timestamp']}-{rest}").write_text(json.dumps(event), encoding="utf-8")
     _git(_tracker(repo), "add", "-A")
     _git(_tracker(repo), "commit", "-q", "--no-verify", "-m", "age events")
 
@@ -116,7 +116,7 @@ def _signing_identity(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         check=True,
         capture_output=True,
     )
-    parts = (tmp_path / "author.pub").read_text().strip().split()
+    parts = (tmp_path / "author.pub").read_text(encoding="utf-8").strip().split()
     ident = rebar.create_identity(
         "Dev", _EMAIL, keys=[f"{parts[0]} {parts[1]}"], repo_root=str(repo)
     )
@@ -129,7 +129,7 @@ def _signing_identity(repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def _signed_events(repo: Path, tid: str) -> list[str]:
     tdir = Path(_tracker(repo)) / tid
     paths = sorted(str(p) for p in tdir.glob("*.json") if not p.name.startswith("."))
-    signed = [p for p in paths if json.loads(Path(p).read_text()).get("author_sig")]
+    signed = [p for p in paths if json.loads(Path(p).read_text(encoding="utf-8")).get("author_sig")]
     assert signed, "ANCHOR: the fixture must produce signed events, or the probe sees nothing"
     return paths
 
@@ -185,7 +185,7 @@ def test_the_snapshot_still_carries_the_resolved_author_id(store: Path) -> None:
 
     snaps = sorted((Path(_tracker(repo)) / tid).glob("*-SNAPSHOT.json"))
     assert snaps, "precondition: the ticket folded"
-    snap = json.loads(snaps[-1].read_text())
+    snap = json.loads(snaps[-1].read_text(encoding="utf-8"))
     assert snap.get("author_id") == ident
     assert snap.get("author_email") == _EMAIL
 

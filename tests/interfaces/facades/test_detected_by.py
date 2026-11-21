@@ -217,7 +217,7 @@ def test_legacy_create_without_field_reduces_without_key(tmp_path: Path):
         "env_id": "someenv",
         "data": {"id": "legacyid00000001", "ticket_type": "bug", "title": "legacy", "priority": 2},
     }
-    (tdir / f"1700000000-{_U1}-CREATE.json").write_text(json.dumps(event))
+    (tdir / f"1700000000-{_U1}-CREATE.json").write_text(json.dumps(event), encoding="utf-8")
     state = reduce_ticket(str(tdir))
     assert "detected_by" not in state, "present-only projection: absent field -> absent key"
 
@@ -241,7 +241,7 @@ def test_reducer_projects_field_present_only(tmp_path: Path):
             "detected_by": "canary",
         },
     }
-    (tdir / f"1700000000-{_U1}-CREATE.json").write_text(json.dumps(event))
+    (tdir / f"1700000000-{_U1}-CREATE.json").write_text(json.dumps(event), encoding="utf-8")
     state = reduce_ticket(str(tdir))
     assert state.get("detected_by") == "canary"
 
@@ -257,7 +257,7 @@ def test_ticket_state_schema_declares_optional_field():
 def test_env_var_registry_documents_detected_by():
     """docs/env-vars.md is generated + CI-drift-gated; the row must exist so the
     gate covers REBAR_DETECTED_BY from now on."""
-    text = (_REPO_ROOT / "docs" / "env-vars.md").read_text()
+    text = (_REPO_ROOT / "docs" / "env-vars.md").read_text(encoding="utf-8")
     assert "REBAR_DETECTED_BY" in text
 
 

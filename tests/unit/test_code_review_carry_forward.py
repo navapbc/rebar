@@ -49,7 +49,7 @@ def _hash_of(tmp_path, name: str) -> str:
 def test_state_classification_covers_every_state(tmp_path) -> None:
     """One rule per state: unchanged region -> still-present, changed region -> addressed, an
     item that was already carried -> withdrawn, and an unresolvable region -> still-present."""
-    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     root = str(tmp_path)
     unchanged = {"a.py": _hash_of(tmp_path, "a.py")}
 
@@ -75,8 +75,8 @@ def test_state_classification_covers_every_state(tmp_path) -> None:
 
 def test_state_classification_drives_what_is_carried(tmp_path, monkeypatch) -> None:
     """Only a still-present item is carried; an addressed one is recorded and left behind."""
-    (tmp_path / "a.py").write_text("x = 1\n")
-    (tmp_path / "b.py").write_text("y = 2\n")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("y = 2\n", encoding="utf-8")
     root = str(tmp_path)
     deps = {"a.py": _hash_of(tmp_path, "a.py"), "b.py": "stale-hash"}
     _stub_reader(
@@ -98,7 +98,7 @@ def test_state_classification_drives_what_is_carried(tmp_path, monkeypatch) -> N
 def test_withdrawn_item_is_never_carried_again(tmp_path, monkeypatch) -> None:
     """The carry is ONE-SHOT: an item that already carries `standing` is classified withdrawn and
     is not re-injected, so the chain terminates after a single patchset."""
-    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     root = str(tmp_path)
     deps = {"a.py": _hash_of(tmp_path, "a.py")}
     already = _finding(standing={"origin_revision": "ps2", "state": "still-present"})
@@ -123,7 +123,7 @@ def test_standing_survives_into_the_next_payload(tmp_path, monkeypatch) -> None:
     )
     assert payload["advisory"][0]["standing"] == standing
 
-    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     _stub_reader(
         monkeypatch,
         _prior(payload["advisory"], deps={"a.py": _hash_of(tmp_path, "a.py")}, revision="ps3"),
@@ -135,7 +135,7 @@ def test_standing_survives_into_the_next_payload(tmp_path, monkeypatch) -> None:
 def test_ineligible_prior_items_yield_nothing(tmp_path, monkeypatch) -> None:
     """No prior review, an ungrounded prior finding, and a payload the surfaced-only reader never
     returns (the `dropped` bucket) all carry nothing."""
-    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     root = str(tmp_path)
     deps = {"a.py": _hash_of(tmp_path, "a.py")}
 
@@ -157,7 +157,7 @@ def test_ineligible_dropped_bucket_is_never_carried(tmp_path, monkeypatch) -> No
     cannot re-enter the review by being carried forward (bug old-frilly-plankton)."""
     from rebar.llm.code_review import sidecar
 
-    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     payload = sidecar.build_payload(
         {
             "verdict": "PASS",
@@ -198,7 +198,7 @@ def test_reader_failure_carries_nothing(tmp_path, monkeypatch) -> None:
 
 
 def test_standing_cap_bounds_the_carried_set(tmp_path, monkeypatch) -> None:
-    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     root = str(tmp_path)
     deps = {"a.py": _hash_of(tmp_path, "a.py")}
     many = [_finding(finding=f"issue {i}", priority=0.1 * (i % 9)) for i in range(40)]

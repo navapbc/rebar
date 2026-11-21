@@ -40,7 +40,7 @@ SCRIPT = REPO_ROOT / "infra" / "scripts" / "docker-storage-cap.sh"
 
 def _stub(bindir: Path, name: str, body: str) -> None:
     path = bindir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -61,12 +61,12 @@ def _bindir(
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     calls = tmp_path / "calls.log"
-    calls.write_text("")  # each stub set starts from a clean argv log
+    calls.write_text("", encoding="utf-8")  # each stub set starts from a clean argv log
     # `inspect_gc_block` replaces the legacy GC-policy block with literal text, so a test can
     # reproduce another buildx release's exact `inspect` output.
     gc_block = tmp_path / "inspect-gc-block.txt"
     if inspect_gc_block is not None:
-        gc_block.write_text(inspect_gc_block)
+        gc_block.write_text(inspect_gc_block, encoding="utf-8")
     # `docker` dispatches on the subcommand because the script asks it three different
     # questions: the Engine version, the BuildKit version behind the default builder, and
     # BuildKit's effective keep-bytes. An empty stub answer is the "unreadable" case.
@@ -296,7 +296,8 @@ def test_stale_and_overriding_space_keys_are_removed(tmp_path: Path) -> None:
                     },
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
     result = _run(tmp_path, ["--print-json"], daemon_json=daemon_json)
     assert result.returncode == 0, result.stderr
@@ -316,7 +317,7 @@ def test_rendering_does_not_probe_the_daemon(tmp_path: Path) -> None:
     bindir, calls = _bindir(tmp_path)
     result = _run(tmp_path, ["--print-json"], bindir=bindir, daemon_json=tmp_path / "daemon.json")
     assert result.returncode == 0, result.stderr
-    assert "docker" not in calls.read_text()
+    assert "docker" not in calls.read_text(encoding="utf-8")
     assert "version" not in result.stderr.lower()
 
 
@@ -342,7 +343,8 @@ def test_the_merge_preserves_unrelated_daemon_configuration(tmp_path: Path) -> N
                 "live-restore": True,
                 "builder": {"entitlements": {"security-insecure": False}},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     result = _run(
         tmp_path,
@@ -374,10 +376,10 @@ def test_a_missing_daemon_json_is_created_rather_than_treated_as_an_error(
 def test_print_json_never_writes_anything(tmp_path: Path) -> None:
     """The print mode is side-effect-free, following ``compose-up.sh --print-volumes``."""
     daemon_json = tmp_path / "daemon.json"
-    daemon_json.write_text('{"log-driver": "journald"}')
-    before = daemon_json.read_text()
+    daemon_json.write_text('{"log-driver": "journald"}', encoding="utf-8")
+    before = daemon_json.read_text(encoding="utf-8")
     _run(tmp_path, ["--print-json"], daemon_json=daemon_json)
-    assert daemon_json.read_text() == before
+    assert daemon_json.read_text(encoding="utf-8") == before
     assert not list(tmp_path.glob("daemon.json.bak*"))
 
 
@@ -388,28 +390,28 @@ def test_print_json_never_writes_anything(tmp_path: Path) -> None:
 
 def test_install_writes_the_policy_and_backs_up_what_was_there(tmp_path: Path) -> None:
     daemon_json = tmp_path / "daemon.json"
-    daemon_json.write_text('{"log-driver": "journald"}')
+    daemon_json.write_text('{"log-driver": "journald"}', encoding="utf-8")
     result = _run(tmp_path, ["--install"], daemon_json=daemon_json)
     assert result.returncode == 0, result.stderr
-    written = json.loads(daemon_json.read_text())
+    written = json.loads(daemon_json.read_text(encoding="utf-8"))
     assert written["log-driver"] == "journald"
     assert written["builder"]["gc"]["enabled"] is True
     backups = list(tmp_path.glob("daemon.json.bak*"))
     assert backups, "the pre-existing daemon.json was replaced without a backup"
-    assert json.loads(backups[0].read_text()) == {"log-driver": "journald"}
+    assert json.loads(backups[0].read_text(encoding="utf-8")) == {"log-driver": "journald"}
 
 
 def test_a_rejected_config_changes_nothing(tmp_path: Path) -> None:
     """A malformed ``daemon.json`` stops ``dockerd`` starting — never move one into place."""
     daemon_json = tmp_path / "daemon.json"
     original = '{"log-driver": "journald"}'
-    daemon_json.write_text(original)
+    daemon_json.write_text(original, encoding="utf-8")
     bindir, calls = _bindir(tmp_path, dockerd_validate_exit=1)
     result = _run(tmp_path, ["--install"], bindir=bindir, daemon_json=daemon_json)
     assert result.returncode != 0
-    assert daemon_json.read_text() == original
+    assert daemon_json.read_text(encoding="utf-8") == original
     # …and the daemon is never poked on a path that changed nothing.
-    log = calls.read_text() if calls.exists() else ""
+    log = calls.read_text(encoding="utf-8") if calls.exists() else ""
     assert "systemctl reload" not in log
     assert "systemctl restart" not in log
 
@@ -419,12 +421,12 @@ def test_a_second_install_is_idempotent_and_writes_nothing(tmp_path: Path) -> No
     daemon_json = tmp_path / "daemon.json"
     first = _run(tmp_path, ["--install"], daemon_json=daemon_json)
     assert first.returncode == 0, first.stderr
-    settled = daemon_json.read_text()
+    settled = daemon_json.read_text(encoding="utf-8")
 
     bindir, _calls = _bindir(tmp_path)
     second = _run(tmp_path, ["--install"], bindir=bindir, daemon_json=daemon_json)
     assert second.returncode == 0, second.stderr
-    assert daemon_json.read_text() == settled
+    assert daemon_json.read_text(encoding="utf-8") == settled
     assert not list(tmp_path.glob("daemon.json.candidate.*"))
 
 
@@ -448,7 +450,7 @@ def test_a_reload_is_never_used_as_evidence_that_the_policy_took(tmp_path: Path)
     Gerrit, the review-bot and the on-box MCP server down together.
     """
     daemon_json = tmp_path / "daemon.json"
-    daemon_json.write_text('{"log-driver": "journald"}')
+    daemon_json.write_text('{"log-driver": "journald"}', encoding="utf-8")
     bindir, calls = _bindir(tmp_path, systemctl_active=True)
     result = _run(
         tmp_path,
@@ -458,7 +460,7 @@ def test_a_reload_is_never_used_as_evidence_that_the_policy_took(tmp_path: Path)
         env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() - 3600))},
     )
     assert result.returncode == 0, result.stderr
-    log = calls.read_text()
+    log = calls.read_text(encoding="utf-8")
     assert "systemctl reload" not in log, log
     assert "systemctl restart" not in log, log
 
@@ -466,7 +468,7 @@ def test_a_reload_is_never_used_as_evidence_that_the_policy_took(tmp_path: Path)
 def test_a_daemon_older_than_the_policy_is_reported_as_not_in_effect(tmp_path: Path) -> None:
     """The install path ALWAYS lands here: the file was just rewritten under a live daemon."""
     daemon_json = tmp_path / "daemon.json"
-    daemon_json.write_text('{"log-driver": "journald"}')
+    daemon_json.write_text('{"log-driver": "journald"}', encoding="utf-8")
     bindir, _ = _bindir(tmp_path, systemctl_active=True)
     result = _run(
         tmp_path,
@@ -477,7 +479,7 @@ def test_a_daemon_older_than_the_policy_is_reported_as_not_in_effect(tmp_path: P
     )
     # The config IS installed — only its activation is deferred to an operator.
     assert result.returncode == 0, result.stderr
-    assert json.loads(daemon_json.read_text())["builder"]["gc"]["enabled"] is True
+    assert json.loads(daemon_json.read_text(encoding="utf-8"))["builder"]["gc"]["enabled"] is True
     assert "is NOT in effect" in result.stderr, result.stderr
     assert "review-bot-ops.md" in result.stderr
     assert "IS in effect" not in result.stderr
@@ -504,7 +506,7 @@ def test_a_daemon_started_after_the_policy_is_reported_in_effect(tmp_path: Path)
     assert result.returncode == 0, result.stderr
     assert "IS in effect" in result.stderr, result.stderr
     assert "is NOT in effect" not in result.stderr
-    assert "systemctl reload" not in calls.read_text()
+    assert "systemctl reload" not in calls.read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------------------
@@ -620,7 +622,7 @@ def test_the_effective_policy_is_read_from_inspect_not_du(tmp_path: Path) -> Non
     )
     assert result.returncode == 0, result.stderr
     assert "does NOT match" in result.stderr, result.stderr
-    assert "buildx inspect" in calls.read_text()
+    assert "buildx inspect" in calls.read_text(encoding="utf-8")
 
 
 def test_the_effective_policy_readback_never_restarts_docker(tmp_path: Path) -> None:
@@ -637,7 +639,7 @@ def test_the_effective_policy_readback_never_restarts_docker(tmp_path: Path) -> 
         env_extra={"DOCKER_PROC_DIR": str(_proc_dir(tmp_path, started_at=time.time() + 60))},
     )
     assert result.returncode == 0, result.stderr
-    log = calls.read_text()
+    log = calls.read_text(encoding="utf-8")
     assert "systemctl restart" not in log, log
     assert "systemctl reload" not in log, log
 
@@ -667,7 +669,7 @@ def test_an_inactive_daemon_is_told_it_will_read_the_policy_at_start(tmp_path: P
     result = _run(tmp_path, ["--install"], bindir=bindir, daemon_json=daemon_json)
     assert result.returncode == 0, result.stderr
     assert "when it next starts" in result.stderr, result.stderr
-    assert "systemctl reload" not in (calls.read_text() if calls.exists() else "")
+    assert "systemctl reload" not in (calls.read_text(encoding="utf-8") if calls.exists() else "")
 
 
 # --------------------------------------------------------------------------------------
@@ -684,10 +686,10 @@ def test_repeated_installs_do_not_accumulate_unbounded_backups(tmp_path: Path) -
     forever, on the volume the story exists to bound.
     """
     daemon_json = tmp_path / "daemon.json"
-    daemon_json.write_text('{"log-driver": "journald"}')
+    daemon_json.write_text('{"log-driver": "journald"}', encoding="utf-8")
     stale = [tmp_path / f"daemon.json.bak.{1700000000 + n}" for n in range(1, 10)]
     for path in stale:
-        path.write_text('{"log-driver": "journald"}')
+        path.write_text('{"log-driver": "journald"}', encoding="utf-8")
 
     result = _run(tmp_path, ["--install"], daemon_json=daemon_json)
     assert result.returncode == 0, result.stderr
@@ -722,9 +724,9 @@ def _boot_sandbox(tmp_path: Path, *, cap_install_exit: int) -> tuple[Path, Path,
     """
     scripts = tmp_path / "repo" / "infra" / "scripts"
     scripts.mkdir(parents=True)
-    (scripts / "compose-up.sh").write_text(COMPOSE_UP.read_text())
+    (scripts / "compose-up.sh").write_text(COMPOSE_UP.read_text(encoding="utf-8"), encoding="utf-8")
     calls = tmp_path / "boot-calls.log"
-    calls.write_text("")
+    calls.write_text("", encoding="utf-8")
     _stub(
         scripts,
         "docker-storage-cap.sh",
@@ -758,7 +760,7 @@ def test_compose_up_installs_the_cap_before_it_starts_docker(tmp_path: Path) -> 
     """
     script, bindir, calls = _boot_sandbox(tmp_path, cap_install_exit=0)
     _boot(script, bindir)
-    log = calls.read_text().splitlines()
+    log = calls.read_text(encoding="utf-8").splitlines()
     install = [i for i, line in enumerate(log) if line.startswith("docker-storage-cap")]
     start = [i for i, line in enumerate(log) if line.startswith("systemctl enable --now docker")]
     assert install, f"compose-up.sh never ran the Docker storage cap installer:\n{log}"
@@ -779,7 +781,7 @@ def test_a_failed_cap_install_does_not_stop_the_stack_booting(tmp_path: Path) ->
     """
     script, bindir, calls = _boot_sandbox(tmp_path, cap_install_exit=1)
     result = _boot(script, bindir)
-    log = calls.read_text()
+    log = calls.read_text(encoding="utf-8")
     assert "docker-storage-cap --install" in log
     assert "systemctl enable --now docker" in log, (
         f"a failed cap install aborted the boot instead of warning:\n{log}"
@@ -835,7 +837,7 @@ def test_check_gc_enforced_is_side_effect_free(tmp_path: Path) -> None:
     result, calls, daemon_json = _check(tmp_path, buildkit_keep_bytes="5.588GiB")
     assert result.returncode == 0, result.stderr
     assert not daemon_json.exists(), "a read-only check must never write daemon.json"
-    logged = calls.read_text()
+    logged = calls.read_text(encoding="utf-8")
     assert "systemctl" not in logged and "dockerd" not in logged, logged
 
 

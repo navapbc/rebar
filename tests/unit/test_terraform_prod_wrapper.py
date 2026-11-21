@@ -82,7 +82,9 @@ def test_plan_checks_tree_currency_before_writing_a_saved_plan(
             terraform_root.resolve(),
         ),
     ]
-    metadata = json.loads((tmp_path / "scratch" / "prod.tfplan.rebar-meta.json").read_text())
+    metadata = json.loads(
+        (tmp_path / "scratch" / "prod.tfplan.rebar-meta.json").read_text(encoding="utf-8")
+    )
     assert metadata["head"] == "a" * 40
     assert metadata["terraform_args"] == ["-target=aws_lambda_function.bedrock_spend_cap"]
 

@@ -51,11 +51,13 @@ def _seed(tracker_dir: Path, ticket_id: str) -> None:
         "author": "test",
         "data": {"id": ticket_id, "ticket_type": "task", "title": "seed", "parent_id": ""},
     }
-    (tracker_dir / ticket_id / f"{ts}-{uid}-CREATE.json").write_text(json.dumps(event))
+    (tracker_dir / ticket_id / f"{ts}-{uid}-CREATE.json").write_text(
+        json.dumps(event), encoding="utf-8"
+    )
 
 
 def _release_deltas(ticket_dir: Path) -> list[dict]:
-    events = [json.loads(p.read_text()) for p in sorted(ticket_dir.glob("*.json"))]
+    events = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(ticket_dir.glob("*.json"))]
     return [e["data"] for e in events if e.get("event_type") == "RELEASE_DELTA"]
 
 

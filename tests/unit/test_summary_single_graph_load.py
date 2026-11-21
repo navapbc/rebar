@@ -39,7 +39,9 @@ class _Event:
             "author": "Test User",
             "data": data,
         }
-        (tdir / f"{self.ts}-{uuid}-{event_type}.json").write_text(json.dumps(payload))
+        (tdir / f"{self.ts}-{uuid}-{event_type}.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
 
 
 BLOCKED, BLOCKER, READY, ARCHIVED, LOG = (f"bbbb-0000-0000-{i:04d}" for i in range(1, 6))

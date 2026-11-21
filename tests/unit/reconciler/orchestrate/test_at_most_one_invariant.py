@@ -260,7 +260,7 @@ def _make_stub_fetcher(snapshot: dict, pass_id: str, tmp_path: Path) -> ModuleTy
     snap_dir = scratch_retention.snapshots_dir(tmp_path)
     snap_dir.mkdir(parents=True, exist_ok=True)
     snap_file = snap_dir / f"{pass_id}.json"
-    snap_file.write_text(json.dumps(snapshot))
+    snap_file.write_text(json.dumps(snapshot), encoding="utf-8")
 
     stub = types.ModuleType("reconcile_fetcher")
 
@@ -269,7 +269,7 @@ def _make_stub_fetcher(snapshot: dict, pass_id: str, tmp_path: Path) -> ModuleTy
         out_dir = scratch_retention.snapshots_dir(repo_root)
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / f"{pid}.json"
-        out.write_text(json.dumps(snapshot))
+        out.write_text(json.dumps(snapshot), encoding="utf-8")
         return out
 
     stub.fetch_snapshot = _fetch
@@ -290,7 +290,7 @@ def _make_stub_applier(tmp_path: Path) -> ModuleType:
         # ignore for stub purposes.
         manifest = scratch_retention.bridge_scratch_dir(repo_root) / "manifests" / f"{pass_id}.json"
         manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(json.dumps({"mutations": len(mutations)}))
+        manifest.write_text(json.dumps({"mutations": len(mutations)}), encoding="utf-8")
         return manifest
 
     stub.apply = _apply

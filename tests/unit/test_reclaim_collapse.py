@@ -75,7 +75,9 @@ def _write_event(
     ticket_dir = tracker / ticket_id
     ticket_dir.mkdir(parents=True, exist_ok=True)
     path = ticket_dir / f"{timestamp}-{event_uuid}-{event_type}.json"
-    path.write_text(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
+    path.write_text(
+        json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
     return path
 
 
@@ -87,7 +89,7 @@ def _make_shadow_tracker(tmp_path: Path) -> Path:
     _git(tracker, "config", "user.name", "Dev")
     marker_dir = tracker / ".rebar"
     marker_dir.mkdir()
-    (marker_dir / "reclaim-shadow-clone").write_text("disposable test clone\n")
+    (marker_dir / "reclaim-shadow-clone").write_text("disposable test clone\n", encoding="utf-8")
     return tracker
 
 
@@ -450,7 +452,7 @@ def test_refuses_non_shadow_or_push_capable_targets(tmp_path: Path) -> None:
     with pytest.raises(engine.ShadowSafetyError, match="shadow"):
         engine.collapse_shadow_tracker(tracker, boundary_commit=boundary, apply=False)
 
-    marker.write_text("disposable test clone\n")
+    marker.write_text("disposable test clone\n", encoding="utf-8")
     _git(tracker, "remote", "add", "origin", "https://example.invalid/prod/tickets.git")
     with pytest.raises(engine.ShadowSafetyError, match=r"push|remote"):
         engine.collapse_shadow_tracker(tracker, boundary_commit=boundary, apply=False)

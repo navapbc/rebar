@@ -44,7 +44,8 @@ def _fixture_repo_root(
     (root / "rebar.toml").write_text(
         "[llm.model_classes]\n"
         f'frontier = {{ model = "{frontier_model}", {fallback_line} }}\n'
-        f'standard = {{ model = "{standard_model}" }}\n'
+        f'standard = {{ model = "{standard_model}" }}\n',
+        encoding="utf-8",
     )
     return str(root)
 
@@ -91,7 +92,8 @@ def test_resolve_pinned_model_refuses_non_bedrock_primary(monkeypatch, tmp_path)
     refused outright — parity is meaningless off Bedrock."""
     fake_toml = tmp_path / "rebar.toml"
     fake_toml.write_text(
-        '[llm.model_classes]\nfrontier = { model = "anthropic:claude-opus-4-8" }\n'
+        '[llm.model_classes]\nfrontier = { model = "anthropic:claude-opus-4-8" }\n',
+        encoding="utf-8",
     )
     with pytest.raises((ValueError, Exception)):
         parity.resolve_pinned_model("pass1", repo_root=str(tmp_path))
@@ -233,7 +235,11 @@ def test_corpus_row_surfaces_ran_model_from_provider_provenance(tmp_path):
 
     manifest = corpus.build_corpus({"main": str(tracker.path)}, cache_dir=tmp_path / "cache")
     cache_file = tmp_path / "cache" / f"{manifest['content_hash']}.jsonl"
-    rows = [json.loads(line) for line in cache_file.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line)
+        for line in cache_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     (row,) = [r for r in rows if r["ticket_id"] == ticket_id]
     assert row["ran_model"] == "bedrock:us.anthropic.claude-opus-4-8"
 
@@ -262,7 +268,11 @@ def test_corpus_row_ran_model_absent_when_no_provenance(tmp_path):
 
     manifest = corpus.build_corpus({"main": str(tracker.path)}, cache_dir=tmp_path / "cache")
     cache_file = tmp_path / "cache" / f"{manifest['content_hash']}.jsonl"
-    rows = [json.loads(line) for line in cache_file.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line)
+        for line in cache_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     (row,) = [r for r in rows if r["ticket_id"] == ticket_id]
     assert row["ran_model"] is None
 
@@ -296,6 +306,10 @@ def test_corpus_row_ran_model_absent_when_provenance_is_explicit_null(tmp_path):
 
     manifest = corpus.build_corpus({"main": str(tracker.path)}, cache_dir=tmp_path / "cache")
     cache_file = tmp_path / "cache" / f"{manifest['content_hash']}.jsonl"
-    rows = [json.loads(line) for line in cache_file.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line)
+        for line in cache_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     (row,) = [r for r in rows if r["ticket_id"] == ticket_id]
     assert row["ran_model"] is None

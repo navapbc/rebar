@@ -52,7 +52,7 @@ def _write_ticket(
             "parent_id": parent_id,
         },
     }
-    with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w") as f:
+    with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(create_event, f)
 
     if status != "open":
@@ -67,7 +67,7 @@ def _write_ticket(
                 "current_status": "open",
             },
         }
-        with open(ticket_dir / f"2000-status-{ticket_id}-STATUS.json", "w") as f:
+        with open(ticket_dir / f"2000-status-{ticket_id}-STATUS.json", "w", encoding="utf-8") as f:
             json.dump(status_event, f)
 
     return ticket_dir
@@ -97,7 +97,7 @@ def _write_blocks_link(
         },
     }
     filename = f"{timestamp}-{link_uuid}-LINK.json"
-    with open(blocker_dir / filename, "w") as f:
+    with open(blocker_dir / filename, "w", encoding="utf-8") as f:
         json.dump(link_event, f)
 
 
@@ -113,7 +113,9 @@ def _write_archive_event(tracker_dir: Path, ticket_id: str, timestamp: int = 300
         "env_id": "00000000-0000-4000-8000-000000000001",
         "data": {},
     }
-    with open(ticket_dir / f"{timestamp}-archive-{ticket_id}-ARCHIVED.json", "w") as f:
+    with open(
+        ticket_dir / f"{timestamp}-archive-{ticket_id}-ARCHIVED.json", "w", encoding="utf-8"
+    ) as f:
         json.dump(archive_event, f)
 
 
@@ -133,7 +135,7 @@ def _make_ticket(tracker: Path, ticket_id: str, ticket_type: str = "task") -> Pa
             "parent_id": None,
         },
     }
-    with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w") as f:
+    with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(create_event, f)
     return ticket_dir
 
@@ -161,7 +163,7 @@ def _write_link_event(
         },
     }
     filename = f"{timestamp}-{link_uuid}-LINK.json"
-    with open(source_dir / filename, "w") as f:
+    with open(source_dir / filename, "w", encoding="utf-8") as f:
         json.dump(link_event, f)
 
 

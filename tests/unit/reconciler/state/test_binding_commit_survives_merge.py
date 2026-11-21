@@ -106,7 +106,7 @@ def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
     bridge_dir.mkdir(parents=True, exist_ok=True)
     bindings_path = bridge_dir / "bindings.json"
     empty_bindings = {"bindings": {}, "reverse": {}}
-    bindings_path.write_text(json.dumps(empty_bindings))
+    bindings_path.write_text(json.dumps(empty_bindings), encoding="utf-8")
 
     # Commit the empty bindings.json so it's on the tickets branch.
     subprocess.run(
@@ -162,7 +162,7 @@ def test_binding_store_committed_to_tickets_branch_after_reconcile_pass(
 
     # Verify end-to-end: even if the working-tree file is overwritten (merge
     # scenario), restoring from the tickets branch HEAD gives back the new binding.
-    bindings_path.write_text(json.dumps(empty_bindings))
+    bindings_path.write_text(json.dumps(empty_bindings), encoding="utf-8")
     subprocess.run(
         ["git", "-C", str(tracker_dir), "checkout", "HEAD", "--", ".bridge_state/bindings.json"],
         check=True,
@@ -208,7 +208,7 @@ def test_outbound_update_generated_when_bindings_present(
         },
         "reverse": {"DIG-5999": "probe-ticket-1"},
     }
-    (bridge_dir / "bindings.json").write_text(json.dumps(bindings_data))
+    (bridge_dir / "bindings.json").write_text(json.dumps(bindings_data), encoding="utf-8")
 
     bs = binding_store_mod.load_binding_store(tmp_path)
     assert bs.get_jira_key("probe-ticket-1") == "DIG-5999", (

@@ -58,7 +58,9 @@ def _project(tmp_path, *, primary: str, fallback: str = _ANTHROPIC_FALLBACK):
     root = tmp_path / "proj"
     root.mkdir()
     (root / ".git").mkdir()
-    (root / "rebar.toml").write_text(_PROJECT_TOML.format(primary=primary, fallback=fallback))
+    (root / "rebar.toml").write_text(
+        _PROJECT_TOML.format(primary=primary, fallback=fallback), encoding="utf-8"
+    )
     return root
 
 
@@ -110,7 +112,8 @@ def test_the_gate_root_does_not_override_an_explicitly_threaded_root(tmp_path, e
     (other / "rebar.toml").write_text(
         _PROJECT_TOML.format(
             primary=f"anthropic:{_ANTHROPIC_PRIMARY}", fallback=_ANTHROPIC_FALLBACK
-        )
+        ),
+        encoding="utf-8",
     )
 
     with use_code_root(str(snapshot)):

@@ -440,7 +440,7 @@ def test_an_honest_empty_match_is_recorded_as_ok_not_as_degradation(plan_reads, 
 
 def test_added_and_modified_modules_are_within_the_size_cap():
     repo = Path(__file__).resolve().parents[2]
-    limit = int((repo / ".github" / "module-size-limit.txt").read_text().strip())
+    limit = int((repo / ".github" / "module-size-limit.txt").read_text(encoding="utf-8").strip())
     touched = [
         "llm/plan_review/overlap.py",
         "llm/plan_review/pass1.py",

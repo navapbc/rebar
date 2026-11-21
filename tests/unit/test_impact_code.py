@@ -486,7 +486,11 @@ def test_boost_is_amplify_only_never_lowers() -> None:
 
 # ── labeled-fixture calibration: HIGH vs NIT separation under v4 ───────────────────────────
 def _load_fixture() -> list[dict]:
-    return [json.loads(line) for line in _FIXTURE.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in _FIXTURE.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def test_fixture_present_and_labeled() -> None:

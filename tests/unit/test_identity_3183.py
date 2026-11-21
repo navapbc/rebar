@@ -106,7 +106,7 @@ def _keypair(tmp_path: Path, name: str) -> tuple[str, str]:
         check=True,
         capture_output=True,
     )
-    parts = (tmp_path / f"{name}.pub").read_text().strip().split()
+    parts = (tmp_path / f"{name}.pub").read_text(encoding="utf-8").strip().split()
     return str(key), f"{parts[0]} {parts[1]}"
 
 
@@ -132,7 +132,7 @@ def test_reducer_never_rejects_bad_signature(store_heldout: Path) -> None:
         "author_sig": "-----BEGIN SSH SIGNATURE-----\nTOTALLY BOGUS\n-----END SSH SIGNATURE-----",
         "data": {"ticket_type": "task", "title": "Tampered", "id": tid, "priority": 2},
     }
-    (tdir / f"1-{ev_uuid}-CREATE.json").write_text(json.dumps(event))
+    (tdir / f"1-{ev_uuid}-CREATE.json").write_text(json.dumps(event), encoding="utf-8")
 
     state = reduce_ticket(str(tdir))
     assert state is not None, "replay must not reject a bad-signature event"
@@ -223,7 +223,7 @@ def test_verify_authorship_flags_unknown_author(store_heldout: Path) -> None:
         "author_sig": "-----BEGIN SSH SIGNATURE-----\nX\n-----END SSH SIGNATURE-----",
         "data": {"ticket_type": "task", "title": "Ghosted", "id": tid, "priority": 2},
     }
-    (tdir / f"1-{ev_uuid}-CREATE.json").write_text(json.dumps(event))
+    (tdir / f"1-{ev_uuid}-CREATE.json").write_text(json.dumps(event), encoding="utf-8")
 
     env = subprocess_env(
         {"REBAR_ROOT": str(store_heldout), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"}

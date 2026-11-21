@@ -59,7 +59,7 @@ def _write_ticket(
             "parent_id": parent_id,
         },
     }
-    with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w") as f:
+    with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(create_event, f)
     if status != "open":
         status_event = {
@@ -70,7 +70,7 @@ def _write_ticket(
             "env_id": "00000000-0000-4000-8000-000000000001",
             "data": {"status": status, "current_status": "open"},
         }
-        with open(ticket_dir / f"2000-status-{ticket_id}-STATUS.json", "w") as f:
+        with open(ticket_dir / f"2000-status-{ticket_id}-STATUS.json", "w", encoding="utf-8") as f:
             json.dump(status_event, f)
     return ticket_dir
 
@@ -94,7 +94,7 @@ def _write_link(
         "env_id": "00000000-0000-4000-8000-000000000001",
         "data": {"target_id": target_id, "relation": relation},
     }
-    with open(source_dir / f"{timestamp}-{link_uuid}-LINK.json", "w") as f:
+    with open(source_dir / f"{timestamp}-{link_uuid}-LINK.json", "w", encoding="utf-8") as f:
         json.dump(link_event, f)
 
 
@@ -109,7 +109,9 @@ def _write_comment(tracker_dir: Path, ticket_id: str, body: str, timestamp: int 
         "env_id": "00000000-0000-4000-8000-000000000001",
         "data": {"body": body},
     }
-    with open(ticket_dir / f"{timestamp}-comment-{ticket_id}-COMMENT.json", "w") as f:
+    with open(
+        ticket_dir / f"{timestamp}-comment-{ticket_id}-COMMENT.json", "w", encoding="utf-8"
+    ) as f:
         json.dump(comment_event, f)
 
 
@@ -255,7 +257,7 @@ def test_archived_source_excluded(inbound, tmp_path: Path) -> None:
         "env_id": "00000000-0000-4000-8000-000000000001",
         "data": {},
     }
-    with open(tracker / ID_A / "1800-archived-A-ARCHIVED.json", "w") as f:
+    with open(tracker / ID_A / "1800-archived-A-ARCHIVED.json", "w", encoding="utf-8") as f:
         json.dump(archived_event, f)
 
     result = inbound(ID_B, str(tracker))
@@ -300,7 +302,7 @@ def test_unlinked_source_not_reported(inbound, tmp_path: Path) -> None:
         "env_id": "00000000-0000-4000-8000-000000000001",
         "data": {"link_uuid": f"link-{ID_A}-blocks-{ID_B}", "target_id": ID_B},
     }
-    with open(tracker / ID_A / "1600-unlink-A-B-UNLINK.json", "w") as f:
+    with open(tracker / ID_A / "1600-unlink-A-B-UNLINK.json", "w", encoding="utf-8") as f:
         json.dump(unlink_event, f)
 
     result = inbound(ID_B, str(tracker))

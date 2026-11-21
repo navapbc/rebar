@@ -199,7 +199,7 @@ esac
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -243,23 +243,23 @@ def _seed_container(
     as unknown and never acts on — so tests that predate the image-retirement behaviour are
     unaffected and only tests that opt in by naming an image exercise it."""
     ct = dstate / "containers"
-    with ct.open("a") as fh:
+    with ct.open("a", encoding="utf-8") as fh:
         fh.write(f"{name}|{port}|{state}|{image}\n")
-    (dstate / f"health-{port}").write_text(f'{{"in_flight":{in_flight}}}')
+    (dstate / f"health-{port}").write_text(f'{{"in_flight":{in_flight}}}', encoding="utf-8")
 
 
 def _seed_image(dstate: Path, ref: str, created: str) -> None:
     """Seed one fake image row visible to `docker images` (an orphaned per-release tag has a row
     here but NO container). ``created`` is retained for readable fixtures but is NOT used to
     select the previous release — that is keyed on recorded deploy order (see _seed_prev_sha)."""
-    with (dstate / "mcp-images").open("a") as fh:
+    with (dstate / "mcp-images").open("a", encoding="utf-8") as fh:
         fh.write(f"{created}|{ref}\n")
 
 
 def _seed_prev_sha(state: Path, sha: str) -> None:
     """Record the immediately-previous mcp release (the rollback target) the way a real cutover
     does — into $STATE_DIR/mcp-previous-sha. Reconcile preserves exactly {live, this}."""
-    (state / "mcp-previous-sha").write_text(sha + "\n")
+    (state / "mcp-previous-sha").write_text(sha + "\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -278,13 +278,13 @@ def mcp_box(tmp_path: Path) -> dict[str, object]:
     deploy_repo = tmp_path / "deploy"
     (deploy_repo / "infra" / "compose").mkdir(parents=True)
     (deploy_repo / "infra" / "scripts").mkdir(parents=True)
-    (deploy_repo / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n")
+    (deploy_repo / "infra" / "compose" / ".env").write_text("PREEXISTING=1\n", encoding="utf-8")
     # The mcp deploy path re-materializes its SSM-sourced secrets before starting the new
     # container (receptive-houndy-nilgai), so the fake box must carry the script the real box
     # has -- same stub the bot-path fixtures use. Without it the deploy aborts at
     # `mcp-secrets-fetch-failed` before any of the blue-green assertions are reached.
     (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").write_text(
-        "#!/usr/bin/env bash\nexit 0\n"
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
     )
     (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").chmod(0o755)
     mirror = tmp_path / "mirror"
@@ -292,13 +292,13 @@ def mcp_box(tmp_path: Path) -> dict[str, object]:
 
     cmd_log = tmp_path / "cmd-log"
     target_file = tmp_path / "target-sha"
-    target_file.write_text(_TARGET + "\n")
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    target_file.write_text(_TARGET + "\n", encoding="utf-8")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
 
     upstream = tmp_path / "mcp-upstream.conf"
-    upstream.write_text("server 127.0.0.1:8091;\n")
-    (dstate / "gerrit-id").write_text("gerrit-abc123\n")
-    (dstate / "health-8000").write_text('{"in_flight":0}')
+    upstream.write_text("server 127.0.0.1:8091;\n", encoding="utf-8")
+    (dstate / "gerrit-id").write_text("gerrit-abc123\n", encoding="utf-8")
+    (dstate / "health-8000").write_text('{"in_flight":0}', encoding="utf-8")
     _seed_container(dstate, "compose-mcp-1", 8091, in_flight=0)
 
     _write_common_stubs(bin_dir, cmd_log, dstate)
@@ -345,7 +345,7 @@ def _run(
 
 def _commands(box: dict[str, object]) -> list[str]:
     cmd_log: Path = box["cmd_log"]  # type: ignore[assignment]
-    return cmd_log.read_text().splitlines() if cmd_log.exists() else []
+    return cmd_log.read_text(encoding="utf-8").splitlines() if cmd_log.exists() else []
 
 
 def _commands_eventually(box: dict[str, object], needle: str, timeout: float = 6.0) -> list[str]:
@@ -384,7 +384,7 @@ def test_cutover_starts_new_flips_then_retires_without_waiting(mcp_box: dict[str
     the deploy returns success WITHOUT waiting on the old container's in-flight work."""
     # An in-flight op on the OLD backend must NOT hold the deploy back (that is the whole point
     # of blue-green vs the review-bot drain).
-    (mcp_box["dstate"] / "health-8091").write_text('{"in_flight":5}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8091").write_text('{"in_flight":5}', encoding="utf-8")  # type: ignore[operator]
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "stop compose-mcp-1")
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
@@ -397,7 +397,7 @@ def test_cutover_starts_new_flips_then_retires_without_waiting(mcp_box: dict[str
     )
     assert "compose-build-mcp" in cmds, f"the immutable image must be built\n{ctx}"
     assert "nginx-reload" in cmds, f"the upstream must be flipped with an nginx reload\n{ctx}"
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"the materialized include must now point at the new container's port\n{ctx}"
     )
     # ordering: build/run (start) < nginx-reload (flip) < stop (retire).
@@ -412,7 +412,7 @@ def test_cutover_starts_new_flips_then_retires_without_waiting(mcp_box: dict[str
 def test_cutover_does_not_force_kill_the_old_container(mcp_box: dict[str, object]) -> None:
     """Retirement is a GRACEFUL `docker stop` (SIGTERM -> the container's own bounded self-drain),
     never a `docker rm -f`/SIGKILL of a still-serving container."""
-    (mcp_box["dstate"] / "health-8091").write_text('{"in_flight":3}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8091").write_text('{"in_flight":3}', encoding="utf-8")  # type: ignore[operator]
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "stop compose-mcp-1")
     ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
@@ -449,11 +449,11 @@ def test_low_memory_aborts_before_starting_a_second_container(mcp_box: dict[str,
     assert _markers(result, "AUTODEPLOY_MCP_MEM_ABORT"), (
         f"a memory abort must be COUNTABLE via its own marker\n{ctx}"
     )
-    assert upstream.read_text().strip() == "server 127.0.0.1:8091;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8091;", (
         f"an aborted deploy must leave the upstream untouched\n{ctx}"
     )
     assert result.returncode != 0, f"the abort is a deploy failure so backoff/retry engage\n{ctx}"
-    assert (mcp_box["state"] / "deployed-sha").read_text().strip() == _DEPLOYED, (  # type: ignore[operator]
+    assert (mcp_box["state"] / "deployed-sha").read_text(encoding="utf-8").strip() == _DEPLOYED, (  # type: ignore[operator]
         f"an aborted deploy must NOT advance deployed-sha\n{ctx}"
     )
 
@@ -480,7 +480,7 @@ def test_unreadable_memory_fails_open(mcp_box: dict[str, object]) -> None:
     assert result.returncode == 0, (
         f"a fail-open deploy must complete the cutover successfully (exit 0)\n{ctx}"
     )
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"fail-open must flip the /mcp upstream to the new container (cutover reached)\n{ctx}"
     )
 
@@ -495,10 +495,10 @@ def test_both_ports_busy_does_not_start_a_third_container(mcp_box: dict[str, obj
     un-reaped containers, the deploy must NOT `docker run -p` onto an occupied port; it emits the
     cap marker and backs off instead."""
     # Re-seed: the compose-original is gone; both A and B are held by draining containers.
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(mcp_box["dstate"], "rebar-mcp-old-a-8092", 8092, in_flight=2)  # type: ignore[arg-type]
     _seed_container(mcp_box["dstate"], "rebar-mcp-old-b-8093", 8093, in_flight=2)  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -534,10 +534,10 @@ def test_port_exhausted_routine_backoff_does_not_inflate_deploy_errors(
     it must emit AUTODEPLOY_MCP_RETIRE_CAP but NOT AUTODEPLOY_ERROR/deploy_failed, so it never
     inflates deploy_errors and false-pages the general alarm during a landing burst."""
     # Both blue/green ports held by draining containers — the routine port-exhausted path.
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(mcp_box["dstate"], "rebar-mcp-old-a-8092", 8092, in_flight=2)  # type: ignore[arg-type]
     _seed_container(mcp_box["dstate"], "rebar-mcp-old-b-8093", 8093, in_flight=2)  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
@@ -598,7 +598,7 @@ def test_unhealthy_new_container_leaves_old_upstream_current(mcp_box: dict[str, 
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
     before = upstream.read_bytes()
     # Pre-mark the new port's health DOWN so the readiness gate fails.
-    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -621,7 +621,7 @@ def test_unhealthy_new_container_leaves_old_upstream_current(mcp_box: dict[str, 
         and (
             mcp_box["state"] / "deployed-sha"  # type: ignore[operator]
         )
-        .read_text()
+        .read_text(encoding="utf-8")
         .strip()
         == _DEPLOYED
     ), f"a failed deploy must not advance deployed-sha\n{ctx}"
@@ -631,14 +631,14 @@ def test_unhealthy_new_container_leaves_old_upstream_current(mcp_box: dict[str, 
     # does_not_backoff_the_bot for why it must not touch the shared one), so clearing that is
     # what models elapsed time here; the shared file is cleared too so this stays a faithful
     # "no backoff is in effect" precondition regardless of which path wrote one.
-    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
-    (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}', encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["cmd_log"]).write_text("", encoding="utf-8")  # type: ignore[operator]
     (mcp_box["state"] / "deploy-backoff").unlink(missing_ok=True)  # type: ignore[operator]
     (mcp_box["state"] / "mcp-deploy-backoff").unlink(missing_ok=True)  # type: ignore[operator]
     result2 = _run(mcp_box)
     ctx2 = f"rc={result2.returncode}\n{result2.stdout}\n{result2.stderr}"
     assert result2.returncode == 0, f"a healthy retry must succeed\n{ctx2}"
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"the healthy retry must flip the upstream to the new container\n{ctx2}"
     )
 
@@ -653,7 +653,7 @@ def test_secrets_fetch_failure_aborts_before_touching_the_live_upstream(
 
     # Make the refresh fail the way an unreachable SSM would.
     fetch = deploy_repo / "infra" / "scripts" / "fetch-secrets.sh"
-    fetch.write_text("#!/usr/bin/env bash\nexit 1\n")
+    fetch.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
     fetch.chmod(0o755)
 
     result = _run(mcp_box)
@@ -686,7 +686,8 @@ def test_storeless_container_is_not_promoted_when_a_store_is_expected(
     # New container comes up healthy, but reports a store it was SUPPOSED to have and lacks.
     (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
         '{"in_flight":0,"store":{"path":"/var/gerrit/site/mcp-tickets",'
-        '"present":false,"expected":true}}'
+        '"present":false,"expected":true}}',
+        encoding="utf-8",
     )
 
     result = _run(mcp_box)
@@ -718,7 +719,8 @@ def test_storeless_refusal_backs_off_mcp_not_the_review_bot(
     # New container comes up healthy but reports a store it was SUPPOSED to have and lacks.
     (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
         '{"in_flight":0,"store":{"path":"/var/gerrit/site/mcp-tickets",'
-        '"present":false,"expected":true}}'
+        '"present":false,"expected":true}}',
+        encoding="utf-8",
     )
 
     result = _run(mcp_box)
@@ -731,7 +733,11 @@ def test_storeless_refusal_backs_off_mcp_not_the_review_bot(
         f"the store-readiness refusal must record the MCP backoff (mcp-deploy-backoff)\n{ctx}"
     )
     review_bot_backoff = state / "deploy-backoff"
-    written = review_bot_backoff.read_text().strip() if review_bot_backoff.exists() else ""
+    written = (
+        review_bot_backoff.read_text(encoding="utf-8").strip()
+        if review_bot_backoff.exists()
+        else ""
+    )
     assert not written, (
         "the store-readiness refusal must NOT write the review-bot deploy-backoff: that file "
         "gates the whole script at the top, so it would suppress a review-bot deploy that never "
@@ -750,7 +756,8 @@ def test_storeless_container_IS_promoted_when_no_store_is_expected(
     """
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
     (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
-        '{"in_flight":0,"store":{"path":"/app/.tickets-tracker","present":false,"expected":false}}'
+        '{"in_flight":0,"store":{"path":"/app/.tickets-tracker","present":false,"expected":false}}',
+        encoding="utf-8",
     )
 
     result = _run(mcp_box)
@@ -759,7 +766,7 @@ def test_storeless_container_IS_promoted_when_no_store_is_expected(
     assert "mcp-store-missing" not in result.stdout + result.stderr, (
         f"a deployment that never declared a store must not be blocked by the gate\n{ctx}"
     )
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"the healthy container must still be promoted\n{ctx}"
     )
 
@@ -772,7 +779,7 @@ def test_health_without_a_store_field_still_promotes(mcp_box: dict[str, object])
     running the previous image.
     """
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
-    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}', encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
@@ -780,7 +787,7 @@ def test_health_without_a_store_field_still_promotes(mcp_box: dict[str, object])
     assert "mcp-store-missing" not in result.stdout + result.stderr, (
         f"a /health that predates the store field must not be blocked\n{ctx}"
     )
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"the container must still be promoted\n{ctx}"
     )
 
@@ -798,22 +805,22 @@ def test_nginx_reload_failure_restores_the_previous_upstream(tmp_path: Path) -> 
     deploy_repo = tmp_path / "deploy"
     (deploy_repo / "infra" / "compose").mkdir(parents=True)
     (deploy_repo / "infra" / "scripts").mkdir(parents=True)
-    (deploy_repo / "infra" / "compose" / ".env").write_text("X=1\n")
+    (deploy_repo / "infra" / "compose" / ".env").write_text("X=1\n", encoding="utf-8")
     # Same reason as the mcp_box fixture: the deploy path re-materializes SSM secrets first.
     (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").write_text(
-        "#!/usr/bin/env bash\nexit 0\n"
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
     )
     (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").chmod(0o755)
     mirror = tmp_path / "mirror"
     (mirror / ".git").mkdir(parents=True)
     cmd_log = tmp_path / "cmd-log"
     target_file = tmp_path / "target-sha"
-    target_file.write_text(_TARGET + "\n")
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    target_file.write_text(_TARGET + "\n", encoding="utf-8")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
     upstream = tmp_path / "mcp-upstream.conf"
-    upstream.write_text("server 127.0.0.1:8091;\n")
+    upstream.write_text("server 127.0.0.1:8091;\n", encoding="utf-8")
     before = upstream.read_bytes()
-    (dstate / "gerrit-id").write_text("gid\n")
+    (dstate / "gerrit-id").write_text("gid\n", encoding="utf-8")
     _seed_container(dstate, "compose-mcp-1", 8091, in_flight=0)
     _write_common_stubs(bin_dir, cmd_log, dstate, nginx_reload_rc=1)
     _stub(bin_dir, "git", _GIT_STUB_MCP_ONLY.replace("__TARGET_FILE__", str(target_file)))
@@ -833,7 +840,7 @@ def test_nginx_reload_failure_restores_the_previous_upstream(tmp_path: Path) -> 
     result = subprocess.run(
         ["bash", str(AUTODEPLOY)], env=env, capture_output=True, text=True, timeout=120, check=False
     )
-    cmds = cmd_log.read_text().splitlines() if cmd_log.exists() else []
+    cmds = cmd_log.read_text(encoding="utf-8").splitlines() if cmd_log.exists() else []
     ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
     assert upstream.read_bytes() == before, (
         f"a failed nginx reload must restore the previous upstream byte-identical\n{ctx}"
@@ -866,13 +873,13 @@ def test_no_op_tick_reaps_a_drained_old_container(mcp_box: dict[str, object]) ->
     """`autodeploy.sh` exits early when up-to-date, so the retire sweep must ALSO run there to
     reap containers that have finished draining since the flip."""
     # Up to date: deployed == target. An old container has drained (exited) on a non-live port.
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, in_flight=0)  # type: ignore[arg-type]
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "rebar-mcp-old-8091", 8091, in_flight=0, state="exited"
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "rm rebar-mcp-old-8091")
@@ -892,8 +899,8 @@ def test_no_op_tick_restarts_dead_live_mcp_backend(mcp_box: dict[str, object]) -
     This is the withheld oracle for trivial-protected-barracuda: before the fix, the
     no-op tick only logs mcp-live-backend-down and leaves /mcp pinned to a dead backend.
     """
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(
         mcp_box["dstate"],  # type: ignore[arg-type]
         "rebar-mcp-live-8092",
@@ -902,7 +909,7 @@ def test_no_op_tick_restarts_dead_live_mcp_backend(mcp_box: dict[str, object]) -
         state="exited",
         image=f"compose-mcp:{_TARGET}",
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -913,7 +920,7 @@ def test_no_op_tick_restarts_dead_live_mcp_backend(mcp_box: dict[str, object]) -
     assert not any(
         "rm rebar-mcp-live-8092" in c or "rm-f rebar-mcp-live-8092" in c for c in cmds
     ), f"the nginx-pinned backend must not be removed during self-heal\n{ctx}"
-    assert (mcp_box["upstream"]).read_text().strip() == "server 127.0.0.1:8092;", (  # type: ignore[operator]
+    assert (mcp_box["upstream"]).read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (  # type: ignore[operator]
         f"in-place heal must leave nginx pinned to the same port\n{ctx}"
     )
     output = result.stdout + result.stderr
@@ -922,8 +929,8 @@ def test_no_op_tick_restarts_dead_live_mcp_backend(mcp_box: dict[str, object]) -
 
 def test_dead_live_mcp_backend_heal_failure_is_retryable(mcp_box: dict[str, object]) -> None:
     """A failed in-place restart keeps identity/upstream intact and records MCP backoff."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(
         mcp_box["dstate"],  # type: ignore[arg-type]
         "rebar-mcp-live-8092",
@@ -932,8 +939,8 @@ def test_dead_live_mcp_backend_heal_failure_is_retryable(mcp_box: dict[str, obje
         state="exited",
         image=f"compose-mcp:{_TARGET}",
     )
-    (mcp_box["dstate"] / "start-fails").write_text("1")  # type: ignore[operator]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "start-fails").write_text("1", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -944,7 +951,7 @@ def test_dead_live_mcp_backend_heal_failure_is_retryable(mcp_box: dict[str, obje
     assert not any(
         "rm rebar-mcp-live-8092" in c or "rm-f rebar-mcp-live-8092" in c for c in cmds
     ), f"a failed restart must retain the nginx-pinned container identity\n{ctx}"
-    assert (mcp_box["upstream"]).read_text().strip() == "server 127.0.0.1:8092;", (  # type: ignore[operator]
+    assert (mcp_box["upstream"]).read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (  # type: ignore[operator]
         f"failed self-heal must not rewrite nginx\n{ctx}"
     )
     assert (mcp_box["state"] / "mcp-deploy-backoff").exists(), (  # type: ignore[operator]
@@ -956,8 +963,8 @@ def test_dead_live_mcp_backend_heal_failure_is_retryable(mcp_box: dict[str, obje
 
 def test_dead_live_mcp_backend_health_failure_is_retryable(mcp_box: dict[str, object]) -> None:
     """A restart that never satisfies /health records the same MCP backoff as start failure."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(
         mcp_box["dstate"],  # type: ignore[arg-type]
         "rebar-mcp-live-8092",
@@ -966,8 +973,8 @@ def test_dead_live_mcp_backend_health_failure_is_retryable(mcp_box: dict[str, ob
         state="exited",
         image=f"compose-mcp:{_TARGET}",
     )
-    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -983,11 +990,13 @@ def test_dead_live_mcp_backend_health_failure_is_retryable(mcp_box: dict[str, ob
 
 def test_dead_live_mcp_backend_honors_active_backoff(mcp_box: dict[str, object]) -> None:
     """A previous failed self-heal throttles retries instead of hammering docker start."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["state"] / "mcp-deploy-backoff").write_text(f"{_TARGET} 2 9999999999\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["state"] / "mcp-deploy-backoff").write_text(
+        f"{_TARGET} 2 9999999999\n", encoding="utf-8"
+    )  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, state="exited")  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -1002,7 +1011,7 @@ def test_source_advancing_tick_restarts_dead_live_mcp_backend(
     mcp_box: dict[str, object],
 ) -> None:
     """The watchdog also runs before ordinary source-changing deploy decisions."""
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(
         mcp_box["dstate"],  # type: ignore[arg-type]
         "compose-mcp-1",
@@ -1028,10 +1037,10 @@ def test_mcp_self_heal_kill_switch_restores_log_only_behavior(
     mcp_box: dict[str, object],
 ) -> None:
     """MCP_SELF_HEAL=0 is the source-free backout for the new watchdog branch."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, state="exited")  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box, {"MCP_SELF_HEAL": "0"})
     cmds = _commands(mcp_box)
@@ -1050,12 +1059,12 @@ def test_retire_never_stops_running_containers_when_live_port_unknown(
     stop` any RUNNING managed container, because it cannot prove which one is still serving
     /mcp. Stopping them all would kill the live backend, the exact guarantee this target exists
     to preserve (bug 7b4a)."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(mcp_box["dstate"], "rebar-mcp-a-8092", 8092, in_flight=0)  # type: ignore[arg-type]
     _seed_container(mcp_box["dstate"], "compose-mcp-1", 8091, in_flight=0)  # type: ignore[arg-type]
     # The upstream include is unreadable -> mcp_live_port yields empty (no live port known).
-    (mcp_box["upstream"]).write_text("")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -1090,14 +1099,14 @@ def test_over_cap_managed_set_emits_retire_cap_without_forcing(mcp_box: dict[str
     (reason 'over-cap') and forces NO kill — distinct from the port-exhaustion path (same marker,
     reason 'port-exhausted'). This exercises the over-cap branch of mcp_retire_sweep on the no-op
     tick with MORE managed containers than the cap allows, none reapable (all still running)."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     # Live backend on 8092 plus THREE still-draining olds -> 4 managed > cap (3), none exited.
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, in_flight=0)  # type: ignore[arg-type]
     _seed_container(mcp_box["dstate"], "rebar-mcp-old-8091", 8091, in_flight=3)  # type: ignore[arg-type]
     _seed_container(mcp_box["dstate"], "rebar-mcp-old-8093", 8093, in_flight=3)  # type: ignore[arg-type]
     _seed_container(mcp_box["dstate"], "compose-mcp-1", 8090, in_flight=3)  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box, {"MCP_RELEASES_CAP": "3"})
     cmds = _commands(mcp_box)
@@ -1122,7 +1131,7 @@ def test_over_cap_managed_set_emits_retire_cap_without_forcing(mcp_box: dict[str
 def _parse_compose_mcp_env_and_volumes() -> tuple[dict[str, str], list[str]]:
     """Parse the `mcp:` service `environment:` mapping and `volumes:` from docker-compose.yml,
     resolving compose ``${VAR:-default}`` to its default (docker run does NOT interpolate)."""
-    text = COMPOSE_FILE.read_text().splitlines()
+    text = COMPOSE_FILE.read_text(encoding="utf-8").splitlines()
     # locate the mcp service block (2-space indented key under services).
     start = None
     for i, ln in enumerate(text):
@@ -1173,7 +1182,7 @@ _ENV_FILE_ONLY = frozenset(
 
 
 def _compose_mcp_mem_limit() -> str:
-    text = COMPOSE_FILE.read_text().splitlines()
+    text = COMPOSE_FILE.read_text(encoding="utf-8").splitlines()
     start = next((i for i, ln in enumerate(text) if re.match(r"^  mcp:\s*$", ln)), None)
     assert start is not None, "mcp service not found in docker-compose.yml"
     for ln in text[start + 1 :]:
@@ -1187,7 +1196,7 @@ def _compose_mcp_mem_limit() -> str:
 
 def _compose_mcp_logging() -> tuple[str, str]:
     """The compose `mcp:` service's ``logging`` driver and ``options.tag``."""
-    text = COMPOSE_FILE.read_text().splitlines()
+    text = COMPOSE_FILE.read_text(encoding="utf-8").splitlines()
     start = next((i for i, ln in enumerate(text) if re.match(r"^  mcp:\s*$", ln)), None)
     assert start is not None, "mcp service not found in docker-compose.yml"
     driver = tag = ""
@@ -1338,7 +1347,7 @@ def test_docker_run_matches_compose_mcp_service(mcp_box: dict[str, object]) -> N
 
 
 def _write_exec(path: Path, body: str) -> None:
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -1378,7 +1387,7 @@ def _render_mcp_env_file(tmp_path: Path) -> list[tuple[str, str]]:
     )
     assert res.returncode == 0, f"fetch-secrets.sh failed: rc={res.returncode}\n{res.stderr}"
     pairs: list[tuple[str, str]] = []
-    for ln in env_file.read_text().splitlines():
+    for ln in env_file.read_text(encoding="utf-8").splitlines():
         m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", ln)
         if m:
             pairs.append((m.group(1), m.group(2)))
@@ -1389,7 +1398,7 @@ def _mcp_run_e_flags() -> list[tuple[str, str]]:
     """Parse the `-e KEY=VALUE` flags from `mcp_run_new()` in autodeploy.sh — the `-e` half of
     the MCP container's composed Config.Env — resolving compose-style `${VAR:-default}` to its
     default (a bare `docker run` does not interpolate)."""
-    text = AUTODEPLOY.read_text().splitlines()
+    text = AUTODEPLOY.read_text(encoding="utf-8").splitlines()
     start = next(i for i, ln in enumerate(text) if re.match(r"^mcp_run_new\(\)", ln))
     end = next(j for j in range(start + 1, len(text)) if re.match(r"^\}", text[j]))
     body = "\n".join(text[start:end])
@@ -1471,7 +1480,7 @@ _MCP_KEY_MOUNTS = ("opcert-ed25519-key", "rebar-bot-signing-key")
 def _compose_mcp_service() -> dict:
     import yaml
 
-    return yaml.safe_load(COMPOSE_FILE.read_text())["services"]["mcp"]
+    return yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))["services"]["mcp"]
 
 
 @pytest.mark.parametrize("key", sorted(_MCP_KEY_ENV))
@@ -1492,7 +1501,7 @@ def test_compose_mcp_mounts_key_read_only(name: str) -> None:
 
 @pytest.mark.parametrize("name", _MCP_KEY_MOUNTS)
 def test_mcp_run_new_mounts_key_read_only(name: str) -> None:
-    text = AUTODEPLOY.read_text()
+    text = AUTODEPLOY.read_text(encoding="utf-8")
     body = text[text.index("mcp_run_new() {") :]
     body = body[: body.index("\n}\n")]
     assert f'-v "$COMPOSE_DIR/{name}:/run/secrets/{name}:ro"' in body
@@ -1528,15 +1537,17 @@ def _make_repo(root: Path, touched: list[str]) -> tuple[Path, str, str]:
     for rel in baseline:
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("v1\n")
-    (repo / "infra" / "scripts" / "fetch-secrets.sh").write_text("#!/usr/bin/env bash\nexit 0\n")
+        p.write_text("v1\n", encoding="utf-8")
+    (repo / "infra" / "scripts" / "fetch-secrets.sh").write_text(
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
+    )
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "baseline")
     deployed = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip()
     for rel in touched:
-        (repo / rel).write_text("v2\n")
+        (repo / rel).write_text("v2\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "change")
     target = subprocess.run(
@@ -1560,19 +1571,19 @@ def _real_git_box(tmp_path: Path, touched: list[str]) -> dict[str, object]:
     deploy_repo = tmp_path / "deploy"
     (deploy_repo / "infra" / "compose").mkdir(parents=True)
     (deploy_repo / "infra" / "scripts").mkdir(parents=True)
-    (deploy_repo / "infra" / "compose" / ".env").write_text("X=1\n")
+    (deploy_repo / "infra" / "compose" / ".env").write_text("X=1\n", encoding="utf-8")
     (deploy_repo / "infra" / "scripts" / "fetch-secrets.sh").write_text(
-        "#!/usr/bin/env bash\nexit 0\n"
+        "#!/usr/bin/env bash\nexit 0\n", encoding="utf-8"
     )
 
     cmd_log = tmp_path / "cmd-log"
     target_file = tmp_path / "target-sha"
-    target_file.write_text(target + "\n")
-    (state / "deployed-sha").write_text(deployed + "\n")
+    target_file.write_text(target + "\n", encoding="utf-8")
+    (state / "deployed-sha").write_text(deployed + "\n", encoding="utf-8")
     upstream = tmp_path / "mcp-upstream.conf"
-    upstream.write_text("server 127.0.0.1:8091;\n")
-    (dstate / "gerrit-id").write_text("gid\n")
-    (dstate / "health-8000").write_text('{"in_flight":0}')
+    upstream.write_text("server 127.0.0.1:8091;\n", encoding="utf-8")
+    (dstate / "gerrit-id").write_text("gid\n", encoding="utf-8")
+    (dstate / "health-8000").write_text('{"in_flight":0}', encoding="utf-8")
     _seed_container(dstate, "compose-mcp-1", 8091, in_flight=0)
 
     _write_common_stubs(bin_dir, cmd_log, dstate)
@@ -1610,7 +1621,11 @@ def test_mcp_only_change_triggers_only_mcp(tmp_path: Path) -> None:
         timeout=120,
         check=False,  # type: ignore[arg-type]
     )
-    cmds = (box["cmd_log"]).read_text().splitlines() if (box["cmd_log"]).exists() else []  # type: ignore[operator]
+    cmds = (
+        (box["cmd_log"]).read_text(encoding="utf-8").splitlines()
+        if (box["cmd_log"]).exists()
+        else []
+    )  # type: ignore[operator]
     ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
     assert any("compose-build-mcp" in c for c in cmds), f"an mcp-only change must build mcp\n{ctx}"
     assert not any("compose-build-review-bot" in c for c in cmds), (
@@ -1628,7 +1643,11 @@ def test_reviewbot_only_change_triggers_only_reviewbot(tmp_path: Path) -> None:
         timeout=120,
         check=False,  # type: ignore[arg-type]
     )
-    cmds = (box["cmd_log"]).read_text().splitlines() if (box["cmd_log"]).exists() else []  # type: ignore[operator]
+    cmds = (
+        (box["cmd_log"]).read_text(encoding="utf-8").splitlines()
+        if (box["cmd_log"]).exists()
+        else []
+    )  # type: ignore[operator]
     ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
     assert any("compose-build-review-bot" in c for c in cmds), (
         f"a bot-only change must build the bot\n{ctx}"
@@ -1648,7 +1667,11 @@ def test_shared_src_change_triggers_both_targets(tmp_path: Path) -> None:
         timeout=120,
         check=False,  # type: ignore[arg-type]
     )
-    cmds = (box["cmd_log"]).read_text().splitlines() if (box["cmd_log"]).exists() else []  # type: ignore[operator]
+    cmds = (
+        (box["cmd_log"]).read_text(encoding="utf-8").splitlines()
+        if (box["cmd_log"]).exists()
+        else []
+    )  # type: ignore[operator]
     ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
     assert any("compose-build-review-bot" in c for c in cmds), (
         f"a shared src/rebar change must build the review-bot\n{ctx}"
@@ -1680,7 +1703,11 @@ def test_secrets_only_change_redeploys_mcp(tmp_path: Path, secrets_path: str) ->
         timeout=120,
         check=False,  # type: ignore[arg-type]
     )
-    cmds = (box["cmd_log"]).read_text().splitlines() if (box["cmd_log"]).exists() else []  # type: ignore[operator]
+    cmds = (
+        (box["cmd_log"]).read_text(encoding="utf-8").splitlines()
+        if (box["cmd_log"]).exists()
+        else []
+    )  # type: ignore[operator]
     ctx = f"rc={result.returncode}\ncmds={cmds}\n{result.stdout}\n{result.stderr}"
     assert any("compose-build-mcp" in c for c in cmds), (
         f"a secrets-only change must rebuild mcp so the refreshed .env reaches it\n{ctx}"
@@ -1707,7 +1734,9 @@ def test_secrets_only_delta_is_pending_during_mcp_backoff(tmp_path: Path) -> Non
         text=True,
     ).stdout.strip()
     # sha matches TARGET and next-attempt is far in the future -> mcp_backoff_active is true.
-    (Path(env["STATE_DIR"]) / "mcp-deploy-backoff").write_text(f"{target} 1 9999999999\n")  # type: ignore[index]
+    (Path(env["STATE_DIR"]) / "mcp-deploy-backoff").write_text(
+        f"{target} 1 9999999999\n", encoding="utf-8"
+    )  # type: ignore[index]
     result = subprocess.run(
         ["bash", str(AUTODEPLOY)],
         env=env,
@@ -1716,7 +1745,11 @@ def test_secrets_only_delta_is_pending_during_mcp_backoff(tmp_path: Path) -> Non
         timeout=120,
         check=False,  # type: ignore[arg-type]
     )
-    cmds = (box["cmd_log"]).read_text().splitlines() if (box["cmd_log"]).exists() else []  # type: ignore[operator]
+    cmds = (
+        (box["cmd_log"]).read_text(encoding="utf-8").splitlines()
+        if (box["cmd_log"]).exists()
+        else []
+    )  # type: ignore[operator]
     out = result.stdout + result.stderr
     ctx = f"rc={result.returncode}\ncmds={cmds}\n{out}"
     assert "mcp backoff active" in out and "is still PENDING" in out, (
@@ -1786,7 +1819,7 @@ def _mcp_box_shared_change(box: dict, in_flight: int) -> None:
     )
     _stub(bin_dir, "git", stub.replace("__TARGET_FILE__", str(target_file)))
     # The bot's drain signal: autodeploy reads in_flight from the bot /health on port 8000.
-    (box["dstate"] / "health-8000").write_text(f'{{"in_flight":{in_flight}}}')  # type: ignore[operator]
+    (box["dstate"] / "health-8000").write_text(f'{{"in_flight":{in_flight}}}', encoding="utf-8")  # type: ignore[operator]
 
 
 def test_bot_deferral_still_reaches_the_mcp_blue_green_deploy(mcp_box: dict[str, object]) -> None:
@@ -1819,7 +1852,7 @@ def test_bot_deferral_still_reaches_the_mcp_blue_green_deploy(mcp_box: dict[str,
         f"a bot deferral must NOT skip the mcp blue-green deploy — the mcp block is documented "
         f"as independent and never kills an in-flight op\n{ctx}"
     )
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"the mcp upstream must be flipped to the newly deployed container\n{ctx}"
     )
 
@@ -1828,11 +1861,13 @@ def test_bot_deferral_still_reaches_the_mcp_blue_green_deploy(mcp_box: dict[str,
     # not a deploy of $TARGET. Without this, letting control past the old `exit 0` would
     # silently start stamping completion for a component that never ran.
     state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
-    assert (state / "deployed-sha").read_text().strip() == _DEPLOYED, (
+    assert (state / "deployed-sha").read_text(encoding="utf-8").strip() == _DEPLOYED, (
         f"a deferred tick must NOT advance deployed-sha — it is not a complete deploy\n{ctx}"
     )
     bot_marker = state / "bot-deployed-sha"
-    assert not (bot_marker.exists() and bot_marker.read_text().strip() == _TARGET), (
+    assert not (
+        bot_marker.exists() and bot_marker.read_text(encoding="utf-8").strip() == _TARGET
+    ), (
         "a deferred tick must NOT stamp bot-deployed-sha: the bot deliberately did not deploy, "
         f"and recording it as done would drop that pending change permanently\n{ctx}"
     )
@@ -1843,7 +1878,7 @@ def test_bot_deferral_still_reaches_the_mcp_blue_green_deploy(mcp_box: dict[str,
     # ...but mcp DID deploy, so its OWN marker must advance. That asymmetry — one component
     # complete, the other not, on the same tick — is the whole point of per-component markers.
     mcp_marker = state / "mcp-deployed-sha"
-    assert mcp_marker.exists() and mcp_marker.read_text().strip() == _TARGET, (
+    assert mcp_marker.exists() and mcp_marker.read_text(encoding="utf-8").strip() == _TARGET, (
         "mcp deployed on this tick, so mcp-deployed-sha MUST advance even though the tick as a "
         f"whole is incomplete; otherwise the next tick redeploys mcp needlessly\n{ctx}"
     )
@@ -1869,7 +1904,7 @@ def test_bot_deferral_is_unaffected_when_only_bot_paths_changed(
         "__CHANGED__", "infra/compose/Dockerfile.reviewbot"
     )
     _stub(bin_dir, "git", bot_only.replace("__TARGET_FILE__", str(target_file)))
-    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":1}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":1}', encoding="utf-8")  # type: ignore[operator]
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
     before = upstream.read_bytes()
 
@@ -1904,7 +1939,7 @@ def test_repeated_deferred_ticks_do_not_redeploy_mcp_every_time(
     )
 
     # Bot remains busy on tick 2.
-    (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
+    (mcp_box["cmd_log"]).write_text("", encoding="utf-8")  # type: ignore[operator]
     second = _run(mcp_box)
     second_cmds = _commands(mcp_box)
     ctx = f"rc={second.returncode}\ncmds={second_cmds}\n{second.stdout}\n{second.stderr}"
@@ -1928,7 +1963,7 @@ def test_mcp_failure_on_a_deferred_tick_does_not_backoff_the_bot(
     state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
     # Make the NEW mcp container fail its readiness probe, so the mcp block takes its
     # fatal path on a tick where the bot only deferred.
-    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
@@ -1941,7 +1976,7 @@ def test_mcp_failure_on_a_deferred_tick_does_not_backoff_the_bot(
     )
 
     global_backoff = state / "deploy-backoff"
-    written = global_backoff.read_text().strip() if global_backoff.exists() else ""
+    written = global_backoff.read_text(encoding="utf-8").strip() if global_backoff.exists() else ""
     assert not written, (
         "an mcp failure must NOT write the SHARED deploy-backoff: that file gates the whole "
         f"script, so it would suppress the review-bot deploy too. got {written!r}\n{ctx}"
@@ -1957,7 +1992,7 @@ def test_a_failed_mcp_deploy_does_not_redeploy_the_bot_every_tick(
     failed deployment.
     """
     _mcp_box_shared_change(mcp_box, in_flight=0)  # bot deploys
-    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # MCP fails
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN", encoding="utf-8")  # MCP fails
 
     first = _run(mcp_box)
     first_cmds = _commands(mcp_box)
@@ -1972,7 +2007,7 @@ def test_a_failed_mcp_deploy_does_not_redeploy_the_bot_every_tick(
     )
 
     # Tick 2 has no new merge. The bot already reached target.
-    (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
+    (mcp_box["cmd_log"]).write_text("", encoding="utf-8")  # type: ignore[operator]
     second = _run(mcp_box)
     second_cmds = _commands(mcp_box)
     ctx2 = f"rc={second.returncode}\ncmds={second_cmds}\n{second.stdout}\n{second.stderr}"
@@ -1997,7 +2032,7 @@ def test_mcp_backoff_throttles_only_mcp_and_lets_the_bot_deploy(
     must run while MCP remains throttled.
     """
     _mcp_box_shared_change(mcp_box, in_flight=2)  # bot busy -> defers, its delta stays pending
-    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN", encoding="utf-8")  # type: ignore[operator]
 
     first = _run(mcp_box)
     ctx1 = f"rc={first.returncode}\n{first.stdout}\n{first.stderr}"
@@ -2010,9 +2045,9 @@ def test_mcp_backoff_throttles_only_mcp_and_lets_the_bot_deploy(
     # Tick 2: bot now IDLE (so its still-pending delta can deploy), mcp health restored.
     # The mcp window is still open (BACKOFF_BASE=60s), so mcp must be skipped ANYWAY --
     # that is what makes it a backoff rather than a retry.
-    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}')  # type: ignore[operator]
-    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
-    (mcp_box["cmd_log"]).write_text("")  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}', encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}', encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["cmd_log"]).write_text("", encoding="utf-8")  # type: ignore[operator]
     second = _run(mcp_box)
     second_cmds = _commands(mcp_box)
     ctx = f"rc={second.returncode}\ncmds={second_cmds}\n{second.stdout}\n{second.stderr}"
@@ -2044,7 +2079,7 @@ def test_mcp_failure_keeps_the_deploy_failed_metric_and_names_the_component(
     marker is what lets an operator tell the two paths apart without a new metric name.
     """
     _mcp_box_shared_change(mcp_box, in_flight=2)
-    (mcp_box["dstate"] / "health-8092").write_text("DOWN")  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text("DOWN", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     errors = _markers(result, "AUTODEPLOY_ERROR")
@@ -2085,10 +2120,12 @@ def test_bot_backoff_tick_does_not_record_the_bot_as_deployed(
         "__CHANGED__", "infra/compose/Dockerfile.reviewbot"
     )
     _stub(bin_dir, "git", bot_only.replace("__TARGET_FILE__", str(target_file)))
-    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}', encoding="utf-8")  # type: ignore[operator]
 
     # The bot's backoff window is OPEN for this exact target (a prior bot deploy failed).
-    (state / "deploy-backoff").write_text(f"{_TARGET} 1 {int(time.time()) + 600}\n")
+    (state / "deploy-backoff").write_text(
+        f"{_TARGET} 1 {int(time.time()) + 600}\n", encoding="utf-8"
+    )
 
     result = _run(mcp_box)
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
@@ -2099,7 +2136,7 @@ def test_bot_backoff_tick_does_not_record_the_bot_as_deployed(
     )
 
     recorded = (
-        (state / "bot-deployed-sha").read_text().strip()
+        (state / "bot-deployed-sha").read_text(encoding="utf-8").strip()
         if (state / "bot-deployed-sha").exists()
         else ""
     )
@@ -2126,7 +2163,9 @@ def test_mcp_backoff_tick_does_not_record_mcp_as_deployed(
     _mcp_box_shared_change(mcp_box, in_flight=0)  # bot idle -> it deploys, nothing defers
     state = Path(mcp_box["env"]["STATE_DIR"])  # type: ignore[index]
     # mcp's own backoff window is OPEN for this exact target (a prior mcp deploy failed).
-    (state / "mcp-deploy-backoff").write_text(f"{_TARGET} 1 {int(time.time()) + 600}\n")
+    (state / "mcp-deploy-backoff").write_text(
+        f"{_TARGET} 1 {int(time.time()) + 600}\n", encoding="utf-8"
+    )
 
     result = _run(mcp_box)
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
@@ -2135,7 +2174,7 @@ def test_mcp_backoff_tick_does_not_record_mcp_as_deployed(
         f"precondition: the tick must reach the mcp gate and skip on the open window\n{ctx}"
     )
     recorded = (
-        (state / "mcp-deployed-sha").read_text().strip()
+        (state / "mcp-deployed-sha").read_text(encoding="utf-8").strip()
         if (state / "mcp-deployed-sha").exists()
         else ""
     )
@@ -2165,9 +2204,11 @@ def test_an_open_bot_backoff_with_no_pending_delta_is_not_reported_as_a_skip(
         "__CHANGED__", "infra/compose/Dockerfile.mcp"
     )
     _stub(bin_dir, "git", mcp_only.replace("__TARGET_FILE__", str(target_file)))
-    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}', encoding="utf-8")  # type: ignore[operator]
     # ...while the BOT's backoff window happens to be open.
-    (state / "deploy-backoff").write_text(f"{_TARGET} 1 {int(time.time()) + 600}\n")
+    (state / "deploy-backoff").write_text(
+        f"{_TARGET} 1 {int(time.time()) + 600}\n", encoding="utf-8"
+    )
 
     result = _run(mcp_box)
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
@@ -2204,7 +2245,7 @@ def test_a_complete_tick_advances_the_mcp_marker_even_when_mcp_was_a_no_op(
         "__CHANGED__", "infra/compose/Dockerfile.reviewbot"
     )
     _stub(bin_dir, "git", bot_only.replace("__TARGET_FILE__", str(target_file)))
-    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8000").write_text('{"in_flight":0}', encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -2215,13 +2256,13 @@ def test_a_complete_tick_advances_the_mcp_marker_even_when_mcp_was_a_no_op(
     assert not any(c.startswith("run ") and "rebar-mcp-" in c for c in cmds), (
         f"precondition: the mcp block must be a NO-OP on a bot-only change\n{ctx}"
     )
-    assert (state / "deployed-sha").read_text().strip() == _TARGET, (
+    assert (state / "deployed-sha").read_text(encoding="utf-8").strip() == _TARGET, (
         f"precondition: a complete tick must advance the global deployed-sha\n{ctx}"
     )
 
     marker = state / "mcp-deployed-sha"
-    recorded = marker.read_text().strip() if marker.exists() else "<absent>"
-    assert marker.exists() and marker.read_text().strip() == _TARGET, (
+    recorded = marker.read_text(encoding="utf-8").strip() if marker.exists() else "<absent>"
+    assert marker.exists() and marker.read_text(encoding="utf-8").strip() == _TARGET, (
         "a COMPLETE tick must leave the mcp marker in lockstep with the global sha even when "
         "the mcp block was a no-op; otherwise a later mcp-only change diffs from a stale "
         f"baseline. mcp-deployed-sha={recorded!r}\n{ctx}"
@@ -2241,8 +2282,8 @@ def test_reaping_a_drained_container_retires_its_per_release_image(
 ) -> None:
     """The AC: after a drained container is reaped, the `compose-mcp:<sha>` image IT was running
     is removed, while the LIVE backend's image and the bare `compose-mcp` build tag survive."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image="compose-mcp:" + "a" * 40
     )
@@ -2253,7 +2294,7 @@ def test_reaping_a_drained_container_retires_its_per_release_image(
         state="exited",
         image="compose-mcp:" + "b" * 40,
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "image-rm ")
@@ -2275,8 +2316,8 @@ def test_a_running_containers_image_is_never_removed(mcp_box: dict[str, object])
     has SUCCEEDED. A still-RUNNING non-live container is asked to drain (`docker stop`) but is
     NOT reaped this tick, so its image must not be touched — removing it would strand a
     container that may still be finishing in-flight certified ops."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image="compose-mcp:" + "a" * 40
     )
@@ -2288,7 +2329,7 @@ def test_a_running_containers_image_is_never_removed(mcp_box: dict[str, object])
         in_flight=3,
         image="compose-mcp:" + "c" * 40,
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "stop rebar-mcp-draining-8091")
@@ -2314,13 +2355,13 @@ def test_an_image_shared_with_the_live_backend_is_retained(mcp_box: dict[str, ob
     of an unchanged sha). Retiring on reap must key on the IMAGE, not on the container: removing
     it would delete the image under the serving container."""
     shared = "compose-mcp:" + "a" * 40
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image=shared)  # type: ignore[arg-type]
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "rebar-mcp-old-8091", 8091, state="exited", image=shared
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "rm rebar-mcp-old-8091")
@@ -2345,15 +2386,15 @@ def test_the_bare_build_tag_is_never_retired(mcp_box: dict[str, object]) -> None
     """`compose-mcp` (the bare `docker compose build mcp` output) is what the next deploy re-tags
     into `compose-mcp:<sha>`. Removing it would break the following build's tag step, so a
     container running the bare tag — the boot compose backend — never triggers a removal."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image="compose-mcp:" + "a" * 40
     )
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "compose-mcp-1", 8091, state="exited", image="compose-mcp"
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "rm compose-mcp-1")
@@ -2374,13 +2415,13 @@ def test_orphaned_per_release_tags_with_no_container_are_reconciled(
     With no container reaped, image removal must come from the orphan sweep rather
     than at-reap retirement.
     """
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     live = "compose-mcp:" + "a" * 40
     prev = "compose-mcp:" + "b" * 40
     orphans = ["compose-mcp:" + c * 40 for c in ("c", "d", "e")]
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image=live)  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
     _seed_prev_sha(mcp_box["state"], "b" * 40)  # type: ignore[arg-type]  # recorded rollback target
     for ref in (live, "compose-mcp:latest", prev, *orphans):
         _seed_image(mcp_box["dstate"], ref, "2026-08-30 00:00:00 +0000 UTC")  # type: ignore[arg-type]
@@ -2405,13 +2446,13 @@ def test_reconcile_never_retires_live_or_immediately_previous(
     backend's image AND the immediately-previous release (the recorded rollback target), plus
     the `:latest` build tag. Only true orphans go. If this ever fails, a reconcile could delete
     the image a rollback depends on."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     live = "compose-mcp:" + "a" * 40
     prev = "compose-mcp:" + "b" * 40
     orphan = "compose-mcp:" + "c" * 40
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image=live)  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
     _seed_prev_sha(mcp_box["state"], "b" * 40)  # type: ignore[arg-type]
     for ref in (live, "compose-mcp:latest", prev, orphan):
         _seed_image(mcp_box["dstate"], ref, "2026-08-30 00:00:00 +0000 UTC")  # type: ignore[arg-type]
@@ -2441,9 +2482,9 @@ def test_reconcile_fails_safe_when_live_image_unidentifiable(
     reconcile must touch NOTHING. The assertion anchors on the reconcile's OWN fail-safe log line
     so it proves the stage was REACHED and chose to skip — not merely that no removal happened
     for some unrelated reason."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
-    (mcp_box["upstream"]).write_text("")  # type: ignore[operator]  # live port UNKNOWN
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("", encoding="utf-8")  # type: ignore[operator]  # live port UNKNOWN
     _seed_prev_sha(mcp_box["state"], "b" * 40)  # type: ignore[arg-type]  # a rollback IS recorded
     for ref in ("compose-mcp:" + "c" * 40, "compose-mcp:" + "d" * 40):
         _seed_image(mcp_box["dstate"], ref, "2026-08-29 12:00:00 +0000 UTC")  # type: ignore[arg-type]
@@ -2472,11 +2513,11 @@ def test_reconcile_defers_when_no_previous_release_recorded(
     rollback target — so reconcile DEFERS and removes nothing rather than guessing one from a
     build timestamp and risking deletion of the real rollback image. Anchored on the deferral
     log line so it proves the stage ran."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     live = "compose-mcp:" + "a" * 40
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image=live)  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
     # No _seed_prev_sha — the mcp-previous-sha marker is absent.
     for ref in (live, "compose-mcp:" + "c" * 40, "compose-mcp:" + "d" * 40):
         _seed_image(mcp_box["dstate"], ref, "2026-08-30 00:00:00 +0000 UTC")  # type: ignore[arg-type]
@@ -2505,7 +2546,7 @@ def test_cutover_records_the_outgoing_release_as_previous(
     mcp component's last-deployed sha, drive a full deploy to _TARGET, and assert the outgoing
     sha was recorded."""
     outgoing = "1" * 40
-    (mcp_box["state"] / "mcp-deployed-sha").write_text(outgoing + "\n")  # type: ignore[operator]
+    (mcp_box["state"] / "mcp-deployed-sha").write_text(outgoing + "\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     prev_file = mcp_box["state"] / "mcp-previous-sha"  # type: ignore[operator]
@@ -2513,9 +2554,9 @@ def test_cutover_records_the_outgoing_release_as_previous(
 
     assert result.returncode == 0, f"a clean mcp cutover exits 0\n{ctx}"
     assert prev_file.exists(), f"the cutover must record the outgoing release as previous\n{ctx}"
-    assert prev_file.read_text().strip() == outgoing, (
+    assert prev_file.read_text(encoding="utf-8").strip() == outgoing, (
         f"mcp-previous-sha must hold the sha that was live BEFORE this cutover\n"
-        f"got={prev_file.read_text().strip()!r} want={outgoing!r}\n{ctx}"
+        f"got={prev_file.read_text(encoding='utf-8').strip()!r} want={outgoing!r}\n{ctx}"
     )
 
 
@@ -2525,13 +2566,13 @@ def test_reconcile_ignores_dangling_none_rows(mcp_box: dict[str, object]) -> Non
     `docker image rm`. Only true `<40-hex-sha>` tags are candidates, and the previous release is
     the RECORDED one — so a dangling row can neither be removed nor masquerade as the rollback
     target."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     live = "compose-mcp:" + "a" * 40
     prev = "compose-mcp:" + "b" * 40
     orphan = "compose-mcp:" + "c" * 40
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8092", 8092, image=live)  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
     _seed_prev_sha(mcp_box["state"], "b" * 40)  # type: ignore[arg-type]
     for ref in (live, "compose-mcp:<none>", prev, orphan):
         _seed_image(mcp_box["dstate"], ref, "2026-08-30 00:00:00 +0000 UTC")  # type: ignore[arg-type]
@@ -2563,7 +2604,8 @@ def test_failed_handshake_container_is_not_promoted(mcp_box: dict[str, object]) 
     (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
         '{"in_flight":0,"store":{"path":"/t","present":true,"expected":true},'
         '"handshake":{"ok":false,"status":421,"host":"127.0.0.1:8091",'
-        '"error":"initialize returned HTTP 421"}}'
+        '"error":"initialize returned HTTP 421"}}',
+        encoding="utf-8",
     )
 
     result = _run(mcp_box)
@@ -2592,7 +2634,8 @@ def test_container_reporting_a_successful_handshake_is_promoted(mcp_box: dict[st
     Without this, "refuses everything" would pass the test above."""
     (mcp_box["dstate"] / "health-8092").write_text(  # type: ignore[operator]
         '{"in_flight":0,"handshake":{"ok":true,"status":200,'
-        '"host":"rebar.solutions.navateam.com","elapsed_ms":3.0}}'
+        '"host":"rebar.solutions.navateam.com","elapsed_ms":3.0}}',
+        encoding="utf-8",
     )
 
     result = _run(mcp_box)
@@ -2600,7 +2643,7 @@ def test_container_reporting_a_successful_handshake_is_promoted(mcp_box: dict[st
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
 
     assert "mcp-handshake-failed" not in result.stdout + result.stderr, ctx
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"a container that proved it can serve MCP must be promoted\n{ctx}"
     )
 
@@ -2608,14 +2651,14 @@ def test_container_reporting_a_successful_handshake_is_promoted(mcp_box: dict[st
 def test_container_with_no_handshake_field_still_promotes(mcp_box: dict[str, object]) -> None:
     """Mixed-version safety: an OLDER container's /health predates the `handshake` field, and an
     absent field must not read as a failure — exactly how the `store` gate treats one."""
-    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}')  # type: ignore[operator]
+    (mcp_box["dstate"] / "health-8092").write_text('{"in_flight":0}', encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     upstream: Path = mcp_box["upstream"]  # type: ignore[assignment]
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
 
     assert "mcp-handshake-failed" not in result.stdout + result.stderr, ctx
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"a mixed-version deploy must not be blocked by the new gate\n{ctx}"
     )
 
@@ -2681,7 +2724,7 @@ def test_entrypoint_source_change_rebuilds_the_mcp_image(mcp_box: dict[str, obje
     assert "nginx-reload" in cmds, (
         f"the upstream must be flipped to the rebuilt container with an nginx reload\n{ctx}"
     )
-    assert upstream.read_text().strip() == "server 127.0.0.1:8092;", (
+    assert upstream.read_text(encoding="utf-8").strip() == "server 127.0.0.1:8092;", (
         f"the materialized include must now point at the rebuilt container's port\n{ctx}"
     )
 
@@ -2697,8 +2740,8 @@ def test_exited_live_backend_is_not_reaped(mcp_box: dict[str, object]) -> None:
     Removing it while upstream still names its port turns a restartable crash into a
     lasting outage. An unrelated exited container must still be reaped.
     """
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     # The LIVE backend (the include points here) has crashed and is currently exited.
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "rebar-mcp-live-8093", 8093, state="exited"
@@ -2707,7 +2750,7 @@ def test_exited_live_backend_is_not_reaped(mcp_box: dict[str, object]) -> None:
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "rebar-mcp-old-8092", 8092, state="exited"
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "rm rebar-mcp-old-8092")
@@ -2733,8 +2776,8 @@ def test_port_ping_pong_prefers_running_live_backend_over_exited_historical_bind
     The running backend that currently owns nginx's live port is authoritative; an older exited
     container with the same historical HostConfig binding must not be mistaken for /mcp.
     """
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     # Old port-A release, stopped after the port-B deploy; its HostConfig still says 8092.
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"],
@@ -2751,7 +2794,7 @@ def test_port_ping_pong_prefers_running_live_backend_over_exited_historical_bind
         state="running",
         image=f"compose-mcp:{_TARGET}",
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "rm rebar-mcp-c0b1ad2e8e92-8092")
@@ -2780,8 +2823,8 @@ def test_exited_live_backend_without_running_owner_still_emits_down_marker(
     mcp_box: dict[str, object],
 ) -> None:
     """If no running backend owns nginx's port, HostConfig fallback still finds the dead one."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"],
         "rebar-mcp-dead-8092",
@@ -2789,7 +2832,7 @@ def test_exited_live_backend_without_running_owner_still_emits_down_marker(
         state="exited",
         image=f"compose-mcp:{_TARGET}",
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands(mcp_box)
@@ -2812,12 +2855,12 @@ def test_exited_live_backend_signals_that_the_serving_backend_is_down(
     sweep must SIGNAL it on the existing observability path rather than skip it in silence.
     `err` (AUTODEPLOY_ERROR) is that path: it is already counted into the deploy_errors metric
     and alarmed, so no new marker token, offset file, or CloudWatch wiring is introduced."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(  # type: ignore[arg-type]
         mcp_box["dstate"], "rebar-mcp-live-8093", 8093, state="exited"
     )
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     ctx = f"rc={result.returncode}\n{result.stdout}\n{result.stderr}"
@@ -2833,11 +2876,11 @@ def test_exited_live_backend_signals_that_the_serving_backend_is_down(
 def test_running_live_backend_is_still_not_reaped_or_stopped(mcp_box: dict[str, object]) -> None:
     """The pre-existing behaviour the fix must preserve: a RUNNING live backend is neither
     stopped nor reaped, while a running superseded one is asked to drain."""
-    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n")  # type: ignore[operator]
-    (mcp_box["dstate"] / "containers").write_text("")  # type: ignore[operator]
+    (mcp_box["state"] / "deployed-sha").write_text(_TARGET + "\n", encoding="utf-8")  # type: ignore[operator]
+    (mcp_box["dstate"] / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(mcp_box["dstate"], "rebar-mcp-live-8093", 8093)  # type: ignore[arg-type]
     _seed_container(mcp_box["dstate"], "rebar-mcp-old-8092", 8092)  # type: ignore[arg-type]
-    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n")  # type: ignore[operator]
+    (mcp_box["upstream"]).write_text("server 127.0.0.1:8093;\n", encoding="utf-8")  # type: ignore[operator]
 
     result = _run(mcp_box)
     cmds = _commands_eventually(mcp_box, "stop rebar-mcp-old-8092")
@@ -2879,11 +2922,11 @@ def _code_workspace(root: Path) -> tuple[Path, Path, str, str]:
     source = root / "source"
     source.mkdir()
     _workspace_git(source, "init", "-q", "-b", "main")
-    (source / "f.txt").write_text("one\n")
+    (source / "f.txt").write_text("one\n", encoding="utf-8")
     _workspace_git(source, "add", "f.txt")
     _workspace_git(source, "commit", "-qm", "one")
     first = _workspace_git(source, "rev-parse", "HEAD")
-    (source / "f.txt").write_text("two\n")
+    (source / "f.txt").write_text("two\n", encoding="utf-8")
     _workspace_git(source, "commit", "-qam", "two")
     second = _workspace_git(source, "rev-parse", "HEAD")
     remote = init_bare_remote(root / "remote.git", initial_branch="main")
@@ -2896,7 +2939,7 @@ def _code_workspace(root: Path) -> tuple[Path, Path, str, str]:
 
 def _advance_remote(source: Path) -> str:
     """Push one more commit to the remote (main advancing without an MCP image change)."""
-    (source / "g.txt").write_text("docs only\n")
+    (source / "g.txt").write_text("docs only\n", encoding="utf-8")
     _workspace_git(source, "add", "g.txt")
     _workspace_git(source, "commit", "-qm", "docs only")
     _workspace_git(source, "push", "-q", "origin", "main")
@@ -2906,11 +2949,11 @@ def _advance_remote(source: Path) -> str:
 def _seed_steady_state(box: dict[str, object], workspace: Path, target: str) -> None:
     """A no-op tick at `target` whose live MCP backend uses `workspace` as MCP_CODE_DIR."""
     dstate = box["dstate"]
-    (dstate / "code-dir").write_text(str(workspace))  # type: ignore[operator]
-    (dstate / "entrypoint").write_text(str(_ENTRYPOINT))  # type: ignore[operator]
-    (box["target_file"]).write_text(target + "\n")  # type: ignore[operator]
-    (box["state"] / "deployed-sha").write_text(target + "\n")  # type: ignore[operator]
-    (dstate / "containers").write_text("")  # type: ignore[operator]
+    (dstate / "code-dir").write_text(str(workspace), encoding="utf-8")  # type: ignore[operator]
+    (dstate / "entrypoint").write_text(str(_ENTRYPOINT), encoding="utf-8")  # type: ignore[operator]
+    (box["target_file"]).write_text(target + "\n", encoding="utf-8")  # type: ignore[operator]
+    (box["state"] / "deployed-sha").write_text(target + "\n", encoding="utf-8")  # type: ignore[operator]
+    (dstate / "containers").write_text("", encoding="utf-8")  # type: ignore[operator]
     _seed_container(
         dstate,  # type: ignore[arg-type]
         "rebar-mcp-live-8092",
@@ -2919,7 +2962,7 @@ def _seed_steady_state(box: dict[str, object], workspace: Path, target: str) -> 
         state="running",
         image=f"compose-mcp:{target}",
     )
-    (box["upstream"]).write_text("server 127.0.0.1:8092;\n")  # type: ignore[operator]
+    (box["upstream"]).write_text("server 127.0.0.1:8092;\n", encoding="utf-8")  # type: ignore[operator]
 
 
 def _stuck_markers(result: subprocess.CompletedProcess[str]) -> list[str]:
@@ -2947,16 +2990,16 @@ def test_no_op_tick_reports_a_stuck_mcp_code_workspace(
     _source, workspace, _first, second = _code_workspace(tmp_path)
     target = second
     if case == "dirty":
-        (workspace / "f.txt").write_text("edited\n")
+        (workspace / "f.txt").write_text("edited\n", encoding="utf-8")
         _workspace_git(workspace, "reset", "-q", "--hard", _first)
-        (workspace / "f.txt").write_text("edited\n")
+        (workspace / "f.txt").write_text("edited\n", encoding="utf-8")
     elif case == "diverged":
         _workspace_git(workspace, "reset", "-q", "--hard", _first)
-        (workspace / "h.txt").write_text("local\n")
+        (workspace / "h.txt").write_text("local\n", encoding="utf-8")
         _workspace_git(workspace, "add", "h.txt")
         _workspace_git(workspace, "commit", "-qm", "local")
     elif case == "unreadable":
-        (workspace / ".git" / "index").write_text("corrupt")
+        (workspace / ".git" / "index").write_text("corrupt", encoding="utf-8")
     elif case == "absent":
         workspace = tmp_path / "never-cloned"
     _seed_steady_state(mcp_box, workspace, target)

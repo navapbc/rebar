@@ -48,7 +48,7 @@ def _write_event(repo: Path, ts: int, etype: str, data: dict) -> None:
         "timestamp": ts,
         "uuid": ev_uuid,
     }
-    (d / f"{ts}-{ev_uuid}-{etype}.json").write_text(json.dumps(envelope))
+    (d / f"{ts}-{ev_uuid}-{etype}.json").write_text(json.dumps(envelope), encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", f"{etype} {_TICKET}")
 

@@ -92,11 +92,15 @@ _DESC = (
 def _enable(repo: Path) -> None:
     # progressive drift-refresh is always on (off switch retired in story 4cdf); the gate config
     # no longer sets it.
-    (repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_claim = true\n", encoding="utf-8"
+    )
 
 
 def _enable_close(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _commit(repo: Path) -> None:
@@ -158,8 +162,8 @@ def test_commit_all_leaves_the_runtime_cache_out_of_the_snapshot(tmp_path: Path)
         subprocess.run(["git", "-C", str(repo), "config", key, value], check=True)
     cached = repo / ".rebar" / "cache" / "plan-review" / "t" / "x.json"
     cached.parent.mkdir(parents=True)
-    cached.write_text("{}\n")
-    (repo / "src.py").write_text("x = 1\n")
+    cached.write_text("{}\n", encoding="utf-8")
+    (repo / "src.py").write_text("x = 1\n", encoding="utf-8")
 
     _commit_all(repo)
 
@@ -779,7 +783,7 @@ def test_review_cap_hit_indeterminate(rebar_repo: Path, monkeypatch) -> None:
 def _scoped(repo: Path, *, dep: str = "dep.py", content: str = "v = 1\n") -> str:
     """A claimable, reviewed ticket whose attestation is SCOPED to one dependency
     file (via file_impact). Returns the ticket id; the attestation is signed."""
-    (repo / dep).write_text(content)
+    (repo / dep).write_text(content, encoding="utf-8")
     _commit_all(repo)  # the reviewed file must exist in the attested snapshot
     tid = _make(repo)
     rebar.set_file_impact(
@@ -794,7 +798,9 @@ def test_code_drift_in_dependency_file_invalidates(rebar_repo: Path) -> None:
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
-    (rebar_repo / "dep.py").write_text("v = 2  # changed\n")  # drift in the reviewed file
+    (rebar_repo / "dep.py").write_text(
+        "v = 2  # changed\n", encoding="utf-8"
+    )  # drift in the reviewed file
     _commit_all(rebar_repo)  # drift is what LANDED — the attested basis moved
     with pytest.raises(rebar.RebarError) as ei:
         rebar.claim(tid, repo_root=str(rebar_repo))
@@ -808,7 +814,7 @@ def test_unrelated_change_does_not_invalidate_attestation(rebar_repo: Path) -> N
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
-    (rebar_repo / "unrelated.py").write_text("noise = True\n")
+    (rebar_repo / "unrelated.py").write_text("noise = True\n", encoding="utf-8")
     _commit(rebar_repo)  # HEAD advances; dep.py is untouched
     rebar.claim(tid, assignee="me", repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) == "in_progress"
@@ -851,7 +857,7 @@ def test_claim_path_drift_check_is_cheap(rebar_repo: Path) -> None:
     _enable(rebar_repo)
     impact = []
     for i in range(30):
-        (rebar_repo / f"d{i}.py").write_text(f"x = {i}\n")
+        (rebar_repo / f"d{i}.py").write_text(f"x = {i}\n", encoding="utf-8")
         impact.append({"path": f"d{i}.py", "reason": "r"})
     _commit_all(rebar_repo)  # the reviewed files must be IN the attested basis
     tid = _make(rebar_repo)
@@ -888,7 +894,9 @@ def test_drift_refresh_reuses_on_immaterial_drift(rebar_repo: Path) -> None:
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)  # signed; dep.py hashed into the manifest
-    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic edit; plan still holds\n")  # drift
+    (rebar_repo / "dep.py").write_text(
+        "v = 1  # cosmetic edit; plan still holds\n", encoding="utf-8"
+    )  # drift
     _commit_all(rebar_repo)
     v = _review(tid, rebar_repo)
     assert v["coverage"].get("drift_refresh") is True
@@ -903,10 +911,10 @@ def test_refreshed_attestation_rebinds_to_current_code(rebar_repo: Path) -> None
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
-    (rebar_repo / "dep.py").write_text("v = 2\n")
+    (rebar_repo / "dep.py").write_text("v = 2\n", encoding="utf-8")
     _commit_all(rebar_repo)
     _review(tid, rebar_repo)  # refresh, now bound to "v = 2"
-    (rebar_repo / "dep.py").write_text("v = 3\n")  # drift again
+    (rebar_repo / "dep.py").write_text("v = 3\n", encoding="utf-8")  # drift again
     _commit_all(rebar_repo)
     with pytest.raises(rebar.RebarError) as ei:
         rebar.claim(tid, repo_root=str(rebar_repo))
@@ -935,7 +943,7 @@ def test_drift_refresh_skips_on_registry_skew(rebar_repo: Path, monkeypatch) -> 
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
-    (rebar_repo / "dep.py").write_text("v = 9\n")  # drift
+    (rebar_repo / "dep.py").write_text("v = 9\n", encoding="utf-8")  # drift
     monkeypatch.setattr(
         attest, "registry_version", lambda repo_root=None: "different-version-stamp"
     )
@@ -957,7 +965,9 @@ def test_drift_refresh_escalates_on_probe_finding(rebar_repo: Path, monkeypatch)
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
-    (rebar_repo / "dep.py").write_text("v = 42  # material change\n")  # dep.py now drifted
+    (rebar_repo / "dep.py").write_text(
+        "v = 42  # material change\n", encoding="utf-8"
+    )  # dep.py now drifted
     _commit_all(rebar_repo)  # drift is what LANDED — the attested basis moved
     cfg = LLMConfig.from_env(repo_root=str(rebar_repo))
     ctx = context_assembly.assemble_context(tid, repo_root=str(rebar_repo), cfg=cfg)
@@ -1034,7 +1044,7 @@ def test_progressive_drift_refresh_always_takes_probe(rebar_repo: Path) -> None:
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
-    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n")  # drift
+    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic\n", encoding="utf-8")  # drift
     _commit_all(rebar_repo)
     v = _review(tid, rebar_repo)
     assert "drift_refresh" in v["coverage"]  # always-on: the scoped probe path is taken
@@ -1059,7 +1069,9 @@ def test_config_flag_default_off(tmp_path: Path) -> None:
     config.reset_config_cache()
     on = tmp_path / "on"
     on.mkdir()
-    (on / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
+    (on / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_claim = true\n", encoding="utf-8"
+    )
     assert config.load_config(str(on)).verify.require_plan_review_for_claim is True
 
 
@@ -1881,7 +1893,9 @@ def test_drift_refreshed_attestation_carries_a_verified_at_sha(rebar_repo: Path)
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _scoped(rebar_repo)
-    (rebar_repo / "dep.py").write_text("v = 1  # cosmetic edit; plan still holds\n")
+    (rebar_repo / "dep.py").write_text(
+        "v = 1  # cosmetic edit; plan still holds\n", encoding="utf-8"
+    )
     _commit_all(rebar_repo)
     v = _review(tid, rebar_repo)
     assert v["signature"].get("refreshed") is True and v["verdict"] == "PASS"
@@ -1917,8 +1931,8 @@ def _signed_deps(tid: str, repo: Path) -> dict:
 
 
 def test_container_dep_set_inherits_the_children_union(rebar_repo: Path) -> None:
-    (rebar_repo / "a.py").write_text("A = 1\n")
-    (rebar_repo / "b.py").write_text("B = 1\n")
+    (rebar_repo / "a.py").write_text("A = 1\n", encoding="utf-8")
+    (rebar_repo / "b.py").write_text("B = 1\n", encoding="utf-8")
     _commit_all(rebar_repo)
     _enable(rebar_repo)
     parent, _kids = _container_with_children(
@@ -1935,13 +1949,13 @@ def test_container_poison_rule_keeps_the_pre_change_set(rebar_repo: Path) -> Non
     would be fail-open for exactly the undeclared scope. The empty set falls back to
     whole-HEAD invalidation (fail-closed), pinned by the claim being blocked after an
     UNRELATED commit."""
-    (rebar_repo / "a.py").write_text("A = 1\n")
+    (rebar_repo / "a.py").write_text("A = 1\n", encoding="utf-8")
     _commit_all(rebar_repo)
     _enable(rebar_repo)
     parent, _kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}], None])
     assert _review(parent, rebar_repo)["signature"]["signed"] is True
     assert _signed_deps(parent, rebar_repo) == {}
-    (rebar_repo / "unrelated.py").write_text("U = 1\n")
+    (rebar_repo / "unrelated.py").write_text("U = 1\n", encoding="utf-8")
     _commit_all(rebar_repo)  # whole-HEAD fallback: ANY landed commit invalidates
     with pytest.raises(rebar.RebarError):
         rebar.claim(parent, assignee="me", repo_root=str(rebar_repo))
@@ -1949,7 +1963,7 @@ def test_container_poison_rule_keeps_the_pre_change_set(rebar_repo: Path) -> Non
 
 
 def test_container_closed_children_neither_contribute_nor_poison(rebar_repo: Path) -> None:
-    (rebar_repo / "a.py").write_text("A = 1\n")
+    (rebar_repo / "a.py").write_text("A = 1\n", encoding="utf-8")
     _commit_all(rebar_repo)
     parent, kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}], None])
     # Close the impact-less child BEFORE the gate is enabled (delivered work).
@@ -1964,24 +1978,26 @@ def test_container_closed_children_neither_contribute_nor_poison(rebar_repo: Pat
 
 
 def test_container_unrelated_commit_does_not_invalidate(rebar_repo: Path) -> None:
-    (rebar_repo / "a.py").write_text("A = 1\n")
+    (rebar_repo / "a.py").write_text("A = 1\n", encoding="utf-8")
     _commit_all(rebar_repo)
     _enable(rebar_repo)
     parent, _kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}]])
     assert _review(parent, rebar_repo)["signature"]["signed"] is True
-    (rebar_repo / "unrelated.py").write_text("U = 1\n")
+    (rebar_repo / "unrelated.py").write_text("U = 1\n", encoding="utf-8")
     _commit_all(rebar_repo)
     rebar.claim(parent, assignee="me", repo_root=str(rebar_repo))  # scoped: claim survives
     assert _status(parent, rebar_repo) == "in_progress"
 
 
 def test_container_child_declared_file_drift_invalidates(rebar_repo: Path) -> None:
-    (rebar_repo / "a.py").write_text("A = 1\n")
+    (rebar_repo / "a.py").write_text("A = 1\n", encoding="utf-8")
     _commit_all(rebar_repo)
     _enable(rebar_repo)
     parent, _kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}]])
     assert _review(parent, rebar_repo)["signature"]["signed"] is True
-    (rebar_repo / "a.py").write_text("A = 2  # the child-declared file moved on main\n")
+    (rebar_repo / "a.py").write_text(
+        "A = 2  # the child-declared file moved on main\n", encoding="utf-8"
+    )
     _commit_all(rebar_repo)
     with pytest.raises(rebar.RebarError) as ei:
         rebar.claim(parent, assignee="me", repo_root=str(rebar_repo))
@@ -1998,10 +2014,11 @@ def test_child_impact_edit_invalidates_the_container_attestation(rebar_repo: Pat
     sets it true) — the config pairing the docs recommend alongside inheritance."""
     from rebar.llm.plan_review import attest
 
-    (rebar_repo / "a.py").write_text("A = 1\n")
+    (rebar_repo / "a.py").write_text("A = 1\n", encoding="utf-8")
     _commit_all(rebar_repo)
     (rebar_repo / "rebar.toml").write_text(
-        "[verify]\nrequire_plan_review_for_claim = true\nenforce_plan_material_pins = true\n"
+        "[verify]\nrequire_plan_review_for_claim = true\nenforce_plan_material_pins = true\n",
+        encoding="utf-8",
     )
     parent, kids = _container_with_children(rebar_repo, [[{"path": "a.py", "reason": "r"}]])
     assert _review(parent, rebar_repo)["signature"]["signed"] is True

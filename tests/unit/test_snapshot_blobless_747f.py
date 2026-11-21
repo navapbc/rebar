@@ -65,7 +65,7 @@ def blobless_clone(tmp_path) -> tuple[Path, str]:
     nested = upstream / "pkg" / "sub"
     nested.mkdir(parents=True)
     for i in range(_FILE_COUNT):
-        (nested / f"f{i}.txt").write_text(f"content-{i}\n")
+        (nested / f"f{i}.txt").write_text(f"content-{i}\n", encoding="utf-8")
     _git(upstream, "add", "-A")
     _git(upstream, "commit", "--quiet", "-m", "seed")
     sha = _git(upstream, "rev-parse", "HEAD")
@@ -116,7 +116,9 @@ def test_materialize_completes_without_lazy_fetch(blobless_clone, monkeypatch):
     assert materialized == sorted(f"f{i}.txt" for i in range(_FILE_COUNT))
     # Contents must be the real committed bytes, not empty/placeholder files.
     for i in range(_FILE_COUNT):
-        assert (Path(handle.path) / "pkg" / "sub" / f"f{i}.txt").read_text() == f"content-{i}\n"
+        assert (Path(handle.path) / "pkg" / "sub" / f"f{i}.txt").read_text(
+            encoding="utf-8"
+        ) == f"content-{i}\n"
 
 
 @_needs_no_lazy_fetch
@@ -132,7 +134,7 @@ def test_materialize_tickets_completes_without_lazy_fetch(tmp_path, monkeypatch)
     _git(upstream, "config", "uploadpack.allowFilter", "true")
     _git(upstream, "config", "uploadpack.allowAnySHA1InWant", "true")
     for i in range(_FILE_COUNT):
-        (upstream / f"e{i}.json").write_text(f'{{"n": {i}}}\n')
+        (upstream / f"e{i}.json").write_text(f'{{"n": {i}}}\n', encoding="utf-8")
     _git(upstream, "add", "-A")
     _git(upstream, "commit", "--quiet", "-m", "events")
     sha = _git(upstream, "rev-parse", "HEAD")
@@ -161,7 +163,7 @@ def test_materialize_tickets_completes_without_lazy_fetch(tmp_path, monkeypatch)
     assert sorted(p.name for p in tracker.iterdir()) == sorted(
         f"e{i}.json" for i in range(_FILE_COUNT)
     )
-    assert (tracker / "e7.json").read_text() == '{"n": 7}\n'
+    assert (tracker / "e7.json").read_text(encoding="utf-8") == '{"n": 7}\n'
 
 
 @_needs_no_lazy_fetch
@@ -198,7 +200,7 @@ def test_materialize_tree_disables_interactive_credential_prompt(tmp_path, monke
     _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "config", "user.name", "Test")
     _git(repo, "config", "commit.gpgsign", "false")
-    (repo / "a.txt").write_text("a\n")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", "c")
     sha = _git(repo, "rev-parse", "HEAD")

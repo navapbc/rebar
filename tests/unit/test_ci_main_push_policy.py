@@ -54,7 +54,7 @@ _MUST_NOT_CHANGE = (
 
 
 def _load(name: str) -> dict[str, Any]:
-    data = yaml.safe_load((_WORKFLOWS / name).read_text())
+    data = yaml.safe_load((_WORKFLOWS / name).read_text(encoding="utf-8"))
     assert isinstance(data, dict), f"{name} did not parse to a mapping"
     return data
 
@@ -239,7 +239,7 @@ def test_main_health_report_is_a_caller_level_job_that_survives_failure() -> Non
 
 
 def test_main_health_report_wires_the_renderer_to_the_run_summary() -> None:
-    text = (_WORKFLOWS / "test.yml").read_text()
+    text = (_WORKFLOWS / "test.yml").read_text(encoding="utf-8")
     assert (_ROOT / "scripts" / "main_health_report.py").is_file(), (
         "the rendering lives in a repo script so the suite can drive it — workflow YAML is "
         "not reachable from a test, and an unexercised bisect recipe fails first at 2am"
@@ -250,7 +250,7 @@ def test_main_health_report_wires_the_renderer_to_the_run_summary() -> None:
         "the run-history lookup needs a token on the step; without one it 403s and the report "
         "degrades to its placeholder on every run instead of visibly once"
     )
-    renderer = (_ROOT / "scripts" / "main_health_report.py").read_text()
+    renderer = (_ROOT / "scripts" / "main_health_report.py").read_text(encoding="utf-8")
     assert "status=success" in renderer, (
         "the last known-green SHA is resolved from this workflow's own successful run history"
     )

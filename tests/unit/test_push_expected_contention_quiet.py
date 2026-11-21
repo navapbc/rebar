@@ -175,7 +175,9 @@ def test_backlog_growth_check_reads_the_marker_before_it_is_overwritten(
     # A prior marker with a non-numeric count (corrupt/unknown) → not proven growing.
     push_state.record_failure(str(tracker), "final-push-rejected", "prior", "origin/tickets")
     marker = Path(push_state._marker_path(str(tracker)))
-    marker.write_text(marker.read_text().replace('"5"', '"unknown"'))
+    marker.write_text(
+        marker.read_text(encoding="utf-8").replace('"5"', '"unknown"'), encoding="utf-8"
+    )
     assert push_state.backlog_grew(str(tracker), "origin/tickets") is False
 
 

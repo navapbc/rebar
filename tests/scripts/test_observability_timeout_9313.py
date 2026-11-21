@@ -62,7 +62,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -154,8 +154,8 @@ def probe(tmp_path: Path):
         }
     )
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
-    (tmp_path / "replication.log").write_text("")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
 
     def run(extra: dict[str, str] | None = None, args: list[str] | None = None):
         run_env = dict(env)
@@ -180,7 +180,7 @@ def _values(log: Path, metric: str) -> list[str]:
     if not log.exists():
         return []
     out = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         if f"--metric-name {metric} " not in line:
             continue
         m = re.search(r"--value (\S+)", line)
@@ -193,7 +193,11 @@ def _docker_root_walks(find_log: Path) -> list[str]:
     """Every ``find`` invocation that traverses the docker root (the expensive one)."""
     if not find_log.exists():
         return []
-    return [line for line in find_log.read_text().splitlines() if "/var/lib/docker" in line]
+    return [
+        line
+        for line in find_log.read_text(encoding="utf-8").splitlines()
+        if "/var/lib/docker" in line
+    ]
 
 
 # --- 1. ONE traversal, not two --------------------------------------------------------------
@@ -274,7 +278,9 @@ def test_expensive_call_cannot_spend_the_tail_reserve(probe) -> None:
     assert result.returncode == 0, result.stderr
 
     grants = probe.grant_log
-    recorded = [line.split() for line in grants.read_text().splitlines() if line.strip()]
+    recorded = [
+        line.split() for line in grants.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     assert recorded, "no bounded call was made; the fixture is not exercising the budget"
     over = [(secs, cmd) for secs, cmd in recorded if int(secs) > 1]
     assert not over, (
@@ -360,8 +366,8 @@ def test_probe_deadline_matches_the_unit_timeout() -> None:
     ``PROBE_DEADLINE_SEC`` is only a correct budget while it equals the ``TimeoutStartSec`` that
     actually kills the process. Nothing else couples them, so this test is the coupling.
     """
-    unit = INSTALLER.read_text()
-    script = SCRIPT.read_text()
+    unit = INSTALLER.read_text(encoding="utf-8")
+    script = SCRIPT.read_text(encoding="utf-8")
     unit_timeout = re.search(r"^TimeoutStartSec=(\d+)$", unit, re.M)
     deadline = re.search(r'^PROBE_DEADLINE_SEC="\$\{PROBE_DEADLINE_SEC:-(\d+)\}"$', script, re.M)
     assert unit_timeout and deadline, "both the unit timeout and the probe deadline must be literal"
@@ -374,7 +380,7 @@ def test_probe_deadline_matches_the_unit_timeout() -> None:
 
 def test_unit_installs_the_truncation_hook() -> None:
     """The hook is the only observer of a kill the probe cannot observe itself."""
-    unit = INSTALLER.read_text()
+    unit = INSTALLER.read_text(encoding="utf-8")
     assert "ExecStopPost=/usr/local/bin/rebar-observability.sh --report-exit" in unit
 
 
@@ -414,7 +420,7 @@ def test_every_wall_clock_bound_goes_through_clamped() -> None:
     call = re.compile(r"(?:^|[|&;(`]|\$\()\s*(timeout|bounded)\s+\S")
 
     offenders = []
-    for number, line in enumerate(SCRIPT.read_text().splitlines(), start=1):
+    for number, line in enumerate(SCRIPT.read_text(encoding="utf-8").splitlines(), start=1):
         stripped = line.strip()
         if stripped.startswith("#") or "composition-door" in line:
             continue
@@ -440,7 +446,7 @@ def test_the_composition_door_is_not_a_blanket_opt_out() -> None:
     """
     marked = [
         line.strip()
-        for line in SCRIPT.read_text().splitlines()
+        for line in SCRIPT.read_text(encoding="utf-8").splitlines()
         if "composition-door" in line and not line.strip().startswith("#")
     ]
     assert len(marked) == 2, (
@@ -503,7 +509,7 @@ def test_clamp_hands_an_exhausted_budget_to_the_expensive_call(tmp_path: Path) -
         }
     )
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
 
     result = run_observability(
         ["bash", str(SCRIPT)],
@@ -514,7 +520,9 @@ def test_clamp_hands_an_exhausted_budget_to_the_expensive_call(tmp_path: Path) -
     )
     assert result.returncode == 0, result.stderr
 
-    recorded = [line.split() for line in grants.read_text().splitlines() if line.strip()]
+    recorded = [
+        line.split() for line in grants.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     assert recorded, "no bounded call was made; the fixture is not exercising the budget"
     walk = [secs for secs, command in recorded if command == "find"]
     assert walk, f"the docker walk was never bounded; grants were {recorded}"
@@ -572,14 +580,16 @@ def test_budget_is_granted_in_full_when_it_is_available(tmp_path: Path) -> None:
         }
     )
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
 
     result = run_observability(
         ["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=120
     )
     assert result.returncode == 0, result.stderr
 
-    recorded = [line.split() for line in grants.read_text().splitlines() if line.strip()]
+    recorded = [
+        line.split() for line in grants.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     walk = [secs for secs, command in recorded if command == "find"]
     assert walk and walk[0] == "60", (
         f"with a full budget the docker walk must get its own DOCKER_DU_TIMEOUT ceiling, got {walk}"
@@ -608,7 +618,7 @@ def _hook_env(tmp_path: Path, *, imds_hangs: bool, cached_region: str | None):
 
     region_cache = tmp_path / "probe-region"
     if cached_region is not None:
-        region_cache.write_text(cached_region + "\n")
+        region_cache.write_text(cached_region + "\n", encoding="utf-8")
 
     env = observability_env(tmp_path)
     env.update(
@@ -645,11 +655,11 @@ def test_truncation_hook_needs_no_network_when_the_region_is_cached(tmp_path: Pa
     assert _values(aws_log, "probe_truncated") == ["1"], (
         "the truncation certificate must publish from the cached region even with IMDS dead"
     )
-    assert not curl_log.exists() or not curl_log.read_text().strip(), (
+    assert not curl_log.exists() or not curl_log.read_text(encoding="utf-8").strip(), (
         "the hook reached for the network despite a cached region; it must not depend on IMDS "
-        f"during the stall it is reporting (calls: {curl_log.read_text()!r})"
+        f"during the stall it is reporting (calls: {curl_log.read_text(encoding='utf-8')!r})"
     )
-    assert "--region us-east-1" in aws_log.read_text()
+    assert "--region us-east-1" in aws_log.read_text(encoding="utf-8")
 
 
 def test_truncation_hook_reports_to_journald_when_no_region_can_be_resolved(
@@ -665,11 +675,11 @@ def test_truncation_hook_reports_to_journald_when_no_region_can_be_resolved(
         timeout=SCRIPT_RUN_TIMEOUT,
     )
     assert result.returncode == 0, result.stderr
-    assert "probe_truncated=1" in log_log.read_text(), (
+    assert "probe_truncated=1" in log_log.read_text(encoding="utf-8"), (
         "journald needs no region, so the truncation FACT must survive even when the metric "
         "cannot be published"
     )
-    assert not aws_log.exists() or "--region  " not in aws_log.read_text(), (
+    assert not aws_log.exists() or "--region  " not in aws_log.read_text(encoding="utf-8"), (
         "`put-metric-data --region ''` publishes nothing while looking like a publish"
     )
 
@@ -688,8 +698,8 @@ def test_truncation_hook_does_not_rerun_the_prologue(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert _values(aws_log, "probe_truncated") == ["0"]
     # The health probes and IMDS all go through curl; none of them may run on a stop.
-    assert not curl_log.exists() or not curl_log.read_text().strip(), (
-        f"the stop path executed the prologue: {curl_log.read_text()!r}"
+    assert not curl_log.exists() or not curl_log.read_text(encoding="utf-8").strip(), (
+        f"the stop path executed the prologue: {curl_log.read_text(encoding='utf-8')!r}"
     )
     assert _values(aws_log, "gerrit_healthy") == []
 
@@ -708,8 +718,8 @@ def test_main_probe_uses_cached_metadata_when_imds_fails(tmp_path: Path) -> None
     logger_log = tmp_path / "logger.log"
     region_cache = tmp_path / "probe-region"
     instance_cache = tmp_path / "probe-instance-id"
-    region_cache.write_text("us-east-1\n")
-    instance_cache.write_text("i-cached123\n")
+    region_cache.write_text("us-east-1\n", encoding="utf-8")
+    instance_cache.write_text("i-cached123\n", encoding="utf-8")
 
     _stub(
         bin_dir,
@@ -763,8 +773,8 @@ def test_main_probe_uses_cached_metadata_when_imds_fails(tmp_path: Path) -> None
         }
     )
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
-    (tmp_path / "replication.log").write_text("")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
 
     result = run_observability(
         ["bash", str(SCRIPT)],
@@ -774,12 +784,12 @@ def test_main_probe_uses_cached_metadata_when_imds_fails(tmp_path: Path) -> None
         timeout=120,
     )
     assert result.returncode == 0, result.stderr
-    published = aws_log.read_text()
+    published = aws_log.read_text(encoding="utf-8")
     assert "--metric-name GerritReachable" in published
     assert "--region us-east-1" in published
     assert "InstanceId=i-cached123" in published
     assert "--region  " not in published
-    logged = logger_log.read_text()
+    logged = logger_log.read_text(encoding="utf-8")
     assert "cloudwatch put-metric-data FAILED metric=gerrit_healthy" in logged
 
 
@@ -832,8 +842,8 @@ def test_main_probe_refreshes_cached_metadata_from_imds(tmp_path: Path) -> None:
         }
     )
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
-    (tmp_path / "replication.log").write_text("")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
 
     result = run_observability(
         ["bash", str(SCRIPT)],
@@ -844,9 +854,9 @@ def test_main_probe_refreshes_cached_metadata_from_imds(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert region_cache.read_text() == "us-east-1\n"
-    assert instance_cache.read_text() == "i-fresh456\n"
-    assert "InstanceId=i-fresh456" in aws_log.read_text()
+    assert region_cache.read_text(encoding="utf-8") == "us-east-1\n"
+    assert instance_cache.read_text(encoding="utf-8") == "i-fresh456\n"
+    assert "InstanceId=i-fresh456" in aws_log.read_text(encoding="utf-8")
 
 
 def test_unit_bounds_the_stop_path_explicitly() -> None:
@@ -857,7 +867,7 @@ def test_unit_bounds_the_stop_path_explicitly() -> None:
     timeout, and it would be incoherent to fix that on the start path and inherit it on the stop
     path.
     """
-    unit = INSTALLER.read_text()
+    unit = INSTALLER.read_text(encoding="utf-8")
     assert re.search(r"^TimeoutStopSec=\d+$", unit, re.M), (
         "the ExecStopPost hook needs its own stated wall-clock ceiling"
     )
@@ -917,7 +927,8 @@ def _census_env(tmp_path: Path, *, root_dev: str, overlay_dev: str):
         'clamped() { local want="$1"; shift; bounded "$want" "$@"; }\n'
         + _extract_census()
         + f'\ndocker_du_census "{docker_root}" && '
-        'printf "total=%s overlay2=%s\\n" "$DOCKER_DU_TOTAL" "${DOCKER_DU_OVERLAY2:-unread}"\n'
+        'printf "total=%s overlay2=%s\\n" "$DOCKER_DU_TOTAL" "${DOCKER_DU_OVERLAY2:-unread}"\n',
+        encoding="utf-8",
     )
     env = {"PATH": f"{bin_dir}:{os.environ['PATH']}", "LOGGER_LOG": str(logger_log)}
     return harness, env
@@ -925,7 +936,7 @@ def _census_env(tmp_path: Path, *, root_dev: str, overlay_dev: str):
 
 def _extract_census() -> str:
     """The real ``docker_du_census`` body, lifted verbatim from the script."""
-    text = SCRIPT.read_text()
+    text = SCRIPT.read_text(encoding="utf-8")
     start = text.index("docker_du_census() {")
     end = text.index("\n}\n", start) + len("\n}\n")
     return text[start:end]

@@ -146,7 +146,9 @@ def test_hedge_finder() -> None:
 
     from rebar.llm.plan_review import registry
 
-    routing = json.loads((Path(registry.__file__).parent / "criteria_routing.json").read_text())
+    routing = json.loads(
+        (Path(registry.__file__).parent / "criteria_routing.json").read_text(encoding="utf-8")
+    )
     assert routing["hedge"]["exec"] == "1-TURN", "hedge must be exec:1-TURN, not exec:DET"
     ds = E.load_eval_spec("plan-review-finder").get("dataset", [])
     hedge = [c for c in ds if c.get("criterion") == "hedge"]
@@ -159,9 +161,9 @@ def test_hedge_dedup() -> None:
 
     from rebar.llm.plan_review import passes
 
-    prompt = (
-        Path(passes.__file__).parent.parent / "reviewers" / "plan_review_hedge.md"
-    ).read_text()
+    prompt = (Path(passes.__file__).parent.parent / "reviewers" / "plan_review_hedge.md").read_text(
+        encoding="utf-8"
+    )
     assert "not-applicable" in prompt and "E6" in prompt, (
         "hedge prompt must carry the E6 dedup rule"
     )
@@ -179,7 +181,7 @@ def _reviewer_prompt(name: str) -> str:
 
     from rebar.llm.plan_review import passes
 
-    return (Path(passes.__file__).parent.parent / "reviewers" / name).read_text()
+    return (Path(passes.__file__).parent.parent / "reviewers" / name).read_text(encoding="utf-8")
 
 
 def test_g5_prohibition() -> None:
@@ -243,11 +245,13 @@ def test_removal_rationale_advisory_and_coaching() -> None:
 
     from rebar.llm.plan_review import passes, registry
 
-    routing = json.loads((Path(registry.__file__).parent / "criteria_routing.json").read_text())
+    routing = json.loads(
+        (Path(registry.__file__).parent / "criteria_routing.json").read_text(encoding="utf-8")
+    )
     assert routing["removal-rationale"]["default_posture"] == "advisory"
     prompt = (
         Path(passes.__file__).parent.parent / "reviewers" / "plan_review_removal_rationale.md"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "move 6" in prompt, "removal-rationale must frame its ask as coach move 6"
     assert _finder_cases_for("removal-rationale").get("R-removal-rationale-e5-overlap")
 

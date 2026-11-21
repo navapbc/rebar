@@ -44,7 +44,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
     _git(root, "config", "user.email", "t@e")
     _git(root, "config", "user.name", "t")
     _git(root, "config", "commit.gpgsign", "false")
-    Path(root, "top.txt").write_text("top\n")
+    Path(root, "top.txt").write_text("top\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-q", "-m", "base")
     base = _git(root, "rev-parse", "HEAD")
@@ -126,7 +126,7 @@ def test_build_with_timed_out_listing_writes_no_sidecar(repo, slow_ls_tree):
     slow_ls_tree(False)
     handle = repo_snapshot.materialize(sha, repo_root=root, fetch=False)
     assert handle.submodules == ("vendor/sub",)
-    assert '"vendor/sub"' in _sidecar(sha).read_text()
+    assert '"vendor/sub"' in _sidecar(sha).read_text(encoding="utf-8")
 
 
 def test_cache_hit_with_timed_out_listing_writes_no_sidecar(repo, slow_ls_tree):

@@ -120,7 +120,7 @@ def is_ancestor(repo: Path, older: str, newer: str) -> bool:
 
 
 def commit_local_file(repo: Path, name: str, content: str, message: str) -> str:
-    (repo / name).write_text(content)
+    (repo / name).write_text(content, encoding="utf-8")
     git(repo, "add", name)
     git(
         repo,

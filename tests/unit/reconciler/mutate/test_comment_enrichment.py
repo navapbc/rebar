@@ -184,7 +184,7 @@ def test_fetcher_enriches_comment_field(tmp_path: Path, monkeypatch: pytest.Monk
     scratch_retention.snapshots_dir(tmp_path).mkdir(parents=True)
     output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 
-    snapshot = json.loads(output_path.read_text())
+    snapshot = json.loads(output_path.read_text(encoding="utf-8"))
     assert snapshot["DIG-90"].get("comment") == {"comments": [{"body": "enriched comment"}]}, (
         f"comment field not enriched: {snapshot['DIG-90']}"
     )
@@ -220,7 +220,7 @@ def test_fetcher_comment_enrichment_failure_degrades(
     with caplog.at_level(logging.WARNING):
         output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 
-    snapshot = json.loads(output_path.read_text())
+    snapshot = json.loads(output_path.read_text(encoding="utf-8"))
     # Snapshot still written; entry carries NO comment key → per-ticket fallback.
     assert "DIG-95" in snapshot
     assert "comment" not in snapshot["DIG-95"], (

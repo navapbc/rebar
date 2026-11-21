@@ -57,13 +57,15 @@ def repo(tmp_path: Path, _isolate_store: None) -> Path:
         ("config", "commit.gpgsign", "false"),
     ):
         _git(r, *args)
-    (r / "seed.txt").write_text("seed\n")
+    (r / "seed.txt").write_text("seed\n", encoding="utf-8")
     _git(r, "add", "-A")
     _git(r, "commit", "--quiet", "-m", "seed")
     _git(r, "checkout", "--quiet", "-b", "tickets")
     ticket = r / "b8d8-19cf-1fcb-4a46"
     ticket.mkdir()
-    (ticket / "1794837868190575901-337d58f4-COMMENT.json").write_text('{"x": 1}\n')
+    (ticket / "1794837868190575901-337d58f4-COMMENT.json").write_text(
+        '{"x": 1}\n', encoding="utf-8"
+    )
     _git(r, "add", "-A")
     _git(r, "commit", "--quiet", "-m", "tickets")
     return r
@@ -121,7 +123,7 @@ def test_the_worst_measured_paths_fit_max_path() -> None:  # pure arithmetic, no
 def test_a_failed_build_leaves_nothing_in_tmp(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(repo_root: str, sha: str, dest_tmp: Path) -> None:
         dest_tmp.mkdir(parents=True, exist_ok=True)
-        (dest_tmp.parent / (dest_tmp.name + ".index")).write_text("idx")
+        (dest_tmp.parent / (dest_tmp.name + ".index")).write_text("idx", encoding="utf-8")
         raise rs.SnapshotError("simulated checkout failure")
 
     monkeypatch.setattr(rs, "_materialize_tree", boom)
@@ -142,12 +144,12 @@ def test_losing_the_publish_race_returns_the_winner(
         real(repo_root, sha_, dest_tmp)
         winner = rs.store_root() / f"tickets-{sha}" / ".tickets-tracker"
         winner.mkdir(parents=True)
-        (winner / "marker").write_text("theirs")
+        (winner / "marker").write_text("theirs", encoding="utf-8")
 
     monkeypatch.setattr(rs, "_materialize_tree", win_race_first)
 
     root = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
 
     assert root == rs.store_root() / f"tickets-{sha}"
-    assert (root / ".tickets-tracker" / "marker").read_text() == "theirs"
+    assert (root / ".tickets-tracker" / "marker").read_text(encoding="utf-8") == "theirs"
     assert list((rs.store_root() / "tmp").iterdir()) == []

@@ -497,7 +497,7 @@ def _scanned_sources() -> list[tuple[str, str]]:
     Shared with the coverage test below so a glob or path that drifted — which would make
     the guard pass VACUOUSLY, scanning nothing — is caught rather than being invisible.
     """
-    return [(p.name, p.read_text()) for p in sorted(_JIRA_ADAPTER_DIR.glob("*.py"))]
+    return [(p.name, p.read_text(encoding="utf-8")) for p in sorted(_JIRA_ADAPTER_DIR.glob("*.py"))]
 
 
 def _unpaginated_search_jql_readers(src: str | None = None) -> list[str]:
@@ -784,6 +784,6 @@ def test_an_ordinary_enrichment_failure_still_fails_open_and_writes_the_snapshot
         out = fetcher.fetch_snapshot(f"9a46-open-{failing}", repo_root=tmp_path)
 
     assert out.exists(), "an ordinary enrichment failure must still write a degraded snapshot"
-    assert "DIG-1" in _json.loads(out.read_text()), (
+    assert "DIG-1" in _json.loads(out.read_text(encoding="utf-8")), (
         "the degraded snapshot must still carry the base scan's issues"
     )

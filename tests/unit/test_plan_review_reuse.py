@@ -280,7 +280,7 @@ def test_code_change_reruns_full_review(repo: Path) -> None:
 def _write_and_commit(repo: Path, *names: str) -> None:
     """Commit the files a test's `file_impact` names, so they exist at the reviewed SHA."""
     for name in names:
-        (repo / name).write_text("v = 1\n")
+        (repo / name).write_text("v = 1\n", encoding="utf-8")
     subprocess.run(["git", "add", *names], cwd=repo, check=True, capture_output=True)
     subprocess.run(
         ["git", "commit", "-q", "-m", "impact files"], cwd=repo, check=True, capture_output=True

@@ -144,7 +144,7 @@ def test_emit_dedupes_per_ticket_field(tmp_path) -> None:
         line
         for f in store_dir.glob("*")
         if f.is_file()
-        for line in f.read_text().splitlines()
+        for line in f.read_text(encoding="utf-8").splitlines()
         if "outbound-field-conflict:KEY-9:priority" in line
     ]
     assert len(records) == 1, f"expected exactly one deduped alert, got {records}"

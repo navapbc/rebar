@@ -378,7 +378,7 @@ def test_bad():
 def test_a_marker_with_a_reason_admits_the_site(tmp_path):
     """Admission is resolved from real pytest markers on the collected item."""
     module = tmp_path / "test_bad.py"
-    module.write_text(_HAZARD_MODULE)
+    module.write_text(_HAZARD_MODULE, encoding="utf-8")
     item = _fake_item(module, "test_bad", [("gate self-test must escape tier monkeypatches",)])
     assert guard.unharnessed_subprocess_reason([item]) is None
 
@@ -407,7 +407,7 @@ def test_a_finding_in_an_uncollected_test_does_not_fail_the_run(tmp_path):
     common developer action; failing it spuriously is how a guard gets reverted.
     """
     module = tmp_path / "test_mixed.py"
-    module.write_text(_MIXED_MODULE)
+    module.write_text(_MIXED_MODULE, encoding="utf-8")
     only_clean = _fake_item(module, "test_unrelated_and_clean", [])
     assert guard.unharnessed_subprocess_reason([only_clean]) is None
 
@@ -416,7 +416,7 @@ def test_the_owning_test_still_fails_when_it_is_collected(tmp_path):
     """The control for the case above: when the hazard's own test IS collected and
     carries no marker, it must still fail."""
     module = tmp_path / "test_mixed.py"
-    module.write_text(_MIXED_MODULE)
+    module.write_text(_MIXED_MODULE, encoding="utf-8")
     owner = _fake_item(module, "test_marked_hazard", [])
     reason = guard.unharnessed_subprocess_reason([owner])
     assert reason is not None
@@ -425,7 +425,7 @@ def test_the_owning_test_still_fails_when_it_is_collected(tmp_path):
 
 def test_an_unmarked_hazard_fails_and_the_message_names_the_fix(tmp_path):
     module = tmp_path / "test_bad.py"
-    module.write_text(_HAZARD_MODULE)
+    module.write_text(_HAZARD_MODULE, encoding="utf-8")
     item = _fake_item(module, "test_bad", [])
     reason = guard.unharnessed_subprocess_reason([item])
     assert reason is not None
@@ -438,7 +438,7 @@ def test_a_marker_without_a_real_reason_is_rejected(tmp_path, args):
     """`--strict-markers` validates the marker NAME only, so the mandatory-reason rule
     is the guard's own job — the rule check_config_reads.py applies to `# read-via:`."""
     module = tmp_path / "test_bad.py"
-    module.write_text(_HAZARD_MODULE)
+    module.write_text(_HAZARD_MODULE, encoding="utf-8")
     item = _fake_item(module, "test_bad", [args])
     reason = guard.unharnessed_subprocess_reason([item])
     assert reason is not None
@@ -462,7 +462,7 @@ def test_uses_helper():
 
 def test_module_level_helper_hazard_honors_file_level_opt_out(tmp_path):
     module = tmp_path / "test_helper_hazard.py"
-    module.write_text(_HELPER_HAZARD_MODULE)
+    module.write_text(_HELPER_HAZARD_MODULE, encoding="utf-8")
     item = _fake_item(module, "test_uses_helper", [("module helper intentionally escapes",)])
     assert guard.unharnessed_subprocess_reason([item]) is None
 

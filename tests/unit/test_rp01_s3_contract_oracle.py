@@ -176,7 +176,11 @@ def test_successful_two_attempt_run_is_one_operation_with_aggregate_requests(tmp
     assert state["calls"] == 2
     assert result["_usage"]["requests"] == 2, "whole-run aggregate, not a single attempt"
 
-    rows = [json.loads(line) for line in Path(log_path).read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line)
+        for line in Path(log_path).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert len(rows) == 1, f"exactly one operation row, got {len(rows)}: {rows}"
 
 
@@ -194,5 +198,9 @@ def test_usage_carries_no_candidate_requests_field(tmp_path, monkeypatch):
     result = PydanticAIRunner(cfg, model_override=model).run(_req(cfg))
 
     assert "candidate_requests" not in result["_usage"]
-    rows = [json.loads(line) for line in Path(log_path).read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line)
+        for line in Path(log_path).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert rows and "candidate_requests" not in rows[0]

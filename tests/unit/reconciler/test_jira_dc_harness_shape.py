@@ -46,7 +46,7 @@ def test_harness_directory_exists_under_the_external_tier() -> None:
 def test_base_image_is_pinned_by_digest_not_a_floating_tag() -> None:
     """A tag would let the upstream shift under us; the digest makes the harness
     reproducible. Mirrors what pycontribs/jira's own wrapper does."""
-    text = _DOCKERFILE.read_text()
+    text = _DOCKERFILE.read_text(encoding="utf-8")
     from_lines = [ln for ln in text.splitlines() if ln.strip().upper().startswith("FROM ")]
 
     assert from_lines, "Dockerfile has no FROM line"
@@ -84,7 +84,7 @@ def test_entrypoint_keeps_the_mandatory_amps_flag(flag: str, why: str) -> None:
     """
     instructions = "\n".join(
         line
-        for line in _DOCKERFILE.read_text().splitlines()
+        for line in _DOCKERFILE.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("#")
         and line.strip().upper().startswith(("ENTRYPOINT", "CMD"))
     )
@@ -99,7 +99,9 @@ def test_dockerfile_records_why_the_timeout_flag_exists() -> None:
     """The flag alone is not enough: a reader needs the failure it prevents, or the
     next person deletes it. Require the ceiling value to appear in a comment."""
     comments = "\n".join(
-        ln for ln in _DOCKERFILE.read_text().splitlines() if ln.lstrip().startswith("#")
+        ln
+        for ln in _DOCKERFILE.read_text(encoding="utf-8").splitlines()
+        if ln.lstrip().startswith("#")
     )
     assert "600000" in comments, (
         "the Dockerfile must record, in a comment, that Cargo's default 600000ms deploy "
@@ -120,7 +122,7 @@ def test_entrypoint_does_not_use_the_verified_ineffective_flags() -> None:
     """
     instructions = [
         line
-        for line in _DOCKERFILE.read_text().splitlines()
+        for line in _DOCKERFILE.read_text(encoding="utf-8").splitlines()
         if not line.lstrip().startswith("#")
         and line.strip().upper().startswith(("ENTRYPOINT", "CMD"))
     ]
@@ -137,7 +139,7 @@ def test_dockerfile_does_not_reference_the_unpublished_image_as_a_source() -> No
     """``pycontribs/jira-test-image`` is not published anywhere — it is upstream's
     LOCAL build name. It must never appear as a ``FROM``/pull source; only as
     attribution prose."""
-    for line in _DOCKERFILE.read_text().splitlines():
+    for line in _DOCKERFILE.read_text(encoding="utf-8").splitlines():
         if line.lstrip().startswith("#"):
             continue
         assert "pycontribs/jira-test-image" not in line, (
@@ -162,7 +164,7 @@ def _compose_services() -> dict[str, Any]:
     """
     import yaml
 
-    data = yaml.safe_load(_COMPOSE.read_text())
+    data = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     services = (data or {}).get("services") or {}
     assert services, f"{_COMPOSE.name} declares no services"
     return services

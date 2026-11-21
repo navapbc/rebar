@@ -220,7 +220,7 @@ def test_no_reexport_shim_remains_at_pre_move_path(module_path: str, moved_name:
     patch-binding bug) — and for the value maps it would also re-create the second
     copy this story exists to delete.
     """
-    text = (_REC / module_path).read_text()
+    text = (_REC / module_path).read_text(encoding="utf-8")
     tree = ast.parse(text)
     bound = set()
     for node in ast.walk(tree):

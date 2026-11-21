@@ -303,7 +303,7 @@ def test_auth_module_adds_no_second_agent_or_structured_owner():
 
     import rebar.llm.auth as auth_mod
 
-    source = pathlib.Path(auth_mod.__file__).read_text()
+    source = pathlib.Path(auth_mod.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     called_names: set[str] = set()

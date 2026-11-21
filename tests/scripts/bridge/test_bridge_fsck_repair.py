@@ -20,7 +20,7 @@ def _write_bindings(tracker: Path, bindings: dict, reverse: dict) -> None:
     state = tracker / ".bridge_state"
     state.mkdir(parents=True, exist_ok=True)
     (state / "bindings.json").write_text(
-        json.dumps({"version": 2, "bindings": bindings, "reverse": reverse})
+        json.dumps({"version": 2, "bindings": bindings, "reverse": reverse}), encoding="utf-8"
     )
 
 
@@ -56,7 +56,8 @@ def _commit_known_event(tracker: Path) -> None:
                 "env_id": "22222222-2222-4222-8222-222222222222",
                 "data": {"ticket_type": "task", "title": "fixture", "parent_id": None},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     subprocess.run(["git", "-C", str(tracker), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(tracker), "commit", "-q", "-m", "fixture"], check=True)
@@ -67,7 +68,7 @@ def _bindings_path(tracker: Path) -> Path:
 
 
 def _load(tracker: Path) -> dict:
-    return json.loads(_bindings_path(tracker).read_text())
+    return json.loads(_bindings_path(tracker).read_text(encoding="utf-8"))
 
 
 def _sha256(path: Path) -> str:
@@ -124,7 +125,9 @@ def test_prune_leaves_the_retired_file_byte_identical(tracker):
         reverse={"REB-1": "live-1", "REB-410": "gone-1"},
     )
     retired = tracker / ".bridge_state" / "bindings-retired.json"
-    retired.write_text(json.dumps({"REB-900": {"local_id": "old-1", "retired_at": "x"}}))
+    retired.write_text(
+        json.dumps({"REB-900": {"local_id": "old-1", "retired_at": "x"}}), encoding="utf-8"
+    )
     before = _sha256(retired)
 
     assert _prune(tracker) == 0
@@ -156,7 +159,9 @@ def test_prune_refuses_when_an_orphan_key_is_retired(tracker):
         reverse={"REB-1": "live-1", "REB-410": "gone-1"},
     )
     retired = tracker / ".bridge_state" / "bindings-retired.json"
-    retired.write_text(json.dumps({"REB-410": {"local_id": "gone-1", "retired_at": "x"}}))
+    retired.write_text(
+        json.dumps({"REB-410": {"local_id": "gone-1", "retired_at": "x"}}), encoding="utf-8"
+    )
     before = _sha256(_bindings_path(tracker))
 
     assert _prune(tracker) == 1
@@ -207,7 +212,7 @@ def test_prune_writes_a_durable_audit_line(tracker):
 
     audit = tracker / ".git" / "rebar-bridge-repair-audit.jsonl"
     assert audit.exists(), "the durable audit line must land in the tracker's git dir"
-    record = json.loads(audit.read_text().strip().splitlines()[-1])
+    record = json.loads(audit.read_text(encoding="utf-8").strip().splitlines()[-1])
     assert record["deleted_reverse_keys"] == ["REB-410"]
     assert record["operation"] == "prune_orphan_reverse_bindings"
     assert record["forward_count"] == 1

@@ -55,7 +55,7 @@ _LINE_START_PROSE = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -100,7 +100,7 @@ def _environment(
     _stub(bin_dir, "logger", "exit 0")
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
     journal = tmp_path / "journal.txt"
-    journal.write_text("".join(f"{line}\n" for line in journal_lines))
+    journal.write_text("".join(f"{line}\n" for line in journal_lines), encoding="utf-8")
     _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
     _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
@@ -110,9 +110,9 @@ def _environment(
     # Cursor 0 includes the first journal entries; absent or bare state would
     # cold-start at the tail and hide this anchor check. Replication uses a bare total.
     for name, path in paths.items():
-        path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
+        path.write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n", encoding="utf-8")
     repl_log = tmp_path / "replication.log"
-    repl_log.write_text("")
+    repl_log.write_text("", encoding="utf-8")
 
     env = observability_env(tmp_path)
     env.update(
@@ -129,7 +129,7 @@ def _environment(
 
 def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -194,15 +194,21 @@ def test_offsets_inflated_by_false_counts_cannot_distort_a_delta(tmp_path: Path)
     false count is never subtracted from the cursor's interval."""
     env, paths = _environment(tmp_path, [_REVIEW_PROSE, _record("VOTER_ERROR")])
     # Inflated totals retain a cursor after observed entries.
-    paths["VOTER_OFFSET_FILE"].write_text("2 2\n")  # counted the prose line as a second error
-    paths["MERGE_OFFSET_FILE"].write_text("1 2\n")  # its only count in history was the prose
+    paths["VOTER_OFFSET_FILE"].write_text(
+        "2 2\n", encoding="utf-8"
+    )  # counted the prose line as a second error
+    paths["MERGE_OFFSET_FILE"].write_text(
+        "1 2\n", encoding="utf-8"
+    )  # its only count in history was the prose
 
     assert _run(env).returncode == 0
     assert _values(paths["aws_log"], "voter_errors") == [0]
     assert _values(paths["aws_log"], "review_bot_merge_change_errors") == [0]
 
     journal = Path(env["JOURNAL_FILE"])
-    journal.write_text(journal.read_text() + _record("VOTER_ERROR") + "\n")
+    journal.write_text(
+        journal.read_text(encoding="utf-8") + _record("VOTER_ERROR") + "\n", encoding="utf-8"
+    )
 
     assert _run(env).returncode == 0
     assert _values(paths["aws_log"], "voter_errors") == [0, 1]

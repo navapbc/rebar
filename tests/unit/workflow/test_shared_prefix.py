@@ -166,12 +166,12 @@ def test_yaml_and_schema_wire_shared_prefix_not_plan() -> None:
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[3]
-    yaml_text = (root / "src/rebar/llm/workflow/gates/plan-review.yaml").read_text()
+    yaml_text = (root / "src/rebar/llm/workflow/gates/plan-review.yaml").read_text(encoding="utf-8")
     assert yaml_text.count("${{ steps.verify_inputs.outputs.shared_prefix }}") == 2
     assert "steps.verify_inputs.outputs.plan" not in yaml_text
     schema_raw = (
         root / "src/rebar/schemas/plan_review_verify_inputs_output.schema.json"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     schema = json.loads(schema_raw)
     assert "shared_prefix" in schema["properties"]
     assert "shared_prefix" in schema["required"]

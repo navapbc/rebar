@@ -69,7 +69,7 @@ def harness_image_digest(dockerfile: Path | None = None) -> str | None:
     """
     path = dockerfile if dockerfile is not None else _HARNESS_DOCKERFILE
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except OSError:
         return None
     for line in text.splitlines():
@@ -634,9 +634,13 @@ def main(argv: list[str] | None = None) -> int:
         if epic_problem is not None:
             print(f"::error::{epic_problem}", file=sys.stderr)
             exit_code = 1
-        (out_dir / "evidence.json").write_text(json.dumps(_EVIDENCE, indent=2, default=str))
+        (out_dir / "evidence.json").write_text(
+            json.dumps(_EVIDENCE, indent=2, default=str), encoding="utf-8"
+        )
         if result is not None:
-            (out_dir / "capability_map.json").write_text(json.dumps(result, indent=2, default=str))
+            (out_dir / "capability_map.json").write_text(
+                json.dumps(result, indent=2, default=str), encoding="utf-8"
+            )
         (out_dir / "run_metadata.json").write_text(
             json.dumps(
                 {
@@ -654,7 +658,8 @@ def main(argv: list[str] | None = None) -> int:
                     "epic_field_report_detail": epic_problem,
                 },
                 indent=2,
-            )
+            ),
+            encoding="utf-8",
         )
 
     print(

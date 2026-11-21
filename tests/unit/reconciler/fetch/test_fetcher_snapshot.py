@@ -191,7 +191,7 @@ def test_fetch_snapshot_is_valid_json(tmp_path, fetcher):
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
         result_path = fetcher.fetch_snapshot(pass_id, repo_root=tmp_path)
 
-    parsed = json.loads(result_path.read_text())
+    parsed = json.loads(result_path.read_text(encoding="utf-8"))
     assert isinstance(parsed, dict)
     assert "DIG-0" in parsed
     assert "DIG-1" in parsed
@@ -225,7 +225,7 @@ def test_fetch_snapshot_paginates_through_full_result_set(tmp_path, fetcher):
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
         result_path = fetcher.fetch_snapshot("2026-05-24-pass-pagination", repo_root=tmp_path)
 
-    parsed = json.loads(result_path.read_text())
+    parsed = json.loads(result_path.read_text(encoding="utf-8"))
     assert len(parsed) == 250
     assert "DIG-0" in parsed
     assert "DIG-249" in parsed

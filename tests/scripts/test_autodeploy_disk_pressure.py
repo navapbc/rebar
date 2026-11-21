@@ -20,7 +20,7 @@ _SHA = "d" * 40  # deployed == target -> the no-op path
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -42,7 +42,7 @@ def box(tmp_path: Path) -> dict[str, object]:
 
     cmd_log = tmp_path / "cmd-log"
     pct_file = tmp_path / "root-pct"
-    pct_file.write_text("50")  # below threshold by default; a test raises it
+    pct_file.write_text("50", encoding="utf-8")  # below threshold by default; a test raises it
     # When present, `pct_after_file` is what the disk reads AFTER a prune runs: the docker stub
     # copies it over `pct_file` on the builder-prune call, so a test can model a reclaim that
     # actually recovered the disk versus one that freed nothing (bug 9bc0). Absent = the disk
@@ -50,7 +50,7 @@ def box(tmp_path: Path) -> dict[str, object]:
     pct_after_file = tmp_path / "root-pct-after"
     ts_file = state / "pressure-prune-ts"
     streak_file = state / "pressure-prune-streak"
-    (state / "deployed-sha").write_text(_SHA + "\n")
+    (state / "deployed-sha").write_text(_SHA + "\n", encoding="utf-8")
 
     # git stub: rev-parse returns the deployed sha, so TARGET == DEPLOYED (no-op path).
     _stub(
@@ -131,12 +131,12 @@ def _set_pct(box: dict[str, object], pct: int, *, after: int | None = None) -> N
     """Set the reported root-disk used percent. ``after`` is what it reads once a prune has
     run — omit it to model the incident (a reclaim that frees nothing)."""
     pct_file: Path = box["pct_file"]  # type: ignore[assignment]
-    pct_file.write_text(str(pct))
+    pct_file.write_text(str(pct), encoding="utf-8")
     pct_after_file: Path = box["pct_after_file"]  # type: ignore[assignment]
     if after is None:
         pct_after_file.unlink(missing_ok=True)
     else:
-        pct_after_file.write_text(str(after))
+        pct_after_file.write_text(str(after), encoding="utf-8")
 
 
 def _streak(box: dict[str, object]) -> int | None:
@@ -144,7 +144,7 @@ def _streak(box: dict[str, object]) -> int | None:
     streak_file: Path = box["streak_file"]  # type: ignore[assignment]
     if not streak_file.exists():
         return None
-    return int(streak_file.read_text().strip())
+    return int(streak_file.read_text(encoding="utf-8").strip())
 
 
 def _run(box: dict[str, object], **extra_env: str) -> subprocess.CompletedProcess[str]:
@@ -163,7 +163,7 @@ def _run(box: dict[str, object], **extra_env: str) -> subprocess.CompletedProces
 
 def _commands(box: dict[str, object]) -> list[str]:
     cmd_log: Path = box["cmd_log"]  # type: ignore[assignment]
-    return cmd_log.read_text().splitlines() if cmd_log.exists() else []
+    return cmd_log.read_text(encoding="utf-8").splitlines() if cmd_log.exists() else []
 
 
 def _markers(result: subprocess.CompletedProcess[str], token: str) -> list[str]:
@@ -229,7 +229,7 @@ def test_throttle_suppresses_a_second_prune_within_the_interval(box: dict[str, o
     still above the threshold, so a stuck-high disk does not prune every 2-min tick."""
     _set_pct(box, 90)
     ts_file: Path = box["ts_file"]  # type: ignore[assignment]
-    ts_file.write_text(str(int(time.time())))  # pruned "just now"
+    ts_file.write_text(str(int(time.time())), encoding="utf-8")  # pruned "just now"
 
     result = _run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="600")
     commands = _commands(box)
@@ -319,7 +319,7 @@ def test_streak_resets_to_zero_once_the_disk_falls_below_the_threshold(
     early return and never reaches the post-reclaim code. A reset written next to the increment
     would be unreachable here and the counter would latch high forever."""
     streak_file: Path = box["streak_file"]  # type: ignore[assignment]
-    streak_file.write_text("2\n")
+    streak_file.write_text("2\n", encoding="utf-8")
     _set_pct(box, 55)  # healthy: the tick early-returns before any prune
 
     result = _run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="0")
@@ -340,7 +340,7 @@ def test_a_reclaim_that_recovers_the_disk_clears_the_streak(box: dict[str, objec
     """The other reset edge: the reclaim RAN and worked. The post-prune re-read is below the
     threshold, so the cycle was effective and the streak returns to zero."""
     streak_file: Path = box["streak_file"]  # type: ignore[assignment]
-    streak_file.write_text("2\n")
+    streak_file.write_text("2\n", encoding="utf-8")
     _set_pct(box, 92, after=57)  # the manual reclaim's real numbers: 92% -> 57%
 
     result = _run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="0")
@@ -361,9 +361,9 @@ def test_a_throttled_pressured_tick_leaves_the_streak_unchanged(box: dict[str, o
     evidence neither for nor against effectiveness — and counting ticks would reach the alarm
     inside a single 600s throttle window on the ~2-min timer, firing after ONE real reclaim."""
     streak_file: Path = box["streak_file"]  # type: ignore[assignment]
-    streak_file.write_text("1\n")
+    streak_file.write_text("1\n", encoding="utf-8")
     ts_file: Path = box["ts_file"]  # type: ignore[assignment]
-    ts_file.write_text(str(int(time.time())))  # pruned "just now"
+    ts_file.write_text(str(int(time.time())), encoding="utf-8")  # pruned "just now"
     _set_pct(box, 92)
 
     result = _run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="600")
@@ -460,7 +460,7 @@ def test_a_corrupt_streak_file_fails_safe_toward_silence(box: dict[str, object])
     or garbage. A non-numeric read is 0 — a lost counter DELAYS the marker rather than firing a
     false 'reclaim is ineffective' page."""
     streak_file: Path = box["streak_file"]  # type: ignore[assignment]
-    streak_file.write_text("not-a-number\n")
+    streak_file.write_text("not-a-number\n", encoding="utf-8")
     _set_pct(box, 92)
 
     result = _run(box, DISK_PRESSURE_PCT="80", PRESSURE_PRUNE_MIN_INTERVAL="0")

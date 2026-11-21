@@ -122,7 +122,7 @@ def _event_files(tracker_dir: Path, local_id: str) -> list[Path]:
 
 def _read_create(tracker_dir: Path, local_id: str) -> dict:
     for path in _event_files(tracker_dir, local_id):
-        ev = json.loads(path.read_text())
+        ev = json.loads(path.read_text(encoding="utf-8"))
         if ev.get("event_type") == "CREATE":
             return ev
     raise AssertionError(f"no CREATE event in {tracker_dir / local_id}")
@@ -186,7 +186,9 @@ def test_inbound_update_writes_edit_event(applier, mut_mod, fixture_repo):
 
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-123") if "EDIT" in p.name
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in _event_files(tracker, "jira-dig-123")
+        if "EDIT" in p.name
     ]
     assert edits, "expected at least one EDIT event"
     assert edits[-1]["data"]["fields"]["title"] == "Y"
@@ -225,7 +227,7 @@ def test_inbound_update_status_event_uses_previous_status_not_new(applier, mut_m
 
     tracker = fixture_repo / ".tickets-tracker"
     status_events = [
-        json.loads(p.read_text())
+        json.loads(p.read_text(encoding="utf-8"))
         for p in _event_files(tracker, "jira-dig-321")
         if "STATUS" in p.name
     ]
@@ -345,7 +347,9 @@ def test_apply_honours_suppress_pair_drops_subsequent_inbound(
     # The two STOMP updates should NOT have produced EDIT events.
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-7") if "EDIT" in p.name
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in _event_files(tracker, "jira-dig-7")
+        if "EDIT" in p.name
     ]
     titles = [e["data"]["fields"].get("title", "") for e in edits]
     assert "STOMP-1" not in titles
@@ -401,7 +405,9 @@ def test_apply_honours_suppress_pair_drops_subsequent_inbound_via_computed_form(
 
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-7") if "EDIT" in p.name
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in _event_files(tracker, "jira-dig-7")
+        if "EDIT" in p.name
     ]
     titles = [e["data"]["fields"].get("title", "") for e in edits]
     assert "SHOULD-BE-DROPPED" not in titles
@@ -447,7 +453,7 @@ def test_inbound_create_dedups_against_binding_store(applier, mut_mod, fixture_r
     # 2. mapping.json records uuid-bound-7 -> DIG-77.
     mapping_file = scratch_retention.mapping_path(fixture_repo)
     assert mapping_file.exists(), "dedup guard must write mapping.json"
-    mapping = json.loads(mapping_file.read_text())
+    mapping = json.loads(mapping_file.read_text(encoding="utf-8"))
     assert mapping.get("uuid-bound-7") == "DIG-77"
 
     # 3. No phantom local ticket materialised under the jira-key-derived id.
@@ -548,7 +554,9 @@ def test_inbound_update_accepts_flat_payload(applier, mut_mod, fixture_repo):
     applier._apply_typed(update_mut, repo_root=fixture_repo)
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-502") if "EDIT" in p.name
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in _event_files(tracker, "jira-dig-502")
+        if "EDIT" in p.name
     ]
     assert edits
     assert edits[-1]["data"]["fields"]["title"] == "Updated flat"
@@ -607,7 +615,9 @@ def test_inbound_update_extracts_nested_jira_objects(applier, mut_mod, fixture_r
     applier._apply_typed(update_mut, repo_root=fixture_repo)
     tracker = fixture_repo / ".tickets-tracker"
     edits = [
-        json.loads(p.read_text()) for p in _event_files(tracker, "jira-dig-601") if "EDIT" in p.name
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in _event_files(tracker, "jira-dig-601")
+        if "EDIT" in p.name
     ]
     assert edits
     fields = edits[-1]["data"]["fields"]
@@ -693,7 +703,9 @@ def test_inbound_create_no_writeback_without_client(applier, mut_mod, fixture_re
 
 def _read_status_events(tracker_dir: Path, local_id: str) -> list[dict]:
     return [
-        json.loads(p.read_text()) for p in _event_files(tracker_dir, local_id) if "STATUS" in p.name
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in _event_files(tracker_dir, local_id)
+        if "STATUS" in p.name
     ]
 
 

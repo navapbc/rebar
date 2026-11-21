@@ -45,7 +45,7 @@ def _events(repo: Path, tid: str, etype: str) -> list[dict]:
     out = []
     for name in sorted(os.listdir(tdir)):
         if name.endswith(f"-{etype}.json") and not name.startswith("."):
-            out.append(json.loads((tdir / name).read_text()))
+            out.append(json.loads((tdir / name).read_text(encoding="utf-8")))
     return out
 
 
@@ -101,7 +101,7 @@ def _all_events(repo: Path, tid: str) -> list[dict]:
     out = []
     for name in sorted(os.listdir(tdir)):
         if name.endswith(".json") and not name.startswith("."):
-            out.append(json.loads((tdir / name).read_text()))
+            out.append(json.loads((tdir / name).read_text(encoding="utf-8")))
     return out
 
 
@@ -231,7 +231,7 @@ def test_backcompat_pre_change_event_reduces_identically(store_heldout: Path) ->
         "author": "Legacy User",  # note: NO author_email / author_id
         "data": {"ticket_type": "task", "title": "Old", "id": tid, "priority": 2},
     }
-    (tdir / "100-u-create-CREATE.json").write_text(json.dumps(create))
+    (tdir / "100-u-create-CREATE.json").write_text(json.dumps(create), encoding="utf-8")
     comment = {
         "timestamp": "200-0-abc",
         "uuid": "u-comment",
@@ -240,7 +240,7 @@ def test_backcompat_pre_change_event_reduces_identically(store_heldout: Path) ->
         "author": "Legacy User",
         "data": {"text": "old comment"},
     }
-    (tdir / "200-u-comment-COMMENT.json").write_text(json.dumps(comment))
+    (tdir / "200-u-comment-COMMENT.json").write_text(json.dumps(comment), encoding="utf-8")
 
     state = reduce_ticket(str(tdir))
     assert state is not None

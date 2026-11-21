@@ -149,7 +149,7 @@ def test_committed_registry_still_documents_the_popped_opcert_key():
     # left after REBAR_RECONCILER_VERBOSE lost its only reader (senile-especial-herring), and is
     # now the 146 left after REBAR_HLC_NOW and REBAR_TEST_COMPACT_RENAME_BARRIER moved out of
     # src/rebar into the test-only child-process hooks (citified-earth-cottontail).
-    doc = (REPO_ROOT / "docs" / "env-vars.md").read_text()
+    doc = (REPO_ROOT / "docs" / "env-vars.md").read_text(encoding="utf-8")
     assert "REBAR_OPCERT_PRIVATE_KEY" in doc
     count = int(re.search(r"_(\d+) variables\._", doc).group(1))
     assert count >= 146, f"registry shrank to {count} variables"

@@ -338,7 +338,9 @@ def test_update_stale_refuses_to_write_while_a_regression_stands(tmp_path, monke
 
 def test_update_stale_drains_while_an_admitted_mechanism_stands(tmp_path, monkeypatch):
     baseline = tmp_path / "mechanism-baseline.json"
-    baseline.write_text(ratchet.render_baseline({"lock::a.lock": 1, "lock::gone.lock": 1}))
+    baseline.write_text(
+        ratchet.render_baseline({"lock::a.lock": 1, "lock::gone.lock": 1}), encoding="utf-8"
+    )
     monkeypatch.setattr(ratchet, "BASELINE_PATH", str(baseline), raising=False)
     monkeypatch.setattr(
         ratchet,
@@ -356,13 +358,13 @@ def test_update_stale_drains_while_an_admitted_mechanism_stands(tmp_path, monkey
     rc = ratchet.main(["--update-stale"])
 
     assert rc == 0
-    assert ratchet.parse_baseline(baseline.read_text()) == {"lock::a.lock": 1}
+    assert ratchet.parse_baseline(baseline.read_text(encoding="utf-8")) == {"lock::a.lock": 1}
 
 
 def test_update_stale_refuses_to_write_while_a_marker_reason_is_blank(tmp_path, monkeypatch):
     baseline = tmp_path / "mechanism-baseline.json"
     original = ratchet.render_baseline({"lock::a.lock": 1, "lock::gone.lock": 1})
-    baseline.write_text(original)
+    baseline.write_text(original, encoding="utf-8")
     monkeypatch.setattr(ratchet, "BASELINE_PATH", str(baseline), raising=False)
     monkeypatch.setattr(
         ratchet,
@@ -380,7 +382,7 @@ def test_update_stale_refuses_to_write_while_a_marker_reason_is_blank(tmp_path, 
     rc = ratchet.main(["--update-stale"])
 
     assert rc != 0
-    assert baseline.read_text() == original
+    assert baseline.read_text(encoding="utf-8") == original
 
 
 # ---------------------------------------------------------------------------
@@ -400,10 +402,10 @@ def test_the_committed_baseline_matches_the_live_tree():
 
 def test_the_shipped_modules_respect_the_module_size_cap():
     """AC15. Neither repo limit-gate scans `scripts/`, so this suite asserts it."""
-    limit = int(LIMIT_FILE.read_text().strip())
+    limit = int(LIMIT_FILE.read_text(encoding="utf-8").strip())
     shipped = [SCRIPT_PATH, *sorted((REPO_ROOT / "scripts" / "_mechanism_delta").glob("*.py"))]
     for path in shipped:
-        n = len(path.read_text().splitlines())
+        n = len(path.read_text(encoding="utf-8").splitlines())
         assert n <= limit, f"{path.name} is {n} lines, over the {limit} cap"
 
 

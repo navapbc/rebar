@@ -152,7 +152,7 @@ def test_structured_runner_preserves_recommend_overlays_but_findings_mode_strips
 
 # ── no-drift guard: the prompt body enumerates EXACTLY the OVERLAY_IDS ──────────────────────
 def test_base_prompt_enumerates_exactly_the_overlay_ids():
-    body = pathlib.Path("src/rebar/llm/reviewers/code-review-base.md").read_text()
+    body = pathlib.Path("src/rebar/llm/reviewers/code-review-base.md").read_text(encoding="utf-8")
     # the catalog is rendered as a `- \`<id>\` —` bullet per overlay
     listed = set(re.findall(r"^- `([a-z0-9-]+)` —", body, flags=re.MULTILINE))
     assert listed == set(reg.OVERLAY_IDS), (

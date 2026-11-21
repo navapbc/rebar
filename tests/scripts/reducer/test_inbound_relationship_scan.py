@@ -52,7 +52,9 @@ class _Store:
             "author": "Test User",
             "data": data,
         }
-        (tdir / f"{self.ts}-{uuid}-{event_type}.json").write_text(json.dumps(payload))
+        (tdir / f"{self.ts}-{uuid}-{event_type}.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
         return uuid
 
     def create(self, tid: str, **extra: Any) -> None:
@@ -133,7 +135,7 @@ def test_preconditions_snapshots_are_not_scanned(
     plain = "bbbb-bbbb-bbbb-0007"
     _Store(Path(tracker)).create(plain)
     pre = Path(tracker) / plain / "9999-0000-PRECONDITIONS-SNAPSHOT.json"
-    pre.write_text(json.dumps({"data": {"note": TARGET}}))
+    pre.write_text(json.dumps({"data": {"note": TARGET}}), encoding="utf-8")
     opened: list[str] = []
     real_open = builtins.open
 

@@ -127,7 +127,7 @@ def test_a_rejected_push_logs_push_pending_at_warning(
 ) -> None:
     origin = store["origin"]
     hook = origin / "hooks" / "pre-receive"
-    hook.write_text(_REJECT_HOOK)
+    hook.write_text(_REJECT_HOOK, encoding="utf-8")
     hook.chmod(0o755)
 
     with caplog.at_level(logging.WARNING):

@@ -45,7 +45,7 @@ def _init_repo(path: Path) -> Path:
 
 
 def _commit(repo: Path, name: str, body: str) -> str:
-    (repo / name).write_text(body)
+    (repo / name).write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", name)
     return _git(repo, "rev-parse", "HEAD")
@@ -254,7 +254,7 @@ def test_a_stale_worker_lock_is_reclaimed(store: Path) -> None:
     stamped-owner discipline inherited from the drain/compaction locks."""
     path = gc_trigger._worker_lock_path(store)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("not-a-v2-stamp")
+    path.write_text("not-a-v2-stamp", encoding="utf-8")
     os.utime(path, (0, 0))
 
     fd = gc_trigger._acquire_worker_lock(store)

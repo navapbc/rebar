@@ -58,7 +58,7 @@ def _install_empty_acli(monkeypatch, tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     acli = bin_dir / "acli"
-    acli.write_text("#!/bin/sh\necho '[]'\nexit 0\n")
+    acli.write_text("#!/bin/sh\necho '[]'\nexit 0\n", encoding="utf-8")
     acli.chmod(acli.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setenv("JIRA_PROJECT", "DIG")

@@ -17,7 +17,7 @@ def _rv():
 def _write(tmp_path: Path, name: str, text: str) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True, exist_ok=True)
-    (pdir / name).write_text(text)
+    (pdir / name).write_text(text, encoding="utf-8")
 
 
 # ── front-matter ──────────────────────────────────────────────────────────────

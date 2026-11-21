@@ -43,7 +43,9 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _enable_claim_gate(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_plan_review_for_claim = true\n", encoding="utf-8"
+    )
 
 
 def _verdict(verdict: str, **extra) -> dict:
@@ -347,7 +349,7 @@ def test_claim_review_does_not_hold_store_flock(repo, monkeypatch):
 def test_help_sources_document_review_flag():
     """Help sources state the flag, its non-atomicity, and review-plan --status (AC 6)."""
     for name in ("edit.txt", "claim.txt"):
-        text = (REPO_ROOT / "src" / "rebar" / "_cli" / "help" / name).read_text()
+        text = (REPO_ROOT / "src" / "rebar" / "_cli" / "help" / name).read_text(encoding="utf-8")
         assert "--review" in text, name
         assert "not atomic" in text, name
         assert "review-plan" in text and "--status" in text, name
@@ -356,7 +358,7 @@ def test_help_sources_document_review_flag():
 def test_exit_codes_doc_documents_review_flag_codes():
     """docs/exit-codes.md documents the --review exit codes and states the
     flagless contracts are unchanged (AC 7)."""
-    text = (REPO_ROOT / "docs" / "exit-codes.md").read_text()
+    text = (REPO_ROOT / "docs" / "exit-codes.md").read_text(encoding="utf-8")
     assert "--review" in text
     assert "flagless" in text
     for needle in ("edit", "claim"):

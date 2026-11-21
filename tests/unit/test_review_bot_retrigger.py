@@ -702,7 +702,7 @@ _G2P_INI = Path(__file__).resolve().parents[2] / "infra/gerrit/gerrit_to_platfor
 def _ci_comment_trigger_words() -> list[str]:
     """Every `[mapping "comment-added"]` key from the g2p ini template."""
     parser = configparser.ConfigParser()
-    parser.read_string(_G2P_INI.read_text())
+    parser.read_string(_G2P_INI.read_text(encoding="utf-8"))
     words = [
         key
         for section in parser.sections()

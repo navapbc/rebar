@@ -117,7 +117,7 @@ def test_non_commit_ticket_has_no_commits_key(rebar_repo: Path) -> None:
 def test_convergence_replay_order(rebar_repo: Path) -> None:
     # Two raw COMMITS files written out of disk-order converge by filename (HLC+UUID).
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
-    env_id = (_tracker(rebar_repo) / ".env-id").read_text().strip()
+    env_id = (_tracker(rebar_repo) / ".env-id").read_text(encoding="utf-8").strip()
     base = 1_781_000_000_000_000_000
 
     def write(ts, uid, sha):
@@ -129,7 +129,9 @@ def test_convergence_replay_order(rebar_repo: Path) -> None:
             "author": "t",
             "data": {"commits": [sha]},
         }
-        (_tracker(rebar_repo) / tid / f"{ts}-{uid}-COMMITS.json").write_text(json.dumps(ev))
+        (_tracker(rebar_repo) / tid / f"{ts}-{uid}-COMMITS.json").write_text(
+            json.dumps(ev), encoding="utf-8"
+        )
 
     write(base + 5, "ffffffff-0000-4000-8000-000000000002", "second")
     write(base + 1, "ffffffff-0000-4000-8000-000000000001", "first")
@@ -196,7 +198,7 @@ def test_dedup_converges_under_reorder(rebar_repo: Path) -> None:
     # The SAME sha arriving in two events, written out of filename order, converges
     # to a single entry deterministically (union-add dedup by sha, replay order).
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
-    env_id = (_tracker(rebar_repo) / ".env-id").read_text().strip()
+    env_id = (_tracker(rebar_repo) / ".env-id").read_text(encoding="utf-8").strip()
     base = 1_781_000_000_000_000_000
 
     def write(ts, uid, shas):
@@ -208,7 +210,9 @@ def test_dedup_converges_under_reorder(rebar_repo: Path) -> None:
             "author": "t",
             "data": {"commits": shas},
         }
-        (_tracker(rebar_repo) / tid / f"{ts}-{uid}-COMMITS.json").write_text(json.dumps(ev))
+        (_tracker(rebar_repo) / tid / f"{ts}-{uid}-COMMITS.json").write_text(
+            json.dumps(ev), encoding="utf-8"
+        )
 
     write(base + 9, "ffffffff-0000-4000-8000-000000000002", ["dup", "later"])
     write(base + 1, "ffffffff-0000-4000-8000-000000000001", ["dup", "early"])

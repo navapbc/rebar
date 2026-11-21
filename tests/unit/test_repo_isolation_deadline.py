@@ -40,7 +40,7 @@ def test_outer_deadline_leaves_cleanup_headroom(
 
     def completed_nested_pytest(*args, **kwargs):
         observed_outer_timeouts.append(kwargs["timeout"])
-        state.write_text("2")
+        state.write_text("2", encoding="utf-8")
         return nested_result
 
     monkeypatch.setattr(guard_test, "_blocking_git", fake_blocking_git)
@@ -71,7 +71,7 @@ def test_completed_watchdog_result_is_not_rejected_by_aggregate_runtime(
         return state, {"PATH": "test-path"}
 
     def completed_nested_pytest(*args, **kwargs):
-        state.write_text("2")
+        state.write_text("2", encoding="utf-8")
         return nested_result
 
     monkeypatch.setattr(guard_test, "_blocking_git", fake_blocking_git)

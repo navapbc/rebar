@@ -176,14 +176,14 @@ def _provision(
     tracker = tmp_path / "tracker"
 
     git = bin_dir / "git"
-    git.write_text(_GIT_STUB)
+    git.write_text(_GIT_STUB, encoding="utf-8")
     git.chmod(0o755)
     ensure = bin_dir / "ensure.sh"
-    ensure.write_text(_ENSURE_STUB)
+    ensure.write_text(_ENSURE_STUB, encoding="utf-8")
     ensure.chmod(0o755)
     if shutil.which("flock") is None:  # macOS without util-linux; CI uses the real one
         shim = bin_dir / "flock"
-        shim.write_text(_FLOCK_SHIM)
+        shim.write_text(_FLOCK_SHIM, encoding="utf-8")
         shim.chmod(0o755)
 
     git_log = tmp_path / "git.log"
@@ -241,7 +241,7 @@ def _provision(
         raise
 
     def _lines(path: Path) -> list[str]:
-        return path.read_text().splitlines() if path.exists() else []
+        return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
     return Run(
         returncode=proc.returncode,
@@ -290,10 +290,10 @@ def test_poisoned_store_with_dot_git_but_no_resolvable_head_is_cleared_and_reclo
     Clear and re-clone it so the persistent volume cannot serve an empty tracker."""
     tracker = tmp_path / "tracker"
     (tracker / ".git" / "refs" / "heads").mkdir(parents=True)
-    (tracker / ".git" / "HEAD").write_text("ref: refs/heads/.invalid\n")
+    (tracker / ".git" / "HEAD").write_text("ref: refs/heads/.invalid\n", encoding="utf-8")
     orphan = tracker / ".git" / "objects" / "pack" / "tmp_pack_orphan"
     orphan.parent.mkdir(parents=True)
-    orphan.write_text("1.5 GB of nothing")
+    orphan.write_text("1.5 GB of nothing", encoding="utf-8")
 
     run = _provision(tmp_path, head_resolves=False)
 
@@ -318,7 +318,7 @@ def test_store_with_files_but_no_dot_git_at_all_is_cleared_and_recloned(
     """
     tracker = tmp_path / "tracker"
     tracker.mkdir()
-    (tracker / "leftover").write_text("stale working-tree file")
+    (tracker / "leftover").write_text("stale working-tree file", encoding="utf-8")
 
     run = _provision(tmp_path, head_resolves=False)
 
@@ -342,7 +342,7 @@ def test_healthy_store_is_neither_cleared_nor_recloned(tmp_path: Path) -> None:
     (tracker / ".git").mkdir(parents=True)
     keep = tracker / "tickets" / "d467.json"
     keep.parent.mkdir()
-    keep.write_text("{}")
+    keep.write_text("{}", encoding="utf-8")
 
     run = _provision(tmp_path, head_resolves=True)
 
@@ -418,7 +418,7 @@ def test_the_clear_refuses_an_unsafe_tracker_dir(tmp_path: Path, unsafe: str) ->
     absolute path other than `/`.
     """
     sentinel = tmp_path / "sentinel"
-    sentinel.write_text("must survive")
+    sentinel.write_text("must survive", encoding="utf-8")
 
     run = _provision(tmp_path, tracker_dir=unsafe, head_resolves=False)
 
@@ -453,7 +453,7 @@ def test_a_concurrent_reclone_is_not_interleaved(tmp_path: Path) -> None:
     tracker = tmp_path / "tracker"
     tracker.mkdir()
     peer_work = tracker / "peer-partial-clone"
-    peer_work.write_text("another container is cloning into this directory")
+    peer_work.write_text("another container is cloning into this directory", encoding="utf-8")
     fd = _peer_lock_fd(tracker)
 
     try:
@@ -562,7 +562,7 @@ def test_the_code_checkout_is_not_cloned_while_a_peer_holds_its_lock(
     code = tmp_path / "code"
     code.mkdir()
     peer_work = code / "peer-partial-clone"
-    peer_work.write_text("another container is cloning into this directory")
+    peer_work.write_text("another container is cloning into this directory", encoding="utf-8")
     fd = os.open(code, os.O_RDONLY)
     fcntl.flock(fd, fcntl.LOCK_EX)
 
@@ -695,7 +695,7 @@ def test_a_healthy_code_checkout_is_neither_cleared_nor_recloned(tmp_path: Path)
     code = tmp_path / "code"
     (code / ".git").mkdir(parents=True)
     keep = code / ".git" / "packed-refs"
-    keep.write_text("# pack-refs with: peeled fully-peeled sorted\n")
+    keep.write_text("# pack-refs with: peeled fully-peeled sorted\n", encoding="utf-8")
 
     run = _provision(tmp_path, head_resolves=True)
 

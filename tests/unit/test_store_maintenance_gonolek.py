@@ -30,7 +30,7 @@ pytestmark = pytest.mark.unit
 def _isolated_env(tmp_path: Path) -> dict[str, str]:
     """Inherited environment with the host's git config files out of the picture."""
     empty = tmp_path / "empty-gitconfig"
-    empty.write_text("")
+    empty.write_text("", encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     env.update(
         GIT_CONFIG_GLOBAL=str(empty),
@@ -62,7 +62,7 @@ def _maintenance_starts(trace: Path) -> list[list[str]]:
     starts: list[list[str]] = []
     if not trace.exists():
         return starts
-    for line in trace.read_text().splitlines():
+    for line in trace.read_text(encoding="utf-8").splitlines():
         event = json.loads(line)
         sub = _subcommand([str(a) for a in event.get("argv") or []])
         if event.get("event") == "start" and sub[:1] in (["maintenance"], ["gc"]):
@@ -153,7 +153,7 @@ def test_explicit_step_packs_loose_objects_without_gc(
     paths = []
     for i, text in enumerate(blobs):
         p = tmp_path / f"b{i}"
-        p.write_text(text)
+        p.write_text(text, encoding="utf-8")
         paths.append(str(p))
     subprocess.run(
         ["git", "-C", str(repo), "hash-object", "-w", "--stdin-paths"],
@@ -197,7 +197,7 @@ def test_timed_out_step_reaps_group_and_lets_git_release_its_lock(tmp_path: Path
     bindir = tmp_path / "bin"
     bindir.mkdir()
     fake = bindir / "git"
-    fake.write_text(_FAKE_GIT)
+    fake.write_text(_FAKE_GIT, encoding="utf-8")
     fake.chmod(0o755)
     work = tmp_path / "work"
     work.mkdir()
@@ -212,7 +212,7 @@ def test_timed_out_step_reaps_group_and_lets_git_release_its_lock(tmp_path: Path
 
     assert result is not None and result.returncode == 124
     assert not (work / "held.lock").exists(), "SIGTERM must reach git so it drops its lock"
-    child = int((work / "child.pid").read_text())
+    child = int((work / "child.pid").read_text(encoding="utf-8"))
     deadline = time.monotonic() + 10
     while _alive(child) and time.monotonic() < deadline:
         time.sleep(0.05)  # an orphaned zombie lingers until init reaps it
@@ -265,6 +265,6 @@ def test_malformed_inherited_count_is_passed_through_for_git_to_report() -> None
 
 def test_container_startup_fetch_disables_implicit_maintenance() -> None:
     script = Path(__file__).resolve().parents[2] / "infra/scripts/reviewbot-ensure-tickets.sh"
-    text = script.read_text()
+    text = script.read_text(encoding="utf-8")
     fetch_at = text.index("fetch --quiet origin")
     assert "-c maintenance.auto=false -c gc.auto=0" in text[text.rindex("git -C", 0, fetch_at) :]

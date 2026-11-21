@@ -158,6 +158,112 @@ def _locale_decoded_text_calls(source: str) -> list[int]:
     return lines
 
 
+_TEMPFILE_OPENERS = frozenset({"NamedTemporaryFile", "TemporaryFile", "SpooledTemporaryFile"})
+
+
+def _names_an_encoding(node: ast.Call) -> bool:
+    """An explicit ``encoding=`` (or a ``**kwargs`` that may carry one)."""
+    return any(kw.arg in ("encoding", None) for kw in node.keywords)
+
+
+def _text_mode(node: ast.Call, index: int, default: str) -> bool:
+    """Whether the call's mode (positional ``index`` or ``mode=``) opens in text mode.
+
+    A mode the scan cannot read statically (a variable) is not flagged."""
+    mode: ast.expr | None = node.args[index] if len(node.args) > index else None
+    mode = next((kw.value for kw in node.keywords if kw.arg == "mode"), mode)
+    if mode is None:
+        return "b" not in default
+    return isinstance(mode, ast.Constant) and isinstance(mode.value, str) and "b" not in mode.value
+
+
+def _is_locale_text_io(node: ast.Call) -> bool:
+    """A text read, write or open that falls back to the locale codec (cp1252 on Windows)."""
+    func = node.func
+    if _names_an_encoding(node):
+        return False
+    if isinstance(func, ast.Name):
+        return func.id == "open" and len(node.args) < 4 and _text_mode(node, 1, "r")
+    if not isinstance(func, ast.Attribute):
+        return False
+    owner = func.value.id if isinstance(func.value, ast.Name) else None
+    if func.attr == "read_text":
+        return not node.args
+    if func.attr == "write_text":
+        return len(node.args) == 1
+    if func.attr == "fdopen" and owner == "os":
+        return _text_mode(node, 1, "r")
+    if func.attr in _TEMPFILE_OPENERS and owner == "tempfile":
+        return _text_mode(node, 0, "w+b")
+    if func.attr == "open" and owner == "io":
+        return len(node.args) < 4 and _text_mode(node, 1, "r")
+    if func.attr == "open" and owner not in ("os", "tarfile", "zipfile", "webbrowser", "gzip"):
+        # ``Path.open``: the mode is the first argument. Only a literal mode is judged, so
+        # ``archive.open("member")`` style calls on other types are not flagged.
+        mode = node.args[0] if node.args else None
+        mode = next((kw.value for kw in node.keywords if kw.arg == "mode"), mode)
+        return (
+            isinstance(mode, ast.Constant)
+            and isinstance(mode.value, str)
+            and set(mode.value) <= set("rwax+tU")
+        )
+    return False
+
+
+def _locale_text_io_calls(source: str) -> list[ast.Call]:
+    """Every call in ``source`` that reads, writes or opens text with the locale codec."""
+    return [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call) and _is_locale_text_io(node)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "flagged"),
+    [
+        ("p.read_text()", True),
+        ('p.read_text(encoding="utf-8")', False),
+        ('p.read_text("utf-8")', False),
+        ("p.write_text(body)", True),
+        ('p.write_text(body, encoding="utf-8")', False),
+        ("open(p)", True),
+        ('open(p, "w")', True),
+        ('open(p, "rb")', False),
+        ("open(p, mode)", False),
+        ('open(p, encoding="utf-8")', False),
+        ("open(p, **kw)", False),
+        ('io.open(p, "a")', True),
+        ('os.fdopen(fd, "w")', True),
+        ('os.fdopen(fd, "wb")', False),
+        ("os.open(p, os.O_RDONLY)", False),
+        ('tempfile.NamedTemporaryFile("w")', True),
+        ("tempfile.NamedTemporaryFile(suffix='.x')", False),
+        ('path.open("w")', True),
+        ('path.open("rb")', False),
+        ('archive.open("member.txt")', False),
+        ('tarfile.open(p, "r")', False),
+    ],
+)
+def test_the_scan_flags_locale_default_text_io(source: str, flagged: bool) -> None:
+    assert bool(_locale_text_io_calls(source)) is flagged
+
+
+def test_no_text_io_uses_the_locale_codec() -> None:
+    """Every text read, write and open in src, scripts and tests names its encoding.
+
+    ruff's PLW1514 cannot see a receiver it cannot type as ``pathlib.Path``, so it reported
+    none of the 12 src sites this scan found (bug dear-advanced-azurevase)."""
+    roots = [REPO_ROOT / "src" / "rebar", REPO_ROOT / "scripts", REPO_ROOT / "tests"]
+    files = [REPO_ROOT / "hatch_build.py", *(p for r in roots for p in sorted(r.rglob("*.py")))]
+    offenders = [
+        f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno}"
+        for path in files
+        for node in _locale_text_io_calls(path.read_text(encoding="utf-8"))
+    ]
+    assert offenders == []
+
+
 @pytest.mark.parametrize(
     ("source", "flagged"),
     [

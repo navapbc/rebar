@@ -473,7 +473,7 @@ def _completion_phase_timestamps(
     signature_at: float | None = None
     for path in ticket_dir.glob("*.json"):
         try:
-            raw = json.loads(path.read_text())
+            raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             audit["bad_phase_event"] += 1
             continue
@@ -508,7 +508,7 @@ def load_tracker(config: ProbeConfig) -> tuple[dict[str, str], list[dict[str, An
     tracker = config.tracker.expanduser()
     for cache in tracker.glob("*/.cache.json"):
         try:
-            state = json.loads(cache.read_text()).get("state", {})
+            state = json.loads(cache.read_text(encoding="utf-8")).get("state", {})
         except (OSError, json.JSONDecodeError):
             continue
         ticket_id = state.get("ticket_id")
@@ -524,7 +524,7 @@ def load_tracker(config: ProbeConfig) -> tuple[dict[str, str], list[dict[str, An
     for operation, suffix in (("plan", "REVIEW_RESULT"), ("close", "COMPLETION_VERDICT")):
         for path in tracker.glob(f"*/*-{suffix}.json"):
             try:
-                raw = json.loads(path.read_text())
+                raw = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 audit["bad_event"] += 1
                 continue

@@ -47,7 +47,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -153,8 +153,8 @@ def _environment(
         }
     )
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
-    (tmp_path / "replication.log").write_text("")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
     if env_extra:
         env.update(env_extra)
     return env, aws_log
@@ -168,7 +168,7 @@ def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
     if not log.exists():
         return values
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -349,7 +349,7 @@ def test_the_docker_metrics_carry_no_dimensions(tmp_path: Path) -> None:
     """Keep metric and alarm dimensionless; asymmetry leaves CloudWatch in INSUFFICIENT_DATA."""
     env, aws_log = _environment(tmp_path)
     assert _run(env).returncode == 0
-    for line in aws_log.read_text().splitlines():
+    for line in aws_log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -452,7 +452,8 @@ def _cap_stub(tmp_path: Path, check_body: str) -> str:
         f"    printf 'DOCKER_BUILDKIT_CACHE_BYTES=%s\\n' {5 * GIB}\n"
         "    printf 'DOCKER_ROOT=%s\\n' /var/lib/docker ;;\n"
         f"  --check-gc-enforced) {check_body} ;;\n"
-        "esac\n"
+        "esac\n",
+        encoding="utf-8",
     )
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return str(path)

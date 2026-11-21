@@ -12,7 +12,7 @@ _SHA = "a" * 40
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -74,7 +74,7 @@ def test_reviewbot_webhook_auth_rejections_publish_from_health_payload(tmp_path:
     assert (result.returncode, repeated.returncode) == (0, 0)
     published = [
         line
-        for line in aws_log.read_text().splitlines()
+        for line in aws_log.read_text(encoding="utf-8").splitlines()
         if "--metric-name reviewbot_webhook_auth_rejections" in line
     ]
     assert any(
@@ -127,7 +127,7 @@ def test_reviewbot_webhook_auth_rejections_survive_process_counter_reset(tmp_pat
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
 
     offset = tmp_path / "reviewbot-webhook-auth-offset"
-    offset.write_text("17\n")
+    offset.write_text("17\n", encoding="utf-8")
     env = observability_env(tmp_path)
     env.update(
         {
@@ -146,7 +146,7 @@ def test_reviewbot_webhook_auth_rejections_survive_process_counter_reset(tmp_pat
     assert result.returncode == 0
     published = [
         line
-        for line in aws_log.read_text().splitlines()
+        for line in aws_log.read_text(encoding="utf-8").splitlines()
         if "--metric-name reviewbot_webhook_auth_rejections" in line
     ]
     assert any(

@@ -58,7 +58,7 @@ def _write_event(ticket_dir: Path, timestamp: int, uuid: str, event_type: str, d
         "data": data,
     }
     path = ticket_dir / f"{timestamp}-{uuid}-{event_type}.json"
-    path.write_text(json.dumps(payload))
+    path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
 
@@ -70,7 +70,7 @@ def _plain_tracker(path: Path, *, n_tickets: int = 3) -> Path:
     subprocess.run(["git", "init", "-q", str(path)], check=True)
     _git(path, "config", "user.email", "t@e")
     _git(path, "config", "user.name", "T")
-    (path / ".gitignore").write_text(_MARKER_IGNORES)
+    (path / ".gitignore").write_text(_MARKER_IGNORES, encoding="utf-8")
     _git(path, "add", ".gitignore")
     marker_paths: list[str] = []
     for i in range(n_tickets):
@@ -83,8 +83,8 @@ def _plain_tracker(path: Path, *, n_tickets: int = 3) -> Path:
             "CREATE",
             {"ticket_type": "task", "title": f"t{i}"},
         )
-        (d / ".archived").write_text("")
-        (d / ".write.lock").write_text("")
+        (d / ".archived").write_text("", encoding="utf-8")
+        (d / ".write.lock").write_text("", encoding="utf-8")
         marker_paths += [f"{d.name}/.archived", f"{d.name}/.write.lock"]
     _git(path, "add", "-A")
     _git(path, "add", "-f", "--", *marker_paths)
@@ -174,7 +174,7 @@ def test_unit_handles_only_one_marker_kind_tracked(tmp_path: Path) -> None:
     _git(tracker, "config", "user.name", "T")
     d = tracker / "aaaa-bbbb-cccc-0000"
     d.mkdir()
-    (d / ".archived").write_text("")
+    (d / ".archived").write_text("", encoding="utf-8")
     _git(tracker, "add", "-f", f"{d.name}/.archived")
     _git(tracker, "commit", "-q", "--no-verify", "-m", "legacy")
 
@@ -272,7 +272,7 @@ def test_list_still_clears_stale_marker_without_archived_event(tmp_path: Path) -
     tdir = tracker / "tkt-stale-marker"
     tdir.mkdir()
     _write_event(tdir, 1742605200, _UUID, "CREATE", {"ticket_type": "task", "title": "t"})
-    (tdir / ".archived").write_text("")
+    (tdir / ".archived").write_text("", encoding="utf-8")
 
     results = reduce_all_tickets(tracker, exclude_archived=True)
 

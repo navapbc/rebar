@@ -128,7 +128,7 @@ def _run_real_guard_with_blocking_git(
 ) -> subprocess.CompletedProcess:
     state, env = _blocking_git(tmp_path, operation)
     nested_test = tmp_path / "test_nested_guard.py"
-    nested_test.write_text("def test_body_finishes():\n    assert True\n")
+    nested_test.write_text("def test_body_finishes():\n    assert True\n", encoding="utf-8")
     try:
         result = run_nested_pytest(
             tmp_path,
@@ -144,7 +144,9 @@ def _run_real_guard_with_blocking_git(
         raise AssertionError(
             f"real repo-isolation {operation} probe kept pytest alive beyond 90 seconds"
         ) from exc
-    assert int(state.read_text()) >= 2, "the shim did not block the real guard probe"
+    assert int(state.read_text(encoding="utf-8")) >= 2, (
+        "the shim did not block the real guard probe"
+    )
     return result
 
 
@@ -154,7 +156,7 @@ def _init_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(path)], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.email", "t@t"], check=True)
     subprocess.run(["git", "-C", str(path), "config", "user.name", "t"], check=True)
-    (path / "seed").write_text("x")
+    (path / "seed").write_text("x", encoding="utf-8")
     subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(path), "commit", "-q", "-m", "seed"], check=True)
 
@@ -180,7 +182,7 @@ def test_head_is_none_outside_a_repo(tmp_path):
 def test_porcelain_reports_a_new_working_tree_file(tmp_path):
     _init_repo(tmp_path)
     base = _isolation.porcelain(tmp_path)
-    (tmp_path / "stray.txt").write_text("leak")
+    (tmp_path / "stray.txt").write_text("leak", encoding="utf-8")
     after = _isolation.porcelain(tmp_path)
     assert base is not None and after is not None
     assert any("stray.txt" in line for line in after - base)
@@ -227,10 +229,10 @@ def test_a_transient_probe_stall_is_re_sampled_rather_than_reported(tmp_path, mo
         patch.setattr(_isolation, "GIT_PROBE_TIMEOUT_SECONDS", 2.0)
         before = _isolation.head(repo)
         assert before, "the first sample must succeed"
-        marker.write_text("")  # arm: the next probe stalls
+        marker.write_text("", encoding="utf-8")  # arm: the next probe stalls
         after = _isolation.head(repo)
 
-    probes = log.read_text().split()
+    probes = log.read_text(encoding="utf-8").split()
     assert probes.count("stall") == 1, f"exactly one probe must stall: {probes}"
     assert "ok" in probes[probes.index("stall") + 1 :], (
         f"the stalled sample must be re-sampled by a healthy probe: {probes}"
@@ -259,7 +261,7 @@ def test_git_probe_timeout_ignores_a_test_monkeypatch_of_time_sleep(tmp_path, mo
         ):
             patch.setenv(key, env[key])
         assert _isolation.head(repo)
-        assert state.read_text() == "1"
+        assert state.read_text(encoding="utf-8") == "1"
         patch.setattr(_isolation, "GIT_PROBE_TIMEOUT_SECONDS", 0.5)
         patch.setattr(time, "sleep", fail_sleep)
         assert subprocess.time.sleep is fail_sleep
@@ -284,7 +286,9 @@ def test_leak_snapshot_catches_write_into_preexisting_state_dir(tmp_path):
     entry — the exact blind spot of a top-level-only ``os.listdir`` diff."""
     rebar_dir = tmp_path / ".rebar"
     rebar_dir.mkdir()
-    (rebar_dir / "current_session_log").write_text("pre-existing")  # dir pre-exists
+    (rebar_dir / "current_session_log").write_text(
+        "pre-existing", encoding="utf-8"
+    )  # dir pre-exists
     before = _isolation.repo_leak_snapshot(tmp_path)
     (rebar_dir / "run_snapshots").mkdir()  # the leak — inside the pre-existing dir
     leaked = _isolation.repo_leak_snapshot(tmp_path) - before
@@ -410,7 +414,7 @@ def test_leak_guard_fails_a_test_that_writes_into_preexisting_state_dir(pytester
     repo = tmp_path / "repo"
     _init_repo(repo)
     (repo / ".rebar").mkdir()  # pre-exists, as it always does in a dogfooding checkout
-    (repo / ".rebar" / "current_session_log").write_text("pre-existing")
+    (repo / ".rebar" / "current_session_log").write_text("pre-existing", encoding="utf-8")
     _write_inline_conftest(pytester, repo)
     pytester.makepyfile(
         f"""
@@ -537,15 +541,15 @@ def test_leak_guard_leaves_entries_it_cannot_attribute_on_disk(request, tmp_path
     stray_dir = tmp_path / "external_dir_probe"
 
     def concurrent_writer() -> None:
-        stray_file.write_text("written by another process in this checkout")
+        stray_file.write_text("written by another process in this checkout", encoding="utf-8")
         stray_dir.mkdir()
-        (stray_dir / "payload.txt").write_text("another process's data")
+        (stray_dir / "payload.txt").write_text("another process's data", encoding="utf-8")
 
     _drive_leak_guard(request, tmp_path, concurrent_writer)
 
     assert stray_file.is_file(), "the guard deleted a file it cannot attribute to the test"
     assert stray_dir.is_dir(), "the guard deleted a directory it cannot attribute to the test"
-    assert (stray_dir / "payload.txt").read_text() == "another process's data"
+    assert (stray_dir / "payload.txt").read_text(encoding="utf-8") == "another process's data"
 
 
 def test_leak_guard_still_fails_and_names_every_entry(request, tmp_path):
@@ -554,7 +558,7 @@ def test_leak_guard_still_fails_and_names_every_entry(request, tmp_path):
 
     def leaking_test_body() -> None:
         (tmp_path / "depends_on").mkdir()  # the classic relative-path leak shape
-        (tmp_path / "stray_report.json").write_text("{}")
+        (tmp_path / "stray_report.json").write_text("{}", encoding="utf-8")
 
     message = _drive_leak_guard(request, tmp_path, leaking_test_body)
 
@@ -606,7 +610,9 @@ def test_leak_guard_exempts_pytest_cache(request, tmp_path):
     def pytest_writes_its_cache() -> None:
         cache = tmp_path / ".pytest_cache"
         cache.mkdir()
-        (cache / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55\n")
+        (cache / "CACHEDIR.TAG").write_text(
+            "Signature: 8a477f597d28d172789f06886806bc55\n", encoding="utf-8"
+        )
         (cache / "v").mkdir()
 
     assert _run_leak_guard(request, tmp_path, pytest_writes_its_cache) is None
@@ -641,7 +647,7 @@ def test_leak_guard_still_fails_on_real_pollution_beside_pytest_cache(request, t
 
     def cache_plus_a_real_leak() -> None:
         (tmp_path / ".pytest_cache").mkdir()
-        (tmp_path / "stray_report.json").write_text("{}")
+        (tmp_path / "stray_report.json").write_text("{}", encoding="utf-8")
 
     message = _run_leak_guard(request, tmp_path, cache_plus_a_real_leak)
 
@@ -687,7 +693,7 @@ def test_session_backstop_still_fails_the_run_and_names_every_entry(request, tmp
     _init_repo(repo)
 
     def a_write_lands_in_the_tree() -> None:
-        (repo / "stray_report.json").write_text("{}")
+        (repo / "stray_report.json").write_text("{}", encoding="utf-8")
 
     message, session = _drive_working_tree_backstop(request, repo, a_write_lands_in_the_tree)
 
@@ -705,7 +711,9 @@ def test_session_backstop_does_not_assert_a_test_made_the_change(request, tmp_pa
     _init_repo(repo)
 
     def another_process_writes() -> None:
-        (repo / "EXTERNAL_MUTATION_PROBE").write_text("written by another process")
+        (repo / "EXTERNAL_MUTATION_PROBE").write_text(
+            "written by another process", encoding="utf-8"
+        )
 
     message, _ = _drive_working_tree_backstop(request, repo, another_process_writes)
 

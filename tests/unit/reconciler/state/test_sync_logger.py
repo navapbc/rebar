@@ -39,7 +39,7 @@ def test_log_writes_jsonl(sl_mod: ModuleType, tmp_path: Path) -> None:
     logger.log("outbound_create", local_id="abc-1", jira_key="DIG-100", fields={"title": "T"})
     logger.close()
 
-    lines = log_file.read_text().strip().splitlines()
+    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
 
     for line in lines:
@@ -80,7 +80,7 @@ def test_event_types(sl_mod: ModuleType, tmp_path: Path) -> None:
     logger.log("rate_limit", endpoint="/rest/api/2/issue", retry_after_s=30)
     logger.close()
 
-    lines = log_file.read_text().strip().splitlines()
+    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 11
 
     events = [json.loads(line) for line in lines]
@@ -114,7 +114,7 @@ def test_close_flushes(sl_mod: ModuleType, tmp_path: Path) -> None:
     logger.close()
 
     # File should be readable and complete after close
-    content = log_file.read_text().strip()
+    content = log_file.read_text(encoding="utf-8").strip()
     assert content  # non-empty
     parsed = json.loads(content)
     assert parsed["event"] == "binding_create"
@@ -137,7 +137,7 @@ def test_append_mode(sl_mod: ModuleType, tmp_path: Path) -> None:
     logger2.log("sync_pass_start", pass_id="p2", mode="live")
     logger2.close()
 
-    lines = log_file.read_text().strip().splitlines()
+    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 2
     assert json.loads(lines[0])["pass_id"] == "p1"
     assert json.loads(lines[1])["pass_id"] == "p2"
@@ -150,7 +150,7 @@ def test_context_manager_closes_on_exit(sl_mod: ModuleType, tmp_path: Path) -> N
         logger.log("sync_pass_start", pass_id="p1", mode="live")
 
     # After exiting the with-block, the file handle should be closed
-    lines = log_file.read_text().strip().splitlines()
+    lines = log_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 1
     parsed = json.loads(lines[0])
     assert parsed["event"] == "sync_pass_start"
@@ -167,5 +167,5 @@ def test_non_serializable_values(sl_mod: ModuleType, tmp_path: Path) -> None:
     logger.log("error", some_path=Path("/tmp/foo"))
     logger.close()
 
-    parsed = json.loads(log_file.read_text().strip())
+    parsed = json.loads(log_file.read_text(encoding="utf-8").strip())
     assert str(Path("/tmp/foo")) in parsed["some_path"]

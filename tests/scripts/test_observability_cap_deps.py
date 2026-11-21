@@ -61,7 +61,7 @@ _INSTALLED_CAPS = re.compile(r"^for cap in (?P<names>[^;]+); do", re.MULTILINE)
 
 def _cap_sh_assignments() -> dict[str, str]:
     """``{basename: the full assignment line}`` for every ``*_CAP_SH`` default in the probe."""
-    text = PROBE.read_text()
+    text = PROBE.read_text(encoding="utf-8")
     found: dict[str, str] = {}
     for match in _CAP_SH_LINE.finditer(text):
         line = text[match.start() : text.index("\n", match.start())]
@@ -78,7 +78,7 @@ def _installer_deploys() -> set[str]:
     NAMES the two scripts that are deliberately excluded, so a substring search over the file
     would report them as installed and invert this test's meaning.
     """
-    match = _INSTALLED_CAPS.search(INSTALLER.read_text())
+    match = _INSTALLED_CAPS.search(INSTALLER.read_text(encoding="utf-8"))
     assert match, "install-observability.sh has no `for cap in ...` deploy loop"
     return set(match.group("names").split())
 
@@ -86,7 +86,7 @@ def _installer_deploys() -> set[str]:
 def _declared_installed_path(cap_name: str, variable: str) -> str:
     """The default the cap script itself declares for its installed copy."""
     pattern = re.compile(rf'^{variable}="\$\{{{variable}:-(?P<path>[^}}"]+)\}}"', re.MULTILINE)
-    match = pattern.search((SCRIPTS / cap_name).read_text())
+    match = pattern.search((SCRIPTS / cap_name).read_text(encoding="utf-8"))
     assert match, f"{cap_name} declares no {variable} default"
     return match.group("path")
 
@@ -177,7 +177,9 @@ _ALARM_BLOCK = re.compile(
 
 
 def _sentinel() -> int:
-    match = re.search(r"^HEARTBEAT_UNKNOWN=(-?\d+)$", PROBE.read_text(), re.MULTILINE)
+    match = re.search(
+        r"^HEARTBEAT_UNKNOWN=(-?\d+)$", PROBE.read_text(encoding="utf-8"), re.MULTILINE
+    )
     assert match, "observability.sh declares no HEARTBEAT_UNKNOWN sentinel"
     return int(match.group(1))
 
@@ -185,7 +187,7 @@ def _sentinel() -> int:
 def _alarms_for(metric: str) -> list[tuple[str, str]]:
     found = []
     for tf in sorted(TERRAFORM.glob("*.tf")):
-        for block in _ALARM_BLOCK.finditer(tf.read_text()):
+        for block in _ALARM_BLOCK.finditer(tf.read_text(encoding="utf-8")):
             body = block.group("body")
             if re.search(rf'^\s*metric_name\s*=\s*"{re.escape(metric)}"\s*$', body, re.MULTILINE):
                 found.append((block.group("name"), body))

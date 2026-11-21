@@ -52,7 +52,7 @@ def _build_store(root: Path, tickets: list[str], payload: bytes) -> None:
     subprocess.run(["git", "init", "-q", "-b", "tickets"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.email", "t@example.invalid"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "bounded copy test"], cwd=root, check=True)
-    (root / ".store-compat.json").write_text("{}\n")
+    (root / ".store-compat.json").write_text("{}\n", encoding="utf-8")
     for name in tickets:
         event = root / name
         event.mkdir()
@@ -162,7 +162,7 @@ def test_the_snapshot_is_not_buffered_whole_in_memory() -> None:
     Capturing held the whole snapshot in RAM on top of the copy on disk. Read structurally so
     the guarantee cannot regress by someone reinstating a capture elsewhere in the module.
     """
-    tree = ast.parse(_FIXTURES.read_text())
+    tree = ast.parse(_FIXTURES.read_text(encoding="utf-8"))
 
     archives = [
         node
@@ -182,7 +182,7 @@ def test_the_snapshot_is_not_buffered_whole_in_memory() -> None:
         )
     ]
     assert not buffered, "tar is fed a buffered archive; stream it from git archive's stdout"
-    assert "subprocess.Popen" in _FIXTURES.read_text(), "the streaming pipe is gone"
+    assert "subprocess.Popen" in _FIXTURES.read_text(encoding="utf-8"), "the streaming pipe is gone"
 
 
 def test_a_failed_archive_is_reported_with_gits_own_message(tmp_path: Path) -> None:
@@ -239,7 +239,9 @@ def test_reclaim_removes_a_finished_copy(tmp_path: Path) -> None:
     module = _load_fixtures()
     work = tmp_path / "dc-store-copy"
     (work / ".tickets-tracker" / "0001-0000-0000-4000").mkdir(parents=True)
-    (work / ".tickets-tracker" / "0001-0000-0000-4000" / "e.json").write_text("{}")
+    (work / ".tickets-tracker" / "0001-0000-0000-4000" / "e.json").write_text(
+        "{}", encoding="utf-8"
+    )
 
     module.reclaim(work)
 
@@ -250,7 +252,7 @@ def test_reclaim_removes_a_finished_copy(tmp_path: Path) -> None:
 @pytest.mark.parametrize("fixture_file", ["_dc_fixtures.py", "test_multi_project_rehearsal.py"])
 def test_every_store_copy_fixture_reclaims_its_tree(fixture_file: str) -> None:
     """Both copy sites must reclaim, or one module's leftovers still fill the disk."""
-    source = (_HARNESS / fixture_file).read_text()
+    source = (_HARNESS / fixture_file).read_text(encoding="utf-8")
 
     assert "reclaim(work)" in source, f"{fixture_file} never reclaims its store copy"
     assert "yield work" in source, f"{fixture_file} cannot reclaim: it returns instead of yielding"
@@ -270,7 +272,7 @@ def test_the_local_ticket_entry_rule_matches_the_harnesss_own() -> None:
 
 def _body_of(path: Path, name: str) -> str:
     """The unparsed return expression of a one-line predicate, ignoring its docstring."""
-    for node in ast.walk(ast.parse(path.read_text())):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.FunctionDef) and node.name == name:
             returns = [n for n in node.body if isinstance(n, ast.Return)]
             assert len(returns) == 1, f"{name} is no longer a single-expression predicate"

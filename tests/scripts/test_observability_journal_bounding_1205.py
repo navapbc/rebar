@@ -129,7 +129,7 @@ _TIMEOUT_STUB = """
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -145,7 +145,7 @@ def _environment(
     bin_dir.mkdir()
     aws_log = tmp_path / "aws.log"
     emitted = tmp_path / "emitted.log"
-    emitted.write_text("")
+    emitted.write_text("", encoding="utf-8")
 
     _stub(
         bin_dir,
@@ -172,7 +172,7 @@ def _environment(
     _stub(bin_dir, "timeout", _TIMEOUT_STUB)
 
     journal = tmp_path / "journal.txt"
-    journal.write_text("".join(f"{line}\n" for line in journal_lines))
+    journal.write_text("".join(f"{line}\n" for line in journal_lines), encoding="utf-8")
 
     state = tmp_path / "state"
     state.mkdir()
@@ -187,7 +187,7 @@ def _environment(
             **{name: str(state / name.lower()) for name in _STATE_VARIABLES},
         }
     )
-    (tmp_path / "replication.log").write_text("")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
     return env, aws_log, emitted, journal
 
 
@@ -199,7 +199,7 @@ def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
     if not log.exists():
         return values
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -210,7 +210,7 @@ def _values(log: Path, metric: str) -> list[int]:
 
 
 def _lines_read(emitted: Path) -> int:
-    return sum(int(line) for line in emitted.read_text().split() if line)
+    return sum(int(line) for line in emitted.read_text(encoding="utf-8").split() if line)
 
 
 def _journal_read_volume(tmp_path: Path, entries: int) -> tuple[int, int]:
@@ -220,7 +220,7 @@ def _journal_read_volume(tmp_path: Path, entries: int) -> tuple[int, int]:
     assert _run(env).returncode == 0
     # The first run initialises the counters. Measure the STEADY-STATE run: the one a healthy
     # box performs every five minutes forever.
-    emitted.write_text("")
+    emitted.write_text("", encoding="utf-8")
     assert _run(env).returncode == 0
     return _lines_read(emitted), entries
 
@@ -272,7 +272,9 @@ def test_marker_delta_is_correct_across_intervals(tmp_path: Path) -> None:
     # Cold start seeds and publishes 0: inherited history predates monitoring (bug e2a6).
     assert _values(aws_log, "mcp_retire_cap") == [0]
 
-    journal.write_text(journal.read_text() + f"{marker}\n{marker}\n")
+    journal.write_text(
+        journal.read_text(encoding="utf-8") + f"{marker}\n{marker}\n", encoding="utf-8"
+    )
     assert _run(env).returncode == 0
     assert _values(aws_log, "mcp_retire_cap") == [0, 2]
 
@@ -295,8 +297,8 @@ def test_unmeasurable_journal_publishes_nothing_and_keeps_its_state(tmp_path: Pa
     # Establish state on a healthy journal first.
     assert _run(env).returncode == 0
     state = Path(env["MCP_RETIRE_CAP_OFFSET_FILE"])
-    before = state.read_text() if state.exists() else ""
-    aws_log.write_text("")
+    before = state.read_text(encoding="utf-8") if state.exists() else ""
+    aws_log.write_text("", encoding="utf-8")
 
     # Now the journal cannot be read at all (journald wedged, or the scan hit its bound).
     _stub(tmp_path / "bin", "journalctl", "exit 1")
@@ -306,7 +308,7 @@ def test_unmeasurable_journal_publishes_nothing_and_keeps_its_state(tmp_path: Pa
         "an unreadable journal published a fabricated datapoint; a wrong number is worse than "
         "a missing one, because the alarm cannot tell it from a healthy reading"
     )
-    after = state.read_text() if state.exists() else ""
+    after = state.read_text(encoding="utf-8") if state.exists() else ""
     assert after == before, "an unmeasurable scan advanced the counter's state"
 
 
@@ -328,7 +330,7 @@ def _render_units(tmp_path: Path) -> dict[str, str]:
         check=False,
     )
     assert result.returncode == 0, "the installer could not be run with its unit dir redirected"
-    return {path.name: path.read_text() for path in unit_dir.iterdir()}
+    return {path.name: path.read_text(encoding="utf-8") for path in unit_dir.iterdir()}
 
 
 def _seconds(unit_text: str, key: str) -> int | None:
@@ -364,8 +366,8 @@ def test_observability_service_start_timeout_is_below_its_timer_period(tmp_path:
 
 def test_autodeploy_service_start_timeout_is_below_its_timer_period() -> None:
     """The auto-deploy oneshot carries the identical latch, and it is what tracks `main`."""
-    service = AUTODEPLOY_UNIT.read_text()
-    timer = (REPO / "infra" / "systemd" / "rebar-autodeploy.timer").read_text()
+    service = AUTODEPLOY_UNIT.read_text(encoding="utf-8")
+    timer = (REPO / "infra" / "systemd" / "rebar-autodeploy.timer").read_text(encoding="utf-8")
 
     timeout = _seconds(service, "TimeoutStartSec")
     period = _seconds(timer, "OnUnitActiveSec")
@@ -391,7 +393,7 @@ def test_old_format_state_without_a_cursor_publishes_zero_and_reads_no_history(
     """
     marker = _marker("AUTODEPLOY_MCP_RETIRE_CAP")
     env, aws_log, emitted, _journal = _environment(tmp_path, [marker] * 500)
-    Path(env["MCP_RETIRE_CAP_OFFSET_FILE"]).write_text("17\n")
+    Path(env["MCP_RETIRE_CAP_OFFSET_FILE"]).write_text("17\n", encoding="utf-8")
 
     assert _run(env).returncode == 0
 
@@ -486,7 +488,7 @@ def test_cursor_journald_no_longer_holds_reseeds_without_a_full_scan(tmp_path: P
     )
     state = Path(env["MCP_RETIRE_CAP_OFFSET_FILE"])
     # A total plus a cursor pointing past everything journald still holds.
-    state.write_text("41 99999\n")
+    state.write_text("41 99999\n", encoding="utf-8")
 
     assert _run(env).returncode == 0
 
@@ -496,4 +498,6 @@ def test_cursor_journald_no_longer_holds_reseeds_without_a_full_scan(tmp_path: P
     assert _lines_read(emitted) < 600, (
         "the probe fell back to reading the whole journal when its cursor was refused"
     )
-    assert "99999" not in state.read_text(), "the unusable cursor was left in place, stalling"
+    assert "99999" not in state.read_text(encoding="utf-8"), (
+        "the unusable cursor was left in place, stalling"
+    )

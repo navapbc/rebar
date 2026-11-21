@@ -172,7 +172,7 @@ def _tracker_present_without_git(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     tracker = repo / ".tickets-tracker"
     tracker.mkdir()
-    (tracker / "reviewbot-ensure-tickets").write_text("marker\n")
+    (tracker / "reviewbot-ensure-tickets").write_text("marker\n", encoding="utf-8")
     assert tracker.is_dir() and not (tracker / ".git").exists()
     return repo
 
@@ -235,14 +235,15 @@ def _write_create_event(event_dir: Path, tid: str, title: str) -> None:
                     "parent_id": None,
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
 
 def _gitless_snapshot(tracker: Path, *, with_event: bool = True) -> Path:
     """Build a ``.git``-less snapshot with a compatibility record and optional event data."""
     tracker.mkdir(parents=True, exist_ok=True)
-    (tracker / ".store-compat.json").write_text(_STORE_COMPAT_RECORD)
+    (tracker / ".store-compat.json").write_text(_STORE_COMPAT_RECORD, encoding="utf-8")
     if with_event:
         _write_create_event(tracker / "abcd-1234-5678-9abc", "abcd-1234-5678-9abc", "snap ticket")
     assert not (tracker / ".git").exists()

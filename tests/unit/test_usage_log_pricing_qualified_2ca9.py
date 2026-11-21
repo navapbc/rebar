@@ -125,7 +125,7 @@ def _pricing_path_sources(pkg_dir: pathlib.Path) -> dict[str, str]:
     """
     sources: dict[str, str] = {}
     for path in sorted(pkg_dir.glob("*.py")):
-        src = path.read_text()
+        src = path.read_text(encoding="utf-8")
         if any(
             isinstance(node, ast.FunctionDef) and node.name in _PRICING_FUNCS
             for node in ast.walk(ast.parse(src))
@@ -201,16 +201,19 @@ def test_the_colon_split_guard_follows_the_pricing_path_into_a_sibling(tmp_path)
     The sanctioned ``config.split_provider_qualifier`` delegate remains allowed.
     """
     (tmp_path / "usage_log.py").write_text(
-        "from rebar.llm.pricing_ref import _pricing_model_ref\n\n__all__ = ['_pricing_model_ref']\n"
+        "from rebar.llm.pricing_ref import _pricing_model_ref\n\n"
+        "__all__ = ['_pricing_model_ref']\n",
+        encoding="utf-8",
     )
     (tmp_path / "pricing_ref.py").write_text(
-        "def _pricing_model_ref(model):\n    return model.partition(':')[2] or model\n"
+        "def _pricing_model_ref(model):\n    return model.partition(':')[2] or model\n",
+        encoding="utf-8",
     )
     (tmp_path / "config.py").write_text(
-        "def split_provider_qualifier(model):\n    return model.partition(':')\n"
+        "def split_provider_qualifier(model):\n    return model.partition(':')\n", encoding="utf-8"
     )
 
-    pinned_only = {"usage_log": (tmp_path / "usage_log.py").read_text()}
+    pinned_only = {"usage_log": (tmp_path / "usage_log.py").read_text(encoding="utf-8")}
     assert not _colon_parsing_calls(pinned_only), (
         "precondition: usage_log.py is itself clean, so a guard pinned to it sees nothing"
     )
@@ -271,7 +274,8 @@ def test_unknown_model_is_tolerated_and_named_so_it_is_distinguishable(
                 _row("anthropic", "not-a-provider:m"),
             )
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
 
     with caplog.at_level(logging.WARNING, logger="rebar.llm.usage_log"):
@@ -299,7 +303,9 @@ def test_a_row_without_a_model_is_not_named_as_an_unknown_model(tmp_path, monkey
 
     _stub_pricing(monkeypatch, calc_price)
     path = tmp_path / "usage.jsonl"
-    path.write_text(json.dumps({"op": "a", "input_tokens": 10, "requests": 1}) + "\n")
+    path.write_text(
+        json.dumps({"op": "a", "input_tokens": 10, "requests": 1}) + "\n", encoding="utf-8"
+    )
 
     out = usage_log.summarize(str(path))
 

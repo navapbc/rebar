@@ -44,7 +44,7 @@ DEFAULT_CAP = 4 * GIB
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -416,8 +416,8 @@ def test_the_reaper_service_is_bounded_below_its_own_timer_period(tmp_path: Path
     env, _ = _environment(tmp_path)
     assert _run(env, "--install").returncode == 0
     units = Path(env["VAR_TMP_UNIT_DIR"])
-    service = (units / "rebar-var-tmp-reaper.service").read_text()
-    timer = (units / "rebar-var-tmp-reaper.timer").read_text()
+    service = (units / "rebar-var-tmp-reaper.service").read_text(encoding="utf-8")
+    timer = (units / "rebar-var-tmp-reaper.timer").read_text(encoding="utf-8")
 
     start_timeout = int(
         next(line for line in service.splitlines() if line.startswith("TimeoutStartSec=")).split(
@@ -434,10 +434,10 @@ def test_install_is_idempotent(tmp_path: Path) -> None:
     """``compose-up.sh`` runs on every deploy tick."""
     env, _ = _environment(tmp_path)
     first = _run(env, "--install")
-    conf = Path(env["VAR_TMP_TMPFILES_CONF"]).read_text()
+    conf = Path(env["VAR_TMP_TMPFILES_CONF"]).read_text(encoding="utf-8")
     second = _run(env, "--install")
     assert first.returncode == 0 and second.returncode == 0
-    assert Path(env["VAR_TMP_TMPFILES_CONF"]).read_text() == conf
+    assert Path(env["VAR_TMP_TMPFILES_CONF"]).read_text(encoding="utf-8") == conf
 
 
 def test_an_unknown_argument_is_refused(tmp_path: Path) -> None:

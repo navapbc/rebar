@@ -54,7 +54,7 @@ def repo(tmp_path):
     for rel, content in _FIXTURE.items():
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content)
+        p.write_text(content, encoding="utf-8")
     return str(tmp_path)
 
 
@@ -293,7 +293,8 @@ def test_load_config_reads_slot(tmp_path):
         "[grounding]\n"
         'ctags_optlib_dirs = ["tools/optlibs"]\n'
         'ctags_options = ["tools/cobol.ctags"]\n'
-        'supported_languages = ["COBOL"]\n'
+        'supported_languages = ["COBOL"]\n',
+        encoding="utf-8",
     )
     cfg = r.load_config(str(tmp_path))
     assert "COBOL" in cfg.supported_languages

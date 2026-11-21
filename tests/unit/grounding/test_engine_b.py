@@ -42,7 +42,7 @@ def js_repo(tmp_path: Path) -> Path:
     """A tiny repo with a .js file containing console.log + debugger."""
     sub = tmp_path / "src"
     sub.mkdir()
-    (sub / "app.js").write_text("function f(){ console.log('x'); debugger; }\n")
+    (sub / "app.js").write_text("function f(){ console.log('x'); debugger; }\n", encoding="utf-8")
     return tmp_path
 
 
@@ -85,7 +85,8 @@ def test_registry_is_cached_and_rebuilds_on_mtime_change(tmp_path: Path) -> None
     time.sleep(0.01)
     (d / "extra.yaml").write_text(
         "rules:\n  - id: project.extra.rule\n    languages: [python]\n"
-        "    severity: INFO\n    message: m\n    pattern: foo(...)\n"
+        "    severity: INFO\n    message: m\n    pattern: foo(...)\n",
+        encoding="utf-8",
     )
     third = reg_mod.load_registry(tmp_path)
     assert third is not first  # mtime bumped -> rebuilt
@@ -97,7 +98,8 @@ def test_project_override_last_wins(tmp_path: Path) -> None:
     # Re-declare a built-in id from the project tree -> project wins.
     (d / "override.yaml").write_text(
         "rules:\n  - id: rebar.builtin.smell.js-console-log\n    languages: [python]\n"
-        "    severity: INFO\n    message: overridden\n    pattern: bar(...)\n"
+        "    severity: INFO\n    message: overridden\n    pattern: bar(...)\n",
+        encoding="utf-8",
     )
     registry = reg_mod.load_registry(tmp_path)
     det = registry.get("rebar.builtin.smell.js-console-log")
@@ -108,7 +110,7 @@ def test_project_override_last_wins(tmp_path: Path) -> None:
 
 def test_unparseable_file_is_dropped_not_raised(tmp_path: Path) -> None:
     d = _project_detectors_dir(tmp_path)
-    (d / "garbage.yaml").write_text(": this is : not : valid yaml :\n  - [\n")
+    (d / "garbage.yaml").write_text(": this is : not : valid yaml :\n  - [\n", encoding="utf-8")
     registry = reg_mod.load_registry(tmp_path)
     # The bad file is recorded as a parse drop; the scan/registry never raised.
     assert any("garbage.yaml" in p for p, _ in registry.parse_drops)
@@ -140,7 +142,8 @@ def test_invalid_detector_is_quarantined_and_does_not_abort_scan(js_repo: Path) 
     d = _project_detectors_dir(js_repo)
     (d / "broken.yaml").write_text(
         "rules:\n  - id: project.broken.rule\n    languages: [javascript]\n"
-        '    severity: INFO\n    message: m\n    pattern: "(((unbalanced"\n'
+        '    severity: INFO\n    message: m\n    pattern: "(((unbalanced"\n',
+        encoding="utf-8",
     )
     result = engine_b.scan(js_repo)
     _all_valid(result.records)
@@ -160,7 +163,7 @@ def test_invalid_detector_is_quarantined_and_does_not_abort_scan(js_repo: Path) 
 def test_absent_language_detector_skipped_with_coverage(tmp_path: Path) -> None:
     # A repo with NO javascript -> the JS built-ins are skipped (not run) with a
     # recorded coverage abstain.
-    (tmp_path / "only.py").write_text("x = 1\n")
+    (tmp_path / "only.py").write_text("x = 1\n", encoding="utf-8")
     result = engine_b.scan(tmp_path)
     _all_valid(result.records)
     skips = [
@@ -180,7 +183,8 @@ def test_non_relative_paths_glob_is_quarantined_not_a_crash(js_repo: Path) -> No
     (d / "badpath.yaml").write_text(
         "rules:\n  - id: project.badpath.rule\n    languages: [javascript]\n"
         "    severity: INFO\n    message: m\n    pattern: console.log(...)\n"
-        "    metadata: {rebar_envelope: {paths: ['/etc/*']}}\n"
+        "    metadata: {rebar_envelope: {paths: ['/etc/*']}}\n",
+        encoding="utf-8",
     )
     result = engine_b.scan(js_repo)  # must not raise
     _all_valid(result.records)
@@ -235,9 +239,10 @@ def test_project_sgconfig_is_threaded_to_astgrep(
     # language routes as applicable (its files are present) instead of being skipped.
     (tmp_path / ".rebar").mkdir()
     (tmp_path / ".rebar" / "sgconfig.yml").write_text(
-        "customLanguages:\n  mojo:\n    libraryPath: mojo.so\n    extensions: [mojo]\n"
+        "customLanguages:\n  mojo:\n    libraryPath: mojo.so\n    extensions: [mojo]\n",
+        encoding="utf-8",
     )
-    (tmp_path / "main.mojo").write_text("fn main(): pass\n")
+    (tmp_path / "main.mojo").write_text("fn main(): pass\n", encoding="utf-8")
     det = reg_mod.Detector(
         id="project.mojo.smell",
         backend=reg_mod.BACKEND_ASTGREP,
@@ -277,7 +282,9 @@ def test_project_sgconfig_is_threaded_to_astgrep(
 def test_unconfigured_custom_language_is_skipped_with_coverage(tmp_path: Path) -> None:
     # AC5 fail-open: a detector in a language with NO bundled and NO project grammar
     # is skipped as unsupported_lang with a coverage record (never run, never crash).
-    (tmp_path / "main.mojo").write_text("fn main(): pass\n")  # no sgconfig present
+    (tmp_path / "main.mojo").write_text(
+        "fn main(): pass\n", encoding="utf-8"
+    )  # no sgconfig present
     det = reg_mod.Detector(
         id="project.mojo.smell",
         backend=reg_mod.BACKEND_ASTGREP,
@@ -303,10 +310,10 @@ def test_metric_backend_requests_per_file_json_and_emits_only_over_cutoff(
 
     large = tmp_path / "large.py"
     boundary = tmp_path / "boundary.py"
-    large.write_text("x = 1\n" * 801)
-    boundary.write_text("x = 1\n" * 800)
-    assert len(large.read_text().splitlines()) == 801
-    assert len(boundary.read_text().splitlines()) == 800
+    large.write_text("x = 1\n" * 801, encoding="utf-8")
+    boundary.write_text("x = 1\n" * 800, encoding="utf-8")
+    assert len(large.read_text(encoding="utf-8").splitlines()) == 801
+    assert len(boundary.read_text(encoding="utf-8").splitlines()) == 800
 
     captured: list[list[str]] = []
 

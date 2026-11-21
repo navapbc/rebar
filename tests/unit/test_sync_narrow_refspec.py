@@ -36,7 +36,7 @@ def _commit_event(repo: Path, ticket_uuid: str, body: str) -> str:
     """Write a UUID-named append-only event file and commit it; return its SHA."""
     tdir = repo / ticket_uuid
     tdir.mkdir(parents=True, exist_ok=True)
-    (tdir / f"1700000000000000000-{ticket_uuid}-CREATE.json").write_text(body)
+    (tdir / f"1700000000000000000-{ticket_uuid}-CREATE.json").write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "--no-verify", "-m", f"ticket: CREATE {ticket_uuid}")
     return _git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -48,10 +48,12 @@ def _commit_scaffolding(repo: Path) -> str:
     Mirrors ``rebar._commands.init``: every non-ticket root entry is dot-prefixed, so such a
     store holds no ticket events and therefore has nothing that a reconverge could lose.
     """
-    (repo / ".gitignore").write_text(".env-id\n.state-cache\n")
-    (repo / ".gitattributes").write_text(".bridge_state/* merge=ours\n")
-    (repo / ".pre-commit-config.yaml").write_text("repos: []\n")
-    (repo / ".store-compat.json").write_text('{"format_version": 1, "required_capabilities": []}\n')
+    (repo / ".gitignore").write_text(".env-id\n.state-cache\n", encoding="utf-8")
+    (repo / ".gitattributes").write_text(".bridge_state/* merge=ours\n", encoding="utf-8")
+    (repo / ".pre-commit-config.yaml").write_text("repos: []\n", encoding="utf-8")
+    (repo / ".store-compat.json").write_text(
+        '{"format_version": 1, "required_capabilities": []}\n', encoding="utf-8"
+    )
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "--no-verify", "-m", "chore: initialize ticket tracker")
     return _git(repo, "rev-parse", "HEAD").stdout.strip()

@@ -45,7 +45,9 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _enable_completion_gate(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _stub_verifier(monkeypatch: pytest.MonkeyPatch, calls: list[dict]) -> None:
@@ -72,11 +74,11 @@ def _make_stack(repo: Path) -> tuple[str, str, str]:
     """A leaf story whose own commit (sha1) records its change; a later commit (sha2) sits on
     top so HEAD is the cumulative tip. Returns (story_id, sha1, sha2)."""
     story = rebar.create_ticket("task", "stacked story", description=_DESC, repo_root=str(repo))
-    (repo / "story.py").write_text("# story change\n")
+    (repo / "story.py").write_text("# story change\n", encoding="utf-8")
     _git(repo, "add", "story.py")
     _git(repo, "commit", "-q", "-m", f"story change\n\nrebar-ticket: {story}")
     sha1 = _git(repo, "rev-parse", "HEAD")
-    (repo / "later.py").write_text("# a later story's change\n")
+    (repo / "later.py").write_text("# a later story's change\n", encoding="utf-8")
     _git(repo, "add", "later.py")
     _git(repo, "commit", "-q", "-m", "later story change")
     sha2 = _git(repo, "rev-parse", "HEAD")

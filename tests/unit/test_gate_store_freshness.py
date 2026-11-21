@@ -37,7 +37,7 @@ def store(tmp_path: Path) -> Path:
     _git(tracker, "config", "user.email", "t@e.com")
     _git(tracker, "config", "user.name", "T")
     _git(tracker, "remote", "add", "origin", str(origin))
-    (tracker / "seed.json").write_text("{}\n")
+    (tracker / "seed.json").write_text("{}\n", encoding="utf-8")
     _git(tracker, "add", "seed.json")
     _git(tracker, "commit", "-q", "-m", "seed")
     _git(tracker, "push", "-q", "origin", "HEAD:tickets")
@@ -55,7 +55,9 @@ def _advance_remote_only(tracker: Path) -> None:
     )
     _git(other, "config", "user.email", "o@e.com")
     _git(other, "config", "user.name", "O")
-    (other / "elsewhere.json").write_text('{"body": "written on another machine"}\n')
+    (other / "elsewhere.json").write_text(
+        '{"body": "written on another machine"}\n', encoding="utf-8"
+    )
     _git(other, "add", "elsewhere.json")
     _git(other, "commit", "-q", "-m", "ticket: SIGNATURE completion-verifier")
     _git(other, "push", "-q", "origin", "HEAD:tickets")
@@ -123,7 +125,7 @@ def test_a_diverged_store_is_stale(store: Path) -> None:
     ``fsck`` already counts this as an integrity issue; a gate must never certify through it.
     """
     _advance_remote_only(store)
-    (store / "local.json").write_text("{}\n")
+    (store / "local.json").write_text("{}\n", encoding="utf-8")
     _git(store, "add", "local.json")
     _git(store, "commit", "-q", "-m", "ticket: local, written while behind")
     result = freshness.store_freshness(str(store))
@@ -140,7 +142,7 @@ def test_an_outstanding_delivery_failure_is_not_stale(store: Path) -> None:
     after writing locally, so the push-pending marker no longer makes the store stale for
     any gate. The marker itself is still recorded for ``fsck``.
     """
-    (store / "unpublished.json").write_text('{"body": "never delivered"}\n')
+    (store / "unpublished.json").write_text('{"body": "never delivered"}\n', encoding="utf-8")
     _git(store, "add", "unpublished.json")
     _git(store, "commit", "-q", "-m", "ticket: unpublished")
     push_state.record_failure(
@@ -154,7 +156,7 @@ def test_an_outstanding_delivery_failure_is_not_stale(store: Path) -> None:
 
 def test_a_store_merely_AHEAD_is_not_reported_behind(store: Path) -> None:
     """Being ahead is not a stale READ: this clone has every event the remote has."""
-    (store / "local.json").write_text("{}\n")
+    (store / "local.json").write_text("{}\n", encoding="utf-8")
     _git(store, "add", "local.json")
     _git(store, "commit", "-q", "-m", "ticket: local")
     assert freshness.store_freshness(str(store))["verdict"] == "fresh"
@@ -214,7 +216,7 @@ def _code_repo(path: Path, origin_url: str, *, sync_remote: str = "origin") -> P
     for args in (("init", "-q"), ("remote", "add", sync_remote, origin_url)):
         subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True, env=env)
     if sync_remote != "origin":
-        (path / "rebar.toml").write_text(f'[sync]\nremote = "{sync_remote}"\n')
+        (path / "rebar.toml").write_text(f'[sync]\nremote = "{sync_remote}"\n', encoding="utf-8")
     return path
 
 
@@ -242,7 +244,7 @@ def test_write_divergence_probe_reads_the_explicit_repo_not_the_ambient_one(
         capture_output=True,
         env=subprocess_env(),
     )
-    (other / ".store-compat.json").write_text("{}\n")
+    (other / ".store-compat.json").write_text("{}\n", encoding="utf-8")
     _git(other, "-c", "user.email=o@e.com", "-c", "user.name=O", "add", ".store-compat.json")
     _git(other, "-c", "user.email=o@e.com", "-c", "user.name=O", "commit", "-q", "-m", "compat")
     _git(other, "push", "-q", "origin", "HEAD:tickets")

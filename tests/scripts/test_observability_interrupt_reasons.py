@@ -40,7 +40,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -74,7 +74,7 @@ def _environment(tmp_path: Path, journal_lines: list[str]) -> tuple[dict[str, st
     _stub(bin_dir, "aws", 'printf \'%s\\n\' "$*" >> "$AWS_LOG"; exit 0')
 
     journal = tmp_path / "journal.txt"
-    journal.write_text("".join(f"{line}\n" for line in journal_lines))
+    journal.write_text("".join(f"{line}\n" for line in journal_lines), encoding="utf-8")
     _stub(bin_dir, "journalctl", JOURNALCTL_EMULATOR)
     _stub(bin_dir, "timeout", TIMEOUT_STUB)
 
@@ -88,7 +88,9 @@ def _environment(tmp_path: Path, journal_lines: list[str]) -> tuple[dict[str, st
     # so the counter is already observing and counts everything in it. A BARE total, like an
     # absent file, is a cold start. REPL_OFFSET_FILE greps a log file and keeps the bare form.
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n" if name == "REPL_OFFSET_FILE" else "0 0\n")
+        (offsets / name.lower()).write_text(
+            "0\n" if name == "REPL_OFFSET_FILE" else "0 0\n", encoding="utf-8"
+        )
     env = observability_env(tmp_path)
     env.update(
         {
@@ -99,13 +101,13 @@ def _environment(tmp_path: Path, journal_lines: list[str]) -> tuple[dict[str, st
             **{name: str(offsets / name.lower()) for name in _OFFSET_VARIABLES},
         }
     )
-    (tmp_path / "replication.log").write_text("")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
     return env, aws_log
 
 
 def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -168,7 +170,7 @@ def test_reason_counters_are_published_dimensionless(tmp_path: Path) -> None:
 
     published = [
         line
-        for line in aws_log.read_text().splitlines()
+        for line in aws_log.read_text(encoding="utf-8").splitlines()
         if any(metric in line.split() for metric in (BOUND_METRIC, SIGNAL_METRIC, TOTAL_METRIC))
     ]
     assert published
@@ -183,7 +185,8 @@ def test_each_reason_counter_keeps_its_own_offset(tmp_path: Path) -> None:
 
     _run(env)
     Path(env["JOURNAL_FILE"]).write_text(
-        "".join(f"{line}\n" for line in journal + [_marker("signal-unavailable")] * 2)
+        "".join(f"{line}\n" for line in journal + [_marker("signal-unavailable")] * 2),
+        encoding="utf-8",
     )
     _run(env)
 

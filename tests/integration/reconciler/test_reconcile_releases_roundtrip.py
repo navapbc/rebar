@@ -107,7 +107,7 @@ def _local_release_delta(repo_root: Path, data: dict, local_id: str = _LOCAL) ->
 
 def _release_deltas(repo_root: Path) -> list[dict]:
     files = sorted((_tracker(repo_root) / _LOCAL).glob("*-RELEASE_DELTA.json"))
-    return [json.loads(p.read_text())["data"] for p in files]
+    return [json.loads(p.read_text(encoding="utf-8"))["data"] for p in files]
 
 
 def _releases(repo_root: Path) -> list[str]:

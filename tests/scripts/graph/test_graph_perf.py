@@ -67,16 +67,16 @@ def test_graph_cache_key_invalidated_on_same_size_rewrite(tmp_path: Path) -> Non
     tracker = tmp_path / "tracker"
     (tracker / "0000-aaaa-bbbb-cccc").mkdir(parents=True)
     ev = tracker / "0000-aaaa-bbbb-cccc" / "0000-create.json"
-    ev.write_text('{"event_type":"CREATE","data":{"title":"AAAA"}}')
+    ev.write_text('{"event_type":"CREATE","data":{"title":"AAAA"}}', encoding="utf-8")
 
     key1 = _compute_cache_key(str(tracker))
     # Unchanged dir → cache still hits (key stable; no read-path regression).
     assert _compute_cache_key(str(tracker)) == key1
 
-    body = ev.read_text()
+    body = ev.read_text(encoding="utf-8")
     st = ev.stat()
-    ev.write_text(body.replace("AAAA", "BBBB"))  # same byte length, new content
-    assert len(ev.read_text()) == len(body), "rewrite must be same byte length"
+    ev.write_text(body.replace("AAAA", "BBBB"), encoding="utf-8")  # same byte length, new content
+    assert len(ev.read_text(encoding="utf-8")) == len(body), "rewrite must be same byte length"
     # Simulate a checkout/rebase that bumps mtime without changing size.
     os.utime(ev, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
 

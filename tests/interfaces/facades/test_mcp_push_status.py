@@ -55,7 +55,7 @@ def declining_store(rebar_repo: Path, tmp_path: Path) -> Path:
     _git(tracker, "push", "-q", "origin", "HEAD:tickets")
     _git(tracker, "fetch", "-q", "origin", "+refs/heads/tickets:refs/remotes/origin/tickets")
     hook = origin / "hooks" / "pre-receive"
-    hook.write_text(_DECLINE_HOOK)
+    hook.write_text(_DECLINE_HOOK, encoding="utf-8")
     hook.chmod(0o755)
     _bare_git(origin, "config", "core.hooksPath", str(origin / "hooks"))
     return tracker

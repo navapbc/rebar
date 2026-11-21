@@ -26,7 +26,7 @@ def _verify_cfg(t_novel=0.7, floor=0.4):
 def test_region_for_finding_unchanged_changed_unknown(tmp_path):
     from rebar.llm.plan_review import attest
 
-    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
     cur = attest._hash_file("a.py", base=str(tmp_path))
     root = str(tmp_path)
     # UNCHANGED: prior hash == current

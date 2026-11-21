@@ -58,7 +58,7 @@ def _port_params(tree: ast.Module) -> list[tuple[str, str, ast.arg]]:
 
 @pytest.mark.parametrize("module", _core_modules(), ids=lambda p: p.name)
 def test_port_params_are_annotated_as_the_port(module: pathlib.Path) -> None:
-    tree = ast.parse(module.read_text())
+    tree = ast.parse(module.read_text(encoding="utf-8"))
     failures: list[str] = []
 
     for func, param, arg in _port_params(tree):
@@ -88,7 +88,7 @@ def test_the_only_deliberate_any_is_the_runtime_guard_itself() -> None:
     """Only the runtime conformance guard may keep a deliberate Any transport parameter."""
     assert DELIBERATE_ANY == {("_backend.py", "assert_transport_conforms")}
 
-    tree = ast.parse((CORE / "_backend.py").read_text())
+    tree = ast.parse((CORE / "_backend.py").read_text(encoding="utf-8"))
     guard = next(
         f for f, p, a in _port_params(tree) if f == "assert_transport_conforms" and p == "transport"
     )
@@ -99,7 +99,7 @@ def test_the_only_deliberate_any_is_the_runtime_guard_itself() -> None:
 
 def test_the_port_is_importable_from_any_core_module_without_a_cycle() -> None:
     """Every core module can import TicketTransport without a cycle or unresolved type."""
-    tree = ast.parse((CORE / "_backend.py").read_text())
+    tree = ast.parse((CORE / "_backend.py").read_text(encoding="utf-8"))
     intra = {
         node.module
         for node in ast.walk(tree)

@@ -235,7 +235,7 @@ def test_mcp_env_vars_include_new_http_keys():
 
 
 def test_server_json_advertises_new_keys():
-    data = json.loads((REPO_ROOT / "server.json").read_text())
+    data = json.loads((REPO_ROOT / "server.json").read_text(encoding="utf-8"))
     advertised = {e["name"] for e in data["packages"][0]["environmentVariables"]}
     for var in NEW_ENV_VARS:
         assert var in advertised, f"{var} missing from server.json"
@@ -878,7 +878,9 @@ def test_absolute_urls_preserve_https_behind_the_deployed_edge_trust():
 
     from rebar.mcp_server import build_server
 
-    compose = yaml.safe_load((REPO_ROOT / "infra" / "compose" / "docker-compose.yml").read_text())
+    compose = yaml.safe_load(
+        (REPO_ROOT / "infra" / "compose" / "docker-compose.yml").read_text(encoding="utf-8")
+    )
     deployed_trust = compose["services"]["mcp"]["environment"]["FORWARDED_ALLOW_IPS"]
 
     # A peer address that is NOT loopback — what nginx looks like from inside the

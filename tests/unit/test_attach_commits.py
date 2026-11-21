@@ -73,7 +73,7 @@ def _commit(repo, message):
 @pytest.fixture
 def git_repo(tmp_path):
     subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
-    (tmp_path / "f.txt").write_text("hi\n")
+    (tmp_path / "f.txt").write_text("hi\n", encoding="utf-8")
     return tmp_path, _commit(tmp_path, "seed")
 
 
@@ -93,10 +93,10 @@ def test_changed_paths_reads_diff_and_returns_none_on_error(git_repo):
 def test_is_merge_commit_detects_two_parents(git_repo):
     repo, base = git_repo
     _git(repo, "checkout", "-q", "-b", "side")
-    (repo / "side.txt").write_text("s\n")
+    (repo / "side.txt").write_text("s\n", encoding="utf-8")
     _commit(repo, "side")
     _git(repo, "checkout", "-q", "main")
-    (repo / "main.txt").write_text("m\n")
+    (repo / "main.txt").write_text("m\n", encoding="utf-8")
     _commit(repo, "main change")
     _git(repo, "-c", "user.name=t", "-c", "user.email=t@e", "merge", "-q", "--no-ff", "side")
     merge_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()

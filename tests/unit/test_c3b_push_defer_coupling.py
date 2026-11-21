@@ -63,14 +63,14 @@ def tracker_with_logging_origin(
     _git(tracker, "config", "sync.push", "always")
     _git(tracker, "remote", "add", "origin", str(origin))
 
-    (tracker / "seed.json").write_text("{}\n")
+    (tracker / "seed.json").write_text("{}\n", encoding="utf-8")
     _git(tracker, "add", "seed.json")
     _git(tracker, "commit", "-q", "-m", "seed")
     _git(tracker, "push", "-q", "origin", "HEAD:tickets")
     _git(tracker, "fetch", "-q", "origin", "+refs/heads/tickets:refs/remotes/origin/tickets")
 
     hook = origin / "hooks" / "pre-receive"
-    hook.write_text(_LOGGING_HOOK)
+    hook.write_text(_LOGGING_HOOK, encoding="utf-8")
     hook.chmod(0o755)
     _bare_git(origin, "config", "core.hooksPath", str(origin / "hooks"))
 
@@ -81,13 +81,13 @@ def tracker_with_logging_origin(
 
 
 def _commit(tracker: Path, name: str) -> None:
-    (tracker / name).write_text('{"body": "x"}\n')
+    (tracker / name).write_text('{"body": "x"}\n', encoding="utf-8")
     _git(tracker, "add", name)
     _git(tracker, "commit", "-q", "-m", f"ticket: COMMENT {name}")
 
 
 def _pushes(push_log: Path) -> int:
-    return sum(1 for line in push_log.read_text().splitlines() if line.strip())
+    return sum(1 for line in push_log.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
 def test_push_mode_is_resolved_live_so_a_midflight_off_defers(

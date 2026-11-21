@@ -127,7 +127,7 @@ def _returned_code_literals() -> set[str]:
     helpers, harvested from the source AST — the exhaustive set of codes the central classifier
     can emit."""
     src = Path(llm_errors.__file__).parent.parent / "_errors.py"
-    tree = ast.parse(src.read_text())
+    tree = ast.parse(src.read_text(encoding="utf-8"))
     targets = {"error_code_for", "_workflow_caller_code", "_llm_error_code"}
     codes: set[str] = set()
     for node in ast.walk(tree):

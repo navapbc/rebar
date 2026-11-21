@@ -62,13 +62,13 @@ def _age_events(tdir: Path, by_ns: int) -> None:
     for path in sorted(tdir.glob("*.json")):
         if path.name.startswith(".") or path.name.endswith("-SNAPSHOT.json"):
             continue
-        event = json.loads(path.read_text())
+        event = json.loads(path.read_text(encoding="utf-8"))
         ts = event.get("timestamp")
         if not isinstance(ts, int):
             continue
         event["timestamp"] = ts - by_ns
         rest = path.name.split("-", 1)[1]
-        path.write_text(json.dumps(event))
+        path.write_text(json.dumps(event), encoding="utf-8")
         path.rename(path.parent / f"{event['timestamp']}-{rest}")
 
 
@@ -83,7 +83,7 @@ def _write_event(tdir: Path, event_type: str, data: dict | None = None, *, age_n
         "timestamp": ts,
         "data": data or {},
     }
-    (tdir / f"{ts}-{event_type}.json").write_text(json.dumps(event))
+    (tdir / f"{ts}-{event_type}.json").write_text(json.dumps(event), encoding="utf-8")
     return uid
 
 
@@ -95,7 +95,7 @@ def _archive_legacy(repo: Path, tid: str) -> None:
     """Archive the way pre-fold rebar did: ARCHIVED event + marker, NO terminal fold."""
     tdir = _tdir(repo, tid)
     _write_event(tdir, "ARCHIVED")
-    (tdir / ".archived").write_text("")
+    (tdir / ".archived").write_text("", encoding="utf-8")
 
 
 # ── the terminal fold: archive leaves no unfolded tail ───────────────────────────────────────
@@ -179,7 +179,7 @@ def test_stale_marker_on_a_reverted_archive_does_not_skip(store: Path) -> None:
     repo = store
     tid = _seed(repo, "marker lies")
     tdir = _tdir(repo, tid)
-    (tdir / ".archived").write_text("")  # stale marker, no ARCHIVED event at all
+    (tdir / ".archived").write_text("", encoding="utf-8")  # stale marker, no ARCHIVED event at all
     tracker = str(_tracker(repo))
     assert tid in _fsck_repair._ticket_dirs(tracker)
 
@@ -188,7 +188,7 @@ def test_stale_marker_on_a_reverted_archive_does_not_skip(store: Path) -> None:
     tdir2 = _tdir(repo, tid2)
     archived_uuid = _write_event(tdir2, "ARCHIVED")
     _write_event(tdir2, "REVERT", {"target_event_uuid": archived_uuid})
-    (tdir2 / ".archived").write_text("")
+    (tdir2 / ".archived").write_text("", encoding="utf-8")
     assert tid2 in _fsck_repair._ticket_dirs(tracker)
 
 
@@ -203,7 +203,7 @@ def test_fsck_default_skips_archived_and_flag_restores(
     archived = _seed(repo, "archived with corrupt event")
     rebar.archive(archived, repo_root=str(repo))
     corrupt = _tdir(repo, archived) / "9999999999999999999-COMMENT.json"
-    corrupt.write_text("{not json")
+    corrupt.write_text("{not json", encoding="utf-8")
 
     rc_default = _fsck.fsck_cli([], repo_root=str(repo), no_mutate=True)
     out_default = capsys.readouterr().out
@@ -322,7 +322,9 @@ def test_repair_run_scopes_archived_findings_with_the_flag(store: Path) -> None:
     # Re-materialize one folded source: a still-present source is the SNAPSHOT_INCONSISTENT
     # fault whose repair is a retire.
     source = retired[0]
-    (tdir / source.name[: -len(".retired")]).write_text(source.read_text())
+    (tdir / source.name[: -len(".retired")]).write_text(
+        source.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     _archive_legacy(repo, tid)
     tracker = str(_tracker(repo))
 

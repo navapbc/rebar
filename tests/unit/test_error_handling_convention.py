@@ -21,7 +21,7 @@ def _allowlisted_path_for(code: str) -> str | None:
     (a still-un-swept package), or None if the allowlist no longer exempts any src/ package
     for that code (e.g. after the close-out empties it). Reads the live pyproject so the
     test tracks the shrinking allowlist instead of hardcoding a package that gets swept."""
-    data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+    data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     ignores = data["tool"]["ruff"]["lint"]["per-file-ignores"]
     for glob, codes in ignores.items():
         if code in codes and glob.startswith("src/") and "plan_review" not in glob:

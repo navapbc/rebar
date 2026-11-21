@@ -282,7 +282,9 @@ def test_orphan_index_lock_under_write_lock_self_heals(tmp_path: Path) -> None:
 
     tracker = _fresh_tracker(tmp_path, "orphan-lock")
     lock = Path(_resolve_tracker_git_dir(tracker)) / "index.lock"
-    lock.write_text("")  # young orphan: age ~0, far under the 300s stale threshold
+    lock.write_text(
+        "", encoding="utf-8"
+    )  # young orphan: age ~0, far under the 300s stale threshold
 
     rc = event_append.stage_and_commit(tracker, "tk-o", _event("u-orphan"))
     assert rc == 0, "a locked write must reclaim the orphan index.lock and succeed"
@@ -329,7 +331,7 @@ def _plant_poison(tracker: str, path: str = "tk-poison/evt.json") -> str:
     every subsequent commit's tree build."""
     p = Path(tracker) / path
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text('{"poison":1}')
+    p.write_text('{"poison":1}', encoding="utf-8")
     subprocess.run(["git", "-C", tracker, "add", "--", path], check=True)
     _unlink_git_object(_loose_object_path(tracker, path))
     return path

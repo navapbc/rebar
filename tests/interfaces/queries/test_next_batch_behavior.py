@@ -36,7 +36,7 @@ def _write(base: Path, tid: str, idx: int, et: str, data: dict, ts: int) -> None
         "author": "alice",
         "data": data,
     }
-    (d / f"{idx:03d}-{et}.json").write_text(json.dumps(evt))
+    (d / f"{idx:03d}-{et}.json").write_text(json.dumps(evt), encoding="utf-8")
 
 
 def _create(
@@ -494,7 +494,9 @@ def test_deleted_dependency_does_not_block(tracker: Path) -> None:
     assert "t" not in {c.id for c in r_blocked.batch}
 
     # Tombstone dep as deleted: the scan reads it and t's blocker counts as closed.
-    (tracker / "dep" / ".tombstone.json").write_text(json.dumps({"status": "deleted"}))
+    (tracker / "dep" / ".tombstone.json").write_text(
+        json.dumps({"status": "deleted"}), encoding="utf-8"
+    )
     r = nb.compute(str(tracker), "e")
     assert "t" in {c.id for c in r.batch}
 

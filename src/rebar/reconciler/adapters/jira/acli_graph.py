@@ -150,7 +150,7 @@ class AcliGraphMixin:
         fd, json_path = tempfile.mkstemp(suffix=".json", prefix="acli-edit-")
         fd_owned = False
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 fd_owned = True
                 json.dump(payload, f)
         except Exception:
@@ -194,7 +194,7 @@ class AcliGraphMixin:
         fd, json_path = tempfile.mkstemp(suffix=".json", prefix="acli-edit-")
         fd_owned = False
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 fd_owned = True
                 json.dump(payload, f)
         except Exception:

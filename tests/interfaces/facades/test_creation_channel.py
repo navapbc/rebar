@@ -202,7 +202,7 @@ def test_legacy_create_without_channel_reduces_to_unknown(tmp_path: Path):
         "env_id": "someenv",
         "data": {"id": "legacyid00000001", "ticket_type": "task", "title": "legacy", "priority": 2},
     }
-    (tdir / f"1700000000-{_U1}-CREATE.json").write_text(json.dumps(event))
+    (tdir / f"1700000000-{_U1}-CREATE.json").write_text(json.dumps(event), encoding="utf-8")
     state = reduce_ticket(str(tdir))
     assert state["creation_channel"] == "unknown"
     assert "creation_channel_inferred" not in state
@@ -234,8 +234,8 @@ def test_immutable_edit_cannot_replace_genesis_creation_channel(tmp_path: Path):
         "author": "a",
         "data": {"fields": {"creation_channel": "cli", "title": "changed"}},
     }
-    (tdir / f"1700000000-{_U1}-CREATE.json").write_text(json.dumps(create))
-    (tdir / f"1700000001-{_U2}-EDIT.json").write_text(json.dumps(edit))
+    (tdir / f"1700000000-{_U1}-CREATE.json").write_text(json.dumps(create), encoding="utf-8")
+    (tdir / f"1700000001-{_U2}-EDIT.json").write_text(json.dumps(edit), encoding="utf-8")
     state = reduce_ticket(str(tdir))
     # The EDIT's immutable-field payload is skipped, but a normal field still applies.
     assert state["creation_channel"] == "python", "genesis channel must be immutable"
@@ -277,7 +277,7 @@ def test_projections_export_ndjson_retains_channel(rebar_repo: Path, tmp_path: P
     out = tmp_path / "export.ndjson"
     rebar.export_tickets(out=str(out), repo_root=str(rebar_repo))
     rows = {}
-    for line in out.read_text().splitlines():
+    for line in out.read_text(encoding="utf-8").splitlines():
         if line.strip():
             row = json.loads(line)
             rows[row.get("ticket_id", row.get("id"))] = row
@@ -285,7 +285,7 @@ def test_projections_export_ndjson_retains_channel(rebar_repo: Path, tmp_path: P
 
 
 def test_projections_generated_types_expose_channel_literal():
-    types_src = (Path(rebar.__file__).resolve().parent / "types.py").read_text()
+    types_src = (Path(rebar.__file__).resolve().parent / "types.py").read_text(encoding="utf-8")
     assert "creation_channel" in types_src
     # The {"const": true} marker must render as Literal[True], not Any.
     assert "creation_channel_inferred" in types_src
@@ -294,7 +294,7 @@ def test_projections_generated_types_expose_channel_literal():
 
 def test_projections_docs_document_creation_channel_enum():
     for rel in ("docs/event-schema.md", "docs/output-schemas.md"):
-        text = (_REPO_ROOT / rel).read_text()
+        text = (_REPO_ROOT / rel).read_text(encoding="utf-8")
         assert "creation_channel" in text, f"{rel} must document creation_channel"
         assert "creation_channel_inferred" in text, f"{rel} must document the inference marker"
         for value in _ENUM:

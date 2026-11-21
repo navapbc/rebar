@@ -241,7 +241,7 @@ def test_gate_gerrit_exit_zero_for_an_unrelated_change(
         now_epoch=1_700_000_000,
     )
     assert rc == 0
-    written = out_file.read_text()
+    written = out_file.read_text(encoding="utf-8")
     assert "blocking=false" in written
     assert "advisory_ids=PYSEC-2026-2132" in written
     captured = capsys.readouterr()
@@ -261,7 +261,7 @@ def test_gate_gerrit_exit_one_when_lock_is_touched(
         now_epoch=1_700_000_000,
     )
     assert rc == 1
-    assert "blocking=true" in out_file.read_text()
+    assert "blocking=true" in out_file.read_text(encoding="utf-8")
     assert mod.RUNBOOK_URL in capsys.readouterr().err
 
 

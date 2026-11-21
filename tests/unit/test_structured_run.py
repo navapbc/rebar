@@ -82,7 +82,7 @@ def test_final_parse_failure_writes_one_artifact_with_reply_and_metadata(tmp_pat
     # The raised error names the artifact path.
     assert str(art) in str(ei.value)
 
-    payload = json.loads(art.read_text())
+    payload = json.loads(art.read_text(encoding="utf-8"))
     assert "never any json" in payload["reply"]
     assert isinstance(payload["model"], str) and payload["model"]
     assert "completion_verdict" in payload["contract"]
@@ -122,7 +122,7 @@ def test_rotation_keeps_only_the_newest_twenty(tmp_path) -> None:
     seeded = []
     for k in range(20):
         p = tmp_path / f"seed_{k:02d}.json"
-        p.write_text("{}")
+        p.write_text("{}", encoding="utf-8")
         os.utime(p, (now - (100 - k), now - (100 - k)))
         seeded.append(p)
     oldest = seeded[0]
@@ -143,7 +143,7 @@ def test_unwritable_dir_still_raises_the_original_parse_error(tmp_path) -> None:
     raise the original LLMRunnerError rather than an artifact-write error.
     """
     clash = tmp_path / "not_a_dir"
-    clash.write_text("i am a file")
+    clash.write_text("i am a file", encoding="utf-8")
     model, calls = _sequence_model(["never any json"])
     with pytest.raises(LLMRunnerError):
         _run(model, artifact_dir=clash)

@@ -156,7 +156,9 @@ def test_error_env_var_fails_loud(rebar_repo: Path, var: str) -> None:
 def test_error_toml_key_fails_loud(rebar_repo: Path) -> None:
     # Standalone rebar.toml uses TOP-LEVEL sections (`[verify]`), not the pyproject-style
     # `[tool.rebar.verify]` nesting.
-    (rebar_repo / "rebar.toml").write_text("[verify]\nrequire_verdict_for_close = true\n")
+    (rebar_repo / "rebar.toml").write_text(
+        "[verify]\nrequire_verdict_for_close = true\n", encoding="utf-8"
+    )
     cp = _cli("list", cwd=str(rebar_repo))
     assert cp.returncode != 0, f"retired TOML key did not fail loud: {cp.stdout}{cp.stderr}"
     out = cp.stdout + cp.stderr
@@ -254,7 +256,8 @@ def test_config_validate_reports_and_exits_nonzero(rebar_repo: Path) -> None:
 
 def test_config_validate_aggregates_tombstones_and_typed_errors(rebar_repo: Path) -> None:
     (rebar_repo / "rebar.toml").write_text(
-        '[reconciler]\nrich_text_cutover = "clould"\n\n[mcp]\nhttp_port = "not-a-port"\n'
+        '[reconciler]\nrich_text_cutover = "clould"\n\n[mcp]\nhttp_port = "not-a-port"\n',
+        encoding="utf-8",
     )
     cp = _cli(
         "config",
@@ -273,7 +276,9 @@ def test_config_validate_aggregates_tombstones_and_typed_errors(rebar_repo: Path
 
 # ── genuinely-unknown TOML key keeps forward-compat policy (WARN, not error) ──
 def test_unknown_toml_key_keeps_forwardcompat_policy(rebar_repo: Path) -> None:
-    (rebar_repo / "rebar.toml").write_text("[verify]\nsome_genuinely_unknown_future_key = true\n")
+    (rebar_repo / "rebar.toml").write_text(
+        "[verify]\nsome_genuinely_unknown_future_key = true\n", encoding="utf-8"
+    )
     # Default policy: WARN + ignore (exit 0). The tombstone registry covers only KNOWN
     # retired inputs; an unknown key must not be treated as a removed input.
     cp = _cli("list", cwd=str(rebar_repo))

@@ -54,7 +54,7 @@ def test_user_override_wins(tmp_path: Path) -> None:
     # A user .rebar/prompts/<id>.md overrides the packaged canon.
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "code-quality.md").write_text("OVERRIDE {{ticket_id}}")
+    (pdir / "code-quality.md").write_text("OVERRIDE {{ticket_id}}", encoding="utf-8")
     text = prompts.canonical_prompt_text(_reviewer(), repo_root=str(tmp_path))
     assert text == "OVERRIDE {{ticket_id}}"
     # And resolve renders it strictly.

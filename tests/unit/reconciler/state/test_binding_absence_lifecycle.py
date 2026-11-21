@@ -79,7 +79,7 @@ def test_retires_after_grace_consecutive_404s(tracker: Path) -> None:
     # Reversible: present in retired file.
     retired_path = tracker / ".tickets-tracker" / ".bridge_state" / "bindings-retired.json"
     assert retired_path.exists()
-    data = json.loads(retired_path.read_text())
+    data = json.loads(retired_path.read_text(encoding="utf-8"))
     assert "DIG-2" in data["retired"]
     assert data["retired"]["DIG-2"]["local_id"] == "loc-2"
 
@@ -117,21 +117,21 @@ def test_set_last_get_records_pass_id(tracker: Path) -> None:
 def test_corrupt_retired_file_fails_open(tracker: Path) -> None:
     bridge = tracker / ".tickets-tracker" / ".bridge_state"
     bridge.mkdir(parents=True)
-    (bridge / "bindings-retired.json").write_text("{ this is not valid json ")
+    (bridge / "bindings-retired.json").write_text("{ this is not valid json ", encoding="utf-8")
     # Must NOT raise — degrades to empty retired-set.
     bs = BindingStore(tracker / ".tickets-tracker")
     assert bs.is_retired("DIG-X") is False
     # Alert emitted to bridge_alerts.
     alerts_dir = scratch_retention.alerts_dir(tracker)
     assert alerts_dir.is_dir(), "fail-open must emit an alert"
-    blob = "".join(p.read_text() for p in alerts_dir.glob("*.jsonl"))
+    blob = "".join(p.read_text(encoding="utf-8") for p in alerts_dir.glob("*.jsonl"))
     assert "binding-retired-file-corrupt" in blob
 
 
 def test_corrupt_bindings_json_still_fails_closed(tracker: Path) -> None:
     bridge = tracker / ".tickets-tracker" / ".bridge_state"
     bridge.mkdir(parents=True)
-    (bridge / "bindings.json").write_text("{ corrupt ")
+    (bridge / "bindings.json").write_text("{ corrupt ", encoding="utf-8")
     with pytest.raises(ValueError):
         BindingStore(tracker / ".tickets-tracker")
 

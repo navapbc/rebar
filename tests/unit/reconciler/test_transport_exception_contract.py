@@ -154,7 +154,7 @@ def test_no_core_module_names_a_vendor_exception(module: str) -> None:
     import pathlib
 
     root = pathlib.Path(__file__).resolve().parents[3] / "src/rebar/reconciler"
-    text = (root / module).read_text()
+    text = (root / module).read_text(encoding="utf-8")
     assert "JIRAError" not in text, (
         f"{module} names a vendor-specific exception — translate at the adapter boundary "
         f"instead, or the core grows one except-clause per backend"

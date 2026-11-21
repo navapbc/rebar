@@ -57,7 +57,8 @@ def _install_git_shim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
         # Match the transient CI failure's stderr exactly.
         '        sys.stderr.write("fatal: bad object HEAD\\n")\n'
         "        sys.exit(128)\n"
-        "os.execv(REAL, [REAL, *argv])\n"
+        "os.execv(REAL, [REAL, *argv])\n",
+        encoding="utf-8",
     )
     shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ['PATH']}")
@@ -65,7 +66,7 @@ def _install_git_shim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 
 
 def _bundle_attempts(attempts: Path) -> int:
-    return len(attempts.read_text().splitlines()) if attempts.exists() else 0
+    return len(attempts.read_text(encoding="utf-8").splitlines()) if attempts.exists() else 0
 
 
 def _seed_two_divergent_bundles(tmp_path: Path):
@@ -272,7 +273,7 @@ def test_heal_refuses_a_dirty_worktree_on_the_published_ref(tmp_path: Path) -> N
     files (the write lock, and any operator scratch) are not at risk and must not trip it —
     proven by every other test here, which run with the untracked lock file present."""
     remote, base_path, _sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
-    (base_path / "uncommitted.txt").write_text("operator WIP")
+    (base_path / "uncommitted.txt").write_text("operator WIP", encoding="utf-8")
     h.git(base_path, "add", "uncommitted.txt")
     keys_before = sorted(h.bundle_keys(remote, "tickets"))
 
@@ -294,7 +295,7 @@ def test_heal_refuses_a_dirty_worktree_on_the_published_ref(tmp_path: Path) -> N
 
     assert downloads == [], "the guard must run before any bundle is fetched"
     assert sorted(h.bundle_keys(remote, "tickets")) == keys_before
-    assert (base_path / "uncommitted.txt").read_text() == "operator WIP"
+    assert (base_path / "uncommitted.txt").read_text(encoding="utf-8") == "operator WIP"
     assert excinfo.value.hint
 
 
@@ -701,8 +702,8 @@ def _policy_tracker(tmp_path: Path, *, driver: bool):
     remote = h.FakeS3Remote(tmp_path / "objstore")
     content = h.init_repo(tmp_path / "content")
     (content / ".bridge_state").mkdir()
-    (content / ".bridge_state" / "state.json").write_text("base")
-    (content / ".gitattributes").write_text(".bridge_state/* merge=ours\n")
+    (content / ".bridge_state" / "state.json").write_text("base", encoding="utf-8")
+    (content / ".gitattributes").write_text(".bridge_state/* merge=ours\n", encoding="utf-8")
     h.git(content, "add", "-A")
     h.git(content, "commit", "-q", "-m", "base with merge policy")
     sha_base = h.git(content, "rev-parse", "HEAD").stdout.strip()
@@ -717,7 +718,7 @@ def _policy_tracker(tmp_path: Path, *, driver: bool):
     # Two heads that write the SAME derived file differently -> collides without the policy.
     for value in ("LEFT", "RIGHT"):
         h.git(content, "reset", "-q", "--hard", sha_base)
-        (content / ".bridge_state" / "state.json").write_text(value)
+        (content / ".bridge_state" / "state.json").write_text(value, encoding="utf-8")
         h.git(content, "add", "-A")
         h.git(content, "commit", "-q", "-m", f"derived {value}")
         h.seed_bundle(remote, content, "tickets", "tickets")

@@ -16,7 +16,7 @@ def test_cli_close_uses_code_repo_when_tracker_is_relocated(
     rebar_repo: Path, tmp_path: Path, monkeypatch
 ) -> None:
     (rebar_repo / "rebar.toml").write_text(
-        "[verify]\nrequire_completion_verification_for_close = true\n"
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
     )
     external_tracker = tmp_path / "external-store" / "tickets"
     external_tracker.parent.mkdir()

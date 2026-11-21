@@ -21,7 +21,7 @@ def test_every_packaged_deterministic_scorer_is_registered() -> None:
     known = sc.known_scorer_names()
     used: set[str] = set()
     for p in glob.glob("src/rebar/llm/eval_specs/*.eval.yaml"):
-        with open(p) as fh:
+        with open(p, encoding="utf-8") as fh:
             spec = yaml.safe_load(fh.read())
         for s in spec.get("scorers", []):
             if s.get("type") == "deterministic":
@@ -237,7 +237,7 @@ def test_every_packaged_spec_passes_strict_validation() -> None:
     specs = glob.glob("src/rebar/llm/eval_specs/*.eval.yaml")
     assert specs, "no packaged eval specs found"
     for p in specs:
-        with open(p) as fh:
+        with open(p, encoding="utf-8") as fh:
             spec = yaml.safe_load(fh.read())
         assert ev.validate_eval_spec(spec) == [], p
         if spec.get("dataset"):
@@ -315,7 +315,7 @@ def _criterion_id_specs_using_emits_valid_findings() -> dict[str, dict]:
 
     found: dict[str, dict] = {}
     for p in sorted(glob.glob("src/rebar/llm/eval_specs/*.eval.yaml")):
-        with open(p) as fh:
+        with open(p, encoding="utf-8") as fh:
             spec = yaml.safe_load(fh.read())
         names = {s.get("name") for s in spec.get("scorers", [])}
         prompt = spec["prompt"]

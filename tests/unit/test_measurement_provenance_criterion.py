@@ -43,7 +43,7 @@ def _contract_lines(blob: str) -> list[str]:
 
 
 def _routing() -> dict:
-    return json.loads(ROUTING.read_text())
+    return json.loads(ROUTING.read_text(encoding="utf-8"))
 
 
 def test_criterion_is_defined_and_activated_in_the_overlay() -> None:
@@ -74,7 +74,7 @@ def test_criterion_never_enters_the_shipped_default_set() -> None:
         for f in (REPO / "src" / "rebar").rglob("*")
         if f.is_file()
         and f.suffix in {".py", ".md", ".json", ".yaml", ".yml", ".toml"}
-        and CRITERION in f.read_text(errors="ignore")
+        and CRITERION in f.read_text(errors="ignore", encoding="utf-8")
     ]
     assert not leaked, f"criterion leaked into the shipped set: {leaked}"
 
@@ -91,7 +91,7 @@ def test_rubric_prompt_is_tool_enabled() -> None:
     routing entry's exec tier — so a prompt left at `single_turn` (as all three sibling project
     prompts are) ships a criterion that CANNOT read infra/terraform/versions.tf, silently
     defeating the environment-contradiction probe."""
-    lines = PROMPT.read_text().splitlines()
+    lines = PROMPT.read_text(encoding="utf-8").splitlines()
     assert "execution_mode: agentic" in [ln.strip() for ln in lines], (
         "rubric must declare execution_mode: agentic, else the probe cannot read the repo"
     )
@@ -100,14 +100,14 @@ def test_rubric_prompt_is_tool_enabled() -> None:
 def test_rubric_prompt_has_a_title() -> None:
     """build_descriptor computes `name = prompt.title or cid`, so a missing title degrades the
     criterion's rendered name to the bare id."""
-    lines = [ln.strip() for ln in PROMPT.read_text().splitlines()]
+    lines = [ln.strip() for ln in PROMPT.read_text(encoding="utf-8").splitlines()]
     assert any(ln.startswith("title:") and len(ln) > len("title:") + 1 for ln in lines)
 
 
 def test_rubric_states_all_four_decision_rules() -> None:
     """The rubric is the single place the criterion's decision rules live. All four must be
     present, or a rule referenced by an AC has no mechanism producing it."""
-    body = PROMPT.read_text().lower()
+    body = PROMPT.read_text(encoding="utf-8").lower()
     assert "no-anchor" in body or "no comparable" in body, "rule (b) no-anchor fallback missing"
     assert "privilege_posture" in body, "rule (c) privilege-posture judgement missing"
     assert "instrument" in body, "rule (d) instrument-vs-authorization missing"
@@ -133,7 +133,7 @@ def test_shipped_contract_text_is_unchanged(path: str) -> None:
     """Contract-bearing lines stay pinned; an intentional cross-client change updates the
     expected digest and count in the same reviewed change."""
     expected_digest, expected_count = CONTRACT_DIGESTS[path]
-    lines = _contract_lines((REPO / path).read_text())
+    lines = _contract_lines((REPO / path).read_text(encoding="utf-8"))
     assert len(lines) == expected_count, (
         f"{path}: expected {expected_count} contract line(s), found {len(lines)}"
     )
@@ -147,6 +147,8 @@ def test_shipped_contract_text_is_unchanged(path: str) -> None:
 def test_det_check_has_no_world_measurement_reach() -> None:
     """The rejected alternative stays rejected: the DET module is a pure text check with no
     network or shell reach, so it can never re-run a world measurement."""
-    src = (REPO / "src/rebar/llm/plan_review/det_measurement_provenance.py").read_text()
+    src = (REPO / "src/rebar/llm/plan_review/det_measurement_provenance.py").read_text(
+        encoding="utf-8"
+    )
     for forbidden in ("boto3", "botocore", "subprocess", "requests", "urllib", "socket", "httpx"):
         assert forbidden not in src, f"{forbidden} must not appear in the DET check"

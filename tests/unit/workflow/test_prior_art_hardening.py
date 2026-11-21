@@ -142,7 +142,7 @@ def test_sweep_removes_readonly_snapshot_tree(tmp_path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
     subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
-    (repo / "f.txt").write_text("hi\n")
+    (repo / "f.txt").write_text("hi\n", encoding="utf-8")
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "c"], cwd=repo, check=True)
 

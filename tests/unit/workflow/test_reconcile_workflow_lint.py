@@ -121,7 +121,7 @@ def _github_shell() -> str:
 
 
 def _jenkins_shell() -> str:
-    blocks = re.findall(r"sh\s+'''\n(.*?)\n\s*'''", _JENKINS.read_text(), re.DOTALL)
+    blocks = re.findall(r"sh\s+'''\n(.*?)\n\s*'''", _JENKINS.read_text(encoding="utf-8"), re.DOTALL)
     assert blocks
     return "\n".join(textwrap.dedent(block) for block in blocks)
 

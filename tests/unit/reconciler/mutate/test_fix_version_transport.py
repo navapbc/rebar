@@ -161,7 +161,7 @@ def _apply_release_update(tmp_path: Any, client: Any, releases: list[dict]) -> d
     with patch.object(applier, "_load_acli", return_value=client):
         applier.apply([mutation], pass_id, repo_root=tmp_path, ticket_plans=_plans([mutation]))
     manifest = scratch_retention.snapshots_dir(tmp_path) / f"{pass_id}.manifest.json"
-    outcomes = json.loads(manifest.read_text()).get("mutations", [])
+    outcomes = json.loads(manifest.read_text(encoding="utf-8")).get("mutations", [])
     return next(o for o in outcomes if o.get("key") == "DIG-1")
 
 

@@ -47,7 +47,7 @@ def init_repo(path: Path) -> Path:
 
 
 def commit_file(repo: Path, name: str, content: str, message: str) -> str:
-    (repo / name).write_text(content)
+    (repo / name).write_text(content, encoding="utf-8")
     git(repo, "add", name)
     git(repo, "commit", "-q", "-m", message)
     return git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -152,7 +152,7 @@ class FakeS3Remote:
         head = self.objdir / self.prefix / "HEAD"
         if not head.exists():
             head.parent.mkdir(parents=True, exist_ok=True)
-            head.write_text(ref)
+            head.write_text(ref, encoding="utf-8")
 
 
 def seed_bundle(remote: FakeS3Remote, source_repo: Path, ref: str, branch: str) -> str:

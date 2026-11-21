@@ -99,7 +99,7 @@ def _tamper_opcert_envelope(repo: Path, tid: str) -> None:
 
     tdir = repo / ".tickets-tracker" / tid
     latest = sorted(glob.glob(str(tdir / "*-SIGNATURE.json")))[-1]
-    ev = json.loads(Path(latest).read_text())
+    ev = json.loads(Path(latest).read_text(encoding="utf-8"))
     env = dsse.decode(ev["data"]["envelope"])
     bad = bytearray(env.signatures[0].sig)
     bad[len(bad) // 2] ^= 0xFF  # flip a byte in the SSHSIG signature
@@ -109,7 +109,7 @@ def _tamper_opcert_envelope(repo: Path, tid: str) -> None:
     ev["uuid"] = str(_uuid.uuid4())
     ev["timestamp"] = int(ev["timestamp"]) + 1000
     (tdir / f"{ev['timestamp']}-{ev['uuid']}-SIGNATURE.json").write_text(
-        json.dumps(ev, ensure_ascii=False)
+        json.dumps(ev, ensure_ascii=False), encoding="utf-8"
     )
     for cache in glob.glob(str(tdir / ".cache.json")):
         os.remove(cache)
@@ -203,7 +203,7 @@ def test_concurrent_signatures_converge_by_basename(rebar_repo: Path) -> None:
             "author": "a",
             "data": data,
         }
-        (tdir / f"{ts}-{uid}-SIGNATURE.json").write_text(json.dumps(ev))
+        (tdir / f"{ts}-{uid}-SIGNATURE.json").write_text(json.dumps(ev), encoding="utf-8")
 
     # Write the higher-uuid one FIRST so disk discovery order != winner order.
     _write("ffffffff-0000-4000-8000-000000000002", ["WINNER"])
@@ -225,13 +225,13 @@ def test_cross_environment_round_trip_via_file_swap(rebar_repo: Path) -> None:
     # shape where the MCP server signs and a local CLI worktree claims.)
     tid = _seed(rebar_repo)
     envid_file = rebar_repo / ".tickets-tracker" / ".env-id"
-    env_a = envid_file.read_text()
+    env_a = envid_file.read_text(encoding="utf-8")
 
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))  # signed under principal A
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
 
     # Become environment B (different .env-id → different principal): A's cert still certifies.
-    envid_file.write_text("environment-b\n")
+    envid_file.write_text("environment-b\n", encoding="utf-8")
     out_b = rebar.verify_signature(tid, repo_root=str(rebar_repo))
     assert out_b["verdict"] == "certified", out_b["reason"]
     assert out_b["key_id"] != "environment-b"  # ANCHOR: genuinely a cert from the OTHER principal
@@ -239,7 +239,7 @@ def test_cross_environment_round_trip_via_file_swap(rebar_repo: Path) -> None:
     # B re-signs → certified in B; A's restored id then also certifies B's signature.
     rebar.sign_manifest(tid, MANIFEST, repo_root=str(rebar_repo))
     assert rebar.verify_signature(tid, repo_root=str(rebar_repo))["verdict"] == "certified"
-    envid_file.write_text(env_a)
+    envid_file.write_text(env_a, encoding="utf-8")
     out_a = rebar.verify_signature(tid, repo_root=str(rebar_repo))
     assert out_a["verdict"] == "certified", out_a["reason"]
     assert out_a["key_id"] == "environment-b"  # ANCHOR: B's cert, read back in A
@@ -269,7 +269,7 @@ def test_verify_survives_non_dict_signature_state(rebar_repo: Path) -> None:
         "author": "a",
         "data": {"compiled_state": state, "source_event_uuids": []},
     }
-    (tdir / f"{ts}-{uid}-SNAPSHOT.json").write_text(json.dumps(snap))
+    (tdir / f"{ts}-{uid}-SNAPSHOT.json").write_text(json.dumps(snap), encoding="utf-8")
     for c in tdir.glob(".cache.json"):
         c.unlink()
 

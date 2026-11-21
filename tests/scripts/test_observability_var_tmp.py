@@ -45,7 +45,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -140,8 +140,8 @@ def _environment(
             check=True,
         ).stdout
         tmpfiles_conf.parent.mkdir(parents=True, exist_ok=True)
-        tmpfiles_conf.write_text(rendered)
-        (unit_dir / "rebar-var-tmp-reaper.timer").write_text("[Timer]\n")
+        tmpfiles_conf.write_text(rendered, encoding="utf-8")
+        (unit_dir / "rebar-var-tmp-reaper.timer").write_text("[Timer]\n", encoding="utf-8")
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
@@ -160,8 +160,8 @@ def _environment(
         }
     )
     for name in _OFFSET_VARIABLES:
-        (offsets / name.lower()).write_text("0\n")
-    (tmp_path / "replication.log").write_text("")
+        (offsets / name.lower()).write_text("0\n", encoding="utf-8")
+    (tmp_path / "replication.log").write_text("", encoding="utf-8")
     return env, aws_log, du_log
 
 
@@ -173,7 +173,7 @@ def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
     if not log.exists():
         return values
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts:
             continue
@@ -204,7 +204,7 @@ def test_the_percent_is_measured_over_the_tree_the_budget_governs(tmp_path: Path
     budget."""
     env, _, du_log = _environment(tmp_path)
     assert _run(env).returncode == 0
-    measured = du_log.read_text().split()
+    measured = du_log.read_text(encoding="utf-8").split()
     assert env["VAR_TMP_DIR"] in measured
     assert "/var" not in measured
 
@@ -357,7 +357,8 @@ def test_an_explicit_cap_script_override_still_beats_every_candidate(tmp_path: P
         "  --print-env) printf 'VAR_TMP_MAX_BYTES=%s\\n' 2147483648 ;;\n"
         "  --check-active) printf '1\\n' ;;\n"
         "  --check-quota) printf '0\\n' ;;\n"
-        "esac\nexit 0\n"
+        "esac\nexit 0\n",
+        encoding="utf-8",
     )
     override.chmod(override.stat().st_mode | stat.S_IXUSR)
 
@@ -408,7 +409,8 @@ def test_the_heartbeat_separates_a_measured_no_from_an_unanswered_check(
         "  --print-env) printf 'VAR_TMP_MAX_BYTES=%s\\n' 4294967296; exit 0 ;;\n"
         f"  --check-active) {check_active_body} ;;\n"
         "  --check-quota) printf '0\\n'; exit 0 ;;\n"
-        "esac\nexit 0\n"
+        "esac\nexit 0\n",
+        encoding="utf-8",
     )
     cap.chmod(cap.stat().st_mode | stat.S_IXUSR)
     env["VARTMP_CAP_SH"] = str(cap)

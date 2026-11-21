@@ -39,7 +39,7 @@ class _Capturing(FakeRunner):
         for rel in ("src/app.py", "package.json", "README.md"):
             p = root / rel
             if p.exists():
-                self.files[rel] = p.read_text()
+                self.files[rel] = p.read_text(encoding="utf-8")
         return super().run(req)
 
 
@@ -56,10 +56,10 @@ def gha_checkout(tmp_path, monkeypatch):
     _git(origin, "config", "user.email", "t@e.com")
     _git(origin, "config", "user.name", "T")
     _git(origin, "config", "commit.gpgsign", "false")
-    (origin / "f.txt").write_text("v1\n")
+    (origin / "f.txt").write_text("v1\n", encoding="utf-8")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "-m", "c1")
-    (origin / "f.txt").write_text("v2\n")
+    (origin / "f.txt").write_text("v2\n", encoding="utf-8")
     _git(origin, "add", "-A")
     _git(origin, "commit", "-q", "-m", "c2")
     head_sha = _git(origin, "rev-parse", "HEAD")
@@ -81,7 +81,7 @@ def test_attested_materialize_works_in_shallow_detached_checkout(gha_checkout):
     # works from the local object DB — the close gate's `ref=HEAD, fetch=False` path.
     handle = rs.materialize("HEAD", source_mode="attested", repo_root=str(gha), fetch=False)
     assert handle.sha == head_sha
-    assert (handle.path / "f.txt").read_text() == "v2\n"
+    assert (handle.path / "f.txt").read_text(encoding="utf-8") == "v2\n"
 
 
 def test_review_code_under_shallow_clone_surfaces_clear_error(gha_checkout, monkeypatch):
@@ -116,10 +116,12 @@ def test_attested_gate_against_non_rebar_sample_repo(tmp_path, monkeypatch):
     _git(repo, "config", "user.email", "t@e.com")
     _git(repo, "config", "user.name", "T")
     _git(repo, "config", "commit.gpgsign", "false")
-    (repo / "package.json").write_text('{"name":"sample","version":"1.0.0"}\n')
+    (repo / "package.json").write_text('{"name":"sample","version":"1.0.0"}\n', encoding="utf-8")
     (repo / "src").mkdir()
-    (repo / "src" / "app.py").write_text("def main():\n    return 'sample-project'\n")
-    (repo / "README.md").write_text("# Sample (not rebar)\n")
+    (repo / "src" / "app.py").write_text(
+        "def main():\n    return 'sample-project'\n", encoding="utf-8"
+    )
+    (repo / "README.md").write_text("# Sample (not rebar)\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "sample project")
     _git(repo, "remote", "add", "origin", str(remote))

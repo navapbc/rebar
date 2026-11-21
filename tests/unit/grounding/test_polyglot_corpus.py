@@ -52,7 +52,7 @@ def corpus(tmp_path: Path) -> str:
     for rel, content in _CORPUS.items():
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content)
+        p.write_text(content, encoding="utf-8")
     return str(tmp_path)
 
 
@@ -141,7 +141,8 @@ def test_grounding_toml_optlib_slot_is_read_and_threads_into_ctags(corpus) -> No
         "[grounding]\n"
         'ctags_optlib_dirs = ["tools/optlibs"]\n'
         'ctags_options = ["tools/cobol.ctags"]\n'
-        'supported_languages = ["COBOL"]\n'
+        'supported_languages = ["COBOL"]\n',
+        encoding="utf-8",
     )
     cfg = r.load_config(corpus)
     assert "COBOL" in cfg.supported_languages
@@ -158,9 +159,10 @@ def test_sgconfig_customlanguages_slot_widens_astgrep_routing(corpus) -> None:
     rebar_dir = Path(corpus) / ".rebar"
     rebar_dir.mkdir(exist_ok=True)
     (rebar_dir / "sgconfig.yml").write_text(
-        "customLanguages:\n  mojo:\n    libraryPath: mojo.so\n    extensions: [mojo]\n"
+        "customLanguages:\n  mojo:\n    libraryPath: mojo.so\n    extensions: [mojo]\n",
+        encoding="utf-8",
     )
-    (Path(corpus) / "main.mojo").write_text("fn main(): pass\n")
+    (Path(corpus) / "main.mojo").write_text("fn main(): pass\n", encoding="utf-8")
     sgconfig, custom_exts = engine_b._resolve_astgrep_sgconfig(Path(corpus))
     assert sgconfig and sgconfig.endswith("sgconfig.yml")
     assert custom_exts == {"mojo": {".mojo"}}
@@ -218,7 +220,8 @@ def test_enumerated_workspace_feeds_refutation_guard(tmp_path, monkeypatch) -> N
     # Enumerated Cargo members abstain. A public dependency can refute.
     (tmp_path / "Cargo.toml").write_text(
         '[package]\nname = "rootcrate"\n[workspace]\nmembers = ["crates/foo"]\n'
-        '[dependencies]\nserde = "1"\n'
+        '[dependencies]\nserde = "1"\n',
+        encoding="utf-8",
     )
     res = deps.enumerate_dependencies(tmp_path)
     members = res["workspace_members"]

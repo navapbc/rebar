@@ -118,7 +118,9 @@ def test_baseline_persists_across_reload(tmp_path):
     assert reloaded.get_baseline("loc-1")["status"] == "In Progress"
     # New stores are written at version 2.
     data = json.loads(
-        (tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings.json").read_text()
+        (tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert data["version"] == 2
 
@@ -150,7 +152,8 @@ def test_version_1_store_reads_without_baseline(tmp_path):
                 "bindings": {"loc-1": {"jira_key": "REB-1", "state": "confirmed"}},
                 "reverse": {"REB-1": "loc-1"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     s = _store(tmp_path)
     assert s.get_baseline("loc-1") is None  # absent → local-wins, not an error
@@ -239,6 +242,6 @@ def test_corrupt_bindings_json_still_fails_closed(tmp_path):
     """The baseline extension must NOT weaken the fail-closed corruption guard."""
     state_dir = tmp_path / ".tickets-tracker" / ".bridge_state"
     state_dir.mkdir(parents=True)
-    (state_dir / "bindings.json").write_text("<<<<<<< HEAD\n{not valid json")
+    (state_dir / "bindings.json").write_text("<<<<<<< HEAD\n{not valid json", encoding="utf-8")
     with pytest.raises(ValueError, match="corrupt or contains git conflict"):
         _store(tmp_path)

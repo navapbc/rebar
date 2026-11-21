@@ -38,8 +38,10 @@ def test_codebase_verifiable_is_still_not_lacking() -> None:
 def test_contracts_and_schema_agree_on_the_value_pair() -> None:
     """Two independent declarations of the same wire contract; drift between them is invisible
     at runtime because `kind` has no enum, so pin their agreement explicitly."""
-    contracts = (REPO / "src/rebar/llm/contracts.py").read_text()
-    schema = json.loads((REPO / "src/rebar/schemas/completion_verdict.schema.json").read_text())
+    contracts = (REPO / "src/rebar/llm/contracts.py").read_text(encoding="utf-8")
+    schema = json.loads(
+        (REPO / "src/rebar/schemas/completion_verdict.schema.json").read_text(encoding="utf-8")
+    )
     desc = schema["properties"]["criteria"]["items"]["properties"]["kind"]["description"]
     for token in ("codebase-verifiable", "non-codebase"):
         assert token in contracts, f"contracts.py lost {token}"
@@ -51,7 +53,7 @@ def test_verifier_prompt_still_teaches_legacy_tag_recognition() -> None:
     """Cutting the emitted KIND over must not remove the prompt's statement that the legacy
     TAG spelling is still accepted — the tag and the wire value are different surfaces, and
     conflating them would silently drop compatibility for authors."""
-    body = (REPO / "src/rebar/llm/reviewers/completion_verifier.md").read_text()
+    body = (REPO / "src/rebar/llm/reviewers/completion_verifier.md").read_text(encoding="utf-8")
     assert "operator-attested" in body, "legacy tag recognition vanished"
     assert "still accepted" in body or "still-accepted" in body
 
@@ -60,7 +62,7 @@ def test_registry_classification_vocabulary_matches_the_emitted_value() -> None:
     """`acceptance_items_classified` tells the model the vocabulary to classify into. If it
     still says `operator-attested` while the verifier emits `non-codebase`, the two LLM-facing
     contracts disagree and the mismatch is unobservable at runtime."""
-    blob = (REPO / "src/rebar/llm/plan_review/criteria_routing.json").read_text()
+    blob = (REPO / "src/rebar/llm/plan_review/criteria_routing.json").read_text(encoding="utf-8")
     data = json.loads(blob)
 
     def _checks(o, acc):

@@ -40,7 +40,7 @@ def _tags(repo: Path, tid: str) -> list[str]:
 def _event_types(repo: Path, tid: str) -> set[str]:
     types = set()
     for f in glob.glob(os.path.join(str(repo), ".tickets-tracker", tid, "*.json")):
-        with open(f) as fh:
+        with open(f, encoding="utf-8") as fh:
             types.add(json.load(fh).get("event_type"))
     return types
 

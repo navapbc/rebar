@@ -202,7 +202,7 @@ def _rewrite_signed_payload(repo: Path, tid: str) -> int:
 
     edited = 0
     for path in (repo / ".tickets-tracker" / tid).glob("*.json"):
-        record = json.loads(path.read_text())
+        record = json.loads(path.read_text(encoding="utf-8"))
         envelope = (record.get("data") or record).get("envelope")
         if not isinstance(envelope, str):
             continue
@@ -215,7 +215,7 @@ def _rewrite_signed_payload(repo: Path, tid: str) -> int:
         ).decode()
         target = record.get("data") or record
         target["envelope"] = json.dumps(env)
-        path.write_text(json.dumps(record))
+        path.write_text(json.dumps(record), encoding="utf-8")
         edited += 1
     return edited
 

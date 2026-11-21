@@ -60,7 +60,8 @@ def gate_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         meminfo_path.write_text(
             f"MemTotal:       7999488 kB\n"
             f"MemFree:         102400 kB\n"
-            f"MemAvailable:  {available_mib * 1024} kB\n"
+            f"MemAvailable:  {available_mib * 1024} kB\n",
+            encoding="utf-8",
         )
         monkeypatch.setattr(ga, "_MEMINFO", meminfo_path)
         return meminfo_path
@@ -68,7 +69,9 @@ def gate_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     meminfo(64 * 1024)
 
     def limit(n: int) -> Path:
-        (tmp_path / "rebar.toml").write_text(f"[snapshot]\nmax_concurrent_gates = {n}\n")
+        (tmp_path / "rebar.toml").write_text(
+            f"[snapshot]\nmax_concurrent_gates = {n}\n", encoding="utf-8"
+        )
         return tmp_path
 
     limit.meminfo = meminfo  # type: ignore[attr-defined]
@@ -337,12 +340,16 @@ def test_zero_disables_the_bound_entirely(gate_host):
 
 
 def test_a_malformed_cap_falls_back_to_the_default(gate_host, tmp_path):
-    (tmp_path / "rebar.toml").write_text('[snapshot]\nmax_concurrent_gates = "many"\n')
+    (tmp_path / "rebar.toml").write_text(
+        '[snapshot]\nmax_concurrent_gates = "many"\n', encoding="utf-8"
+    )
     assert ga.max_concurrent_gates(tmp_path) == ga.DEFAULT_MAX_CONCURRENT_GATES
 
 
 def test_a_negative_cap_falls_back_to_the_default(gate_host, tmp_path):
-    (tmp_path / "rebar.toml").write_text("[snapshot]\nmax_concurrent_gates = -3\n")
+    (tmp_path / "rebar.toml").write_text(
+        "[snapshot]\nmax_concurrent_gates = -3\n", encoding="utf-8"
+    )
     assert ga.max_concurrent_gates(tmp_path) == ga.DEFAULT_MAX_CONCURRENT_GATES
 
 
@@ -590,7 +597,7 @@ def test_an_unreadable_proc_meminfo_admits_but_announces_the_disarm(
 ):
     root = gate_host(2)
     garbage = tmp_path / "meminfo-garbage"
-    garbage.write_text("MemTotal:  7999 kB\nSwapFree:  0 kB\n")
+    garbage.write_text("MemTotal:  7999 kB\nSwapFree:  0 kB\n", encoding="utf-8")
     monkeypatch.setattr(ga, "_MEMINFO", garbage)
     ran = []
     with ga.gate_admission("plan_review", "t-broken", root):

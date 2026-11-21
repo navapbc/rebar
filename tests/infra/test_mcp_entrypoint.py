@@ -44,7 +44,7 @@ def _init_remote(tmp_path: Path) -> tuple[Path, Path]:
     source = tmp_path / "source"
     source.mkdir()
     _git(source, "init", "-b", "main")
-    (source / "file.txt").write_text("one\n")
+    (source / "file.txt").write_text("one\n", encoding="utf-8")
     _git(source, "add", "file.txt")
     _git(source, "commit", "-m", "initial")
     remote = init_bare_remote(tmp_path / "remote.git", initial_branch="main")
@@ -54,7 +54,7 @@ def _init_remote(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _advance(source: Path) -> str:
-    (source / "file.txt").write_text("two\n")
+    (source / "file.txt").write_text("two\n", encoding="utf-8")
     _git(source, "commit", "-am", "advance")
     _git(source, "push", "origin", "main")
     return _git(source, "rev-parse", "HEAD").stdout.strip()
@@ -86,7 +86,7 @@ def _path_with_failing_flock(tmp_path: Path) -> str:
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir(exist_ok=True)
     fake_flock = fake_bin / "flock"
-    fake_flock.write_text("#!/bin/sh\necho fake flock invoked >&2\nexit 127\n")
+    fake_flock.write_text("#!/bin/sh\necho fake flock invoked >&2\nexit 127\n", encoding="utf-8")
     fake_flock.chmod(0o755)
     return f"{fake_bin}{os.pathsep}{os.environ['PATH']}"
 
@@ -141,7 +141,7 @@ def _run_provision(
 ) -> subprocess.CompletedProcess[str]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     ensure_script = tmp_path / "ensure-store.sh"
-    ensure_script.write_text("#!/bin/sh\nexit 0\n")
+    ensure_script.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     env = subprocess_env(
         MCP_CODE_DIR=str(code_dir),
         MCP_TICKETS_URL=str(remote),
@@ -187,7 +187,8 @@ def test_with_dir_lock_serializes_concurrent_holders(tmp_path: Path) -> None:
         'if ! mkdir "$active" 2>/dev/null; then echo overlap >> "$1/overlap"; fi\n'
         'echo enter >> "$1/log"\n'
         "sleep 0.3\n"
-        'rmdir "$active"\n'
+        'rmdir "$active"\n',
+        encoding="utf-8",
     )
     worker.chmod(0o755)
     command = [
@@ -308,7 +309,7 @@ def test_with_dir_lock_releases_after_holder_process_dies(tmp_path: Path) -> Non
         )
     finally:
         if child_pid.exists():
-            _kill_pid(int(child_pid.read_text().strip()))
+            _kill_pid(int(child_pid.read_text(encoding="utf-8").strip()))
 
     assert result.returncode == 0, result.stderr
 
@@ -374,7 +375,7 @@ def test_dirty_workspace_is_left_byte_identical(tmp_path: Path) -> None:
     source, remote = _init_remote(tmp_path)
     checkout = tmp_path / "code"
     _clone(remote, checkout)
-    (checkout / "file.txt").write_text("dirty\n")
+    (checkout / "file.txt").write_text("dirty\n", encoding="utf-8")
     before = _tree_snapshot(checkout)
     _advance(source)
 
@@ -387,7 +388,7 @@ def test_diverged_workspace_is_left_byte_identical(tmp_path: Path) -> None:
     source, remote = _init_remote(tmp_path)
     checkout = tmp_path / "code"
     _clone(remote, checkout)
-    (checkout / "file.txt").write_text("local\n")
+    (checkout / "file.txt").write_text("local\n", encoding="utf-8")
     _git(checkout, "commit", "-am", "local")
     before = _tree_snapshot(checkout)
     _advance(source)
@@ -402,12 +403,12 @@ def test_refusals_distinguish_dirty_diverged_and_unreachable(tmp_path: Path) -> 
 
     dirty = tmp_path / "dirty"
     _clone(remote, dirty)
-    (dirty / "file.txt").write_text("dirty\n")
+    (dirty / "file.txt").write_text("dirty\n", encoding="utf-8")
     dirty_result = _run_provision(dirty, remote, tmp_path / "dirty-run")
 
     diverged = tmp_path / "diverged"
     _clone(remote, diverged)
-    (diverged / "file.txt").write_text("local\n")
+    (diverged / "file.txt").write_text("local\n", encoding="utf-8")
     _git(diverged, "commit", "-am", "local")
     _advance(source)
     diverged_result = _run_provision(diverged, remote, tmp_path / "diverged-run")
@@ -438,7 +439,7 @@ def test_workspace_with_unresolvable_head_is_recloned(tmp_path: Path) -> None:
     source, remote = _init_remote(tmp_path)
     checkout = tmp_path / "code"
     _clone(remote, checkout)
-    (checkout / ".git" / "HEAD").write_text("ref: refs/heads/missing\n")
+    (checkout / ".git" / "HEAD").write_text("ref: refs/heads/missing\n", encoding="utf-8")
     remote_tip = _advance(source)
 
     result = _run_provision(checkout, remote, tmp_path)
@@ -488,7 +489,7 @@ def test_interrupted_fast_forward_is_recovered_then_refreshed(tmp_path: Path) ->
     stuck_head = _head(checkout)
     interrupted_target = _advance(source)
     _interrupt_fast_forward(checkout, interrupted_target)
-    (source / "file.txt").write_text("three\n")
+    (source / "file.txt").write_text("three\n", encoding="utf-8")
     _git(source, "commit", "-am", "later")
     _git(source, "push", "origin", "main")
     remote_tip = _git(source, "rev-parse", "HEAD").stdout.strip()
@@ -506,7 +507,7 @@ def test_staged_tree_matching_no_main_commit_is_refused_with_a_marker(tmp_path: 
     source, remote = _init_remote(tmp_path)
     checkout = tmp_path / "code"
     _clone(remote, checkout)
-    (checkout / "file.txt").write_text("not on main\n")
+    (checkout / "file.txt").write_text("not on main\n", encoding="utf-8")
     _git(checkout, "add", "file.txt")
     _advance(source)
     before = _tree_snapshot(checkout)
@@ -528,7 +529,7 @@ def test_untracked_file_blocks_recovery_of_an_interrupted_fast_forward(tmp_path:
     _clone(remote, checkout)
     stuck_head = _head(checkout)
     _interrupt_fast_forward(checkout, _advance(source))
-    (checkout / "stray.txt").write_text("unexplained\n")
+    (checkout / "stray.txt").write_text("unexplained\n", encoding="utf-8")
 
     result = _run_provision(checkout, remote, tmp_path)
 
@@ -545,7 +546,7 @@ def test_unstaged_edit_blocks_recovery_of_an_interrupted_fast_forward(tmp_path: 
     _clone(remote, checkout)
     stuck_head = _head(checkout)
     _interrupt_fast_forward(checkout, _advance(source))
-    (checkout / "file.txt").write_text("hand edit after the interruption\n")
+    (checkout / "file.txt").write_text("hand edit after the interruption\n", encoding="utf-8")
     before = _tree_snapshot(checkout)
 
     result = _run_provision(checkout, remote, tmp_path)
@@ -577,7 +578,7 @@ def test_diverged_refusal_emits_a_marker(tmp_path: Path) -> None:
     source, remote = _init_remote(tmp_path)
     checkout = tmp_path / "code"
     _clone(remote, checkout)
-    (checkout / "file.txt").write_text("local\n")
+    (checkout / "file.txt").write_text("local\n", encoding="utf-8")
     _git(checkout, "commit", "-am", "local")
     _advance(source)
 

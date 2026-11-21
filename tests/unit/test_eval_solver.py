@@ -141,7 +141,7 @@ def test_plan_review_novelty_carryover_case_routes_and_scores() -> None:
 def test_fixture_files_are_written_into_the_store() -> None:
     case = {"id": "f1", "expect": "pass", "files": {"a/b.txt": "hello"}}
     with eval_solver.case_store(case) as root:
-        assert pathlib.Path(root, "a/b.txt").read_text() == "hello"
+        assert pathlib.Path(root, "a/b.txt").read_text(encoding="utf-8") == "hello"
 
 
 def test_unknown_prompt_raises() -> None:
@@ -168,7 +168,7 @@ def test_agentic_case_reroots_injected_runner_at_its_fixture(
     checkout = str(tmp_path / "checkout")
     pathlib.Path(checkout).mkdir()
     pathlib.Path(checkout, "src").mkdir()
-    pathlib.Path(checkout, "src", "cli.py").write_text("# the real checkout\n")
+    pathlib.Path(checkout, "src", "cli.py").write_text("# the real checkout\n", encoding="utf-8")
     seen: dict = {}
 
     def spy(*args, **kwargs) -> dict:
@@ -221,7 +221,7 @@ def test_code_review_files_case_reroots_prompt_and_runner(
     checkout = str(tmp_path / "checkout")
     pathlib.Path(checkout).mkdir()
     pathlib.Path(checkout, "docs").mkdir()
-    pathlib.Path(checkout, "docs", "client.md").write_text("checkout copy\n")
+    pathlib.Path(checkout, "docs", "client.md").write_text("checkout copy\n", encoding="utf-8")
     seen: dict[str, str] = {}
 
     def spy_run(self: PydanticAIRunner, request) -> dict:

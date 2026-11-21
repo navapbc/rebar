@@ -58,7 +58,7 @@ def _write_ticket(
             "parent_id": None,
         },
     }
-    with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w") as f:
+    with open(ticket_dir / f"1000-create-{ticket_id}-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(create_event, f)
 
     # STATUS event if not open
@@ -74,7 +74,7 @@ def _write_ticket(
                 "current_status": "open",
             },
         }
-        with open(ticket_dir / f"2000-status-{ticket_id}-STATUS.json", "w") as f:
+        with open(ticket_dir / f"2000-status-{ticket_id}-STATUS.json", "w", encoding="utf-8") as f:
             json.dump(status_event, f)
 
     # LINK events: each entry in deps means "dep_id blocks ticket_id".
@@ -99,7 +99,7 @@ def _write_ticket(
             blocker_dir = tracker_dir / dep_id
             blocker_dir.mkdir(parents=True, exist_ok=True)
             filename = f"{timestamp}-{link_uuid}-LINK.json"
-            with open(blocker_dir / filename, "w") as f:
+            with open(blocker_dir / filename, "w", encoding="utf-8") as f:
                 json.dump(link_event, f)
 
     return ticket_dir
@@ -292,7 +292,7 @@ def _write_depends_on_link(
         },
     }
     filename = f"{timestamp}-{link_uuid}-LINK.json"
-    with open(depending_dir / filename, "w") as f:
+    with open(depending_dir / filename, "w", encoding="utf-8") as f:
         json.dump(link_event, f)
 
 
@@ -373,7 +373,7 @@ def test_batch_close_finds_open_children(unblock: ModuleType) -> None:
     # Write parent ticket
     parent_dir = tracker_dir / "parent"
     parent_dir.mkdir()
-    with open(parent_dir / "1000-create-parent-CREATE.json", "w") as f:
+    with open(parent_dir / "1000-create-parent-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "event_type": "CREATE",
@@ -389,7 +389,7 @@ def test_batch_close_finds_open_children(unblock: ModuleType) -> None:
     # Write child-1 with parent_id=parent
     child1_dir = tracker_dir / "child-1"
     child1_dir.mkdir()
-    with open(child1_dir / "1000-create-child1-CREATE.json", "w") as f:
+    with open(child1_dir / "1000-create-child1-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "event_type": "CREATE",
@@ -409,7 +409,7 @@ def test_batch_close_finds_open_children(unblock: ModuleType) -> None:
     # Write child-2 with parent_id=parent
     child2_dir = tracker_dir / "child-2"
     child2_dir.mkdir()
-    with open(child2_dir / "1000-create-child2-CREATE.json", "w") as f:
+    with open(child2_dir / "1000-create-child2-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "event_type": "CREATE",
@@ -495,7 +495,7 @@ def test_batch_close_excludes_archived(unblock: ModuleType) -> None:
     # Write parent
     parent_dir = tracker_dir / "parent"
     parent_dir.mkdir()
-    with open(parent_dir / "1000-create-parent-CREATE.json", "w") as f:
+    with open(parent_dir / "1000-create-parent-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "event_type": "CREATE",
@@ -511,7 +511,7 @@ def test_batch_close_excludes_archived(unblock: ModuleType) -> None:
     # Write child-open with parent_id=parent
     child_open_dir = tracker_dir / "child-open"
     child_open_dir.mkdir()
-    with open(child_open_dir / "1000-create-childopen-CREATE.json", "w") as f:
+    with open(child_open_dir / "1000-create-childopen-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "event_type": "CREATE",
@@ -531,7 +531,7 @@ def test_batch_close_excludes_archived(unblock: ModuleType) -> None:
     # Write child-archived with parent_id=parent and ARCHIVED event
     child_arch_dir = tracker_dir / "child-archived"
     child_arch_dir.mkdir()
-    with open(child_arch_dir / "1000-create-childarch-CREATE.json", "w") as f:
+    with open(child_arch_dir / "1000-create-childarch-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "event_type": "CREATE",
@@ -547,7 +547,7 @@ def test_batch_close_excludes_archived(unblock: ModuleType) -> None:
             },
             f,
         )
-    with open(child_arch_dir / "2000-archived-childarch-ARCHIVED.json", "w") as f:
+    with open(child_arch_dir / "2000-archived-childarch-ARCHIVED.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "event_type": "ARCHIVED",
@@ -702,7 +702,7 @@ def test_detect_newly_unblocked_ignores_suggestions_dir(
     suggestion_file = (
         suggestions_dir / "1778262194332-b25af26e-4e7d6a27-ad27-4d6a-8184-5f894b522b0e.json"
     )
-    suggestion_file.write_text(json.dumps(suggestion_payload))
+    suggestion_file.write_text(json.dumps(suggestion_payload), encoding="utf-8")
 
     # Capture stderr to detect any spurious warnings
     captured_stderr = io.StringIO()
@@ -758,7 +758,7 @@ def _tombstoned_blocker_tracker(tmp_path: Path, tombstone_bytes: str, *, reducib
     else:
         blocker_dir = tracker_dir / "blk-tomb"
         blocker_dir.mkdir()
-    (blocker_dir / ".tombstone.json").write_text(tombstone_bytes)
+    (blocker_dir / ".tombstone.json").write_text(tombstone_bytes, encoding="utf-8")
 
     return tracker_dir
 

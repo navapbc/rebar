@@ -1287,7 +1287,7 @@ def test_merge_files_fixture_proves_auto_merge_default(tmp_path, monkeypatch):
     assert set(files) == {"/COMMIT_MSG", "/MERGE_LIST"}
     assert all(p in gc.MAGIC_PATHS for p in files)
     # commit fixture has 2 parents => merge detection
-    commit = _json.loads((_FIXTURES / "merge_commit_clean.json").read_text())
+    commit = _json.loads((_FIXTURES / "merge_commit_clean.json").read_text(encoding="utf-8"))
     assert len(commit["parents"]) >= 2
 
 
@@ -2024,7 +2024,7 @@ def _compose_stop_grace_seconds() -> float:
 
     yaml = pytest.importorskip("yaml")
     root = pathlib.Path(__file__).resolve().parents[2]
-    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text())
+    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text(encoding="utf-8"))
     raw = d["services"]["review-bot"].get("stop_grace_period")
     assert raw, "the review-bot service must declare a stop_grace_period"
     match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(s|m)?\s*", str(raw))
@@ -2043,7 +2043,7 @@ def test_reviewbot_healthcheck_probes_its_own_listener():
 
     yaml = pytest.importorskip("yaml")
     root = pathlib.Path(__file__).resolve().parents[2]
-    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text())
+    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text(encoding="utf-8"))
     hc = d["services"]["review-bot"].get("healthcheck")
     assert hc, "the review-bot service must declare a healthcheck (AC4: the zombie must alarm)"
     test = hc.get("test")
@@ -2231,7 +2231,7 @@ def test_reviewbot_compose_trusts_tickets_dir_via_safe_directory():
 
     yaml = pytest.importorskip("yaml")
     root = pathlib.Path(__file__).resolve().parents[2]
-    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text())
+    d = yaml.safe_load((root / "infra/compose/docker-compose.yml").read_text(encoding="utf-8"))
     env = d["services"]["review-bot"]["environment"]
     if isinstance(env, list):  # compose allows either a dict or a list of "K=V"
         env = dict(e.split("=", 1) for e in env)
@@ -3345,10 +3345,10 @@ def scratch_host(tmp_path, monkeypatch):
     monkeypatch.setattr(_config_sources, "user_config_path", lambda: tmp_path / "absent.toml")
 
     def declare() -> None:
-        (parent / ga._SCRATCH_REQUIRED_MARKER).write_text("")
+        (parent / ga._SCRATCH_REQUIRED_MARKER).write_text("", encoding="utf-8")
 
     def mount() -> None:
-        (base / ga._SCRATCH_MOUNTED_MARKER).write_text("")
+        (base / ga._SCRATCH_MOUNTED_MARKER).write_text("", encoding="utf-8")
 
     return SimpleNamespace(base=base, parent=parent, declare=declare, mount=mount)
 
@@ -3543,7 +3543,7 @@ def test_the_clone_guard_shares_the_gates_predicate_rather_than_reimplementing_i
 
     review_bot_dir = pathlib.Path(voter.__file__).parent
     for module in sorted(review_bot_dir.glob("*.py")):
-        text = module.read_text()
+        text = module.read_text(encoding="utf-8")
         assert ga._SCRATCH_MOUNTED_MARKER not in text, module
         assert ga._SCRATCH_REQUIRED_MARKER not in text, module
 
@@ -3553,7 +3553,7 @@ def test_monitoring_reads_the_same_proof_marker_as_the_clone_guard():
     from rebar.llm import gate_admission as ga
 
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    src = (repo_root / "infra" / "scripts" / "observability.sh").read_text()
+    src = (repo_root / "infra" / "scripts" / "observability.sh").read_text(encoding="utf-8")
     assert ga._SCRATCH_MOUNTED_MARKER in src
 
 

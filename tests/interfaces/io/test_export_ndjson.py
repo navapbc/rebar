@@ -108,7 +108,7 @@ def test_writes_to_file_and_returns_metadata(rebar_repo: Path, tmp_path: Path) -
     out = tmp_path / "dump.ndjson"
     meta = rebar.export_tickets(out=str(out), repo_root=str(rebar_repo))
     assert out.exists()
-    n_lines = len(out.read_text().splitlines())
+    n_lines = len(out.read_text(encoding="utf-8").splitlines())
     assert meta["exported"] == n_lines
     assert meta["schema_version"] == rebar._io.EXPORT_SCHEMA_VERSION
     assert meta["source_env"]

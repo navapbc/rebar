@@ -65,7 +65,7 @@ def _gate_steps() -> list[dict]:
             for item in node:
                 walk(item)
 
-    walk(yaml.safe_load(_GATE.read_text()))
+    walk(yaml.safe_load(_GATE.read_text(encoding="utf-8")))
     return found
 
 
@@ -97,7 +97,7 @@ def test_code_review_yaml_wires_provenance_from_an_agent_step() -> None:
 def gate_verdict(tmp_path, monkeypatch) -> dict:
     """Run the code-review gate with an offline model and return its terminal verdict."""
     monkeypatch.setenv("REBAR_USAGE_LOG", str(tmp_path / "usage.jsonl"))
-    doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text()))
+    doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text(encoding="utf-8")))
     cfg = replace(
         LLMConfig.from_env(),
         runner="pydantic_ai",

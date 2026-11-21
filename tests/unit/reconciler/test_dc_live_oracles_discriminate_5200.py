@@ -185,7 +185,7 @@ def test_the_writer_emits_the_COLON_label_form_and_nothing_emits_the_hyphen(supp
         "binding_recovery.py": "local_id",
     }
     for name, local_id_expr in writers.items():
-        source = (_ENGINE / name).read_text()
+        source = (_ENGINE / name).read_text(encoding="utf-8")
         assert f'f"rebar-id:{{{local_id_expr}}}"' in source, (
             f"{name} no longer writes the colon-form label; row 1's oracle asserts "
             f"{support.REBAR_ID_LABEL_PREFIX!r} and would be wrong"

@@ -36,13 +36,15 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _enable_completion_gate(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _in_progress_story(repo: Path) -> tuple[str, str]:
     """A story whose own commit (A = HEAD) carries its rebar-ticket trailer; returns (id, A)."""
     story = rebar.create_ticket("task", "raced story", description=_DESC, repo_root=str(repo))
-    (repo / "story.py").write_text("# story change\n")
+    (repo / "story.py").write_text("# story change\n", encoding="utf-8")
     _git(repo, "add", "story.py")
     _git(repo, "commit", "-q", "-m", f"story change\n\nrebar-ticket: {story}")
     a = _git(repo, "rev-parse", "HEAD")
@@ -63,7 +65,7 @@ def test_default_close_pins_head_across_a_concurrent_commit(
         verified = resolve_ref(ref or "HEAD", repo_root, fetch=False)
         # ...then an unrelated agent commits into the shared worktree, moving HEAD A -> B.
         root = Path(repo_root)
-        (root / "unrelated.py").write_text("# another ticket's in-flight work\n")
+        (root / "unrelated.py").write_text("# another ticket's in-flight work\n", encoding="utf-8")
         _git(root, "add", "unrelated.py")
         _git(root, "commit", "-q", "-m", "unrelated in-flight work")
         return {

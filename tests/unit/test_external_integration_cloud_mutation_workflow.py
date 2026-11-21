@@ -23,7 +23,7 @@ _MODULE_DIR = "tests/external/live_jira_cloud_mutation"
 
 def _load() -> dict:
     assert _WORKFLOW.exists(), f"expected workflow missing: {_WORKFLOW}"
-    return yaml.safe_load(_WORKFLOW.read_text())
+    return yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
 
 
 def _job() -> dict:

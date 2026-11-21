@@ -45,7 +45,7 @@ def _write_event(ticket_dir: Path, timestamp: int, uuid: str, event_type: str, d
         "data": data,
     }
     path = ticket_dir / f"{timestamp}-{uuid}-{event_type}.json"
-    path.write_text(json.dumps(payload))
+    path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
 

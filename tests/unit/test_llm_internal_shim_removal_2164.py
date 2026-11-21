@@ -65,7 +65,7 @@ def test_run_shape_record_writes_the_same_durable_json_fields(monkeypatch, tmp_p
 
     usage_log.record(row, op="plan-reviewer", model="claude-opus-4-8", provider="anthropic")
 
-    written = json.loads(target.read_text().strip())
+    written = json.loads(target.read_text(encoding="utf-8").strip())
     assert isinstance(written.pop("timestamp"), str)
     assert written == {
         "op": "plan-reviewer",

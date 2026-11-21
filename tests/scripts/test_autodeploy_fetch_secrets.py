@@ -20,7 +20,7 @@ _TARGET = "e" * 40
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -39,7 +39,7 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
 
     # A pre-existing .env whose content must survive a fetch-secrets FAILURE untouched.
     env_file = deploy_repo / "infra" / "compose" / ".env"
-    env_file.write_text("PREEXISTING=1\n")
+    env_file.write_text("PREEXISTING=1\n", encoding="utf-8")
 
     # Shared command log: stubs append a line as they run, so tests can assert ordering.
     cmd_log = tmp_path / "cmd-log"
@@ -85,7 +85,7 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
         _stub(bin_dir, tool, "exit 0")
 
     # Seed deployed-sha so this is neither first-run nor up-to-date.
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
 
     env = {
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -107,7 +107,10 @@ def _write_fetch_secrets(deploy_repo: Path, marker: Path, exit_code: int) -> Non
     """Place the fetch-secrets.sh autodeploy will invoke (the rsync'd TARGET copy) as a stub
     that records it ran (marker) then exits with ``exit_code``."""
     fs = deploy_repo / "infra" / "scripts" / "fetch-secrets.sh"
-    fs.write_text(f'#!/usr/bin/env bash\necho fetch-secrets >> "{marker}"\nexit {exit_code}\n')
+    fs.write_text(
+        f'#!/usr/bin/env bash\necho fetch-secrets >> "{marker}"\nexit {exit_code}\n',
+        encoding="utf-8",
+    )
     fs.chmod(0o755)
 
 
@@ -129,7 +132,7 @@ def test_fetch_secrets_runs_before_compose_up_on_secrets_change(
     _write_fetch_secrets(deploy_box["deploy_repo"], cmd_log, exit_code=0)  # type: ignore[arg-type]
 
     result = _run(deploy_box["env"])  # type: ignore[arg-type]
-    lines = cmd_log.read_text().splitlines() if cmd_log.exists() else []
+    lines = cmd_log.read_text(encoding="utf-8").splitlines() if cmd_log.exists() else []
 
     assert "fetch-secrets" in lines, (
         "autodeploy must re-run fetch-secrets.sh when a SECRETS_PATHS source changed "
@@ -154,14 +157,14 @@ def test_fetch_secrets_failure_aborts_deploy_failsafe(
     _write_fetch_secrets(deploy_box["deploy_repo"], cmd_log, exit_code=1)  # type: ignore[arg-type]
 
     result = _run(deploy_box["env"])  # type: ignore[arg-type]
-    lines = cmd_log.read_text().splitlines() if cmd_log.exists() else []
+    lines = cmd_log.read_text(encoding="utf-8").splitlines() if cmd_log.exists() else []
 
     assert "fetch-secrets" in lines, "fetch-secrets.sh must have been attempted"
     assert "compose-build" not in lines and "compose-up" not in lines, (
         "a fetch-secrets FAILURE must abort BEFORE building/starting the container — never "
         f"deploy against a stale/half-written secrets file. log={lines}\nstderr:\n{result.stderr}"
     )
-    assert env_file.read_text() == "PREEXISTING=1\n", (
+    assert env_file.read_text(encoding="utf-8") == "PREEXISTING=1\n", (
         "the existing .env must be left intact on failure"
     )
     assert (state / "deploy-backoff").exists(), (

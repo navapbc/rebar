@@ -67,7 +67,7 @@ class TrackerBuilder:
         d.mkdir(parents=True, exist_ok=True)
         ev_uuid = str(uuidlib.UUID(int=ts % (2**128)))
         fname = f"{ts}-{ev_uuid}-{event_type}.json"
-        (d / fname).write_text(json.dumps({"data": data}))
+        (d / fname).write_text(json.dumps({"data": data}), encoding="utf-8")
 
     def create(
         self, ticket_id: str, *, description: str, title: str = "T", ts: int | None = None
@@ -329,7 +329,7 @@ def test_build_corpus_empty_store(tmp_path):
     tracker = TrackerBuilder(tmp_path / "store")
     # An empty git repo has no commits at all; give it one so `git rev-list` has a
     # ref to walk, but with no ticket/event content.
-    (tracker.path / ".gitkeep").write_text("")
+    (tracker.path / ".gitkeep").write_text("", encoding="utf-8")
     _run_git(tracker.path, "add", "-A")
     _run_git(tracker.path, "commit", "-q", "-m", "empty")
 
@@ -370,7 +370,11 @@ def test_build_corpus_marks_unverified_when_fingerprint_matches_nothing(tmp_path
 
     cache_file = cache_dir / f"{manifest['content_hash']}.jsonl"
     assert cache_file.exists()
-    cached_rows = [json.loads(line) for line in cache_file.read_text().splitlines() if line.strip()]
+    cached_rows = [
+        json.loads(line)
+        for line in cache_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     assert all(row["ticket_id"] != ticket_id for row in cached_rows), (
         "an unverified row must not appear in the verified-only JSONL cache"
     )

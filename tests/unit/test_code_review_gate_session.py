@@ -46,7 +46,7 @@ def repo_with_origin(tmp_path, monkeypatch):
     _git(repo, "config", "commit.gpgsign", "false")
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
-    (repo / "x.py").write_text("print('hi')\n")
+    (repo / "x.py").write_text("print('hi')\n", encoding="utf-8")
     _git(repo, "add", "x.py")
     _git(repo, "commit", "-q", "-m", "content")
     _git(repo, "remote", "add", "origin", str(remote))

@@ -88,7 +88,9 @@ def test_jgit_materializer_seeds_and_validates_the_receive_section(tmp_path: Pat
 
     bad_root = tmp_path / "bad-root"
     (bad_root / "infra" / "compose").mkdir(parents=True)
-    (bad_root / "infra" / "compose" / "jgit.config").write_text("[core]\n\tautogc = false\n")
+    (bad_root / "infra" / "compose" / "jgit.config").write_text(
+        "[core]\n\tautogc = false\n", encoding="utf-8"
+    )
     result = subprocess.run(
         [
             "bash",
@@ -106,23 +108,23 @@ def test_jgit_materializer_seeds_and_validates_the_receive_section(tmp_path: Pat
 
 
 def test_compose_mounts_and_seeds_jgit_config() -> None:
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     volumes = doc["services"]["gerrit"]["volumes"]
     assert "gerrit_etc:/var/gerrit/etc" in volumes
 
-    text = _COMPOSE_UP.read_text()
+    text = _COMPOSE_UP.read_text(encoding="utf-8")
     assert "materialize-gerrit-jgit-config.sh" in text
     assert '"${SITE_HOST_DIR}"' in text
 
 
 def test_autodeploy_flags_jgit_config_for_manual_apply() -> None:
-    text = _AUTODEPLOY.read_text()
+    text = _AUTODEPLOY.read_text(encoding="utf-8")
     assert "infra/compose/jgit.config" in text
     assert "infra/scripts/materialize-gerrit-jgit-config.sh" in text
 
 
 def test_repair_runbook_is_backup_first_and_connectivity_verified() -> None:
-    text = _RUNBOOK.read_text()
+    text = _RUNBOOK.read_text(encoding="utf-8")
     assert "create-snapshot" in text
     assert "git fetch" in text
     assert "--prune" not in text
@@ -134,7 +136,7 @@ def test_repair_runbook_is_backup_first_and_connectivity_verified() -> None:
 
 
 def test_repair_runbook_uses_quarantine_and_post_repair_checks() -> None:
-    text = _RUNBOOK.read_text()
+    text = _RUNBOOK.read_text(encoding="utf-8")
     assert "refs/recovery/github/main" in text
     assert "+refs/heads/*:refs/heads/*" not in text
     assert "validate-gerrit-repair-refspecs.sh" in text

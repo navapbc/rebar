@@ -49,7 +49,7 @@ def _scan_id_tags(tracker_dir: Path) -> dict[str, list[str]]:
             continue
         for event in ticket_dir.glob("*.json"):
             try:
-                text = event.read_text()
+                text = event.read_text(encoding="utf-8")
             except OSError:
                 continue
             # Quoted token matching works at any event nesting depth.
@@ -116,8 +116,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nBacked up bind-state -> {backup}")
 
     bs.mkdir(parents=True, exist_ok=True)
-    bindings_path.write_text(json.dumps(_EMPTY_BINDINGS, indent=2))
-    prev_path.write_text("{}")
+    bindings_path.write_text(json.dumps(_EMPTY_BINDINGS, indent=2), encoding="utf-8")
+    prev_path.write_text("{}", encoding="utf-8")
     if retired_path.exists():
         retired_path.unlink()
     print("Cleared bindings.json, prev_snapshot.json, bindings-retired.json.")

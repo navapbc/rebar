@@ -38,7 +38,7 @@ def _seed_missing_create(repo: Path, ticket_id: str = "aaaa-bbbb-cccc-dddd") -> 
     d = _tracker(repo) / ticket_id
     d.mkdir(parents=True, exist_ok=True)
     (d / "0001-comment.json").write_text(
-        json.dumps({"type": "COMMENT", "ticket_id": ticket_id, "body": "orphan"})
+        json.dumps({"type": "COMMENT", "ticket_id": ticket_id, "body": "orphan"}), encoding="utf-8"
     )
     return ticket_id
 
@@ -184,7 +184,7 @@ def _seed_status_fork(repo: Path) -> str:
         "data": {"status": "closed", "current_status": "in_progress", "parent_status_uuid": None},
     }
     path = _tracker(repo) / ticket_id / f"{_FORK_TS}-{_FORK_UUID}-STATUS.json"
-    path.write_text(json.dumps(event))
+    path.write_text(json.dumps(event), encoding="utf-8")
     tracker = _tracker(repo)
     subprocess.run(["git", "add", "-A"], cwd=tracker, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "seed resolved fork"], cwd=tracker, check=True)

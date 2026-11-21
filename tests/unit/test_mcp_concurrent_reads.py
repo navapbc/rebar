@@ -40,7 +40,7 @@ def _create(tracker: Path, tid: str, ticket_type: str, parent: str | None, ts: i
             "parent_id": parent,
         },
     }
-    (d / "001-CREATE.json").write_text(json.dumps(event))
+    (d / "001-CREATE.json").write_text(json.dumps(event), encoding="utf-8")
 
 
 @pytest.fixture

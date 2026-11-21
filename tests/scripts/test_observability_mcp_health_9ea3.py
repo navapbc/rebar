@@ -28,7 +28,7 @@ _OFFSET_VARIABLES = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -79,7 +79,7 @@ def _environment(
     offsets = tmp_path / "offsets"
     offsets.mkdir()
     repl_log = tmp_path / "replication.log"
-    repl_log.write_text("")
+    repl_log.write_text("", encoding="utf-8")
 
     env = observability_env(tmp_path)
     env.update(
@@ -95,7 +95,7 @@ def _environment(
 
 def _values(log: Path, metric: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts or metric not in parts:
             continue

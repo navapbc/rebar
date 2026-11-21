@@ -166,7 +166,7 @@ def test_fetcher_enriches_issuelinks(tmp_path: Path, monkeypatch: pytest.MonkeyP
     scratch_retention.snapshots_dir(tmp_path).mkdir(parents=True)
     output_path = fetcher_mod.fetch_snapshot("test-pass", repo_root=tmp_path)
 
-    snapshot = json.loads(output_path.read_text())
+    snapshot = json.loads(output_path.read_text(encoding="utf-8"))
     assert snapshot["DIG-90"].get("issuelinks") == [link], (
         f"issuelinks field not enriched onto the snapshot: {snapshot['DIG-90']}"
     )

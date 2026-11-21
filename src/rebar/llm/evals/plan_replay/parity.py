@@ -45,7 +45,8 @@ def resolve_pinned_model(pass_name: str, *, repo_root: str | None = None) -> Pin
     config_root = tempfile.mkdtemp()
     atexit.register(shutil.rmtree, config_root, ignore_errors=True)
     (Path(config_root) / "rebar.toml").write_text(
-        f'[llm.model_classes]\n{class_name} = {{ model = "{resolved}", fallback = [] }}\n'
+        f'[llm.model_classes]\n{class_name} = {{ model = "{resolved}", fallback = [] }}\n',
+        encoding="utf-8",
     )
     return PinnedModel(model_id=resolved, config_root=config_root)
 

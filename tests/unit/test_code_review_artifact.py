@@ -376,7 +376,7 @@ def test_reviewed_file_hashes_absent_sentinel(store: Path) -> None:
     from rebar.llm.plan_review import attest
 
     root = str(store)
-    (store / "present.py").write_text("x = 1\n")
+    (store / "present.py").write_text("x = 1\n", encoding="utf-8")
     deps = sidecar.reviewed_file_hashes(["present.py", "gone.py"], repo_root=root)
     assert deps["gone.py"] == attest._ABSENT_HASH
     assert deps["present.py"] != attest._ABSENT_HASH and len(deps["present.py"]) == 64

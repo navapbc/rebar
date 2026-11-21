@@ -22,7 +22,7 @@ EMIT_PROMPTS = [
 @pytest.mark.parametrize("path", EMIT_PROMPTS)
 def test_emit_prompts_name_the_canonical_tag(path: str) -> None:
     """Each emit-side rule instructs the canonical `[non-codebase]` spelling."""
-    assert "[non-codebase]" in (REPO / path).read_text()
+    assert "[non-codebase]" in (REPO / path).read_text(encoding="utf-8")
 
 
 def test_coach_move_14_template_uses_the_canonical_tag() -> None:

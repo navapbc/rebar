@@ -34,7 +34,7 @@ _TARGETS = (
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -45,7 +45,7 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
     aws_log = tmp_path / "aws.log"
     # The journal's marker count is read from a file so a test can grow it between runs.
     markers_file = tmp_path / "markers"
-    markers_file.write_text(f"{_MARKERS_IN_JOURNAL}\n")
+    markers_file.write_text(f"{_MARKERS_IN_JOURNAL}\n", encoding="utf-8")
     _stub(
         bin_dir,
         "curl",
@@ -89,7 +89,7 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
     paths = {variable: offsets / variable.lower() for _metric, variable, _n in _TARGETS}
     assert not any(path.exists() for path in paths.values())
     repl_log = tmp_path / "replication.log"
-    repl_log.write_text("[ERROR]\n" * _MARKERS_IN_JOURNAL)
+    repl_log.write_text("[ERROR]\n" * _MARKERS_IN_JOURNAL, encoding="utf-8")
 
     env = observability_env(tmp_path)
     env.update(
@@ -107,7 +107,7 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
 
 def _values(log: Path, target: str) -> list[int]:
     values: list[int] = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
         if "--metric-name" not in parts or target not in parts:
             continue
@@ -117,7 +117,7 @@ def _values(log: Path, target: str) -> list[int]:
 
 def _state(path: Path) -> tuple[int, str]:
     """Read journal total and cursor; log-file totals have no cursor."""
-    fields = path.read_text().split()
+    fields = path.read_text(encoding="utf-8").split()
     return int(fields[0]), (fields[1] if len(fields) > 1 else "")
 
 
@@ -149,8 +149,8 @@ def test_markers_after_initialisation_still_publish(tmp_path: Path) -> None:
 
     run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
     # One more marker of every kind lands after the counters initialised.
-    paths["markers"].write_text(f"{_MARKERS_IN_JOURNAL + 1}\n")
-    paths["repl_log"].write_text("[ERROR]\n" * (_MARKERS_IN_JOURNAL + 1))
+    paths["markers"].write_text(f"{_MARKERS_IN_JOURNAL + 1}\n", encoding="utf-8")
+    paths["repl_log"].write_text("[ERROR]\n" * (_MARKERS_IN_JOURNAL + 1), encoding="utf-8")
     second = run_observability(["bash", str(SCRIPT)], env=env, timeout=SCRIPT_RUN_TIMEOUT)
 
     assert second.returncode == 0

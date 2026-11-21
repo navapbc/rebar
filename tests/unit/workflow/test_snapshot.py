@@ -28,9 +28,9 @@ def _repo(tmp_path: Path, files: dict[str, str], attrs: str | None = None) -> Pa
     for rel, content in files.items():
         p = repo / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content)
+        p.write_text(content, encoding="utf-8")
     if attrs is not None:
-        (repo / ".gitattributes").write_text(attrs)
+        (repo / ".gitattributes").write_text(attrs, encoding="utf-8")
     _git("add", "-A", cwd=repo)
     _git("commit", "-qm", "init", cwd=repo)
     return repo
@@ -39,8 +39,8 @@ def _repo(tmp_path: Path, files: dict[str, str], attrs: str | None = None) -> Pa
 def test_snapshot_extracts_tracked_tree_without_git(tmp_path: Path) -> None:
     repo = _repo(tmp_path, {"a.py": "print(1)\n", "pkg/b.py": "x = 2\n"})
     snapdir = snap.snapshot_at_ref("HEAD", str(repo))
-    assert (snapdir / "a.py").read_text() == "print(1)\n"
-    assert (snapdir / "pkg" / "b.py").read_text() == "x = 2\n"
+    assert (snapdir / "a.py").read_text(encoding="utf-8") == "print(1)\n"
+    assert (snapdir / "pkg" / "b.py").read_text(encoding="utf-8") == "x = 2\n"
     # No .git in the snapshot (git archive emits content only).
     assert not (snapdir / ".git").exists()
 
@@ -97,9 +97,9 @@ def test_snapshot_at_specific_commit_is_immutable(tmp_path: Path) -> None:
     # Snapshotting an OLD commit reflects that commit, not the moving branch.
     repo = _repo(tmp_path, {"a.py": "v1\n"})
     old_sha = snap.resolve_sha("HEAD", str(repo))
-    (repo / "a.py").write_text("v2\n")
+    (repo / "a.py").write_text("v2\n", encoding="utf-8")
     _git("commit", "-aqm", "v2", cwd=repo)
     old_snap = snap.snapshot_at_ref(old_sha, str(repo))
     head_snap = snap.snapshot_at_ref("HEAD", str(repo))
-    assert (old_snap / "a.py").read_text() == "v1\n"
-    assert (head_snap / "a.py").read_text() == "v2\n"
+    assert (old_snap / "a.py").read_text(encoding="utf-8") == "v1\n"
+    assert (head_snap / "a.py").read_text(encoding="utf-8") == "v2\n"

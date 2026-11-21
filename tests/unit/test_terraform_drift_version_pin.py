@@ -30,7 +30,7 @@ _WORKFLOW = _REPO / ".github" / "workflows" / "terraform-drift.yml"
 
 def _required_version_floor() -> Version:
     """The minimum Terraform core version required by infra/terraform/versions.tf."""
-    text = _VERSIONS.read_text()
+    text = _VERSIONS.read_text(encoding="utf-8")
     m = re.search(r'required_version\s*=\s*"[^"]*?>=\s*([0-9]+(?:\.[0-9]+){1,2})', text)
     assert m is not None, 'no `required_version = ">= X"` floor found in versions.tf'
     return Version(m.group(1))
@@ -38,7 +38,7 @@ def _required_version_floor() -> Version:
 
 def _drift_workflow_pins() -> list[Version]:
     """Every terraform_version pinned in the Terraform Drift workflow's setup-terraform steps."""
-    doc = yaml.safe_load(_WORKFLOW.read_text())
+    doc = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
     pins: list[Version] = []
     for job in (doc.get("jobs") or {}).values():
         for step in job.get("steps") or []:

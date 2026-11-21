@@ -139,7 +139,7 @@ def test_graph_archived_ticket_treated_as_closed(graph: ModuleType, tmp_path: Pa
             "parent_id": None,
         },
     }
-    with open(ticket_b_dir / "1000-create-ticket-b-CREATE.json", "w") as f:
+    with open(ticket_b_dir / "1000-create-ticket-b-CREATE.json", "w", encoding="utf-8") as f:
         json.dump(create_event, f)
 
     # ticket-b depends_on ticket-a: LINK event stored in ticket-b's dir.
@@ -155,7 +155,9 @@ def test_graph_archived_ticket_treated_as_closed(graph: ModuleType, tmp_path: Pa
             "relation": "depends_on",
         },
     }
-    with open(ticket_b_dir / "1500-link-ticket-b-depends_on-ticket-a-LINK.json", "w") as f:
+    with open(
+        ticket_b_dir / "1500-link-ticket-b-depends_on-ticket-a-LINK.json", "w", encoding="utf-8"
+    ) as f:
         json.dump(link_event, f)
 
     # ticket-a directory intentionally absent (archived/tombstoned)
@@ -184,7 +186,7 @@ def test_graph_tombstone_tombstone_json_respected(graph: ModuleType, tmp_path: P
     ticket_a_dir = tracker_dir / "ticket-a"
     ticket_a_dir.mkdir(parents=True)
     tombstone = {"status": "closed", "closed_at": 1700000000}
-    with open(ticket_a_dir / ".tombstone.json", "w") as f:
+    with open(ticket_a_dir / ".tombstone.json", "w", encoding="utf-8") as f:
         json.dump(tombstone, f)
 
     _write_blocks_link(tracker_dir, "ticket-a", "ticket-b", timestamp=1500)
@@ -212,7 +214,7 @@ def test_ready_to_work_when_blocker_has_deleted_tombstone(
     _write_ticket(tracker_dir, "ticket-a", status="open")
     ticket_a_dir = tracker_dir / "ticket-a"
     tombstone = {"status": "deleted", "deleted_at": 1700000000}
-    with open(ticket_a_dir / ".tombstone.json", "w") as f:
+    with open(ticket_a_dir / ".tombstone.json", "w", encoding="utf-8") as f:
         json.dump(tombstone, f)
 
     _write_blocks_link(tracker_dir, "ticket-a", "ticket-b", timestamp=1500)

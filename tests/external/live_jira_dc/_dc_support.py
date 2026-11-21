@@ -60,7 +60,7 @@ def read_inherited_env(work: Path) -> dict[str, str | None]:
         f"{INHERITED_ENV_FILE} is absent from {work} — the fixture did not record the inherited "
         f"environment, so any assertion about the JOB environment would pass vacuously"
     )
-    return dict(json.loads(path.read_text()))
+    return dict(json.loads(path.read_text(encoding="utf-8")))
 
 
 def collect_base_urls(root: Path) -> dict[str, list[str]]:
@@ -81,7 +81,7 @@ def collect_base_urls(root: Path) -> dict[str, list[str]]:
     for path in candidates:
         if not path.is_file():
             continue
-        for value in pattern.findall(path.read_text()):
+        for value in pattern.findall(path.read_text(encoding="utf-8")):
             collected.setdefault(value, []).append(str(path.relative_to(root)))
     return collected
 

@@ -2002,9 +2002,9 @@ def test_no_config_in_the_working_repo_points_anywhere_but_the_harness(
     # empty or broken collector could make the real-copy equality check pass (bug 59b2).
     decoy_root = dc_store_copy_repo / ".j11-decoy"
     (decoy_root / ".rebar").mkdir(parents=True, exist_ok=True)
-    (decoy_root / "rebar.toml").write_text(f'[reconciler]\nbase_url = "{BASE}"\n')
+    (decoy_root / "rebar.toml").write_text(f'[reconciler]\nbase_url = "{BASE}"\n', encoding="utf-8")
     (decoy_root / ".rebar" / "nested.toml").write_text(
-        '[reconciler]\nbase_url = "https://real-jira.example.com"\n'
+        '[reconciler]\nbase_url = "https://real-jira.example.com"\n', encoding="utf-8"
     )
     decoy_found = collect_base_urls(decoy_root)
     assert set(decoy_found) == {BASE, "https://real-jira.example.com"}, (

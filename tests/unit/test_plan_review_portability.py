@@ -57,7 +57,7 @@ def test_plan_review_prompts_do_not_expose_internal_adr_0043() -> None:
     leaked = [
         str(path.relative_to(ROOT))
         for path in prompt_paths
-        if INTERNAL_ADR.search(path.read_text())
+        if INTERNAL_ADR.search(path.read_text(encoding="utf-8"))
     ]
     assert leaked == []
 
@@ -65,7 +65,9 @@ def test_plan_review_prompts_do_not_expose_internal_adr_0043() -> None:
 def test_client_adr_present_in_target_repo_remains_grounded(tmp_path: Path) -> None:
     client_adr = tmp_path / "docs/adr/0043-client-authored-decision.md"
     client_adr.parent.mkdir(parents=True)
-    client_adr.write_text("# Client decision\n\nUse ticket-recorded deployment evidence.\n")
+    client_adr.write_text(
+        "# Client decision\n\nUse ticket-recorded deployment evidence.\n", encoding="utf-8"
+    )
     result = {
         "findings": [
             {

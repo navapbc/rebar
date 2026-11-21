@@ -65,7 +65,7 @@ def repo(tmp_path: Path) -> str:
     for rel, content in _REPO.items():
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content)
+        p.write_text(content, encoding="utf-8")
     return str(tmp_path)
 
 
@@ -152,7 +152,7 @@ def test_ctags_unsupported_lang(repo, ctags_index) -> None:
 def test_ctags_ambiguous_collision_is_not_a_false_refute(repo) -> None:
     # parse-error analogue for the resolve lane: a name with >1 def is the hazard the
     # guard sends to abstain(ambiguous) — never a false refute.
-    (Path(repo) / "pkg/dup.py").write_text("def reconcile(s):\n    return s\n")
+    (Path(repo) / "pkg/dup.py").write_text("def reconcile(s):\n    return s\n", encoding="utf-8")
     idx, _ = r.build_index(repo)
     assert idx is not None
     rec = r.refute_absence({"kind": "symbol", "name": "reconcile"}, repo_root=repo, index=idx)
@@ -267,7 +267,8 @@ def test_opengrep_invalid_detector_is_quarantined_scan_continues(repo) -> None:
     d.mkdir(parents=True, exist_ok=True)
     (d / "broken.yaml").write_text(
         "rules:\n  - id: project.broken.rule\n    languages: [javascript]\n"
-        '    severity: INFO\n    message: m\n    pattern: "(((unbalanced"\n'
+        '    severity: INFO\n    message: m\n    pattern: "(((unbalanced"\n',
+        encoding="utf-8",
     )
     reg_mod.clear_cache()
     try:
@@ -307,7 +308,7 @@ def test_metric_missing_tool(repo, monkeypatch) -> None:
 def test_metric_unsupported_lang_when_no_matching_files(tmp_path, monkeypatch) -> None:
     # A metric detector with a declared language absent from the repo is skipped with
     # an unsupported_lang coverage record (routing, not a tool failure).
-    (tmp_path / "only.txt").write_text("hello\n")
+    (tmp_path / "only.txt").write_text("hello\n", encoding="utf-8")
     det = reg_mod.Detector(
         id="project.metric.go-only",
         backend=reg_mod.BACKEND_METRIC,

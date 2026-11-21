@@ -74,7 +74,7 @@ def s3_record(requester: str, status: int = 403, error_code: str = "AccessDenied
 
 
 def test_terraform_replaces_raw_s3_4xx_alarm_with_filtered_metric() -> None:
-    text = TERRAFORM.read_text()
+    text = TERRAFORM.read_text(encoding="utf-8")
 
     assert 'lmn_private_context_alarm_name  = "lmn-staging-private-context-denied"' in text
     assert "alarm_name        = local.lmn_private_context_alarm_name" in text

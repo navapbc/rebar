@@ -43,7 +43,7 @@ def _buildkit_cap() -> str:
 
 def _write_stub(bindir: Path, name: str, body: str) -> None:
     p = bindir / name
-    p.write_text(f"#!/usr/bin/env bash\n{body}\n")
+    p.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
     p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -78,7 +78,7 @@ def _run_helpers(
         _write_stub(bindir, "df", "exit 1")
     else:
         avail = tmp_path / "avail"
-        avail.write_text(str(free_kb[0]))
+        avail.write_text(str(free_kb[0]), encoding="utf-8")
         _write_stub(
             bindir,
             "df",
@@ -96,7 +96,7 @@ def _run_helpers(
     # script's executable flow starts there) plus the helper functions under test
     # and their collaborators, which are defined further down (a shell function
     # block ends at the first column-0 closing brace).
-    src = SCRIPT.read_text()
+    src = SCRIPT.read_text(encoding="utf-8")
     prefix = src.split("# ── single-flight")[0]
     funcs = "\n".join(
         m.group(0)
@@ -144,7 +144,7 @@ bo_cnt=3
 
 def _calls(tmp_path: Path) -> list[str]:
     p = tmp_path / "calls.log"
-    return p.read_text().splitlines() if p.exists() else []
+    return p.read_text(encoding="utf-8").splitlines() if p.exists() else []
 
 
 def test_failure_path_prunes_and_records_backoff(tmp_path):
@@ -155,7 +155,7 @@ def test_failure_path_prunes_and_records_backoff(tmp_path):
         f"docker builder prune -f --keep-storage {_buildkit_cap()}",
         "docker image prune -f",
     ]
-    backoff = (tmp_path / "state" / "deploy-backoff").read_text().split()
+    backoff = (tmp_path / "state" / "deploy-backoff").read_text(encoding="utf-8").split()
     assert backoff[0] == "deadbeef"
     assert backoff[1] == "4"  # bo_cnt=3 -> fail #4 (prune did not disturb it)
 
@@ -248,7 +248,7 @@ def test_normal_pressure_prune_keeps_warm_build_cache(tmp_path):
 
 
 def test_no_uncapped_or_stray_prunes_in_script():
-    src = SCRIPT.read_text()
+    src = SCRIPT.read_text(encoding="utf-8")
     # comment-stripped code lines (trailing comments too — the tunable line
     # mentions the flag in its comment and must not count as an invocation).
     code = [ln.split("#")[0] for ln in src.splitlines()]
@@ -299,7 +299,7 @@ def test_the_keep_storage_cap_comes_from_the_shared_budget(tmp_path):
 def test_the_buildkit_cap_is_not_re_spelled_in_autodeploy(tmp_path):
     """A second copy of the number is the drift this indirection exists to remove."""
     cap = _buildkit_cap()
-    src = SCRIPT.read_text()
+    src = SCRIPT.read_text(encoding="utf-8")
     assert cap not in src, (
         f"autodeploy.sh spells the BuildKit cap ({cap}) itself; it must come from "
         "docker-storage-cap.sh --print-env so the prune and the daemon's builder.gc policy "
@@ -337,7 +337,7 @@ def test_an_unreadable_budget_skips_the_capped_prune_rather_than_guessing(tmp_pa
 def _orphan_sweep(tmp_path, *, tags: list[str], live: str, prev_sha: str):
     """Drive ``mcp_reconcile_orphans`` with its collaborators stubbed at the shell level."""
     (tmp_path / "state").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "state" / "mcp-previous-sha").write_text(prev_sha)
+    (tmp_path / "state" / "mcp-previous-sha").write_text(prev_sha, encoding="utf-8")
     tag_list = "\n".join(tags)
     drive = f"""
 mcp_live_port() {{ echo 8092; }}
@@ -377,7 +377,7 @@ def test_the_retention_sweep_never_forces_a_removal(tmp_path):
     assert res.returncode == 0, res.stderr
     for line in _calls(tmp_path):
         assert not line.startswith("docker image rm -f"), line
-    code = [ln.split("#")[0] for ln in SCRIPT.read_text().splitlines()]
+    code = [ln.split("#")[0] for ln in SCRIPT.read_text(encoding="utf-8").splitlines()]
     assert not [ln for ln in code if "image rm" in ln and " -f" in ln]
 
 

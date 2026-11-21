@@ -41,7 +41,7 @@ def _read_tombstone_status(ticket_dir: str) -> str | None:
     if not tombstone_path.is_file():
         return None
     try:
-        return str(json.loads(tombstone_path.read_text()).get("status", "deleted"))
+        return str(json.loads(tombstone_path.read_text(encoding="utf-8")).get("status", "deleted"))
     except Exception:  # noqa: BLE001 — tombstone read best-effort: a malformed/missing tombstone defaults to deleted
         return "deleted"
 

@@ -21,10 +21,18 @@ class FakeAcliClient:
 
     def __init__(self, fixture_dir: Path | None = None, **_kwargs: Any) -> None:
         d = fixture_dir or FIXTURE_DIR
-        self._search: list[dict[str, Any]] = json.loads((d / "search.json").read_text())
-        self._comment_map: dict[str, Any] = json.loads((d / "comment_map.json").read_text())
-        self._issuelinks_map: dict[str, Any] = json.loads((d / "issuelinks_map.json").read_text())
-        self._parent_map: dict[str, Any] = json.loads((d / "parent_map.json").read_text())
+        self._search: list[dict[str, Any]] = json.loads(
+            (d / "search.json").read_text(encoding="utf-8")
+        )
+        self._comment_map: dict[str, Any] = json.loads(
+            (d / "comment_map.json").read_text(encoding="utf-8")
+        )
+        self._issuelinks_map: dict[str, Any] = json.loads(
+            (d / "issuelinks_map.json").read_text(encoding="utf-8")
+        )
+        self._parent_map: dict[str, Any] = json.loads(
+            (d / "parent_map.json").read_text(encoding="utf-8")
+        )
 
     # --- production AcliClient surface (signatures mirror the real client) ---
 

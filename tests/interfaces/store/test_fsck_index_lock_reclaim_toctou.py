@@ -34,7 +34,7 @@ def _resolved_index_lock(tracker: str) -> Path:
 
 
 def _seed_stale_lock(lock_file: Path) -> None:
-    lock_file.write_text("stale-owner")
+    lock_file.write_text("stale-owner", encoding="utf-8")
     old = time.time() - (gitutil._INDEX_LOCK_STALE_S + 60)
     os.utime(lock_file, (old, old))
 
@@ -59,7 +59,7 @@ def test_fsck_check3_does_not_clobber_fresh_lock_replaced_midflight(rebar_repo: 
             return
         state["swapped"] = True
         lock_file.unlink()
-        lock_file.write_text(fresh_marker)
+        lock_file.write_text(fresh_marker, encoding="utf-8")
 
     # Hook for the FIXED code path (Check 3 -> hardened helper): the helper's probe
     # fires after the stale decision and before the guarded re-validation + unlink.
@@ -85,7 +85,7 @@ def test_fsck_check3_does_not_clobber_fresh_lock_replaced_midflight(rebar_repo: 
     fsck._scan(tracker, False, str(rebar_repo))
 
     assert lock_file.exists(), "the peer's fresh live index.lock was wrongly reclaimed"
-    assert lock_file.read_text() == fresh_marker
+    assert lock_file.read_text(encoding="utf-8") == fresh_marker
 
 
 def test_fsck_check3_still_reclaims_a_stationary_stale_lock(rebar_repo: Path):

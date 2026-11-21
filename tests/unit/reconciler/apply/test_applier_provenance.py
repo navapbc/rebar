@@ -137,7 +137,7 @@ def test_provenance_persisted_for_labels_field(applier, tmp_path):
     mapping_path = scratch_retention.mapping_path(tmp_path)
     assert mapping_path.exists(), "mapping.json must be created after update with set-valued field"
 
-    data = json.loads(mapping_path.read_text())
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
     assert "DIG-123" in data, f"mapping.json must have entry for DIG-123, got: {data!r}"
     assert "field_provenance" in data["DIG-123"], (
         f"mapping['DIG-123'] must have 'field_provenance' key, got: {data['DIG-123']!r}"
@@ -168,7 +168,7 @@ def test_provenance_labels_contains_field_values(applier, tmp_path):
         )
 
     mapping_path = scratch_retention.mapping_path(tmp_path)
-    data = json.loads(mapping_path.read_text())
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
     labels_provenance = data["DIG-456"]["field_provenance"]["labels"]
     for label in ["frontend", "ux"]:
         assert label in labels_provenance, (
@@ -222,7 +222,7 @@ def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
     mapping_path = scratch_retention.mapping_path(tmp_path)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
     # Pre-populate with an existing local_id -> jira_key mapping
-    mapping_path.write_text(json.dumps({"old-local-id": "DIG-1"}))
+    mapping_path.write_text(json.dumps({"old-local-id": "DIG-1"}), encoding="utf-8")
 
     mutation = _make_update_mutation("DIG-999", labels=["ops"])
     fake_acli, _ = _make_mock_acli()
@@ -242,7 +242,7 @@ def test_provenance_preserves_existing_mapping_entries(applier, tmp_path):
             ticket_plans=_plans([mutation]),
         )
 
-    data = json.loads(mapping_path.read_text())
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
     assert data.get("old-local-id") == "DIG-1", "Pre-existing mapping entry must be preserved"
     assert "DIG-999" in data, "New provenance entry for DIG-999 must be present"
 
@@ -300,7 +300,7 @@ def test_provenance_multiple_set_valued_fields(applier, tmp_path):
         )
 
     mapping_path = scratch_retention.mapping_path(tmp_path)
-    data = json.loads(mapping_path.read_text())
+    data = json.loads(mapping_path.read_text(encoding="utf-8"))
     provenance = data["DIG-300"]["field_provenance"]
     assert "labels" in provenance, "Expected 'labels' in field_provenance"
     assert "watchers" in provenance, "Expected 'watchers' in field_provenance"
@@ -331,7 +331,7 @@ def test_non_set_valued_fields_do_not_create_provenance(applier, tmp_path):
     mapping_path = scratch_retention.mapping_path(tmp_path)
     # mapping.json may or may not exist — if it does, DIG-400 should not have field_provenance
     if mapping_path.exists():
-        data = json.loads(mapping_path.read_text())
+        data = json.loads(mapping_path.read_text(encoding="utf-8"))
         if "DIG-400" in data:
             assert "field_provenance" not in data["DIG-400"], (
                 "Non-set-valued fields must not create field_provenance entries"

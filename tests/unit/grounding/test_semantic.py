@@ -36,7 +36,8 @@ def test_config_defaults_when_no_file(tmp_path) -> None:
 def test_config_parses_valid_t2_keys(tmp_path) -> None:
     (tmp_path / ".rebar").mkdir()
     (tmp_path / ".rebar" / "grounding.toml").write_text(
-        '[grounding]\nt2_enabled = true\nt2_backend = "pyright"\nt2_timeout_seconds = 12.5\n'
+        '[grounding]\nt2_enabled = true\nt2_backend = "pyright"\nt2_timeout_seconds = 12.5\n',
+        encoding="utf-8",
     )
     cfg = resolve.load_config(str(tmp_path))
     assert cfg.t2_enabled is True
@@ -50,7 +51,8 @@ def test_config_malformed_t2_keys_fail_open_to_defaults(tmp_path) -> None:
         "[grounding]\n"
         't2_enabled = "yes"\n'  # not a bool
         "t2_backend = 123\n"  # not a string
-        "t2_timeout_seconds = -5\n"  # not positive
+        "t2_timeout_seconds = -5\n",
+        encoding="utf-8",  # not positive
     )
     cfg = resolve.load_config(str(tmp_path))
     assert cfg.t2_enabled is False
@@ -61,7 +63,9 @@ def test_config_malformed_t2_keys_fail_open_to_defaults(tmp_path) -> None:
 def test_config_rejects_bool_timeout(tmp_path) -> None:
     # bool is an int subclass — it must not be accepted as a timeout number.
     (tmp_path / ".rebar").mkdir()
-    (tmp_path / ".rebar" / "grounding.toml").write_text("[grounding]\nt2_timeout_seconds = true\n")
+    (tmp_path / ".rebar" / "grounding.toml").write_text(
+        "[grounding]\nt2_timeout_seconds = true\n", encoding="utf-8"
+    )
     assert resolve.load_config(str(tmp_path)).t2_timeout_seconds == 30.0
 
 

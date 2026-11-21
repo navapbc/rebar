@@ -313,7 +313,7 @@ def test_fetch_overlap_zero_total() -> None:
 def test_prefetch_paragraph_before_volatile_and_inherited_by_successor() -> None:
     from pathlib import Path
 
-    md = Path("src/rebar/llm/reviewers/completion_verifier.md").read_text()
+    md = Path("src/rebar/llm/reviewers/completion_verifier.md").read_text(encoding="utf-8")
     before_volatile = md.split("<!--volatile-->", 1)[0]
     assert "prefetched_file_contents" in before_volatile
     assert "PRE-LOAD MANIFEST" in before_volatile

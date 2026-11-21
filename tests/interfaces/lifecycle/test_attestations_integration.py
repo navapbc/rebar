@@ -77,7 +77,7 @@ def _snapshot_compiled_state(store: Path, tid: str):
     tdir = _tdir(store, tid)
     snap = None
     for f in tdir.glob("*.json"):
-        ev = json.loads(f.read_text())
+        ev = json.loads(f.read_text(encoding="utf-8"))
         if ev.get("event_type") == "SNAPSHOT":
             snap = ev["data"]["compiled_state"]
     assert snap is not None, "no SNAPSHOT event written"
@@ -150,7 +150,7 @@ def test_legacy_snapshot_signature_folds_into_map(store: Path) -> None:
     tid = rebar.create_ticket("task", "legacy", repo_root=str(store))
     tdir = _tdir(store, tid)
     resolved = tdir.name
-    uuids = [json.loads(f.read_text()).get("uuid") for f in tdir.glob("*.json")]
+    uuids = [json.loads(f.read_text(encoding="utf-8")).get("uuid") for f in tdir.glob("*.json")]
     # Simulate an OLD-clone SNAPSHOT: compiled_state carries only the legacy single `signature`
     # (a plan-review record), with NO `attestations` map; it subsumes the genesis events.
     legacy_state = {

@@ -43,7 +43,9 @@ def test_commit_failure_returns_false_and_logs_error(
     bridge_dir = tracker_dir / ".bridge_state"
     bridge_dir.mkdir(parents=True)
     bindings_path = bridge_dir / "bindings.json"
-    bindings_path.write_text(json.dumps({"bindings": {"t1": {"jira_key": "DIG-1"}}, "reverse": {}}))
+    bindings_path.write_text(
+        json.dumps({"bindings": {"t1": {"jira_key": "DIG-1"}}, "reverse": {}}), encoding="utf-8"
+    )
 
     stub_bs = MagicMock()
 
@@ -96,7 +98,7 @@ def test_commit_failure_appends_alert(
     bridge_dir = tracker_dir / ".bridge_state"
     bridge_dir.mkdir(parents=True)
     bindings_path = bridge_dir / "bindings.json"
-    bindings_path.write_text(json.dumps({"bindings": {}, "reverse": {}}))
+    bindings_path.write_text(json.dumps({"bindings": {}, "reverse": {}}), encoding="utf-8")
 
     stub_bs = MagicMock()
 
@@ -133,7 +135,7 @@ def test_commit_failure_appends_alert(
 
     all_records = []
     for jf in jsonl_files:
-        for line in jf.read_text().splitlines():
+        for line in jf.read_text(encoding="utf-8").splitlines():
             try:
                 all_records.append(json.loads(line))
             except json.JSONDecodeError:
@@ -167,7 +169,7 @@ def test_commit_success_returns_true_no_alert(
     bridge_dir = tracker_dir / ".bridge_state"
     bridge_dir.mkdir(parents=True)
     bindings_path = bridge_dir / "bindings.json"
-    bindings_path.write_text(json.dumps({"bindings": {}, "reverse": {}}))
+    bindings_path.write_text(json.dumps({"bindings": {}, "reverse": {}}), encoding="utf-8")
     # A real tracker repo: the commit now goes through the locked store seam
     # (rebar._store.push.commit_tickets_branch), which a global subprocess mock
     # cannot meaningfully fake without restating the seam's internals.
@@ -201,7 +203,7 @@ def test_commit_success_returns_true_no_alert(
     if alerts_dir.is_dir():
         all_records = []
         for jf in alerts_dir.glob("*.jsonl"):
-            for line in jf.read_text().splitlines():
+            for line in jf.read_text(encoding="utf-8").splitlines():
                 try:
                     all_records.append(json.loads(line))
                 except json.JSONDecodeError:
@@ -223,7 +225,7 @@ def test_commit_failure_dedup_suppresses_second_alert(
     bridge_dir = tracker_dir / ".bridge_state"
     bridge_dir.mkdir(parents=True)
     bindings_path = bridge_dir / "bindings.json"
-    bindings_path.write_text(json.dumps({"bindings": {}, "reverse": {}}))
+    bindings_path.write_text(json.dumps({"bindings": {}, "reverse": {}}), encoding="utf-8")
 
     stub_bs = MagicMock()
 
@@ -252,7 +254,7 @@ def test_commit_failure_dedup_suppresses_second_alert(
     if alerts_dir.is_dir():
         all_records = []
         for jf in alerts_dir.glob("*.jsonl"):
-            for line in jf.read_text().splitlines():
+            for line in jf.read_text(encoding="utf-8").splitlines():
                 try:
                     all_records.append(json.loads(line))
                 except json.JSONDecodeError:

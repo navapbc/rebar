@@ -31,7 +31,7 @@ def _repo(tmp_path, monkeypatch):
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate"))
     rebar.init_repo(repo_root=str(repo))
-    (repo / "dep.py").write_text("ORIGINAL = 1\n")
+    (repo / "dep.py").write_text("ORIGINAL = 1\n", encoding="utf-8")
     _git(repo, "add", "dep.py")
     _git(repo, "commit", "-q", "-m", "dep v1")
     _git(repo, "remote", "add", "origin", str(remote))
@@ -81,7 +81,7 @@ def test_attested_claim_gate_ignores_uncommitted_working_tree_drift(tmp_path, mo
     _sign(repo, tid, attested=True)
 
     # Drift the WORKING TREE only (the current gate ref still says v1).
-    (repo / "dep.py").write_text("DRIFTED = 999\n")
+    (repo / "dep.py").write_text("DRIFTED = 999\n", encoding="utf-8")
 
     chk = attest.claim_gate_check(tid, repo_root=str(repo))
     # The claim gate re-hashes at the CURRENT gate ref's snapshot — a mere working-tree
@@ -97,7 +97,7 @@ def test_attested_claim_gate_sees_committed_drift_in_signed_dependency(tmp_path,
     tid = rebar.create_ticket("task", "coherence", repo_root=str(repo))
     _sign(repo, tid, attested=True)
 
-    (repo / "dep.py").write_text("DRIFTED = 999\n")
+    (repo / "dep.py").write_text("DRIFTED = 999\n", encoding="utf-8")
     _git(repo, "add", "dep.py")
     _git(repo, "commit", "-q", "-m", "dep v2")  # the attested basis (ref=HEAD) moved
 
@@ -113,7 +113,7 @@ def test_attested_claim_gate_ignores_unrelated_committed_change(tmp_path, monkey
     tid = rebar.create_ticket("task", "coherence", repo_root=str(repo))
     _sign(repo, tid, attested=True)
 
-    (repo / "unrelated.py").write_text("OTHER = 1\n")
+    (repo / "unrelated.py").write_text("OTHER = 1\n", encoding="utf-8")
     _git(repo, "add", "unrelated.py")
     _git(repo, "commit", "-q", "-m", "unrelated")
 
@@ -147,7 +147,7 @@ def test_local_gate_config_uses_working_tree_basis_on_both_sides(tmp_path, monke
     assert signing.verified_at_sha_from_manifest(v["manifest"]) is None
     # A local-configured gate re-hashes the working tree (pre-S4b behavior), so a
     # working-tree drift DOES register as stale-code (coherent: both sides used the tree).
-    (repo / "dep.py").write_text("DRIFTED = 999\n")
+    (repo / "dep.py").write_text("DRIFTED = 999\n", encoding="utf-8")
     chk = attest.claim_gate_check(tid, repo_root=str(repo))
     assert chk["verdict"] == "stale-code", chk
 
@@ -170,7 +170,7 @@ def test_hash_basis_resolution(tmp_path, monkeypatch):
     monkeypatch.setenv("REBAR_GATE_REF", "origin/main")
     basis = attest.gate_ref_hash_basis(str(repo)).path
     assert basis.endswith(main_sha)
-    assert (Path(basis) / "dep.py").read_text() == "ORIGINAL = 1\n"
+    assert (Path(basis) / "dep.py").read_text(encoding="utf-8") == "ORIGINAL = 1\n"
     # gate ref + local config → the working tree (the documented back-out)
     monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
     basis = attest.gate_ref_hash_basis(str(repo)).path
@@ -197,7 +197,7 @@ def test_attested_claim_gate_refuses_to_certify_when_the_gate_ref_is_unresolvabl
     _sign(repo, tid, attested=True)
 
     # The signed dependency drifts and LANDS on the gate ref …
-    (repo / "dep.py").write_text("DRIFTED = 999\n")
+    (repo / "dep.py").write_text("DRIFTED = 999\n", encoding="utf-8")
     _git(repo, "add", "dep.py")
     _git(repo, "commit", "-q", "-m", "dep v2")
     _git(repo, "push", "-q", "origin", "main")
@@ -217,7 +217,7 @@ def test_attested_claim_gate_refuses_to_certify_when_the_gate_ref_is_unresolvabl
     # basis genuinely holds the reviewed bytes — so an unguarded comparison finds NO drift.
     basis = attest.gate_ref_hash_basis(str(repo)).path
     assert basis == str(rebar.config.repo_root(str(repo))), "the working-tree substitution fired"
-    assert (Path(basis) / "dep.py").read_text() == "ORIGINAL = 1\n"
+    assert (Path(basis) / "dep.py").read_text(encoding="utf-8") == "ORIGINAL = 1\n"
 
     chk = attest.claim_gate_check(tid, repo_root=str(repo))
     assert chk["ok"] is False, chk

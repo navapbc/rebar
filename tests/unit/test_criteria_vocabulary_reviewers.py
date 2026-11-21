@@ -27,7 +27,7 @@ _EXCLUDED = {
 
 
 def _sc_hits(path: Path) -> list[str]:
-    return [ln for ln in path.read_text().splitlines() if _SC_RE.search(ln)]
+    return [ln for ln in path.read_text(encoding="utf-8").splitlines() if _SC_RE.search(ln)]
 
 
 def _in_scope_files() -> list[Path]:
@@ -63,13 +63,13 @@ def test_the_dod_uncertifiable_wording_is_left_intact(name: str) -> None:
 # ── held-out: the bare-SC abbreviation ────────────────────────────────────────
 def test_no_bare_sc_abbreviation_in_g3() -> None:
     """G3 carried the repo's only two bare `SC` tokens; both must be renamed."""
-    text = (_REVIEWERS / "plan_review_G3.md").read_text()
+    text = (_REVIEWERS / "plan_review_G3.md").read_text(encoding="utf-8")
     assert re.findall(r"\bSCs?\b", text) == []
 
 
 def test_g3_still_teaches_the_contradiction_patterns() -> None:
     """Renaming the token must not delete the guidance it belonged to."""
-    text = (_REVIEWERS / "plan_review_G3.md").read_text()
+    text = (_REVIEWERS / "plan_review_G3.md").read_text(encoding="utf-8")
     assert "AC-CONTRADICTION PATTERNS" in text
     assert "annotates exceptions" in text
 
@@ -81,7 +81,7 @@ def test_generated_criteria_guide_is_regenerated_and_still_generated() -> None:
     contract is therefore "no SC vocabulary EXCEPT that one echo", not "none at all".
     """
     guide = Path(__file__).resolve().parents[2] / "docs" / "plan-review-criteria-guide.md"
-    text = guide.read_text()
+    text = guide.read_text(encoding="utf-8")
 
     hits = [ln for ln in text.splitlines() if _SC_RE.search(ln)]
     unexpected = [ln for ln in hits if "for a trial" not in ln]

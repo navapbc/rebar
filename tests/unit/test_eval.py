@@ -27,7 +27,8 @@ def test_user_spec_overrides_packaged(tmp_path) -> None:
     (d / "code-quality.eval.yaml").write_text(
         "prompt: code-quality\nmodel: anthropic:claude-x\nepochs: 1\n"
         "gate: at_least(1)\ncoverage_threshold: 0.5\n"
-        "scorers:\n  - {type: deterministic, name: ok}\n"
+        "scorers:\n  - {type: deterministic, name: ok}\n",
+        encoding="utf-8",
     )
     spec = ev.load_eval_spec("code-quality", repo_root=str(tmp_path))
     assert spec["epochs"] == 1  # the user spec, not the packaged one

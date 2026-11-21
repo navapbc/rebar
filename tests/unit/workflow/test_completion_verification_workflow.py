@@ -27,7 +27,7 @@ _WF = pathlib.Path("src/rebar/llm/workflow/gates/completion-verification.yaml")
 
 
 def _doc() -> dict:
-    return _migrate.migrate_to_current(yaml.safe_load(_WF.read_text()))
+    return _migrate.migrate_to_current(yaml.safe_load(_WF.read_text(encoding="utf-8")))
 
 
 class _Rec(_ex.RunRecorder):
@@ -144,7 +144,7 @@ def test_workflow_validates_and_lints():
     assert _schema.validate_document(doc) == []
     findings = [
         str(f)
-        for f in _lint.lint_workflow(_WF.read_text(), check_prompts=True)
+        for f in _lint.lint_workflow(_WF.read_text(encoding="utf-8"), check_prompts=True)
         if f.severity != "warning"
     ]
     assert findings == [], findings

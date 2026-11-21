@@ -42,7 +42,9 @@ def _log(monkeypatch, tmp_path):
 def _rows(target) -> list[dict]:
     if not target.exists():
         return []
-    return [json.loads(line) for line in target.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in target.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 def _run(model, *, ticket_id: str | None = None):
@@ -269,7 +271,8 @@ def test_a_pre_aec1_log_with_no_shape_fields_summarizes_unchanged(tmp_path):
                 "requests": 1,
             }
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     out = usage_log.summarize(str(path))
     assert "### LLM token usage" in out

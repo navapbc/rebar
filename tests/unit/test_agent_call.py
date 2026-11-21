@@ -269,7 +269,7 @@ def test_spend_record_keeps_the_op_model_and_derived_provider_wiring(monkeypatch
         call_label="plan-reviewer",
         ran_model="anthropic:claude-sonnet-4-6",
     )
-    row = json.loads(sink.read_text().splitlines()[0])
+    row = json.loads(sink.read_text(encoding="utf-8").splitlines()[0])
     assert row["op"] == "plan-reviewer"
     assert row["model"] == "anthropic:claude-sonnet-4-6"
     assert row["provider"] == "anthropic"

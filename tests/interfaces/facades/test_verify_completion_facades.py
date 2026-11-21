@@ -76,7 +76,9 @@ def _capture_graph():
 
 def _enable_close_gate(repo: Path) -> None:
     """Turn ON the completion-verification CLOSE gate via rebar.toml."""
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _seed_in_progress(repo: Path) -> str:

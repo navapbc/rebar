@@ -129,7 +129,7 @@ def test_reducer_skips_corrupt_json_with_warning(tmp_path: Path, reducer: Module
 
     # Write a malformed JSON file in the same directory
     corrupt_file = ticket_dir / f"1742605300-{_UUID2}-STATUS.json"
-    corrupt_file.write_text("{this is not valid json!!!}")
+    corrupt_file.write_text("{this is not valid json!!!}", encoding="utf-8")
 
     # The reducer must NOT raise; it should return valid state
     with warnings.catch_warnings(record=True):
@@ -444,7 +444,7 @@ def test_reducer_returns_error_state_for_ticket_dir_with_zero_valid_events(
 
     # Write only a corrupt JSON file — no valid events at all
     corrupt_file = ticket_dir / f"1742605200-{_UUID}-CREATE.json"
-    corrupt_file.write_text("{this is not valid json at all!!!}")
+    corrupt_file.write_text("{this is not valid json at all!!!}", encoding="utf-8")
 
     state = reducer.reduce_ticket(ticket_dir)
 
@@ -484,7 +484,7 @@ def test_reducer_flags_corrupt_create_as_fsck_needed(tmp_path: Path, reducer: Mo
         },
     }
     create_file = ticket_dir / f"1742605200-{_UUID}-CREATE.json"
-    create_file.write_text(json.dumps(malformed_create))
+    create_file.write_text(json.dumps(malformed_create), encoding="utf-8")
 
     # A STATUS event follows the corrupt CREATE
     _write_event(
@@ -535,7 +535,7 @@ def test_reducer_skips_corrupt_json_event_and_returns_valid_state(
 
     # Corrupt event file (invalid JSON)
     corrupt_file = ticket_dir / "1742605250-bad-uuid-STATUS.json"
-    corrupt_file.write_text("THIS IS NOT VALID JSON {{{")
+    corrupt_file.write_text("THIS IS NOT VALID JSON {{{", encoding="utf-8")
 
     # Valid COMMENT event after the corrupt one
     _write_event(
@@ -579,7 +579,7 @@ def test_reducer_emits_warning_for_corrupt_event(
     )
 
     corrupt_file = ticket_dir / "1742605250-corrupt-uuid-STATUS.json"
-    corrupt_file.write_text("{not valid json at all")
+    corrupt_file.write_text("{not valid json at all", encoding="utf-8")
 
     # Clear any cached state so reducer processes fresh
     cache_file = ticket_dir / ".cache.json"
@@ -618,7 +618,7 @@ def test_reducer_skips_corrupt_event_in_snapshot_pass1(tmp_path: Path, reducer: 
 
     # Corrupt event that pass 1 must skip
     corrupt_file = ticket_dir / "1742605250-corrupt-uuid-STATUS.json"
-    corrupt_file.write_text("<<<CORRUPT>>>")
+    corrupt_file.write_text("<<<CORRUPT>>>", encoding="utf-8")
 
     # Write a SNAPSHOT after the corrupt event
     snapshot_payload = {
@@ -644,7 +644,7 @@ def test_reducer_skips_corrupt_event_in_snapshot_pass1(tmp_path: Path, reducer: 
         },
     }
     (ticket_dir / "1742605300-snapshot-uuid-pass1-SNAPSHOT.json").write_text(
-        json.dumps(snapshot_payload)
+        json.dumps(snapshot_payload), encoding="utf-8"
     )
 
     state = reducer.reduce_ticket(ticket_dir)
@@ -664,8 +664,8 @@ def test_reducer_all_events_corrupt_returns_error_dict(tmp_path: Path, reducer: 
     ticket_dir.mkdir()
 
     # Write only corrupt event files
-    (ticket_dir / "1742605200-bad1-CREATE.json").write_text("NOT JSON 1")
-    (ticket_dir / "1742605300-bad2-STATUS.json").write_text("NOT JSON 2")
+    (ticket_dir / "1742605200-bad1-CREATE.json").write_text("NOT JSON 1", encoding="utf-8")
+    (ticket_dir / "1742605300-bad2-STATUS.json").write_text("NOT JSON 2", encoding="utf-8")
 
     state = reducer.reduce_ticket(ticket_dir)
 

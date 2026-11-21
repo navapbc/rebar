@@ -223,8 +223,8 @@ def main() -> int:
 def _write_evidence(verdicts: dict[str, str]) -> None:
     """Persist verdicts and every recorded round trip on any exit path."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    (OUT_DIR / "verdicts.json").write_text(json.dumps(verdicts, indent=2))
-    (OUT_DIR / "evidence.json").write_text(json.dumps(_EVIDENCE, indent=2))
+    (OUT_DIR / "verdicts.json").write_text(json.dumps(verdicts, indent=2), encoding="utf-8")
+    (OUT_DIR / "evidence.json").write_text(json.dumps(_EVIDENCE, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

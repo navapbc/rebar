@@ -198,6 +198,7 @@ def test_worktree_add_failure_is_reported_as_failure(tmp_path: Path) -> None:
     assert not (tmp_path / "make-args.txt").exists()
 
 
+@_POSIX_SHELL_SUBJECT
 def test_successful_provisioning_still_succeeds(tmp_path: Path) -> None:
     # The fix must not be "always fail": the happy path keeps its exit 0 and its message.
     result = _run_worktree(tmp_path)
@@ -284,6 +285,7 @@ def test_missing_origin_prints_the_restore_command_and_runbook(tmp_path: Path) -
     assert RUNBOOK in combined, combined
 
 
+@_POSIX_SHELL_SUBJECT
 def test_missing_gerrit_warns_but_still_creates_the_worktree(tmp_path: Path) -> None:
     # Creating a worktree never talks to gerrit; only the later push does. So a missing
     # gerrit remote is announced, not fatal.

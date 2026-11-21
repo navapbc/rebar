@@ -44,14 +44,18 @@ def test_sidecar_only_change_is_staged_and_committed(tmp_path: Path) -> None:
     bridge.mkdir()
     bindings = bridge / "bindings.json"
     rotation = bridge / "get_rotation.json"
-    bindings.write_text(json.dumps({"version": 2, "bindings": {}, "reverse": {}}))
-    rotation.write_text(json.dumps({"version": 1, "last_get_pass": {"DIG-1": "p1"}}))
+    bindings.write_text(json.dumps({"version": 2, "bindings": {}, "reverse": {}}), encoding="utf-8")
+    rotation.write_text(
+        json.dumps({"version": 1, "last_get_pass": {"DIG-1": "p1"}}), encoding="utf-8"
+    )
     _git(tracker, "add", ".bridge_state/bindings.json", ".bridge_state/get_rotation.json")
     _git(tracker, "commit", "--no-verify", "-m", "initial rotation state")
     before = _git(tracker, "rev-parse", "HEAD")
     bindings_before = bindings.read_bytes()
 
-    rotation.write_text(json.dumps({"version": 1, "last_get_pass": {"DIG-1": "p2"}}))
+    rotation.write_text(
+        json.dumps({"version": 1, "last_get_pass": {"DIG-1": "p2"}}), encoding="utf-8"
+    )
     pass_support = _load_pass_support()
     assert pass_support._commit_binding_store_snapshot(object(), tmp_path, "rotation-only") is True
 
@@ -93,10 +97,11 @@ def test_cutover_commit_contains_sidecar_only_rotation_state(tmp_path: Path) -> 
                 },
                 "reverse": {"DIG-1": "loc-1"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     (bridge / "get_rotation.json").write_text(
-        json.dumps({"version": 1, "last_get_pass": {"DIG-1": "p1"}})
+        json.dumps({"version": 1, "last_get_pass": {"DIG-1": "p1"}}), encoding="utf-8"
     )
     _git(tracker, "add", ".bridge_state/bindings.json", ".bridge_state/get_rotation.json")
     _git(tracker, "commit", "--no-verify", "-m", "initial mixed rotation state")

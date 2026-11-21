@@ -19,7 +19,7 @@ _TARGET = "e" * 40
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -41,11 +41,11 @@ def _make_box(tmp_path: Path, diff_pathspec: str) -> dict[str, object]:
     # proof), placed at the exact path autodeploy invokes ($MIRROR_DIR/infra/scripts/...).
     marker = tmp_path / "installer-ran"
     installer = mirror / "infra" / "scripts" / "install-certbot-timer.sh"
-    installer.write_text(f'#!/usr/bin/env bash\necho ran > "{marker}"\nexit 0\n')
+    installer.write_text(f'#!/usr/bin/env bash\necho ran > "{marker}"\nexit 0\n', encoding="utf-8")
     installer.chmod(0o755)
 
     # Seed deployed-sha so this is neither first-run nor up-to-date.
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
 
     # git stub: only `diff … <diff_pathspec>` reports a change; BOT/CONFIG diffs are empty.
     _stub(
@@ -179,7 +179,7 @@ def test_autodeploy_bootstrap_clone_is_bounded(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "AUTODEPLOY_ERROR" in result.stderr
     assert "mirror-clone-failed" in result.stderr
-    assert timeout_log.read_text().strip().startswith("7 git clone -q")
+    assert timeout_log.read_text(encoding="utf-8").strip().startswith("7 git clone -q")
 
 
 def test_certbot_renew_service_renders_finite_start_timeout(tmp_path: Path) -> None:
@@ -206,7 +206,7 @@ def test_certbot_renew_service_renders_finite_start_timeout(tmp_path: Path) -> N
         check=False,
     )
 
-    service = (unit_dir / "certbot-renew.service").read_text()
+    service = (unit_dir / "certbot-renew.service").read_text(encoding="utf-8")
     assert result.returncode == 0, result.stderr
     assert "Type=oneshot" in service
     assert "TimeoutStartSec=" in service

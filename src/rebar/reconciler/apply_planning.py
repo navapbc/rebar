@@ -344,7 +344,7 @@ def _emit_mode_manifest(
         suffix=".json.tmp",
     )
     try:
-        with os.fdopen(fd, "w") as tmp_f:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_f:
             json.dump(rendered_with_meta, tmp_f, indent=2)
         replace_with_retry(tmp_path, str(manifest_path))
     except BaseException:

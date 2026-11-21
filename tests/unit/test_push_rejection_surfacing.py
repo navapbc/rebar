@@ -76,7 +76,7 @@ def rejecting_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
 
     # Seed a shared base commit and publish it, so origin/tickets EXISTS -- the incident
     # shape (a diverging branch), not a first-push-of-a-new-branch.
-    (tracker / "seed.json").write_text("{}\n")
+    (tracker / "seed.json").write_text("{}\n", encoding="utf-8")
     _git(tracker, "add", "seed.json")
     _git(tracker, "commit", "-q", "-m", "seed")
     _git(tracker, "push", "-q", "origin", "HEAD:tickets")
@@ -84,12 +84,14 @@ def rejecting_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
 
     # Now arm the policy decline.
     hook = origin / "hooks" / "pre-receive"
-    hook.write_text(_GH013_HOOK)
+    hook.write_text(_GH013_HOOK, encoding="utf-8")
     hook.chmod(0o755)
     _bare_git(origin, "config", "core.hooksPath", str(origin / "hooks"))
 
     # One local-only commit: the write whose push will be rejected.
-    (tracker / "evidence.json").write_text('{"body": "evidence recorded during the outage"}\n')
+    (tracker / "evidence.json").write_text(
+        '{"body": "evidence recorded during the outage"}\n', encoding="utf-8"
+    )
     _git(tracker, "add", "evidence.json")
     _git(tracker, "commit", "-q", "-m", "ticket: COMMENT evidence")
 
@@ -140,7 +142,7 @@ def test_policy_rejection_surfaces_the_unpushed_backlog(
     # Two more local writes, so the backlog is unambiguously 3 (not 0 or 1, which could be
     # matched by an incidental digit in a path or a retry count).
     for n in range(2):
-        (tracker / f"more{n}.json").write_text("{}\n")
+        (tracker / f"more{n}.json").write_text("{}\n", encoding="utf-8")
         _git(tracker, "add", f"more{n}.json")
         _git(tracker, "commit", "-q", "-m", f"ticket: COMMENT more{n}")
     assert _ahead(tracker) == 3
@@ -171,7 +173,7 @@ def test_policy_rejection_is_not_retried_as_a_non_fast_forward(
     with caplog.at_level(logging.WARNING, logger="rebar._store.push"):
         push.push_tickets_branch(str(tracker))
 
-    attempts = len([ln for ln in reject_log.read_text().splitlines() if ln.strip()])
+    attempts = len([ln for ln in reject_log.read_text(encoding="utf-8").splitlines() if ln.strip()])
     assert attempts == 1, (
         f"a permanent policy rejection hit the remote {attempts} times; it is misclassified "
         "as a retriable non-fast-forward and burns the whole retry budget on futile "

@@ -44,7 +44,7 @@ def tmp_git_repo_with_tickets(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
     _git(["config", "user.email", "test@example.com"], tmp_path)
     _git(["config", "user.name", "Test"], tmp_path)
-    (tmp_path / "README.md").write_text("hello\n")
+    (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
     _git(["add", "README.md"], tmp_path)
     _git(["commit", "-m", "init"], tmp_path)
     return tmp_path

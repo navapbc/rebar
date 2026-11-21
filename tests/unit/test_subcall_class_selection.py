@@ -241,7 +241,7 @@ def _parsed(path: pathlib.Path) -> ast.Module:
     ``_verdict`` and function discovery repeatedly walk the same trees; process lifetime keeps
     this cache from surviving a later source change.
     """
-    return ast.parse(path.read_text())
+    return ast.parse(path.read_text(encoding="utf-8"))
 
 
 _Function = ast.FunctionDef | ast.AsyncFunctionDef

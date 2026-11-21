@@ -82,7 +82,7 @@ def test_cli_threads_ref_source(rebar_repo, monkeypatch, tmp_path):
     tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
     monkeypatch.chdir(rebar_repo)
     spec = tmp_path / "spec.txt"
-    spec.write_text("spec")
+    spec.write_text("spec", encoding="utf-8")
 
     cli._review_code(["--diff-file", str(spec), "--ref", "feat/y", "--source", "attested"])
     assert cap["review_code"] == ("feat/y", "attested")
@@ -123,7 +123,7 @@ def test_adr_records_cli_mcp_mapping_and_cwd_decoupling():
             / "adr"
             / "0005-snapshot-cache-architecture.md"
         )
-        .read_text()
+        .read_text(encoding="utf-8")
         .lower()
     )
     assert "one-to-one" in adr and "cli" in adr

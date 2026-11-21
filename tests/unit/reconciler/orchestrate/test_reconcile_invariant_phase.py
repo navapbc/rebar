@@ -28,7 +28,7 @@ def _make_stub_fetcher(snapshot: dict) -> ModuleType:
         out_dir = scratch_retention.snapshots_dir(repo_root)
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / f"{pid}.json"
-        out.write_text(json.dumps(snapshot))
+        out.write_text(json.dumps(snapshot), encoding="utf-8")
         return out
 
     stub.fetch_snapshot = _fetch
@@ -43,7 +43,7 @@ def _make_stub_applier() -> ModuleType:
         # more kwargs in the future); accept and ignore for stub purposes.
         manifest = scratch_retention.bridge_scratch_dir(repo_root) / "manifests" / f"{pass_id}.json"
         manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(json.dumps({"mutations": len(mutations)}))
+        manifest.write_text(json.dumps({"mutations": len(mutations)}), encoding="utf-8")
         return manifest
 
     stub.apply = _apply

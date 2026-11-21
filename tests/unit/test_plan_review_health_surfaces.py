@@ -220,7 +220,9 @@ def test_mcp_ticket_detail_schema_exposes_structured_plan_review_health() -> Non
         assert field in rendered_mcp_schema
 
     canonical = json.loads(
-        (Path(__file__).parents[2] / "src/rebar/schemas/ticket_state.schema.json").read_text()
+        (Path(__file__).parents[2] / "src/rebar/schemas/ticket_state.schema.json").read_text(
+            encoding="utf-8"
+        )
     )["properties"]["plan_review_health"]
     rendered_canonical = json.dumps(canonical, sort_keys=True)
     for field in ("available", "pin_status", "enforcement_status", "targets"):

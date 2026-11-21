@@ -290,7 +290,7 @@ def test_structured_llm_failure_gains_code_keeps_disposition() -> None:
 # ---------------------------------------------------------------------------
 def test_schema_allows_input_optional_but_still_accepts_cli_shape() -> None:
     jsonschema = pytest.importorskip("jsonschema")
-    schema_doc = json.loads((SRC / "schemas" / "common.schema.json").read_text())
+    schema_doc = json.loads((SRC / "schemas" / "common.schema.json").read_text(encoding="utf-8"))
     defs = schema_doc.get("$defs") or schema_doc["definitions"]
     env_schema = defs["error_envelope"]
 

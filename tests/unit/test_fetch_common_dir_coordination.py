@@ -46,7 +46,7 @@ def _new_tickets_repo(path: Path) -> None:
 def _commit_event(repo: Path, ticket_uuid: str, body: str) -> str:
     tdir = repo / ticket_uuid
     tdir.mkdir(parents=True, exist_ok=True)
-    (tdir / f"1700000000000000000-{ticket_uuid}-CREATE.json").write_text(body)
+    (tdir / f"1700000000000000000-{ticket_uuid}-CREATE.json").write_text(body, encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "--no-verify", "-m", f"ticket: CREATE {ticket_uuid}")
     return _git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -209,7 +209,7 @@ def _snapshot_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     _git(repo, "config", "user.email", "t@t")
     _git(repo, "config", "user.name", "t")
-    (repo / "f").write_text("x")
+    (repo / "f").write_text("x", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "--no-verify", "-m", "c")
     return repo
@@ -407,7 +407,7 @@ def _install_force_race_hook(worktree: Path) -> None:
     hooks = Path(_resolve_common_git_dir(str(worktree))) / "hooks"
     hooks.mkdir(exist_ok=True)
     hook = hooks / "reference-transaction"
-    hook.write_text(_FORCE_RACE_HOOK)
+    hook.write_text(_FORCE_RACE_HOOK, encoding="utf-8")
     hook.chmod(0o755)
 
 

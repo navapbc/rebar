@@ -58,7 +58,7 @@ def _assert_scope_covers_scripts(recipe: str) -> None:
 
 def test_typecheck_covers_src_and_scripts() -> None:
     """The real Makefile must type-check `src/rebar` AND `scripts`."""
-    _assert_scope_covers_scripts(_recipe("typecheck", _MAKEFILE.read_text()))
+    _assert_scope_covers_scripts(_recipe("typecheck", _MAKEFILE.read_text(encoding="utf-8")))
 
 
 def test_guard_rejects_a_renarrowed_recipe() -> None:

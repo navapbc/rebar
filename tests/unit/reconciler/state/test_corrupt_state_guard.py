@@ -161,7 +161,7 @@ class TestPrevSnapshotCorrupt:
             prev_path.write_text(content, encoding="utf-8")
             # The bare json.loads(prev_path.read_text()) MUST raise on each of these
             with pytest.raises((json.JSONDecodeError, ValueError)):
-                json.loads(prev_path.read_text())
+                json.loads(prev_path.read_text(encoding="utf-8"))
 
     def test_corrupt_prev_snapshot_must_not_emit_comment_adds(
         self, tmp_path: Path, outbound_differ_mod: ModuleType

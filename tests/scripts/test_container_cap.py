@@ -66,7 +66,7 @@ def _share_bytes() -> int:
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     path = bin_dir / name
-    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -176,7 +176,9 @@ def _removed(calls: Path) -> list[str]:
     if not calls.exists():
         return []
     return [
-        line.split()[2] for line in calls.read_text().splitlines() if line.startswith("docker rm ")
+        line.split()[2]
+        for line in calls.read_text(encoding="utf-8").splitlines()
+        if line.startswith("docker rm ")
     ]
 
 
@@ -284,7 +286,7 @@ def test_the_mcp_blue_green_set_is_spared_by_name_even_with_no_labels(
 def test_the_protected_name_pattern_matches_autodeploys_own_regex() -> None:
     """The two must agree by construction, not by two edited literals: a container autodeploy
     considers its own but this script does not is exactly the unowned one that gets reaped."""
-    autodeploy = (REPO_ROOT / "infra" / "scripts" / "autodeploy.sh").read_text()
+    autodeploy = (REPO_ROOT / "infra" / "scripts" / "autodeploy.sh").read_text(encoding="utf-8")
     assert 'grep -E "^(${MCP_CONTAINER_PREFIX}|${MCP_COMPOSE_CONTAINER})"' in autodeploy
     rendered = subprocess.run(
         ["bash", str(SCRIPT), "--print-env"], capture_output=True, text=True, check=True
@@ -313,7 +315,7 @@ def test_volumes_and_force_are_never_passed_and_prune_is_never_used(tmp_path: Pa
     debris = Container("scratch", size=8 * GIB)
     result, calls = _run(tmp_path, ["--reap"], containers=[debris])
     assert result.returncode == 0, result.stderr
-    log = calls.read_text()
+    log = calls.read_text(encoding="utf-8")
     assert "docker rm " in log, "the reaper did not reap at all, so this guard is vacuous"
     for forbidden in (" -f", " --force", " -v", " --volumes", "system prune", "container prune"):
         assert forbidden not in log, f"the reaper passed {forbidden!r}: {log}"
@@ -396,10 +398,10 @@ def _install_units(tmp_path: Path, unit_dir: Path) -> None:
     for line in rendered.splitlines():
         if line.startswith("# ---- "):
             current = unit_dir / line.split()[2]
-            current.write_text("")
+            current.write_text("", encoding="utf-8")
             continue
         if current is not None:
-            with current.open("a") as handle:
+            with current.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
 
 
@@ -425,7 +427,7 @@ def test_check_active_is_zero_when_the_installed_timer_is_stale(tmp_path: Path) 
     unit_dir = tmp_path / "units"
     _install_units(tmp_path, unit_dir)
     timer = unit_dir / "rebar-container-reaper.timer"
-    timer.write_text(timer.read_text().replace("5min", "90min"))
+    timer.write_text(timer.read_text(encoding="utf-8").replace("5min", "90min"), encoding="utf-8")
     result, _ = _run(tmp_path, ["--check-active"], unit_dir=unit_dir, timer_active=True)
     assert result.stdout.strip() == "0", result.stderr
 

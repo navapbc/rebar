@@ -19,7 +19,7 @@ def _iso(second: int) -> str:
 
 
 def _write_jsonl(path: Path, records: list[dict[str, object]]) -> None:
-    path.write_text("".join(json.dumps(record) + "\n" for record in records))
+    path.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
 
 
 def test_classify_command_separates_gate_operations_and_exclusions() -> None:
@@ -536,7 +536,7 @@ def test_completion_phase_timestamps_read_only_matching_events(tmp_path: Path) -
         "data": {"kind": "plan-review"},
     }
     for name, payload in (("status", status), ("signature", signature), ("other", unrelated)):
-        (tmp_path / f"{name}.json").write_text(json.dumps(payload))
+        (tmp_path / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
 
     phases = probe._completion_phase_timestamps(
         tmp_path,
@@ -549,7 +549,9 @@ def test_completion_phase_timestamps_read_only_matching_events(tmp_path: Path) -
 
 
 def test_completion_phase_timestamps_audit_non_integer_timestamps(tmp_path: Path) -> None:
-    (tmp_path / ".cache.json").write_text(json.dumps({"state": {"status": "closed"}}))
+    (tmp_path / ".cache.json").write_text(
+        json.dumps({"state": {"status": "closed"}}), encoding="utf-8"
+    )
     (tmp_path / "bad-timestamp.json").write_text(
         json.dumps(
             {
@@ -557,7 +559,8 @@ def test_completion_phase_timestamps_audit_non_integer_timestamps(tmp_path: Path
                 "event_type": "STATUS",
                 "data": {"status": "closed"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     audit = probe.Counter()
 
@@ -577,7 +580,7 @@ def test_unbounded_tracker_load_keeps_late_completion_events(tmp_path: Path) -> 
     ticket_dir = tmp_path / ticket_id
     ticket_dir.mkdir()
     (ticket_dir / ".cache.json").write_text(
-        json.dumps({"state": {"ticket_id": ticket_id, "alias": "sample-ticket"}})
+        json.dumps({"state": {"ticket_id": ticket_id, "alias": "sample-ticket"}}), encoding="utf-8"
     )
     (ticket_dir / "verdict-COMPLETION_VERDICT.json").write_text(
         json.dumps(
@@ -591,7 +594,8 @@ def test_unbounded_tracker_load_keeps_late_completion_events(tmp_path: Path) -> 
                     "provider_provenance": {"ran_model": "bedrock:test-model"},
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
     (ticket_dir / "status.json").write_text(
         json.dumps(
@@ -600,7 +604,8 @@ def test_unbounded_tracker_load_keeps_late_completion_events(tmp_path: Path) -> 
                 "event_type": "STATUS",
                 "data": {"status": "closed"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     (ticket_dir / "signature.json").write_text(
         json.dumps(
@@ -609,7 +614,8 @@ def test_unbounded_tracker_load_keeps_late_completion_events(tmp_path: Path) -> 
                 "event_type": "SIGNATURE",
                 "data": {"kind": "completion-verifier"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     config = probe.ProbeConfig(log_roots=(), tracker=tmp_path)
 
@@ -654,7 +660,8 @@ def test_load_tracker_preserves_direct_timing_and_workload_metrics(tmp_path: Pat
                     "metrics": direct_metrics,
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     _aliases, events, _audit = probe.support.load_tracker(
@@ -700,7 +707,7 @@ def test_summary_reports_direct_timings_workload_and_legacy_residual(
         ],
     )
     (ticket_dir / ".cache.json").write_text(
-        json.dumps({"state": {"ticket_id": ticket_id, "alias": "sample-ticket"}})
+        json.dumps({"state": {"ticket_id": ticket_id, "alias": "sample-ticket"}}), encoding="utf-8"
     )
     direct_timings = {
         "pre_verifier_total": ("pre_verifier_total_ms", 12_000),
@@ -776,7 +783,8 @@ def test_summary_reports_direct_timings_workload_and_legacy_residual(
                         "provider_provenance": {"ran_model": "bedrock:test-model"},
                     },
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
     command = [

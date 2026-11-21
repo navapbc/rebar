@@ -248,7 +248,7 @@ def test_a_timeout_reaps_the_whole_process_group_not_just_the_child(
     deadline = time.monotonic() + 15
     while not pid_file.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
-    grandchild = int(pid_file.read_text().strip())
+    grandchild = int(pid_file.read_text(encoding="utf-8").strip())
     assert grandchild > 0
 
     while _alive(grandchild) and time.monotonic() < deadline:

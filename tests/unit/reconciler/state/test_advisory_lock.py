@@ -144,7 +144,8 @@ def test_ref_backend_roundtrip_survives_a_slow_local_git_call(
         "import os, sys, time\n"
         "if 'update-ref' in sys.argv[1:]:\n"
         f"    time.sleep({_SLOW_UPDATE_REF_SECS})\n"
-        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n"
+        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
     )
     shim.chmod(0o755)
     monkeypatch.setenv("PATH", os.pathsep.join((str(bin_dir), os.environ["PATH"])))

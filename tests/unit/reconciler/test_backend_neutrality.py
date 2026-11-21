@@ -45,7 +45,7 @@ def test_no_inline_acliclient_construction(filename: str) -> None:
     """The core transport/construction sites route through the Backend port, so no
     ``AcliClient(`` construction (in code, comment, or docstring) remains."""
     path = _REC / filename
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert "AcliClient(" not in text, (
         f"{filename} still constructs an AcliClient inline — route it through the "
         f"backend transport (select_backend(load_config()).transport) instead. The "
@@ -69,7 +69,9 @@ def test_apply_inbound_records_has_single_jira_literal() -> None:
     """The inbound-apply record surface carries exactly one ``"jira"`` literal — the
     retained ``validate_creation_channel("jira")`` vocabulary key. The two former
     provider-identity literals now come from the selected backend's ``vendor``."""
-    texts = {name: (_REC / name).read_text() for name in _INBOUND_APPLY_RECORD_SURFACE}
+    texts = {
+        name: (_REC / name).read_text(encoding="utf-8") for name in _INBOUND_APPLY_RECORD_SURFACE
+    }
     per_file = {name: text.count('"jira"') for name, text in texts.items()}
     occurrences = sum(per_file.values())
     assert occurrences == 1, (
@@ -111,7 +113,7 @@ _MAPPER_INJECTED = (
 def _module_level_imported_names(path: Path) -> set[str]:
     """Return the set of symbol names imported by MODULE-LEVEL ``from X import ...``
     statements (imports nested inside functions/classes are excluded)."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
@@ -180,7 +182,7 @@ def test_outbound_differ_names_no_vendor_snapshot_key() -> None:
     """The canonical outbound differ reads local field names only; no raw Jira snapshot key
     used AS A STRING LITERAL (a dict-key read like ``jira_fields["accountId"]``) appears in its
     source (ticket 625b). Bare mentions in comments/docstrings are not reads and are allowed."""
-    text = (_REC / "outbound_differ.py").read_text()
+    text = (_REC / "outbound_differ.py").read_text(encoding="utf-8")
     offenders = sorted(
         k for k in _VENDOR_SNAPSHOT_KEY_LITERALS if f'"{k}"' in text or f"'{k}'" in text
     )
@@ -194,7 +196,7 @@ def test_outbound_differ_names_no_vendor_snapshot_key() -> None:
 def _all_imported_modules(path: Path) -> set[str]:
     """Every module string reachable via ``import X`` / ``from X import ...`` ANYWHERE
     in the file — module scope and nested inside functions/classes (full AST walk)."""
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -336,7 +338,7 @@ _SWEEP_EXEMPTIONS = {"inbound_fields.py"}
 
 
 def _has_vendor_lazyload_literal(path: Path) -> bool:
-    for node in ast.walk(ast.parse(path.read_text())):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             if node.value == _VENDOR_LAZYLOAD_PREFIX or node.value.startswith(
                 _VENDOR_LAZYLOAD_PREFIX + "."

@@ -138,7 +138,11 @@ def ledger_total(ledger_path: str) -> float:
     p = Path(ledger_path)
     if not p.is_file():
         return 0.0
-    return sum(json.loads(line)["usd"] for line in p.read_text().splitlines() if line.strip())
+    return sum(
+        json.loads(line)["usd"]
+        for line in p.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    )
 
 
 def unreliable_titles(store: Path) -> list[str]:
@@ -709,7 +713,11 @@ def test_budget_does_not_accumulate_across_sweeps(store, monkeypatch) -> None:
 
 
 def _ledger_entries(ledger_path: str) -> list[dict]:
-    return [json.loads(line) for line in Path(ledger_path).read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in Path(ledger_path).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 # If finalize cannot price present usage rows, charge the deterministic

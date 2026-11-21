@@ -82,7 +82,11 @@ def _fake_acli(log: Path, mode: str) -> list[str]:
 
 
 def _records(log: Path) -> list[dict]:
-    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    return (
+        [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        if log.exists()
+        else []
+    )
 
 
 @pytest.fixture

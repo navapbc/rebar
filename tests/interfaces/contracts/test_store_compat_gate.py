@@ -60,7 +60,9 @@ def _compat_path(repo: Path) -> Path:
 
 
 def _write_record(repo: Path, obj) -> None:
-    _compat_path(repo).write_text(json.dumps(obj) if not isinstance(obj, str) else obj)
+    _compat_path(repo).write_text(
+        json.dumps(obj) if not isinstance(obj, str) else obj, encoding="utf-8"
+    )
 
 
 def _seed(repo: Path) -> str:
@@ -136,7 +138,7 @@ def test_ensure_unit_writes_record_when_absent(rebar_repo: Path) -> None:
     # a present+compatible record at the canonical path.
     cp = _compat_path(rebar_repo)
     assert cp.exists(), "ensure unit did not write .store-compat.json"
-    rec = json.loads(cp.read_text())
+    rec = json.loads(cp.read_text(encoding="utf-8"))
     assert rec["format_version"] == compat.CURRENT_FORMAT_VERSION
     assert rec["required_capabilities"] == []
     # And it is a COMMITTED file on the tickets branch (not gitignored).
@@ -277,7 +279,7 @@ def test_optional_additive_event_not_blocked(rebar_repo: Path) -> None:
     tid = _seed(rebar_repo)
     # Hand-write a future/unknown-type event file.
     tdir = _tracker(rebar_repo) / tid
-    env_id = (_tracker(rebar_repo) / ".env-id").read_text().strip()
+    env_id = (_tracker(rebar_repo) / ".env-id").read_text(encoding="utf-8").strip()
     ts = 1_781_000_000_000_000_000
     uuid = "ffffffff-0000-4000-8000-000000000042"
     event = {
@@ -288,7 +290,7 @@ def test_optional_additive_event_not_blocked(rebar_repo: Path) -> None:
         "author": "newer-rebar",
         "data": {"x": 1},
     }
-    (tdir / f"{ts}-{uuid}-FUTURE_TYPE.json").write_text(json.dumps(event))
+    (tdir / f"{ts}-{uuid}-FUTURE_TYPE.json").write_text(json.dumps(event), encoding="utf-8")
     # Reads succeed (preserve-and-ignore) AND a further lock-held write is allowed,
     # because the compatible record permits writes and the unknown event is optional.
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["status"] == "open"
@@ -369,28 +371,28 @@ def test_gate_wired_at_all_write_chokepoints() -> None:
     check_store_compat — so a new un-gated write path fails CI rather than relying on
     a hand-maintained prose list."""
     src = Path(rebar.__file__).resolve().parent
-    lock_txt = (src / "_store" / "lock.py").read_text()
+    lock_txt = (src / "_store" / "lock.py").read_text(encoding="utf-8")
     # The single acquire() must invoke the gate.
     acq = lock_txt[lock_txt.index("def acquire(") :]
     acq = acq[: acq.index("\ndef ")]
     assert "check_store_compat" in acq, "lock.acquire() does not call check_store_compat"
 
-    recover_txt = (src / "_commands" / "fsck_recover.py").read_text()
+    recover_txt = (src / "_commands" / "fsck_recover.py").read_text(encoding="utf-8")
     assert "check_store_compat" in recover_txt, "fsck_recover missing explicit gate"
 
     # check_store_compat's reconciler chokepoint moved from reconcile.py to
     # apply_phase.py (ticket piscine-bullish-cowbird, reconcile.py module-size
     # headroom): apply_mutations still calls it before any write dispatch.
-    reconcile_txt = (src / "reconciler" / "apply_phase.py").read_text()
+    reconcile_txt = (src / "reconciler" / "apply_phase.py").read_text(encoding="utf-8")
     assert "check_store_compat" in reconcile_txt, "reconcile apply_mutations missing explicit gate"
 
     # No OTHER definition of acquire()/write_lock() bypasses the gate: there is exactly
     # one of each, both in lock.py.
     for other in ("txn.py", "compact.py", "fsck.py", "event_append.py", "sync.py", "push.py"):
         txt = (
-            (src / "_commands" / other).read_text()
+            (src / "_commands" / other).read_text(encoding="utf-8")
             if (src / "_commands" / other).exists()
-            else (src / "_store" / other).read_text()
+            else (src / "_store" / other).read_text(encoding="utf-8")
         )
         assert "def acquire(" not in txt, f"{other} defines a competing acquire()"
 

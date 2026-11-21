@@ -31,7 +31,9 @@ def pre_upgrade_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "i"], cwd=repo, check=True)
     info = repo / ".git" / "info"
     info.mkdir(parents=True, exist_ok=True)
-    (info / "exclude").write_text(".tickets-tracker\n.env\n")  # legacy: no .scratch
+    (info / "exclude").write_text(
+        ".tickets-tracker\n.env\n", encoding="utf-8"
+    )  # legacy: no .scratch
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     return repo
 
@@ -42,7 +44,7 @@ def _count(text: str, needle: str = ".scratch") -> int:
 
 def _scratch_counts(repo: Path) -> tuple[int, int, int]:
     tracker = repo / ".tickets-tracker"
-    main_exclude = (repo / ".git" / "info" / "exclude").read_text()
+    main_exclude = (repo / ".git" / "info" / "exclude").read_text(encoding="utf-8")
     gitignore = subprocess.run(
         ["git", "-C", str(tracker), "show", "tickets:.gitignore"],
         capture_output=True,
@@ -60,7 +62,7 @@ def _scratch_counts(repo: Path) -> tuple[int, int, int]:
         if not Path(wt_git).is_absolute()
         else Path(wt_git) / "info" / "exclude"
     )
-    wt_exclude = wt_exclude_path.read_text() if wt_exclude_path.is_file() else ""
+    wt_exclude = wt_exclude_path.read_text(encoding="utf-8") if wt_exclude_path.is_file() else ""
     return _count(main_exclude), _count(gitignore), _count(wt_exclude)
 
 
@@ -70,8 +72,8 @@ def test_init_adds_scratch_exclusions_idempotently(pre_upgrade_repo: Path) -> No
     rebar.init_repo(repo_root=str(repo))
     assert _scratch_counts(repo) == (1, 1, 1), "first init must add exactly one .scratch each"
     # Legacy entries preserved.
-    assert ".tickets-tracker" in (repo / ".git" / "info" / "exclude").read_text()
-    assert ".env" in (repo / ".git" / "info" / "exclude").read_text()
+    assert ".tickets-tracker" in (repo / ".git" / "info" / "exclude").read_text(encoding="utf-8")
+    assert ".env" in (repo / ".git" / "info" / "exclude").read_text(encoding="utf-8")
 
     rebar.init_repo(repo_root=str(repo))  # re-run
     assert _scratch_counts(repo) == (1, 1, 1), "second init must not duplicate .scratch"

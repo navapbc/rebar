@@ -26,7 +26,7 @@ def _write_bindings(tracker: Path, bindings: dict, reverse: dict) -> None:
     state = tracker / ".bridge_state"
     state.mkdir(parents=True, exist_ok=True)
     (state / "bindings.json").write_text(
-        json.dumps({"version": 2, "bindings": bindings, "reverse": reverse})
+        json.dumps({"version": 2, "bindings": bindings, "reverse": reverse}), encoding="utf-8"
     )
 
 
@@ -106,7 +106,7 @@ def test_binding_drift_flags_live_retired_overlap(fsck, tmp_path):
     _write_bindings(tracker, bindings={"loc-1": _confirmed("REB-9")}, reverse={"REB-9": "loc-1"})
     state = tracker / ".bridge_state"
     (state / "bindings-retired.json").write_text(
-        json.dumps({"version": 1, "retired": {"REB-9": {"local_id": "loc-1"}}})
+        json.dumps({"version": 1, "retired": {"REB-9": {"local_id": "loc-1"}}}), encoding="utf-8"
     )
     drift = fsck.audit_binding_drift(
         tracker, local_states=[{"ticket_id": "loc-1", "status": "open", "archived": False}]

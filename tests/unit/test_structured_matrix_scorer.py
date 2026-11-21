@@ -34,7 +34,7 @@ def _model():
 def _reply(name: str) -> str:
     import json
 
-    return json.loads((_CORPUS / f"{name}.json").read_text())["reply"]
+    return json.loads((_CORPUS / f"{name}.json").read_text(encoding="utf-8"))["reply"]
 
 
 # The four parse-success goldens (v1..v4) and their MEASURED current/new parse outcomes. Pinned
@@ -178,14 +178,14 @@ def test_baseline_workflow_is_dispatch_only_with_a_budget_input_and_scoped_secre
 
     wf_path = _ROOT / ".github" / "workflows" / "structured-output-baseline.yml"
     assert wf_path.exists(), "the baseline measurement workflow must be committed"
-    wf = yaml.safe_load(wf_path.read_text())
+    wf = yaml.safe_load(wf_path.read_text(encoding="utf-8"))
 
     # PyYAML parses the bare `on:` key as the boolean True.
     on = wf.get("on", wf.get(True))
     assert set(on) == {"workflow_dispatch"}, "manual dispatch ONLY — never push/PR/schedule"
     assert "max_calls" in on["workflow_dispatch"]["inputs"], "budget must be a declared input"
 
-    text = wf_path.read_text()
+    text = wf_path.read_text(encoding="utf-8")
     # Per-arm secret scoping, exactly as external-integration.yml does it.
     assert "matrix.provider == 'anthropic' && secrets.ANTHROPIC_API_KEY" in text
     assert "matrix.provider == 'openai' && secrets.OPENAI_API_KEY" in text

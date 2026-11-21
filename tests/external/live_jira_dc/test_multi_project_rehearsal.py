@@ -169,9 +169,9 @@ def _set_legacy_default(work: Path, key: str) -> None:
     Keep the committed JSON shape consumed by the reconciler.
     """
     path = _projects_record_path(work)
-    record = json.loads(path.read_text())
+    record = json.loads(path.read_text(encoding="utf-8"))
     record["legacy_default"] = key
-    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +229,7 @@ def store_copy(
         )
 
     _init(work, "main")
-    (work / ".gitignore").write_text(".tickets-tracker/\n")
+    (work / ".gitignore").write_text(".tickets-tracker/\n", encoding="utf-8")
 
     # Extract a bounded snapshot of the live tickets branch into the inner store repo.
     fetch_tickets(source)
@@ -269,7 +269,8 @@ def store_copy(
 
         [jira]
         project = "{legacy_key}"
-        """).lstrip()
+        """).lstrip(),
+        encoding="utf-8",
     )
     monkeypatch.setenv("JIRA_PAT", jira_dc_pat)
     monkeypatch.setenv("JIRA_PROJECT", legacy_key)
@@ -593,7 +594,7 @@ def test_capability_stamp_and_fail_closed(
 
     # The mapping now holds >1 project (one + two + zero + legacy); converging stamps it.
     list(run_ensures(str(tracker)))
-    record = json.loads((tracker / ".store-compat.json").read_text())
+    record = json.loads((tracker / ".store-compat.json").read_text(encoding="utf-8"))
     assert "multi-project-bridge" in record.get("required_capabilities", []), (
         "run_ensures did not stamp the multi-project-bridge capability despite two mapped projects"
     )
@@ -602,7 +603,8 @@ def test_capability_stamp_and_fail_closed(
     fake_tracker = tmp_path / "fake-compat"
     fake_tracker.mkdir()
     (fake_tracker / ".store-compat.json").write_text(
-        json.dumps({"format_version": 1, "required_capabilities": ["made-up-future-capability"]})
+        json.dumps({"format_version": 1, "required_capabilities": ["made-up-future-capability"]}),
+        encoding="utf-8",
     )
     with pytest.raises(StoreIncompatibleError):
         check_store_compat(fake_tracker)

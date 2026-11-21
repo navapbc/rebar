@@ -43,7 +43,9 @@ def _log(monkeypatch, tmp_path):
 def _rows(target) -> list[dict]:
     if not target.exists():
         return []
-    return [json.loads(line) for line in target.read_text().splitlines() if line.strip()]
+    return [
+        json.loads(line) for line in target.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
 
 
 def _run(model, *, reviewers=("verify",)):

@@ -260,7 +260,7 @@ def test_health_exposes_in_flight_without_needing_the_reviewbot_extra() -> None:
 
     from rebar.review_bot import config as _config  # fastapi-free sibling module
 
-    app_source = (Path(_config.__file__).parent / "app.py").read_text()
+    app_source = (Path(_config.__file__).parent / "app.py").read_text(encoding="utf-8")
     assert '"in_flight": _voter.in_flight_reviews()' in app_source, (
         "the /health handler must report voter.in_flight_reviews() as `in_flight` — "
         "autodeploy.sh's drain gate parses that exact field, and treats its absence as an "
@@ -279,7 +279,7 @@ def test_the_reconciler_path_is_counted_too(monkeypatch: pytest.MonkeyPatch) -> 
 
     from rebar.review_bot import reconcile
 
-    source = Path(reconcile.__file__).read_text()
+    source = Path(reconcile.__file__).read_text(encoding="utf-8")
     assert "_review_and_vote" not in source, (
         "reconcile must not call the UNCOUNTED _review_and_vote — its reviews would then be "
         "invisible to the deploy loop's drain check, and the reconciler is exactly the path "

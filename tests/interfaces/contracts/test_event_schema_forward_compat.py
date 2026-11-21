@@ -65,7 +65,7 @@ def _ticket_dir(repo: Path, tid: str) -> Path:
 
 def _write_future_event(repo: Path, tid: str) -> Path:
     tdir = _ticket_dir(repo, tid)
-    env_id = (repo / ".tickets-tracker" / ".env-id").read_text().strip()
+    env_id = (repo / ".tickets-tracker" / ".env-id").read_text(encoding="utf-8").strip()
     event = {
         "event_type": FUTURE_TYPE,
         "timestamp": FUTURE_TS,
@@ -75,7 +75,7 @@ def _write_future_event(repo: Path, tid: str) -> Path:
         "data": {"some_future_field": "value"},
     }
     path = tdir / f"{FUTURE_TS}-{FUTURE_UUID}-{FUTURE_TYPE}.json"
-    path.write_text(json.dumps(event, ensure_ascii=False))
+    path.write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")
     return path
 
 
@@ -207,7 +207,7 @@ _RETIRED_OVERLAP_EVENTS = {
 
 def _write_retired_event(repo: Path, tid: str, event_type: str, n: int, data: dict) -> Path:
     tdir = _ticket_dir(repo, tid)
-    env_id = (repo / ".tickets-tracker" / ".env-id").read_text().strip()
+    env_id = (repo / ".tickets-tracker" / ".env-id").read_text(encoding="utf-8").strip()
     ts = FUTURE_TS + n
     uid = f"eeeeeeee-0000-4000-8000-{n:012d}"
     payload = {k: (tid if k == "ticket_id" else v) for k, v in data.items()}
@@ -220,7 +220,7 @@ def _write_retired_event(repo: Path, tid: str, event_type: str, n: int, data: di
         "data": payload,
     }
     path = tdir / f"{ts}-{uid}-{event_type}.json"
-    path.write_text(json.dumps(event, ensure_ascii=False))
+    path.write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")
     return path
 
 

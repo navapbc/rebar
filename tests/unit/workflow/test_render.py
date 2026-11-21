@@ -74,7 +74,8 @@ def test_cli_workflow_show(tmp_path, capsys) -> None:
     f = tmp_path / "wf.yaml"
     f.write_text(
         'schema_version: "1"\nname: showdemo\nsteps:\n'
-        "  - id: a\n    uses: u\n  - id: b\n    uses: u\n    needs: [a]\n"
+        "  - id: a\n    uses: u\n  - id: b\n    uses: u\n    needs: [a]\n",
+        encoding="utf-8",
     )
     rc = main(["workflow", "show", str(f)])
     assert rc == 0
@@ -99,7 +100,7 @@ def test_mcp_render_workflow_tool(tmp_path) -> None:
     from rebar.mcp_server import build_server
 
     f = tmp_path / "wf.yaml"
-    f.write_text('schema_version: "1"\nname: m\nsteps:\n  - id: a\n    uses: u\n')
+    f.write_text('schema_version: "1"\nname: m\nsteps:\n  - id: a\n    uses: u\n', encoding="utf-8")
     srv = build_server()
     res = asyncio.run(srv.call_tool("render_workflow", {"workflow": str(f)}))
     # _unwrap-free: the tool returns a string; FastMCP wraps it — just check content.

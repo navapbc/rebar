@@ -49,7 +49,7 @@ def _do_compact(repo: Path, tid: str, *, extra: list[str] | None = None) -> None
 def _snapshot_event(tdir: Path) -> dict:
     snaps = sorted(tdir.glob("*-SNAPSHOT.json"))
     assert len(snaps) == 1, f"expected exactly one SNAPSHOT, got {snaps}"
-    return json.loads(snaps[0].read_text())
+    return json.loads(snaps[0].read_text(encoding="utf-8"))
 
 
 def _seed_foldable(repo: Path, title: str) -> str:
@@ -80,8 +80,8 @@ def _write_legacy_jira_ticket(repo: Path, tid: str = "jira-leg-1") -> str:
         "env_id": "reconciler",
         "data": {"body": "legacy comment"},
     }
-    (tdir / f"{_TS}-{_UA}-CREATE.json").write_text(json.dumps(create))
-    (tdir / f"{_TS + 1}-{_UB}-COMMENT.json").write_text(json.dumps(comment))
+    (tdir / f"{_TS}-{_UA}-CREATE.json").write_text(json.dumps(create), encoding="utf-8")
+    (tdir / f"{_TS + 1}-{_UB}-COMMENT.json").write_text(json.dumps(comment), encoding="utf-8")
     return tid
 
 
@@ -112,8 +112,8 @@ def _write_recorded_ticket(repo: Path, channel: str, tid: str) -> str:
         "env_id": "someenv",
         "data": {"body": "c"},
     }
-    (tdir / f"{_TS}-{_UA}-CREATE.json").write_text(json.dumps(create))
-    (tdir / f"{_TS + 1}-{_UB}-COMMENT.json").write_text(json.dumps(comment))
+    (tdir / f"{_TS}-{_UA}-CREATE.json").write_text(json.dumps(create), encoding="utf-8")
+    (tdir / f"{_TS + 1}-{_UB}-COMMENT.json").write_text(json.dumps(comment), encoding="utf-8")
     return tid
 
 
@@ -200,10 +200,10 @@ def test_rollback_recovery_detects_and_repairs_stale_channel_snapshot(rebar_repo
     _do_compact(repo, tid)
     # Simulate a pre-feature SNAPSHOT: strip creation_channel from its compiled_state.
     snap_path = sorted(tdir.glob("*-SNAPSHOT.json"))[0]
-    snap = json.loads(snap_path.read_text())
+    snap = json.loads(snap_path.read_text(encoding="utf-8"))
     snap["data"]["compiled_state"].pop("creation_channel", None)
     snap["data"]["compiled_state"].pop("creation_channel_inferred", None)
-    snap_path.write_text(json.dumps(snap))
+    snap_path.write_text(json.dumps(snap), encoding="utf-8")
 
     # Read-time re-inference already keeps SNAPSHOT-only replay correct.
     assert reduce_ticket(str(tdir))["creation_channel"] == "jira"
@@ -217,7 +217,7 @@ def test_rollback_recovery_detects_and_repairs_stale_channel_snapshot(rebar_repo
     # the inferred provenance back into compiled_state.
     fsck.fsck_cli(["--repair-snapshots"], repo_root=str(repo))
     new_path = sorted(tdir.glob("*-SNAPSHOT.json"))[0]
-    rebuilt = json.loads(new_path.read_text())["data"]["compiled_state"]
+    rebuilt = json.loads(new_path.read_text(encoding="utf-8"))["data"]["compiled_state"]
     assert rebuilt["creation_channel"] == "jira"
     assert rebuilt["creation_channel_inferred"] is True
     # ...and the stale-channel finding clears after the repair.

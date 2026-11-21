@@ -430,7 +430,7 @@ def _repo_with_tickets_branch(tmp_path: Path) -> Path:
     _git(["config", "user.name", "Test"], tmp_path)
     _git(["commit", "--allow-empty", "-m", "init"], tmp_path)
     _git(["checkout", "-q", "--orphan", "tickets"], tmp_path)
-    (tmp_path / ".gitkeep").write_text("")
+    (tmp_path / ".gitkeep").write_text("", encoding="utf-8")
     _git(["add", ".gitkeep"], tmp_path)
     _git(["commit", "-q", "-m", "tickets init"], tmp_path)
     return tmp_path
@@ -444,7 +444,7 @@ def test_purge_committed_reconciler_locks(tmp_path: Path) -> None:
     repo = _repo_with_tickets_branch(tmp_path)
     # Seed the legacy committed lock files on the tickets branch.
     for name in (".reconciler-pass-lock", ".reconciler-phase-gate"):
-        (repo / name).write_text("pass-old\n")
+        (repo / name).write_text("pass-old\n", encoding="utf-8")
         _git(["add", name], repo)
     _git(["commit", "-q", "-m", "legacy locks"], repo)
     _git(["checkout", "-q", "main" if _has_main(repo) else "master"], repo)

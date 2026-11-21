@@ -75,7 +75,9 @@ def test_conflict_marker_detector_registers_generic_on_opengrep():
     assert all(d.dimension == "smell_generic" for d in cm)
     # `generic` (polyglot) language so it scans every file type, not one language.
     assert "generic" in cm[0].languages
-    body = Path("src/rebar/grounding/detectors/builtin/smell_conflict_markers.yaml").read_text()
+    body = Path("src/rebar/grounding/detectors/builtin/smell_conflict_markers.yaml").read_text(
+        encoding="utf-8"
+    )
     assert PREFIX in body
 
 
@@ -98,8 +100,8 @@ def test_conflict_markers_is_a_dedicated_advisory_det_criterion():
 def test_positive_conflict_markers_match(tmp_path):
     from rebar.llm.code_review.detectors import run_detectors
 
-    (tmp_path / "bad.py").write_text(POSITIVE_PY)
-    (tmp_path / "diff3.py").write_text(POSITIVE_DIFF3)
+    (tmp_path / "bad.py").write_text(POSITIVE_PY, encoding="utf-8")
+    (tmp_path / "diff3.py").write_text(POSITIVE_DIFF3, encoding="utf-8")
     out = run_detectors(changed_files=["bad.py", "diff3.py"], repo_root=str(tmp_path))
     cm = out.get(CRITERION, {"matches": []})
     matched_files = {(m.get("location") or {}).get("file") for m in cm["matches"]}
@@ -110,8 +112,8 @@ def test_positive_conflict_markers_match(tmp_path):
 def test_negative_bare_equals_does_not_match(tmp_path):
     from rebar.llm.code_review.detectors import run_detectors
 
-    (tmp_path / "ok.py").write_text(NEGATIVE_PY)
-    (tmp_path / "ok.md").write_text(NEGATIVE_MD)
+    (tmp_path / "ok.py").write_text(NEGATIVE_PY, encoding="utf-8")
+    (tmp_path / "ok.md").write_text(NEGATIVE_MD, encoding="utf-8")
     out = run_detectors(changed_files=["ok.py", "ok.md"], repo_root=str(tmp_path))
     cm = out.get(CRITERION, {"matches": []})
     # A bare `=======` (string / heredoc / Markdown underline) is FP-prone and NOT matched.
@@ -132,7 +134,7 @@ def test_conflict_marker_match_stays_advisory(tmp_path, monkeypatch):
     }
     monkeypatch.setattr(registry, "det_criteria", lambda: only)
 
-    (tmp_path / "bad.py").write_text(POSITIVE_PY)
+    (tmp_path / "bad.py").write_text(POSITIVE_PY, encoding="utf-8")
     verdict = {"verdict": "PASS"}
     detectors.apply_failclosed(verdict, changed_files=["bad.py"], repo_root=str(tmp_path))
     assert verdict["verdict"] == "PASS"  # advisory — a match never auto-blocks
@@ -147,6 +149,6 @@ def test_conflict_marker_match_stays_advisory(tmp_path, monkeypatch):
 def test_clean_diff_produces_no_finding(tmp_path):
     from rebar.llm.code_review.detectors import run_detectors
 
-    (tmp_path / "clean.py").write_text("def f():\n    return 1 + 2\n")
+    (tmp_path / "clean.py").write_text("def f():\n    return 1 + 2\n", encoding="utf-8")
     out = run_detectors(changed_files=["clean.py"], repo_root=str(tmp_path))
     assert out.get(CRITERION, {"matches": []})["matches"] == []

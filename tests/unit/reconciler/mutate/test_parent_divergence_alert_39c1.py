@@ -138,7 +138,7 @@ def test_a_broken_alert_store_does_not_break_the_pass(applier, tmp_path, monkeyp
     # Occupy the alert directory's path with a FILE, so mkdir/append raise.
     blocked_alerts = scratch_retention.alerts_dir(tmp_path)
     blocked_alerts.parent.mkdir(parents=True)
-    blocked_alerts.write_text("not a directory")
+    blocked_alerts.write_text("not a directory", encoding="utf-8")
 
     client = MagicMock()
     client.update_issue.return_value = None

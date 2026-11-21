@@ -90,7 +90,7 @@ def test_cli_env_contract_matches_shell_shape() -> None:
 
 def test_workflow_invokes_python_port() -> None:
     """gerrit-verify.yaml sparse-checks-out the .py path and the run step invokes it."""
-    text = _WORKFLOW.read_text()
+    text = _WORKFLOW.read_text(encoding="utf-8")
     assert "scripts/normalize_ci_conclusion.py" in text
     assert ("normalize_ci_conclusion" + ".sh") not in text
 
@@ -188,7 +188,7 @@ def test_domain_invariant_fuzz() -> None:
 def test_entry_point_is_stdlib_only() -> None:
     """The workflow runs the single sparse-checked-out file with no package install:
     every top-level import must be stdlib."""
-    tree = ast.parse(_PY.read_text())
+    tree = ast.parse(_PY.read_text(encoding="utf-8"))
     names: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -213,7 +213,7 @@ def test_no_repo_reference_to_deleted_shell_remains() -> None:
             if not p.is_file() or p.suffix in {".pyc"} or "__pycache__" in p.parts:
                 continue
             try:
-                if needle in p.read_text():
+                if needle in p.read_text(encoding="utf-8"):
                     hits.append(str(p.relative_to(_REPO)))
             except (UnicodeDecodeError, OSError):
                 continue
@@ -229,7 +229,7 @@ def test_workflow_sparse_checkout_fetches_only_the_py(tmp_path: Path) -> None:
     the invariant is that the normalizer is still named and cone-mode is still off, not how
     the list is formatted.
     """
-    text = _WORKFLOW.read_text()
+    text = _WORKFLOW.read_text(encoding="utf-8")
     patterns = [
         line.strip()
         for step in yaml.safe_load(text)["jobs"]["vote"]["steps"]
@@ -246,7 +246,7 @@ def test_repointed_contract_test_drives_python() -> None:
     re-pointed, its table preserved — not deleted, not still driving the .sh)."""
     contract = _REPO / "tests" / "scripts" / "test_normalize_ci_conclusion.py"
     assert contract.exists(), "the original contract test must survive the port"
-    text = contract.read_text()
+    text = contract.read_text(encoding="utf-8")
     assert "normalize_ci_conclusion.py" in text
     assert ("normalize_ci_conclusion" + ".sh") not in text
     # its key rows survive

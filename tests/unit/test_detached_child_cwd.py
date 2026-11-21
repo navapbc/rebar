@@ -109,11 +109,11 @@ def test_detached_sweep_child_survives_removal_of_the_spawning_worktree(
     monkeypatch.chdir(tmp_path)
     shutil.rmtree(worktree)
     assert not worktree.exists()  # precondition: the worktree is gone, the child is not
-    go.write_text("go")
+    go.write_text("go", encoding="utf-8")
 
     assert rec.proc is not None
     rec.proc.wait(timeout=30)
-    assert out.read_text() == "CWD " + os.path.realpath(root)
+    assert out.read_text(encoding="utf-8") == "CWD " + os.path.realpath(root)
 
 
 # --- the contract, across both tracker-scoped detach sites ---------------------------------

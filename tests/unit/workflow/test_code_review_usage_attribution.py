@@ -132,7 +132,7 @@ def gate_run(tmp_path, monkeypatch):
 
     monkeypatch.setattr(anthropic_model_mod, "_pai_model", _spy)
 
-    doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text()))
+    doc = _migrate.migrate_to_current(yaml.safe_load(_GATE.read_text(encoding="utf-8")))
     cfg = replace(
         LLMConfig.from_env(), runner="pydantic_ai", repo_path=".", model=_CFG_MODEL, api_key=None
     )
@@ -146,7 +146,11 @@ def gate_run(tmp_path, monkeypatch):
             agent_runner=RunnerAgentStep(runner=runner, config=cfg),
             batch_runner=CodeReviewBatchRunner(context="## Diff\n(fake)"),
         )
-    rows = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    rows = [
+        json.loads(line)
+        for line in log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     return rows, resolved
 
 
@@ -174,7 +178,7 @@ def test_usage_log_distinguishes_the_two_batch_passes(gate_run):
     steps = {r["step"] for r in rows}
     assert {"round_a", "round_b"} <= steps, f"both batch passes must appear: {sorted(steps)}"
 
-    doc = yaml.safe_load(_GATE.read_text())
+    doc = yaml.safe_load(_GATE.read_text(encoding="utf-8"))
     by_id = {s["id"]: s for s in doc["steps"]}
     prompts_a = {c["prompt"] for c in by_id["round_a"]["batch"]["criteria"]}
     prompts_b = {c["prompt"] for c in by_id["round_b"]["batch"]["criteria"]}

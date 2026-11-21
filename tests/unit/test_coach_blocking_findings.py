@@ -161,7 +161,9 @@ class TestYamlArmIdentity:
     def test_both_arms_coach_blocks_are_binding_identical(self):
         from importlib import resources
 
-        text = (resources.files("rebar.llm.workflow") / "gates" / "plan-review.yaml").read_text()
+        text = (resources.files("rebar.llm.workflow") / "gates" / "plan-review.yaml").read_text(
+            encoding="utf-8"
+        )
         doc = yaml.safe_load(text)
 
         def _coach_steps(steps, found):

@@ -96,7 +96,7 @@ def test_dedup_suppression_emits_alert(tmp_path, fetcher):
     assert snapshot_path.exists()
     import json
 
-    snapshot = json.loads(snapshot_path.read_text())
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
     assert "DIG-100" in snapshot
     dig100_count = sum(1 for k in snapshot if k == "DIG-100")
     assert dig100_count == 1, (

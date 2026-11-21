@@ -215,7 +215,7 @@ def test_committed_metrics_nontrivial_over_existing_corpus():
     # proof it works NOW — not future data. (The firing ledger itself is git-ignored: it is ~8 MB
     # over the current corpus, far over the 500 KB large-file gate, and is regenerated locally.)
     assert ce.METRICS_OUT.exists(), "committed criterion_effectiveness.json must be present"
-    committed = json.loads(ce.METRICS_OUT.read_text())
+    committed = json.loads(ce.METRICS_OUT.read_text(encoding="utf-8"))
     assert len(committed) >= 30  # auto-included criteria
     assert sum(1 for v in committed.values() if v["detection_proxy"] is not None) >= 1
     assert sum(1 for v in committed.values() if v["blocking_fp_proxy"] is not None) >= 1
@@ -242,6 +242,6 @@ def test_local_ledger_reproduces_committed_metrics():
         import pytest
 
         pytest.skip("firing ledger absent (git-ignored; regenerate with --record --backfill)")
-    committed = json.loads(ce.METRICS_OUT.read_text())
+    committed = json.loads(ce.METRICS_OUT.read_text(encoding="utf-8"))
     recomputed = ce.compute_effectiveness(ledger, window=ce.DEFAULT_WINDOW)
     assert json.loads(json.dumps(recomputed, sort_keys=True)) == committed

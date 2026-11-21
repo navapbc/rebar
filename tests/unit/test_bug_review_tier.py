@@ -291,7 +291,7 @@ def test_e2e_offline_bug_gets_advisory_review_not_exempt(monkeypatch):
             "findings": [{"finding": "necessity nit", "criteria": ["necessity"]}],
         }
     )
-    doc = _migrate.migrate_to_current(yaml.safe_load(_WF.read_text()))
+    doc = _migrate.migrate_to_current(yaml.safe_load(_WF.read_text(encoding="utf-8")))
     rec = _Rec()
     res = _ex.run_workflow(
         doc,

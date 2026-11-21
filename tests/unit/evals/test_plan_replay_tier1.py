@@ -89,7 +89,7 @@ def test_load_verifier_candidate_none_is_reproduction_run():
 
 def test_load_verifier_candidate_existing_path(tmp_path):
     prompt_file = tmp_path / "custom.md"
-    prompt_file.write_text("---\ncategory: review\n---\ncustom prompt body")
+    prompt_file.write_text("---\ncategory: review\n---\ncustom prompt body", encoding="utf-8")
     candidate = load_verifier_candidate(str(prompt_file))
     assert candidate.prompt_path == str(prompt_file)
 
@@ -113,7 +113,7 @@ def test_build_candidate_runner_installs_the_candidate_prompt_override(tmp_path,
     fixed_config_root = str(tmp_path / "pinned-config-root")
     Path(fixed_config_root).mkdir(parents=True)
     (Path(fixed_config_root) / "rebar.toml").write_text(
-        '[llm.model_classes]\nstandard = { model = "bedrock:x", fallback = [] }\n'
+        '[llm.model_classes]\nstandard = { model = "bedrock:x", fallback = [] }\n', encoding="utf-8"
     )
     monkeypatch.setattr(
         tier1.parity,

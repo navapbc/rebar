@@ -120,7 +120,8 @@ def test_legacy_uncapped_live_keeps_tally_and_removes_manifest(tmp_path: Path, m
                         {"key": "DIG-9", "action": "update", "error": "rejected"},
                     ]
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         return legacy_batch
 

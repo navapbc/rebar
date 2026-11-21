@@ -97,7 +97,7 @@ def test_assemble_does_not_import_single_pass_route():
     # guard depend on pytest being invoked from the repo root, and a `read_text` that cannot
     # find its target raises rather than reporting a violation — the guard's own reliability
     # must not be an artefact of where the runner was launched.
-    src = _ASSEMBLE_SRC.read_text()
+    src = _ASSEMBLE_SRC.read_text(encoding="utf-8")
     tree = ast.parse(src)
     forbidden = {"review_code", "select_code_reviewers", "_review_code_inner", "_compose_context"}
     for node in ast.walk(tree):
@@ -134,7 +134,7 @@ def _init_repo(tmp_path: pathlib.Path) -> pathlib.Path:
     _git(repo, "init", "-q", "-b", "main")
     _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "config", "user.name", "t")
-    (repo / "base.py").write_text("x = 0\n")
+    (repo / "base.py").write_text("x = 0\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "F0 branch point")
     return repo
@@ -149,12 +149,12 @@ def test_diff_is_merge_base_three_dot_not_two_dot(tmp_path):
     repo = _init_repo(tmp_path)
     # Branch `feature` from F0 and add ONE file — this is `head`, now behind `main`.
     _git(repo, "checkout", "-q", "-b", "feature")
-    (repo / "feat.py").write_text("y = 1\n")
+    (repo / "feat.py").write_text("y = 1\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "feature change")
     # Advance `main` past the branch point with unrelated work `head` never saw.
     _git(repo, "checkout", "-q", "main")
-    (repo / "other.py").write_text("z = 2\n")
+    (repo / "other.py").write_text("z = 2\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "unrelated main work after branch point")
 

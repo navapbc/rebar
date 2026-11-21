@@ -38,7 +38,7 @@ def _row(n: int, verdict: str, description: str = _PLAN) -> dict:
 
 def _labels(tmp_path: Path, rows: list[dict]) -> Path:
     path = tmp_path / "labels-test.jsonl"
-    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
     return path
 
 
@@ -117,7 +117,7 @@ def test_identical_verdicts_agree_and_a_blocker_flips(tmp_path: Path) -> None:
     assert summary["historical_pipeline_agreement"]["agentic"] == {"agree": 2, "n": 3}
     assert results["valid"] and not results["dry_run"]
     assert results["corpus"] == "labels-test.jsonl"  # a name, never a local path
-    assert json.loads((tmp_path / "out.json").read_text())["summary"] == summary
+    assert json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))["summary"] == summary
 
 
 def test_errors_and_floor_rows_are_excluded_not_disagreements(tmp_path: Path) -> None:
@@ -273,7 +273,7 @@ def test_fixture_files_come_from_the_checkout_head(tmp_path: Path) -> None:
 
     checkout = tmp_path / "checkout"
     (checkout / "src").mkdir(parents=True)
-    (checkout / "src" / "thing.py").write_text("VALUE = 1\n")
+    (checkout / "src" / "thing.py").write_text("VALUE = 1\n", encoding="utf-8")
     for args in (
         ("git", "init", "-q"),
         ("git", "config", "user.email", "t@e.com"),
@@ -353,7 +353,7 @@ def test_cli_exit_code_and_file_backed_resume(tmp_path: Path) -> None:
     first = _Scripted({})
     args = ["--labels", str(labels), "--out", str(out)]
     assert ec.main(args, make_runner=lambda cfg: first, title_lookup=lambda t: None) == 0
-    assert json.loads(out.read_text())["valid"] is True
+    assert json.loads(out.read_text(encoding="utf-8"))["valid"] is True
     second = _Scripted({})
     assert (
         ec.main([*args, "--resume"], make_runner=lambda cfg: second, title_lookup=lambda t: None)
@@ -403,16 +403,18 @@ def test_resume_refuses_a_saved_run_with_a_different_header(
     out = tmp_path / "results.json"
     args = ["--labels", str(labels), "--out", str(out)]
     assert ec.main(args, make_runner=lambda cfg: _Scripted({}), title_lookup=lambda t: None) == 0
-    saved = json.loads(out.read_text())
+    saved = json.loads(out.read_text(encoding="utf-8"))
     saved[field] = value
-    out.write_text(json.dumps(saved))
+    out.write_text(json.dumps(saved), encoding="utf-8")
     capsys.readouterr()
     runner = _Scripted({})
     code = ec.main([*args, "--resume"], make_runner=lambda cfg: runner, title_lookup=lambda t: None)
     assert code == 2
     assert field in capsys.readouterr().err
     assert runner.calls == 0
-    assert json.loads(out.read_text())[field] == value  # the saved file is left untouched
+    assert (
+        json.loads(out.read_text(encoding="utf-8"))[field] == value
+    )  # the saved file is left untouched
 
 
 def test_each_engine_record_names_its_runner_and_model(tmp_path: Path) -> None:

@@ -48,7 +48,7 @@ def _tickets_repo_with_event(tmp_path: Path) -> Path:
     """A repo whose ``tickets`` branch tree mimics the tracker layout: one ticket dir
     holding one valid CREATE event."""
     repo = _init_repo(tmp_path / "repo")
-    (repo / "seed.txt").write_text("seed")
+    (repo / "seed.txt").write_text("seed", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", "seed")
     _git(repo, "checkout", "--quiet", "-b", "tickets")
@@ -62,7 +62,9 @@ def _tickets_repo_with_event(tmp_path: Path) -> Path:
         "author": "Immutability Tester",
         "data": {"ticket_type": "task", "title": "immutable-entry", "parent_id": None},
     }
-    (tdir / "100-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee-CREATE.json").write_text(json.dumps(event))
+    (tdir / "100-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee-CREATE.json").write_text(
+        json.dumps(event), encoding="utf-8"
+    )
     _git(repo, "add", "-A")
     _git(repo, "commit", "--quiet", "-m", "tickets")
     _git(repo, "checkout", "--quiet", "-")
@@ -122,14 +124,14 @@ def test_atomic_write_publishes_by_rename_never_in_place(tmp_path):
     in-place write through a shared inode would silently corrupt every entry linking it.
     This pins the contract behaviorally: the sibling link still holds the old bytes."""
     target = tmp_path / "blob"
-    target.write_text("published-generation")
+    target.write_text("published-generation", encoding="utf-8")
     sibling = tmp_path / "shared-into-another-entry"
     os.link(target, sibling)
 
     atomic_write(str(target), "next-generation")
 
-    assert target.read_text() == "next-generation"
-    assert sibling.read_text() == "published-generation", (
+    assert target.read_text(encoding="utf-8") == "next-generation"
+    assert sibling.read_text(encoding="utf-8") == "published-generation", (
         "atomic_write wrote IN PLACE through a shared inode — the rename-over contract broke"
     )
     assert os.lstat(target).st_ino != os.lstat(sibling).st_ino

@@ -60,7 +60,8 @@ class JournalCheckingJira(FakeJira):
 
     def delete_comment(self, jira_key: str, comment_id: str) -> int:
         self.records_at_delete = [
-            json.loads(line)["record_type"] for line in self._journal.read_text().splitlines()
+            json.loads(line)["record_type"]
+            for line in self._journal.read_text(encoding="utf-8").splitlines()
         ]
         return super().delete_comment(jira_key, comment_id)
 
@@ -454,7 +455,7 @@ def test_execution_journals_intent_before_delete_and_outcome_afterward(tmp_path:
     args.confirm_manifest_digest = manifest["manifest_digest"]
 
     _run(args, transport=transport, expected_actions=1)
-    records = [json.loads(line) for line in journal.read_text().splitlines()]
+    records = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
 
     assert (
         transport.records_at_delete,
@@ -487,7 +488,9 @@ def test_ambiguous_delete_is_reread_once_without_retrying(tmp_path: Path) -> Non
     result = _run(args, transport=transport, expected_actions=1)
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (
@@ -533,7 +536,9 @@ def test_ambiguous_retained_target_is_journaled_and_stops_without_retry(tmp_path
         refusal = "no refusal"
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (
@@ -584,7 +589,9 @@ def test_restart_retries_a_persisted_retained_target_once(tmp_path: Path) -> Non
     result = _run(args, transport=resumed_transport, expected_actions=1)
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (
@@ -638,7 +645,9 @@ def test_non_204_delete_is_reread_once_without_retrying(tmp_path: Path) -> None:
     result = _run(args, transport=transport, expected_actions=1)
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (
@@ -678,7 +687,9 @@ def test_non_204_delete_with_unrelated_drift_seals_postcondition_failure(tmp_pat
         _run(args, transport=transport, expected_actions=1)
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (
@@ -726,7 +737,9 @@ def test_restart_recovers_intent_after_delete_without_a_second_delete(tmp_path: 
     result = _run(args, transport=transport, expected_actions=1)
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (
@@ -775,7 +788,9 @@ def test_restart_recovers_intent_before_delete_and_retries_once(tmp_path: Path) 
     result = _run(args, transport=transport, expected_actions=1)
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (
@@ -934,7 +949,9 @@ def test_canary_stops_before_second_delete_when_any_non_target_comment_drifts(
         refusal = "no refusal"
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (
@@ -986,7 +1003,9 @@ def test_restart_resumes_six_action_canary_without_redeleting_completed_targets(
     result = _run(args, transport=transport)
     records = [
         json.loads(line)
-        for line in (artifacts / "jira-cleanup-journal.jsonl").read_text().splitlines()
+        for line in (artifacts / "jira-cleanup-journal.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
     ]
 
     assert (

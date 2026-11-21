@@ -24,11 +24,15 @@ _HAVE_SEMGREP = bool(shutil.which("opengrep") or shutil.which("semgrep"))
 def mixed_repo(tmp_path: Path) -> Path:
     """A mixed-language repo: JS (matches built-ins), Go, and Python."""
     (tmp_path / "web").mkdir()
-    (tmp_path / "web" / "app.js").write_text("function f(){ console.log('x'); debugger; }\n")
+    (tmp_path / "web" / "app.js").write_text(
+        "function f(){ console.log('x'); debugger; }\n", encoding="utf-8"
+    )
     (tmp_path / "svc").mkdir()
-    (tmp_path / "svc" / "main.go").write_text("package main\nfunc Serve() int { return 0 }\n")
+    (tmp_path / "svc" / "main.go").write_text(
+        "package main\nfunc Serve() int { return 0 }\n", encoding="utf-8"
+    )
     (tmp_path / "pkg").mkdir()
-    (tmp_path / "pkg" / "core.py").write_text("x = 1\n" * 50)
+    (tmp_path / "pkg" / "core.py").write_text("x = 1\n" * 50, encoding="utf-8")
     return tmp_path
 
 

@@ -24,7 +24,8 @@ def _write_codex(home, *, env_var=dmc.CANONICAL_PAT_ENV["codex"]):
     path.write_text(
         "[mcp_servers.rebar]\n"
         'url = "https://example.invalid/mcp/"\n'
-        f'bearer_token_env_var = "{env_var}"\n'
+        f'bearer_token_env_var = "{env_var}"\n',
+        encoding="utf-8",
     )
     return path
 
@@ -45,7 +46,8 @@ def _write_header_client(home, client, *, env_var, template="Bearer ${{{name}}}"
                     }
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
     return path
 
@@ -167,7 +169,7 @@ def test_malformed_config_degrades_to_a_finding_not_an_exception(tmp_path, relpa
     """
     path = tmp_path / relpath
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body)
+    path.write_text(body, encoding="utf-8")
     findings = dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
     unreadable = [f for f in findings if f["kind"] == dmc.KIND_CONFIG_UNREADABLE]
     assert len(unreadable) == 1
@@ -182,7 +184,7 @@ def test_config_without_a_rebar_entry_is_reported(tmp_path):
     """
     path = tmp_path / ".codex" / "config.toml"
     path.parent.mkdir(parents=True)
-    path.write_text('[mcp_servers.other]\nurl = "https://example.invalid/mcp/"\n')
+    path.write_text('[mcp_servers.other]\nurl = "https://example.invalid/mcp/"\n', encoding="utf-8")
     assert dmc.KIND_SERVER_ABSENT in _kinds(
         dmc.scan_mcp_clients(home=tmp_path, cwd=tmp_path, env={})
     )
@@ -330,7 +332,8 @@ def test_project_config_takes_precedence_over_user_level_config(tmp_path):
                     }
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     findings = dmc.scan_mcp_clients(
@@ -355,7 +358,8 @@ def test_project_config_rejects_legacy_user_level_env_name(tmp_path):
                     }
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     findings = dmc.scan_mcp_clients(

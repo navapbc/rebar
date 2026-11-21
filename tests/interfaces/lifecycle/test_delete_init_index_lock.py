@@ -46,7 +46,7 @@ def _plant_stale_lock(tracker: str) -> Path:
         check=True,
     ).stdout.strip()
     lock = Path(p) if os.path.isabs(p) else Path(tracker) / p
-    lock.write_text("")  # leftover lock from a crashed git process
+    lock.write_text("", encoding="utf-8")  # leftover lock from a crashed git process
     old = time.time() - (_STALE_S + 60)
     os.utime(lock, (old, old))
     return lock
@@ -71,7 +71,7 @@ def test_init_git_commit_reclaims_stale_index_lock(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path, "ini")
     tracker = _tracker(repo)
     # stage a change so there is something to commit through init._git
-    (Path(tracker) / ".init-lock-probe").write_text("x")
+    (Path(tracker) / ".init-lock-probe").write_text("x", encoding="utf-8")
     _init._git(tracker, "add", "--", ".init-lock-probe")
     lock = _plant_stale_lock(tracker)
 
@@ -91,7 +91,7 @@ def _plant_fresh_lock(tracker: str) -> Path:
         check=True,
     ).stdout.strip()
     lock = Path(p) if os.path.isabs(p) else Path(tracker) / p
-    lock.write_text("")  # fresh mtime
+    lock.write_text("", encoding="utf-8")  # fresh mtime
     return lock
 
 
@@ -139,7 +139,7 @@ def test_init_git_rides_out_contended_index_lock(tmp_path: Path, monkeypatch) ->
     is released through the ``_retry_probe`` seam only after the first confirmed failure."""
     repo = _init_repo(tmp_path, "inic")
     tracker = _tracker(repo)
-    (Path(tracker) / ".init-contended-probe").write_text("x")
+    (Path(tracker) / ".init-contended-probe").write_text("x", encoding="utf-8")
     _init._git(tracker, "add", "--", ".init-contended-probe")
     lock = _plant_fresh_lock(tracker)
     attempts: list = []

@@ -46,7 +46,7 @@ def test_transition_reclaims_stale_index_lock(tmp_path: Path) -> None:
     tid = rebar.create_ticket("task", "t", repo_root=repo)
 
     lock = _index_lock_path(tracker)
-    lock.write_text("")
+    lock.write_text("", encoding="utf-8")
     old = time.time() - (_STALE_S + 60)
     os.utime(lock, (old, old))
 

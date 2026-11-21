@@ -112,7 +112,7 @@ def add_bytes_held(delta: int, root: Path) -> int:
     """:func:`add_bytes` for a caller already inside :func:`accounting_lock`."""
     path = _byte_total_path(root)
     try:
-        current = int(path.read_text().strip() or "0")
+        current = int(path.read_text(encoding="utf-8").strip() or "0")
     except (OSError, ValueError):
         current = 0
     new = max(0, current + delta)

@@ -31,7 +31,9 @@ def _write_event(ticket_dir: Path, timestamp: int, uuid: str, event_type: str, d
         "author": "Test User",
         "data": data,
     }
-    (ticket_dir / f"{timestamp}-{uuid}-{event_type}.json").write_text(json.dumps(payload))
+    (ticket_dir / f"{timestamp}-{uuid}-{event_type}.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
 
 
 def _forked_ticket(tmp_path: Path) -> Path:

@@ -35,7 +35,7 @@ def _yaml_pass1_ladder() -> list[str]:
             for value in node:
                 walk(value)
 
-    walk(yaml.safe_load(_GATE.read_text()))
+    walk(yaml.safe_load(_GATE.read_text(encoding="utf-8")))
     assert len(found) == 1, f"expected exactly one model_ladder in plan-review.yaml, got {found!r}"
     return found[0]
 

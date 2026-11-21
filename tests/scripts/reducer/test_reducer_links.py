@@ -291,7 +291,7 @@ def test_reducer_link_events_survive_snapshot(tmp_path: Path, reducer: ModuleTyp
         },
     }
     (ticket_dir / "1742605400-snap-link-uuid-abcd-SNAPSHOT.json").write_text(
-        json.dumps(snapshot_payload)
+        json.dumps(snapshot_payload), encoding="utf-8"
     )
 
     # New LINK event after the snapshot
@@ -368,7 +368,7 @@ def test_reducer_deps_in_snapshot_not_duplicated(tmp_path: Path, reducer: Module
         },
     }
     (ticket_dir / "1742605400-snap-nodupe-uuid-abcd-SNAPSHOT.json").write_text(
-        json.dumps(snapshot_payload)
+        json.dumps(snapshot_payload), encoding="utf-8"
     )
 
     state = reducer.reduce_ticket(ticket_dir)

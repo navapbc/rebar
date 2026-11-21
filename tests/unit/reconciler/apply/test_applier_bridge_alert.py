@@ -99,7 +99,7 @@ def test_bridge_alert_tag_is_create_identity_write_failed(applier, tmp_path):
 
     alert_files = list((tmp_path / ".tickets-tracker" / local_id).glob("*-BRIDGE_ALERT.json"))
     assert len(alert_files) == 1
-    payload = json.loads(alert_files[0].read_text())
+    payload = json.loads(alert_files[0].read_text(encoding="utf-8"))
     data = payload.get("data", {})
     assert data.get("tag") == "create-identity-write-failed" or (
         "identity-write" in data.get("reason", "")

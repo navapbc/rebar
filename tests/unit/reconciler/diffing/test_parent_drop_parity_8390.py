@@ -108,7 +108,7 @@ def _alert_kinds(repo_root: Path) -> list[str]:
     """Read durable bridge-alert kinds from the repository, rather than an in-memory sink."""
     kinds: list[str] = []
     for path in sorted(scratch_retention.alerts_dir(repo_root).glob("*.jsonl")):
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 kinds.append(json.loads(line).get("kind", ""))
     return kinds

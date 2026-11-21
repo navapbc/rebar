@@ -36,7 +36,7 @@ _COMPOSE_UP = _REPO / "infra" / "scripts" / "compose-up.sh"
 
 def test_terraform_opcert_integration_uri_is_https() -> None:
     """AC1(a): the integration proxies to the box origin over HTTPS (not http://:80)."""
-    tf = _TF.read_text()
+    tf = _TF.read_text(encoding="utf-8")
     m = re.search(r'integration_uri\s*=\s*"([^"]+)"', tf)
     assert m, "opcert.tf has no integration_uri"
     assert m.group(1).startswith("https://"), m.group(1)
@@ -44,7 +44,7 @@ def test_terraform_opcert_integration_uri_is_https() -> None:
 
 def test_terraform_opcert_injects_guard_header() -> None:
     """AC1(b): the integration injects the static X-Opcert-Guard origin-guard header."""
-    tf = _TF.read_text()
+    tf = _TF.read_text(encoding="utf-8")
     assert '"append:header.X-Opcert-Guard"' in tf
     # the header value is the Terraform-managed random_password (same value stored in SSM).
     assert "random_password.opcert_guard.result" in tf
@@ -52,7 +52,7 @@ def test_terraform_opcert_injects_guard_header() -> None:
 
 def test_terraform_both_securestring_params_present() -> None:
     """AC1(c+d): both /rebar/prod/ params exist as SecureString, key guarded / guard not."""
-    tf = _TF.read_text()
+    tf = _TF.read_text(encoding="utf-8")
     for label, name in (
         ("opcert_ed25519_key", "/rebar/prod/opcert-ed25519-key"),
         ("opcert_origin_guard", "/rebar/prod/opcert-origin-guard"),
@@ -80,7 +80,7 @@ def test_terraform_both_securestring_params_present() -> None:
 
 def test_terraform_route_is_sigv4_aws_iam() -> None:
     """AC1(e): the route is SigV4-authenticated (authorization_type = AWS_IAM)."""
-    tf = _TF.read_text()
+    tf = _TF.read_text(encoding="utf-8")
     route = _resource_block(tf, "aws_apigatewayv2_route", "opcert")
     assert route is not None
     assert 'authorization_type = "AWS_IAM"' in route
@@ -88,7 +88,7 @@ def test_terraform_route_is_sigv4_aws_iam() -> None:
 
 def test_terraform_random_provider_pinned() -> None:
     """AC1(g): the hashicorp/random provider is in versions.tf required_providers."""
-    versions = _VERSIONS.read_text()
+    versions = _VERSIONS.read_text(encoding="utf-8")
     assert "hashicorp/random" in versions
     assert re.search(r"random\s*=\s*{", versions)
 
@@ -96,7 +96,7 @@ def test_terraform_random_provider_pinned() -> None:
 def test_terraform_invoke_policy_is_the_sole_grantee() -> None:
     """AC1 invoke-policy: exactly one execute-api:Invoke policy, labelled opcert_admin_invoke,
     on the IaC-created rebar-opcert-admin role, scoped to this API's execution ARN."""
-    tf = _TF.read_text()
+    tf = _TF.read_text(encoding="utf-8")
     # role exists with the pinned name
     role = _resource_block(tf, "aws_iam_role", "opcert_admin")
     assert role is not None and 'name               = "rebar-opcert-admin"' in role
@@ -122,7 +122,7 @@ def test_terraform_opcert_admin_role_ignores_assume_role_policy_drift() -> None:
     A no-var plan otherwise compares empty principal input with deployed trust and
     reports a phantom change. ignore_changes on assume_role_policy preserves the
     operator-owned list. The key parameter is checked separately as write-only."""
-    tf = _TF.read_text()
+    tf = _TF.read_text(encoding="utf-8")
     role = _resource_block(tf, "aws_iam_role", "opcert_admin")
     assert role is not None, "missing aws_iam_role.opcert_admin"
     assert re.search(r"ignore_changes\s*=\s*\[\s*assume_role_policy\s*\]", role), (
@@ -133,7 +133,7 @@ def test_terraform_opcert_admin_role_ignores_assume_role_policy_drift() -> None:
 
 def test_terraform_no_fixed_cost_resources() -> None:
     """The zero-fixed-cost posture: no Fargate/ECS/LB/Secrets-Manager/KMS-CMK/kms:Sign."""
-    tf = _strip_hcl_comments(_TF.read_text())
+    tf = _strip_hcl_comments(_TF.read_text(encoding="utf-8"))
     for forbidden in (
         "aws_ecs_service",
         "aws_lb",
@@ -153,7 +153,7 @@ def test_assertion_script_present_executable_and_literal() -> None:
     AC1 jq queries (aggregated all() on route auth; the write-only value_wo_version (f) query)."""
     assert _ASSERT_SH.is_file()
     assert os.access(_ASSERT_SH, os.X_OK), "assertion script must be executable"
-    body = _ASSERT_SH.read_text()
+    body = _ASSERT_SH.read_text(encoding="utf-8")
     assert 'startswith("https://")' in body
     assert 'has("append:header.X-Opcert-Guard")' in body
     assert 'all(.t == "SecureString")' in body
@@ -168,7 +168,7 @@ def test_assertion_script_present_executable_and_literal() -> None:
 
 def test_compose_has_opcert_service_with_env_wiring() -> None:
     """AC3: docker-compose has the opcert service with the env wiring + loopback port."""
-    doc = yaml.safe_load(_COMPOSE.read_text())
+    doc = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))
     svc = doc["services"]["opcert"]
     env = svc["environment"]
     assert env["REBAR_OPCERT_KEY_PATH"], (
@@ -188,7 +188,7 @@ def test_compose_has_opcert_service_with_env_wiring() -> None:
 def test_nginx_template_has_failclosed_guard_map_and_403_block() -> None:
     """AC3: the TEMPLATE itself carries the fail-closed guard map (default 0 + zero-match glob
     include) and the guarded /opcert/ 403 location."""
-    conf = _NGINX.read_text()
+    conf = _NGINX.read_text(encoding="utf-8")
     # the map: fail-closed default + glob include (tolerates zero matches on a fresh boot)
     assert re.search(r"map\s+\$http_x_opcert_guard\s+\$opcert_guard_ok\s*{", conf), (
         "guard map missing"
@@ -210,12 +210,12 @@ def test_materialize_script_present_and_wired() -> None:
     """AC3: the guard materialize script exists, ends with nginx -s reload, reads the SSM param,
     and is wired into compose-up.sh BEFORE `docker compose up`."""
     assert _MATERIALIZE.is_file() and os.access(_MATERIALIZE, os.X_OK)
-    body = _MATERIALIZE.read_text()
+    body = _MATERIALIZE.read_text(encoding="utf-8")
     assert "aws ssm get-parameter" in body
     assert "/rebar/prod/opcert-origin-guard" in body
     assert "nginx -s reload" in body
 
-    up = _COMPOSE_UP.read_text()
+    up = _COMPOSE_UP.read_text(encoding="utf-8")
     assert "materialize-opcert-guard.sh" in up
     # ordering: the materialize call precedes the stack bring-up (`docker compose ... up -d`)
     idx_mat = up.index("materialize-opcert-guard.sh")
@@ -233,12 +233,12 @@ def test_materialize_script_renders_guard_from_ssm_stub(tmp_path: Path) -> None:
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir()
     stub_aws = stub_dir / "aws"
-    stub_aws.write_text(f'#!/bin/sh\nprintf "%s\\n" "{fixture}"\n')
+    stub_aws.write_text(f'#!/bin/sh\nprintf "%s\\n" "{fixture}"\n', encoding="utf-8")
     stub_aws.chmod(stub_aws.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
 
     map_file = tmp_path / "opcert-guard.map.conf"
     env_file = tmp_path / ".env"
-    env_file.write_text("EXISTING=1\nREBAR_OPCERT_GUARD=STALE\n")
+    env_file.write_text("EXISTING=1\nREBAR_OPCERT_GUARD=STALE\n", encoding="utf-8")
 
     env = subprocess_env()
     env["PATH"] = f"{stub_dir}:{env['PATH']}"
@@ -256,9 +256,9 @@ def test_materialize_script_renders_guard_from_ssm_stub(tmp_path: Path) -> None:
     assert res.returncode == 0, res.stderr
 
     # the nginx map entry is exactly `"<value>" 1;`
-    assert map_file.read_text().strip() == f'"{fixture}" 1;'
+    assert map_file.read_text(encoding="utf-8").strip() == f'"{fixture}" 1;'
     # the .env has the fresh guard (stale line replaced) and preserves other lines
-    env_body = env_file.read_text()
+    env_body = env_file.read_text(encoding="utf-8")
     assert f"REBAR_OPCERT_GUARD={fixture}" in env_body
     assert "REBAR_OPCERT_GUARD=STALE" not in env_body
     assert "EXISTING=1" in env_body
@@ -269,7 +269,9 @@ def test_materialize_script_fails_closed_on_empty_guard(tmp_path: Path) -> None:
     stub_dir = tmp_path / "bin"
     stub_dir.mkdir()
     stub_aws = stub_dir / "aws"
-    stub_aws.write_text('#!/bin/sh\nprintf "None\\n"\n')  # SSM returns the None sentinel
+    stub_aws.write_text(
+        '#!/bin/sh\nprintf "None\\n"\n', encoding="utf-8"
+    )  # SSM returns the None sentinel
     stub_aws.chmod(stub_aws.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
 
     env = subprocess_env()
@@ -406,12 +408,12 @@ def _autodeploy_trusted_keys() -> str:
 
 
 def test_compose_mcp_service_trusts_exactly_the_operator_list() -> None:
-    env = yaml.safe_load(_COMPOSE.read_text())["services"]["mcp"]["environment"]
+    env = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"]["mcp"]["environment"]
     assert _trust_pairs(env[_TRUST_ENV_VAR]) == _MCP_TRUSTED_PAIRS
 
 
 @requires_posix_shell
 def test_autodeploy_mcp_run_new_carries_the_compose_trust_list() -> None:
-    env = yaml.safe_load(_COMPOSE.read_text())["services"]["mcp"]["environment"]
+    env = yaml.safe_load(_COMPOSE.read_text(encoding="utf-8"))["services"]["mcp"]["environment"]
     assert _autodeploy_trusted_keys() == env[_TRUST_ENV_VAR]
     assert _trust_pairs(_autodeploy_trusted_keys()) == _MCP_TRUSTED_PAIRS

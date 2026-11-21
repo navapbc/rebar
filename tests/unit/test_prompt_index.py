@@ -27,7 +27,8 @@ def test_get_prompt_project_override_wins(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
     (pdir / "code-quality.md").write_text(
-        "---\ncategory: review\ndimension: code-quality\n---\nOVERRIDE {{ticket_id}}"
+        "---\ncategory: review\ndimension: code-quality\n---\nOVERRIDE {{ticket_id}}",
+        encoding="utf-8",
     )
     p = prompts.get_prompt("code-quality", repo_root=str(tmp_path))
     assert p.text == "OVERRIDE {{ticket_id}}"
@@ -44,7 +45,9 @@ def test_get_prompt_unknown_raises() -> None:
 def test_non_review_category_is_not_reviewer(tmp_path: Path) -> None:
     pdir = tmp_path / ".rebar" / "prompts"
     pdir.mkdir(parents=True)
-    (pdir / "summarize.md").write_text("---\ncategory: transform\n---\nDo a thing.")
+    (pdir / "summarize.md").write_text(
+        "---\ncategory: transform\n---\nDo a thing.", encoding="utf-8"
+    )
     p = prompts.get_prompt("summarize", repo_root=str(tmp_path))
     assert p.is_reviewer is False and p.category == "transform"
 
@@ -66,7 +69,7 @@ def test_index_on_disk_matches_regenerated() -> None:
 
 def _write_prompt(d: Path, name: str, meta_lines: str, body: str = "BODY") -> None:
     d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(f"---\n{meta_lines}\n---\n{body}")
+    (d / name).write_text(f"---\n{meta_lines}\n---\n{body}", encoding="utf-8")
 
 
 def _scan_dir(monkeypatch, d: Path) -> None:

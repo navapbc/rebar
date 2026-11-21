@@ -17,7 +17,7 @@ _DEPLOYED = "d" * 40
 
 def _stub(bin_dir: Path, name: str, body: str) -> None:
     p = bin_dir / name
-    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
+    p.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body), encoding="utf-8")
     p.chmod(0o755)
 
 
@@ -29,10 +29,12 @@ def no_op_box_with_dead_review_bot(tmp_path: Path) -> dict[str, object]:
     state.mkdir()
     deploy_repo = tmp_path / "deploy"
     (deploy_repo / "infra" / "compose").mkdir(parents=True)
-    (deploy_repo / "infra" / "compose" / "docker-compose.yml").write_text("services: {}\n")
+    (deploy_repo / "infra" / "compose" / "docker-compose.yml").write_text(
+        "services: {}\n", encoding="utf-8"
+    )
     mirror = tmp_path / "mirror"
     (mirror / ".git").mkdir(parents=True)
-    (state / "deployed-sha").write_text(_DEPLOYED + "\n")
+    (state / "deployed-sha").write_text(_DEPLOYED + "\n", encoding="utf-8")
 
     _stub(
         bin_dir,

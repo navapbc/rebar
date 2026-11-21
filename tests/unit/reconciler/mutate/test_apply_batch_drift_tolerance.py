@@ -239,7 +239,7 @@ def test_benign_unrelated_ticket_commit_continues(tmp_path, applier):
     subjects = ["ticket: STATUS OTHER-999", None]
     path, client = _run_batch(applier, tmp_path, mutations, subjects, "pa")
     assert client.update_issue.call_count == 2
-    assert json.loads(path.read_text())["mutation_count"] == 2
+    assert json.loads(path.read_text(encoding="utf-8"))["mutation_count"] == 2
 
 
 def test_benign_same_ticket_edit_commit_continues(tmp_path, applier):
@@ -251,7 +251,7 @@ def test_benign_same_ticket_edit_commit_continues(tmp_path, applier):
     ]
     path, client = _run_batch(applier, tmp_path, mutations, ["ticket: EDIT 6d43-a70d", None], "pb")
     assert client.update_issue.call_count == 2
-    assert json.loads(path.read_text())["mutation_count"] == 2
+    assert json.loads(path.read_text(encoding="utf-8"))["mutation_count"] == 2
 
 
 def test_benign_ticket_compact_delete_commit_continues(tmp_path, applier):
@@ -265,7 +265,7 @@ def test_benign_ticket_compact_delete_commit_continues(tmp_path, applier):
     subjects = ["ticket: COMPACT 6d43-a70d-871c-4973", None]
     path, client = _run_batch(applier, tmp_path, mutations, subjects, "pc")
     assert client.update_issue.call_count == 2
-    assert json.loads(path.read_text())["mutation_count"] == 2
+    assert json.loads(path.read_text(encoding="utf-8"))["mutation_count"] == 2
 
 
 def test_sequential_benign_commits_continue_to_completion(tmp_path, applier):
@@ -280,7 +280,7 @@ def test_sequential_benign_commits_continue_to_completion(tmp_path, applier):
     subjects = ["ticket: STATUS DSO-10", "ticket: COMPACT DSO-11", "ticket: EDIT DSO-12"]
     path, client = _run_batch(applier, tmp_path, mutations, subjects, "pd")
     assert client.update_issue.call_count == 3
-    assert json.loads(path.read_text())["mutation_count"] == 3
+    assert json.loads(path.read_text(encoding="utf-8"))["mutation_count"] == 3
 
 
 def test_competing_pass_record_commit_aborts_before_next_jira_call(tmp_path, applier):

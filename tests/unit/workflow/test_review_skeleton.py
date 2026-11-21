@@ -24,7 +24,7 @@ _SKELETON = pathlib.Path("src/rebar/llm/workflow/examples/review_skeleton.yaml")
 
 
 def _doc() -> dict:
-    return _migrate.migrate_to_current(yaml.safe_load(_SKELETON.read_text()))
+    return _migrate.migrate_to_current(yaml.safe_load(_SKELETON.read_text(encoding="utf-8")))
 
 
 class _Rec(_ex.RunRecorder):
@@ -52,7 +52,9 @@ def test_skeleton_validates_and_lints():
     # lint_workflow is the FULL linter (schema + references + prompt-existence + secrets) — it
     # exercises the prompt-ref checks (incl. the new batch nested-prompt check) on real text.
     findings = [
-        str(f) for f in _lint.lint_workflow(_SKELETON.read_text()) if f.severity != "warning"
+        str(f)
+        for f in _lint.lint_workflow(_SKELETON.read_text(encoding="utf-8"))
+        if f.severity != "warning"
     ]
     assert findings == [], findings
 

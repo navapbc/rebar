@@ -49,7 +49,7 @@ def _sha256(token: str) -> str:
 def _tokens_file(tmp_path, *records) -> str:
     """Write a JSON static-tokens secrets file and return its path."""
     p = tmp_path / "tokens.json"
-    p.write_text(json.dumps({"tokens": list(records)}))
+    p.write_text(json.dumps({"tokens": list(records)}), encoding="utf-8")
     return str(p)
 
 
@@ -193,7 +193,8 @@ def test_static_rejects_plaintext_literal_record(tmp_path):
     tf.write_text(
         json.dumps(
             {"tokens": [{"name": "bad", "client_id": "bad", "scopes": [], "token": "plaintext"}]}
-        )
+        ),
+        encoding="utf-8",
     )
     with pytest.raises(AuthConfigError):
         StaticBearerVerifier(tokens_file=str(tf), resource=RESOURCE)
@@ -203,7 +204,10 @@ def test_static_rejects_record_missing_both_token_fields(tmp_path):
     from rebar._mcp_auth import AuthConfigError, StaticBearerVerifier
 
     tf = tmp_path / "t.json"
-    tf.write_text(json.dumps({"tokens": [{"name": "bad", "client_id": "bad", "scopes": []}]}))
+    tf.write_text(
+        json.dumps({"tokens": [{"name": "bad", "client_id": "bad", "scopes": []}]}),
+        encoding="utf-8",
+    )
     with pytest.raises(AuthConfigError):
         StaticBearerVerifier(tokens_file=str(tf), resource=RESOURCE)
 

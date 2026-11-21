@@ -24,7 +24,9 @@ def _legacy_compacted_closed_ticket(repo_a, seed, tracker_a):
     from rebar.reducer import reduce_ticket
 
     seed_dir = tracker_a / seed
-    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text())["uuid"]
+    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text(encoding="utf-8"))[
+        "uuid"
+    ]
 
     # A surviving claim STATUS (open -> in_progress) — this is what a lossy replay falls
     # back to.
@@ -39,7 +41,8 @@ def _legacy_compacted_closed_ticket(repo_a, seed, tracker_a):
                 "author": "Test",
                 "data": {"current_status": "open", "status": "in_progress"},
             }
-        )
+        ),
+        encoding="utf-8",
     )
     # The close STATUS is DELETED from disk — it survives only as a cited source uuid.
     deleted_close_uuid = "22222222-2222-4222-8222-222222222222"
@@ -62,7 +65,8 @@ def _legacy_compacted_closed_ticket(repo_a, seed, tracker_a):
                     "source_event_uuids": [create_uuid, claim_uuid, deleted_close_uuid],
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
     return seed_dir
 
@@ -137,7 +141,9 @@ def test_rebuild_still_folds_orphan_when_log_is_complete(two_clones):  # noqa: F
     tracker_a = _tracker(repo_a)
     seed_dir = tracker_a / seed
 
-    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text())["uuid"]
+    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text(encoding="utf-8"))[
+        "uuid"
+    ]
     compiled = {k: v for k, v in reduce_ticket(str(seed_dir)).items() if k != "updated_at"}
     _engine_run(repo_a, "comment", seed, "orphan-comment-body")
     snap_uuid = "44444444-4444-4444-8444-444444444444"
@@ -152,7 +158,8 @@ def test_rebuild_still_folds_orphan_when_log_is_complete(two_clones):  # noqa: F
                 # complete: every cited source is present on disk
                 "data": {"compiled_state": compiled, "source_event_uuids": [create_uuid]},
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     did = rebuild_snapshot_from_full_log(str(tracker_a), seed, str(seed_dir), no_commit=True)
@@ -206,8 +213,10 @@ def test_restore_recovers_a_source_deleted_by_legacy_compaction(two_clones):  # 
 
     _engine_run(repo_a, "comment", seed, "body-that-must-survive")
     victim = sorted(seed_dir.glob("*-COMMENT.json"))[-1]
-    victim_uuid = _json.loads(victim.read_text())["uuid"]
-    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text())["uuid"]
+    victim_uuid = _json.loads(victim.read_text(encoding="utf-8"))["uuid"]
+    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text(encoding="utf-8"))[
+        "uuid"
+    ]
     _commit(tracker_a, "seed events")
 
     # Legacy delete-style compaction: the source file is REMOVED and the removal committed.
@@ -227,7 +236,8 @@ def test_restore_recovers_a_source_deleted_by_legacy_compaction(two_clones):  # 
                     "source_event_uuids": [create_uuid, victim_uuid],
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
     assert snapshot_missing_sources(str(seed_dir)) == [victim_uuid], "precondition: log incomplete"
 
@@ -253,11 +263,11 @@ def test_restore_takes_the_newest_pre_image_when_deleted_twice(two_clones):  # n
     name = "1700000000000000000-66666666-6666-4666-8666-666666666666-COMMENT.json"
     target = seed_dir / name
 
-    target.write_text('{"event_type": "COMMENT", "data": {"body": "OLD"}}')
+    target.write_text('{"event_type": "COMMENT", "data": {"body": "OLD"}}', encoding="utf-8")
     _commit(tracker_a, "add v1")
     target.unlink()
     _commit(tracker_a, "delete v1")
-    target.write_text('{"event_type": "COMMENT", "data": {"body": "NEW"}}')
+    target.write_text('{"event_type": "COMMENT", "data": {"body": "NEW"}}', encoding="utf-8")
     _commit(tracker_a, "add v2")
     target.unlink()
     _commit(tracker_a, "delete v2")
@@ -265,7 +275,7 @@ def test_restore_takes_the_newest_pre_image_when_deleted_twice(two_clones):  # n
     restored = restore_deleted_sources(str(tracker_a), seed, str(seed_dir))
 
     assert name in restored
-    body = (seed_dir / (name + ".retired")).read_text()
+    body = (seed_dir / (name + ".retired")).read_text(encoding="utf-8")
     assert "NEW" in body and "OLD" not in body, "must restore the newest pre-image"
 
 
@@ -280,8 +290,10 @@ def test_restore_falls_back_to_per_uuid_lookup(two_clones, monkeypatch):  # noqa
 
     _engine_run(repo_a, "comment", seed, "body-recovered-by-fallback")
     victim = sorted(seed_dir.glob("*-COMMENT.json"))[-1]
-    victim_uuid = _json.loads(victim.read_text())["uuid"]
-    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text())["uuid"]
+    victim_uuid = _json.loads(victim.read_text(encoding="utf-8"))["uuid"]
+    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text(encoding="utf-8"))[
+        "uuid"
+    ]
     _commit(tracker_a, "seed events")
     victim.unlink()
     _commit(tracker_a, "ticket: COMPACT (legacy delete-style)")
@@ -300,7 +312,8 @@ def test_restore_falls_back_to_per_uuid_lookup(two_clones, monkeypatch):  # noqa
                     "source_event_uuids": [create_uuid, victim_uuid],
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
     assert snapshot_missing_sources(str(seed_dir)) == [victim_uuid]
 

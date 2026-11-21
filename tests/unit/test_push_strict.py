@@ -123,7 +123,7 @@ def test_strict_terminal_push_classes_have_distinct_reasons_and_preserve_state(
     tracker = tmp_path / ".tickets-tracker"
     _common(monkeypatch, tracker)
     witness = tracker / "local-commit.witness"
-    witness.write_text("unchanged\n")
+    witness.write_text("unchanged\n", encoding="utf-8")
     before = witness.read_bytes()
     push_calls = 0
 

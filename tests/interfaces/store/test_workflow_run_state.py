@@ -31,7 +31,7 @@ def _append(repo: Path, tid: str, etype: str, data: dict) -> None:
 
 def _write_event_file(repo: Path, tid: str, etype: str, ts: int, uid: str, data: dict) -> Path:
     tracker = _tracker(repo)
-    env_id = (tracker / ".env-id").read_text().strip()
+    env_id = (tracker / ".env-id").read_text(encoding="utf-8").strip()
     event = {
         "timestamp": ts,
         "uuid": uid,
@@ -41,7 +41,7 @@ def _write_event_file(repo: Path, tid: str, etype: str, ts: int, uid: str, data:
         "data": data,
     }
     path = tracker / tid / f"{ts}-{uid}-{etype}.json"
-    path.write_text(json.dumps(event, ensure_ascii=False))
+    path.write_text(json.dumps(event, ensure_ascii=False), encoding="utf-8")
     return path
 
 

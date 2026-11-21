@@ -208,7 +208,7 @@ def test_the_prefix_gated_helper_is_gone_and_the_call_site_passes_no_model():
         "the anthropic-prefix-gated web helper is back"
     )
 
-    tree = ast.parse(pathlib.Path(runner_mod.__file__).read_text())
+    tree = ast.parse(pathlib.Path(runner_mod.__file__).read_text(encoding="utf-8"))
     calls = [
         n
         for n in ast.walk(tree)
@@ -374,7 +374,11 @@ def test_runner_unflagged_request_is_byte_identical(monkeypatch, tmp_path, model
 
 
 def _packaged_routing() -> dict:
-    text = resources.files("rebar.llm").joinpath("plan_review/criteria_routing.json").read_text()
+    text = (
+        resources.files("rebar.llm")
+        .joinpath("plan_review/criteria_routing.json")
+        .read_text(encoding="utf-8")
+    )
     return json.loads(text)
 
 
@@ -423,7 +427,12 @@ def test_pass1_chunk_threads_web_from_criterion_routing():
 
 
 def _t1_rubric() -> str:
-    return resources.files("rebar.llm").joinpath("reviewers/plan_review_T1.md").read_text().lower()
+    return (
+        resources.files("rebar.llm")
+        .joinpath("reviewers/plan_review_T1.md")
+        .read_text(encoding="utf-8")
+        .lower()
+    )
 
 
 def test_t1_rubric_asserts_web_access_rather_than_hedging_it():
@@ -446,7 +455,11 @@ def test_t1_rubric_still_forbids_fabricated_citations_and_frames_results_as_untr
 
 
 def test_t1_rubric_grants_only_unverified_authority_to_the_local_failure_sentinel():
-    text = resources.files("rebar.llm").joinpath("reviewers/plan_review_T1.md").read_text()
+    text = (
+        resources.files("rebar.llm")
+        .joinpath("reviewers/plan_review_T1.md")
+        .read_text(encoding="utf-8")
+    )
     lower = text.lower()
 
     assert "WEB_SEARCH_UNAVAILABLE" in text
@@ -472,7 +485,7 @@ def test_adr_0063_records_the_local_failure_boundary_reargument():
     text = (
         pathlib.Path(__file__).resolve().parents[2]
         / "docs/adr/0063-web-search-capability-security-posture.md"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     lower = text.lower()
 
     assert "adds no fetcher" in lower

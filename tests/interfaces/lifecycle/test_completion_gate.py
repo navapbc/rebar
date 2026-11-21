@@ -30,7 +30,9 @@ from rebar._ids import resolve_ticket_id
 
 
 def _enable(repo: Path) -> None:
-    (repo / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
 
 
 def _commit(repo: Path) -> None:
@@ -313,7 +315,7 @@ def test_unreadable_config_errors_the_close_before_any_verifier(
     # loudly naming the config fault, and the (billable) verifier is never reached.
     monkeypatch.setattr(rebar.llm, "verify_completion", _never)
     tid = _make(rebar_repo)
-    (rebar_repo / "rebar.toml").write_text("this is = = not valid toml [[[\n")
+    (rebar_repo / "rebar.toml").write_text("this is = = not valid toml [[[\n", encoding="utf-8")
     from rebar import config as _config
 
     _config.reset_config_cache()
@@ -537,7 +539,9 @@ def test_config_rebar_toml_enables_flag_and_default_off(tmp_path: Path) -> None:
     config.reset_config_cache()
     on = tmp_path / "on"
     on.mkdir()
-    (on / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    (on / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n", encoding="utf-8"
+    )
     assert config.load_config(str(on)).verify.require_completion_verification_for_close is True
 
     config.reset_config_cache()

@@ -31,7 +31,7 @@ def _write_tree(root: Path) -> None:
     for rel, body in files.items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body)
+        path.write_text(body, encoding="utf-8")
 
 
 def _git_repo(tmp_path: Path) -> Path:
@@ -89,7 +89,7 @@ def test_omitted_path_named_for_removed_symbol_without_grep_ac(tmp_path: Path) -
 
 def test_omitted_path_names_the_matched_text_of_an_over_matching_regex(tmp_path: Path) -> None:
     root = _git_repo(tmp_path)
-    (root / "src/aliases.py").write_text("_ARCH_ALIASES = {}\n")
+    (root / "src/aliases.py").write_text("_ARCH_ALIASES = {}\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True)
     plan = (
         "## Approach\nDelete `_LEGACY_ENV_ALIASES` from `src/spot.py`.\n\n"
