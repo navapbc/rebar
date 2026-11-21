@@ -259,7 +259,14 @@ def test_opted_in_sites_are_exactly_the_declared_set():
     """The blast radius is the whole point: compaction, fsck, doctor, the reconciler and the
     best-effort sweeps must NOT gain retries. Compaction especially — retrying there would
     undo 7084's stand-aside and re-create the 48s holder that caused this bug."""
-    assert _opt_in_sites() == {"event_append.py": 3, "txn.py": 1, "push.py": 1}
+    # completion_delivery.py: only the close's own candidate merge (canonical=True) opts in;
+    # its post-publication convergence merges stay fail-fast (sweltering-difficult-drongo).
+    assert _opt_in_sites() == {
+        "event_append.py": 3,
+        "txn.py": 1,
+        "push.py": 1,
+        "completion_delivery.py": 1,
+    }
 
 
 def test_advisory_push_merge_stays_fail_fast():
