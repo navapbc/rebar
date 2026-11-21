@@ -246,11 +246,59 @@ def write_blocking_divergence(
     return {
         "verdict": "diverged",
         "remote_ref": remote_ref,
+        "superseded": _remote_supersedes(tracker, remote_ref),
         "reason": (
             "the local ticket store has DIVERGED from the shared store with no shared "
             "ancestor, so new ticket events would remain local-only and never push"
         ),
     }
+
+
+def _remote_supersedes(tracker: str, remote_ref: str) -> bool:
+    """Whether ``remote_ref``'s store epoch proves it a reclaimed rewrite of this store.
+
+    That is the one unrelated history the sync's stale-clone override moves a clone onto
+    (ADR 0106 §5). Fails closed: an unreadable ref or record is not superseding.
+    """
+    from rebar._store import compat
+    from rebar._store.gitutil import run_git
+
+    try:
+        resolved = run_git(
+            tracker,
+            "rev-parse",
+            "--verify",
+            f"{remote_ref}^{{commit}}",
+            check=False,
+            timeout=_GIT_TIMEOUT,
+        )
+        target = resolved.stdout.strip()
+        return bool(
+            resolved.returncode == 0
+            and target
+            and compat.remote_epoch_supersedes_local(tracker, target)
+        )
+    # An unreadable remote record proves nothing.
+    except Exception:
+        logger.debug("store epoch supersede probe failed", exc_info=True)
+        return False
+
+
+def heal_superseded_clone(tracker: str | os.PathLike[str]) -> None:
+    """Run one sync round so a reclaim-superseded clone moves onto the reclaimed baseline.
+
+    The write path calls this only after :func:`write_blocking_divergence` proved the
+    supersession, and only without the write lock held: the round fetches, takes the lock
+    and runs the stale-clone override (bug ``smiling-ancient-finwhale``). Best-effort and
+    never raises; the write's retried precheck refuses whatever it could not move.
+    """
+    from rebar._store import sync
+
+    try:
+        sync.reconverge(tracker)
+    # The retried precheck still refuses an unhealed store.
+    except Exception:
+        logger.debug("superseded-clone heal failed; the write precheck decides", exc_info=True)
 
 
 def stale_gate_message(gate_label: str, ticket_id: str, freshness: dict[str, Any]) -> str:
