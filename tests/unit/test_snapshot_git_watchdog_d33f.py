@@ -57,10 +57,12 @@ def slow_git(repo: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     wrapper.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setattr(git_fetch, "_GIT_TIMEOUT", _BOUND_S)
 
     def _slow(subcommand: str) -> None:
+        # Shrink the watchdog only once a call is actually made to hang, so healthy real
+        # git is held to the production bound (combative-sanctified-copperhead).
         monkeypatch.setenv("EEL_SLOW_SUBCMD", subcommand)
+        monkeypatch.setattr(git_fetch, "_GIT_TIMEOUT", _BOUND_S)
 
     return _slow
 
@@ -122,8 +124,11 @@ def test_best_effort_blob_prefetch_stays_silent_on_a_remote_timeout(repo, slow_g
 
 
 def test_healthy_calls_still_answer(repo, slow_git):
-    """With no subcommand slowed, the remote is seen and HEAD resolves."""
-    slow_git("no-such-subcommand")
+    """With the wrapper on PATH but nothing slowed, the remote is seen and HEAD resolves.
+
+    Real git is held to the production bound here: a loaded host (a Windows runner in
+    sweep 44885970695) can take the shrunken 1 s just to start git.
+    """
     assert git_fetch.has_remote(repo) is True
     assert git_fetch.has_remote(repo, "upstream") is False
     assert len(repo_snapshot.resolve_ref("HEAD", repo, fetch=False)) in (40, 64)
