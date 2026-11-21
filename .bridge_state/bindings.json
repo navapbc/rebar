@@ -11922,9 +11922,17 @@
       "updated_at": "2026-09-04T22:39:07Z"
     },
     "1a73-6936-59d9-4f49": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nTwo tests added by 863abe7cd19 (rubbery-adamantine-panda) fail in every Windows sweep since: tests/unit/metrics/test_git_metrics.py::test_oracle_cap_change_events_compares_unsampled_adjacent_revisions and ::test_history_walk_cat_file_starts_do_not_grow_with_revisions, both at `git fast-import --quiet --export-marks=...` returned non-zero exit status 128 (helper `_fast_import_history`, tests/unit/metrics/test_git_metrics.py:220-250). Seen in tmp-branch runs 44900392763 and 44900397644 (2026-11-21 PST, trees on origin/main 1a11014a3a4). They block a green main `sweep (windows)`, which breezy-hogged-mastiff needs to close.\n\n## Hypothesis (unverified)\nThe helper passes the stream as text (`input=\"...\"` with text mode), so on Windows each \\\\n is written to git's stdin as \\\\r\\\\n, while each `data <n>` count is the byte length with \\\\n only. fast-import then reads past or short of each data block and aborts. Check: rerun with stderr captured, or feed `input=...encode('utf-8')` without text mode, on a Windows run.\n\n## Acceptance Criteria\n- [ ] Both tests pass in a `sweep (windows)` run (run id recorded in a comment) with the cause recorded on this ticket.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Windows sweep: test_git_metrics fast-import history helper fails with exit 128"
+      },
       "created_at": "2026-11-21T13:32:06Z",
       "jira_id": "4599773",
       "jira_key": "REB-7344",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-21T13:32:09Z"
     },
@@ -52301,9 +52309,9 @@
           "self": "https://navasage.atlassian.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\ngolden-busied-nag (Gerrit 3495, `d5f10d1d2c8`) made `rebar verify-opcert` read its `[verify]` settings from the project config committed on `origin/main`, never from the change under review. `docs/llm-framework.md` (the \"Trust model\" paragraph, around line 1063) still says the trust list lives \"in the verifying environment's own `verify.trusted_opcert_keys` (never in the repository, ADR 0125)\". It does not mention that the merge gate's project layer comes from main, so a reader of that page gets an incomplete, and for a repository-set list contradictory, account of where the gate's trust comes from. `docs/plan-review-gate.md`, `docs/manifest-signing.md` and `infra/runbooks/mcp-opcert-enforcement-flip.md` were updated in that change; this page was missed.\n\n## Approach\n\nAmend the one sentence in that paragraph so it states both facts: the trust list belongs in the verifying environment's own configuration (ADR 0125), and when the merge gate runs, its `[verify]` settings and `tracker.dir` come from the project config committed on `origin/main`, never from the checkout under review, so a change cannot widen its own gate run. Keep the rest of the paragraph unchanged. Wording matches `docs/plan-review-gate.md` (the op-cert quote block) so the 2 pages agree.\n\nDocumentation only: no code, config key, env var or flag changes, so there is no new testable behaviour.\n\n## Scope\n\n- `docs/llm-framework.md`\n\n## Acceptance Criteria\n\n- [ ] The \"Trust model\" paragraph of `docs/llm-framework.md` states that `rebar verify-opcert` reads its `[verify]` settings from the project config committed on `origin/main`, not from the checkout under review: `grep -n \"committed on \\`origin/main\\`\" docs/llm-framework.md` prints a line in that paragraph.\n- [ ] The paragraph still says the trust list belongs to the verifying environment (ADR 0125): `grep -n \"verifying environment's own\" docs/llm-framework.md` still matches.\n- [ ] The docs gates pass: `pytest tests -k \"docs\" -q` and `make lint` exit 0.",
+        "description": "## Context / Problem\n\ngolden-busied-nag (Gerrit 3495, `d5f10d1d2c8`) made `rebar verify-opcert` read its `[verify]` settings from the project config committed on `origin/main`, never from the change under review. `docs/llm-framework.md` (the \"Trust model\" paragraph, around line 1063) still says the trust list lives \"in the verifying environment's own `verify.trusted_opcert_keys` (never in the repository, ADR 0125)\". It does not mention that the merge gate's project layer comes from main, so a reader of that page gets an incomplete, and for a repository-set list contradictory, account of where the gate's trust comes from. `docs/plan-review-gate.md`, `docs/manifest-signing.md` and `infra/runbooks/mcp-opcert-enforcement-flip.md` were updated in that change; this page was missed.\n\n## Approach\n\nAmend the one sentence in that paragraph so it states both facts: the trust list belongs in the verifying environment's own configuration (ADR 0125), and when the merge gate runs, its `[verify]` settings and `tracker.dir` come from the project config committed on `origin/main`, never from the checkout under review, so a change cannot widen its own gate run. Keep the rest of the paragraph unchanged. Wording matches `docs/plan-review-gate.md` (the op-cert quote block) so the 2 pages agree.\n\nDocumentation only: no code, config key, env var or flag changes, so there is no new testable behaviour.\n\n## Scope\n\n- `docs/llm-framework.md`\n\n## Acceptance Criteria\n\n- [x] The \"Trust model\" paragraph of `docs/llm-framework.md` states that `rebar verify-opcert` reads its `[verify]` settings from the project config committed on `origin/main`, not from the checkout under review: `grep -n \"committed on \\`origin/main\\`\" docs/llm-framework.md` prints a line in that paragraph.\n- [x] The paragraph still says the trust list belongs to the verifying environment (ADR 0125): `grep -n \"verifying environment's own\" docs/llm-framework.md` still matches.\n- [x] The docs gates pass: `pytest tests -k \"docs\" -q` and `make lint` exit 0.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "llm-framework trust model omits the main-branch gate rule"
       },
       "created_at": "2026-11-21T07:31:31Z",
@@ -68948,6 +68956,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:25Z"
+    },
+    "98a7-07c4-fc4d-4e08": {
+      "created_at": "2026-11-21T14:32:16Z",
+      "jira_id": "4599774",
+      "jira_key": "REB-7345",
+      "state": "confirmed",
+      "updated_at": "2026-11-21T14:32:19Z"
     },
     "98b0-642a-ae89-4772": {
       "baseline": {
@@ -121667,7 +121682,16 @@
     "1795263824564007001": "__rebar_unknown_comment_id__",
     "1795266530692471001": "__rebar_unknown_comment_id__",
     "1795266547939667001": "__rebar_unknown_comment_id__",
-    "1795267379773567001": "__rebar_unknown_comment_id__"
+    "1795267379773567001": "__rebar_unknown_comment_id__",
+    "1795267750825934001": "__rebar_unknown_comment_id__",
+    "1795267769197337001": "__rebar_unknown_comment_id__",
+    "1795268319783866001": "__rebar_unknown_comment_id__",
+    "1795269058259753001": "__rebar_unknown_comment_id__",
+    "1795269373889223001": "__rebar_unknown_comment_id__",
+    "1795269474856977001": "__rebar_unknown_comment_id__",
+    "1795270543403636001": "__rebar_unknown_comment_id__",
+    "1795270912608049001": "__rebar_unknown_comment_id__",
+    "1795271307381523001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -127351,6 +127375,7 @@
     "REB-7342": "b9a4-afea-0a35-47f5",
     "REB-7343": "8c3d-a931-4c0b-4792",
     "REB-7344": "1a73-6936-59d9-4f49",
+    "REB-7345": "98a7-07c4-fc4d-4e08",
     "REB-735": "6f0a-0c1e-cdf8-4a8d",
     "REB-736": "9408-861a-405d-4131",
     "REB-739": "df42-5932-6178-4376",
