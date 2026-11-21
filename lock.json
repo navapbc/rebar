@@ -1,1 +1,1 @@
-{"completed_at":"2026-11-21T17:50:30Z","degraded":null,"environment_id":"reconciler","failure_kind":null,"lock_fence":4,"outcome":"success","outcome_tally":null,"pass_id":"2026-11-21T17-47-06","schema_version":2}
+{"completed_at":"2026-11-21T18:31:23Z","degraded":null,"environment_id":"reconciler","failure_kind":null,"lock_fence":3,"outcome":"success","outcome_tally":null,"pass_id":"2026-11-21T18-28-55","schema_version":2}
