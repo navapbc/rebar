@@ -18,8 +18,17 @@ pytestmark = pytest.mark.unit
 
 
 def _git(d, *a, _in=None, check=True):
+    """Run git with stdin as UTF-8 BYTES. Text-mode stdin on Windows rewrites every ``\\n`` as
+    ``\\r\\n``, which ``update-index --index-info`` silently rejects, so the fixture's UU entry
+    was never created there (bug cold-censorable-armedcrab)."""
     r = subprocess.run(
-        ["git", "-C", str(d), *a], input=_in, capture_output=True, text=True, check=False
+        ["git", "-C", str(d), *a],
+        input=None if _in is None else _in.encode("utf-8"),
+        capture_output=True,
+        check=False,
+    )
+    r = subprocess.CompletedProcess(
+        r.args, r.returncode, r.stdout.decode("utf-8"), r.stderr.decode("utf-8")
     )
     if check and r.returncode != 0:
         raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")

@@ -288,7 +288,6 @@ jobs:
           '@.github/windows-sweep-deselect/path-separators.args'
           '@.github/windows-sweep-deselect/posix-api.args'
           '@.github/windows-sweep-deselect/posix-shell-stubs.args'
-          '@.github/windows-sweep-deselect/store-history.args'
 
   # Scheduled full macOS default suite catches platform regressions outside Verified's reduced
   # `platform_compat` subset without extending the hot path.
