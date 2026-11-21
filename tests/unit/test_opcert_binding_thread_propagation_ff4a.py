@@ -63,7 +63,7 @@ def test_async_gate_daemon_signs_under_the_bound_key(tmp_path, monkeypatch):
     from rebar._mcp_llm import _spawn_gate_daemon
     from rebar._opcert_binding import bound_signer
 
-    monkeypatch.setattr(rebar.llm, "record_gate_run", lambda record: None)
+    monkeypatch.setattr(rebar.llm, "record_gate_run", lambda record, **_kw: None)
     deployed_key, _ = keypair(tmp_path, "deployed")
     monkeypatch.setenv("REBAR_OPCERT_ENV_ID", "pinned-prod-env")
     monkeypatch.delenv("REBAR_OPCERT_KEY_PATH", raising=False)
