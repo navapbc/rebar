@@ -1922,8 +1922,11 @@ Read the map through these interfaces:
 > and verifies each completion certificate's SSHSIG signature, its binding, and that its
 > (environment, key) pair is listed. Without a required-environment configuration a certificate
 > remains a local process record. The gate reads its `[verify]` settings from the project config
-> committed on the reviewed base branch (`origin/main`), along with `tracker.dir`, never from
-> the checkout under review, so a change cannot widen the trust of its own gate run.
+> committed on the reviewed base branch, along with `tracker.dir`, never from the checkout under
+> review, so a change cannot widen the trust of its own gate run. The base is the environment's
+> `sync.remote` (default `origin`) at that remote's default branch (`<remote>/HEAD`), else
+> `<remote>/main`; the base's own committed `[snapshot].ref` may move it once to another branch of
+> that remote. `REBAR_GATE_REF` and the checkout's `[snapshot].ref` are ignored.
 
 ## End-to-end latency before work begins
 
