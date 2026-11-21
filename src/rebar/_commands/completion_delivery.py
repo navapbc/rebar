@@ -96,13 +96,28 @@ def _record_local_sync_pending(tracker: str, reason: str, detail: str, remote_re
     )
 
 
-def _merge_ref(tracker: str, ref: str, *, expected_head: TicketsOID | None = None) -> bool | None:
-    """Merge a fetched ref under the store lock; ``None`` means local HEAD raced."""
+def _merge_ref(
+    tracker: str, ref: str, *, expected_head: TicketsOID | None = None, canonical: bool = False
+) -> bool | None:
+    """Merge a fetched ref under the store lock; ``None`` means local HEAD raced.
+
+    ``canonical`` marks the close's own candidate merge, which waits the canonical
+    write-path budget: a single fixed 10 s window made a concurrent close of the same ticket
+    fail outright whenever the other close held the lock longer on a slow host
+    (sweltering-difficult-drongo). Post-publication convergence stays fail-fast: the
+    remote already holds the close, and a lock miss there is recorded as pending sync.
+    """
     from rebar._store import lock as store_lock
     from rebar._store import push
 
     try:
-        with store_lock.write_lock(tracker, timeout=10, attempts=1, dual_window=True):
+        if canonical:
+            lock = store_lock.write_lock(
+                tracker, dual_window=True, retries=store_lock.write_path_retries()
+            )
+        else:
+            lock = store_lock.write_lock(tracker, timeout=10, attempts=1, dual_window=True)
+        with lock:
             if expected_head is not None and tracker_head(tracker) != expected_head:
                 return None
             merged = push._merge_remote_under_lock(push, tracker, ref, 1, True, store_lock)
@@ -177,7 +192,7 @@ def _deliver_local(
         raise _receipt_conflict(validation, ticket_id)
     private_ref = _import_candidate(candidate, tracker)
     try:
-        merged = _merge_ref(tracker, private_ref, expected_head=current)
+        merged = _merge_ref(tracker, private_ref, expected_head=current, canonical=True)
         if merged is None:
             return DeliveryResult(
                 "retry_local_race",

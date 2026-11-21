@@ -670,3 +670,34 @@ def test_split_remote_preflight_checks_the_push_url(
     with pytest.raises(CommandError, match="completion delivery preflight failed"):
         _commit_bundle(rebar_repo, ticket, result)
     assert pushes == []
+
+
+def test_candidate_merge_waits_on_the_canonical_write_lock_budget(monkeypatch, tmp_path) -> None:
+    """The close's own merge waits like any store write, not one 10 s window.
+
+    A single fixed window made the second of two closes of one ticket fail on a slow host
+    whenever the first held the lock longer (sweltering-difficult-drongo). Convergence
+    merges after publication stay fail-fast.
+    """
+    from rebar._store import lock as store_lock
+
+    seen: list[dict[str, Any]] = []
+
+    class _Stop(Exception):
+        pass
+
+    def fake_write_lock(tracker, **kwargs):
+        seen.append(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(store_lock, "write_lock", fake_write_lock)
+    for canonical in (True, False):
+        with pytest.raises(CommandError, match="completion candidate merge failed"):
+            completion_delivery._merge_ref(
+                str(tmp_path), "refs/heads/candidate", canonical=canonical
+            )
+
+    assert seen == [
+        {"dual_window": True, "retries": store_lock.write_path_retries()},
+        {"timeout": 10, "attempts": 1, "dual_window": True},
+    ]
