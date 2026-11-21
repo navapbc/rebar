@@ -1,5 +1,8 @@
 {
-  "epoch": "comment-echo-reclaim-v1-41953b29f774dcdfa982df76ec118194",
+  "epoch": "62794ca2-b425-4a14-8b24-8eecea89e63c",
+  "epoch_lineage": [
+    "comment-echo-reclaim-v1-41953b29f774dcdfa982df76ec118194"
+  ],
   "format_version": 1,
   "required_capabilities": [
     "multi-project-bridge"
