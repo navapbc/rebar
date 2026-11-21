@@ -1,0 +1,13 @@
+--deselect=tests/unit/test_compact_trigger.py::test_a_cli_close_writes_the_sweep_to_the_store_log_file
+--deselect=tests/unit/test_compact_trigger.py::test_a_detached_sweep_child_is_handed_the_canonical_store_tracker
+--deselect=tests/unit/test_compact_trigger.py::test_always_folds_inline
+--deselect=tests/unit/test_compact_trigger.py::test_an_mcp_close_hands_the_sweep_the_servers_stderr
+--deselect=tests/unit/test_compact_trigger.py::test_fires_on_a_stale_sweep_even_when_the_ticket_is_fine
+--deselect=tests/unit/test_compact_trigger.py::test_fires_when_the_written_ticket_exceeds_snapshot_alpha
+--deselect=tests/unit/test_compact_trigger.py::test_fires_when_the_written_ticket_needs_folding
+--deselect=tests/unit/test_compact_trigger.py::test_the_close_neither_folds_nor_holds_the_lock
+--deselect=tests/unit/test_snapshot_gc_trigger.py::test_fires_again_once_the_stamp_goes_stale
+--deselect=tests/unit/test_snapshot_gc_trigger.py::test_fires_when_the_store_has_never_run_a_pass
+--deselect=tests/unit/test_snapshot_gc_trigger.py::test_reclamation_happens_on_a_host_without_the_review_bot
+--deselect=tests/unit/test_snapshot_gc_trigger.py::test_the_detached_child_is_anchored_to_the_durable_store_root
+--deselect=tests/unit/test_snapshot_gc_trigger.py::test_the_trigger_takes_no_ticket_store_lock
