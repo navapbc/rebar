@@ -221,6 +221,7 @@ def _spawn_gate_daemon(
     ticket_id: str,
     work: Callable[[], Any],
     owner_lock: int | None = None,
+    repo_root: str | None = None,
 ) -> None:
     """Run gate work on a daemon and always settle its index and followers.
 
@@ -231,7 +232,13 @@ def _spawn_gate_daemon(
     terminal record is written.
     """
     import rebar.llm
+    from rebar import config
     from rebar.llm import gate_runs
+
+    # Resolve the store root NOW, on the caller's thread: the daemon outlives the request,
+    # and resolving it at write time follows whatever cwd/REBAR_ROOT the process has by
+    # then, so a terminal record could land in another repository (coexistent-unclear-icefish).
+    root = repo_root or str(config.repo_root())
 
     def _bg() -> None:
         result: Any = None
@@ -253,10 +260,10 @@ def _spawn_gate_daemon(
                 "finished_at": time.time(),
             }
             record.update(_gate_sidecar_fields(gate_type, result))
-            rebar.llm.record_gate_run(record)
+            rebar.llm.record_gate_run(record, repo_root=root)
             # Release only after the terminal record: a poller that finds the lock free
             # re-reads the record before declaring the job stranded.
-            gate_runs.release_owner_lock(owner_lock, handle.job_id)
+            gate_runs.release_owner_lock(owner_lock, handle.job_id, repo_root=root)
             handle.complete(result=result, error=error)
 
     # Context-propagating spawn: a bare threading.Thread would drop the op-cert signer
@@ -281,6 +288,7 @@ def _start_gate_job(
     duplicate starts attach to its ID without launching another billable run.
     """
     import rebar.llm
+    from rebar import config
     from rebar.llm import gate_runs
 
     handle = begin_gate_job(
@@ -297,7 +305,8 @@ def _start_gate_job(
     if handle.is_new:
         # Held for the job's lifetime so a poller in another process or container (a
         # blue-green cutover) sees a live owner (bug digestive-greasy-kingsnake).
-        owner_lock = gate_runs.hold_owner_lock(handle.job_id)
+        root = str(config.repo_root())  # one root for the lock, both records and the release
+        owner_lock = gate_runs.hold_owner_lock(handle.job_id, repo_root=root)
         rebar.llm.record_gate_run(
             {
                 "job_id": handle.job_id,
@@ -305,9 +314,10 @@ def _start_gate_job(
                 "gate_type": gate_type,
                 "status": "running",
                 "started_at": time.time(),
-            }
+            },
+            repo_root=root,
         )
-        _spawn_gate_daemon(handle, gate_type, ticket_id, work, owner_lock)
+        _spawn_gate_daemon(handle, gate_type, ticket_id, work, owner_lock, repo_root=root)
     return {
         "job_id": handle.job_id,
         "ticket_id": ticket_id,

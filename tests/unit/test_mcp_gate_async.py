@@ -1072,3 +1072,47 @@ def test_review_plan_start_holds_the_owner_lock_until_the_terminal_record(store,
     while time.monotonic() < deadline and gate_runs.owner_lock_path(job_id).exists():
         time.sleep(0.02)
     assert not gate_runs.owner_lock_path(job_id).exists() or _lock_is_free(job_id)
+
+
+def test_gate_daemon_writes_its_terminal_record_to_the_root_it_started_in(
+    store, tmp_path, monkeypatch
+):
+    """The daemon outlives the request; its records stay in the starting store's root.
+
+    Resolving the root at write time followed whatever REBAR_ROOT/cwd the process had by
+    then. In the suite that was the checkout once the starting test's monkeypatch was
+    undone, so ``.rebar/gate_runs`` leaked into REPO_ROOT (coexistent-unclear-icefish).
+    """
+    from rebar import _mcp_llm
+
+    other = tmp_path / "other"
+    other.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=other, check=True, capture_output=True)
+    inflight.reset_registry()
+    release = threading.Event()
+
+    def work():
+        release.wait(timeout=10)
+        return {"verdict": "PASS"}
+
+    handle = _mcp_llm._start_gate_job(
+        "plan_review",
+        "d80d",
+        ref=None,
+        source=None,
+        variant="",
+        readonly=False,
+        force=False,
+        work=work,
+    )
+    monkeypatch.setenv("REBAR_ROOT", str(other))  # the process moved on before the gate ended
+    release.set()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        record = gate_runs.read_gate_run(handle["job_id"], repo_root=str(store))
+        if record and record.get("status") != "running":
+            break
+        time.sleep(0.02)
+
+    assert record and record["status"] == "passed"
+    assert not (other / ".rebar" / "gate_runs").exists()
