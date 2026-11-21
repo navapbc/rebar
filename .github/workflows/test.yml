@@ -281,7 +281,15 @@ jobs:
           uv run --no-sync pytest -m "not integration and not external"
           -n 4 --dist worksteal -q -p no:cacheprovider
           --timeout=600 --timeout-method=thread
-          '@.github/windows-sweep-deselect/unclassified.args'
+          '@.github/windows-sweep-deselect/crlf.args'
+          '@.github/windows-sweep-deselect/detached-maintenance.args'
+          '@.github/windows-sweep-deselect/locale-subprocess.args'
+          '@.github/windows-sweep-deselect/locale-tests.args'
+          '@.github/windows-sweep-deselect/path-separators.args'
+          '@.github/windows-sweep-deselect/pid-liveness.args'
+          '@.github/windows-sweep-deselect/posix-api.args'
+          '@.github/windows-sweep-deselect/posix-shell-stubs.args'
+          '@.github/windows-sweep-deselect/store-history.args'
 
   # Scheduled full macOS default suite catches platform regressions outside Verified's reduced
   # `platform_compat` subset without extending the hot path.

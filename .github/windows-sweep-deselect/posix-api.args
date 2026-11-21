@@ -1,0 +1,15 @@
+--deselect=tests/interfaces/store/test_git_contention_9305.py::test_advisory_lock_serializes_against_competing_holder
+--deselect=tests/interfaces/test_tracker_footprint_cli.py::test_fresh_clone_json_exposes_allocation_without_a_policy_verdict
+--deselect=tests/scripts/graph/test_doctor_locks.py::test_a_contended_fcntl_leg_reads_as_held
+--deselect=tests/scripts/test_ensure_pandoc.py::test_mismatched_architecture_installs_the_verified_binary
+--deselect=tests/unit/grounding/test_harness.py::test_timeout_reaps_pipe_holding_grandchild
+--deselect=tests/unit/store/test_footprint.py::test_measure_tracker_reports_exact_standalone_layers
+--deselect=tests/unit/test_compact_trigger_shared_sidecars.py::test_two_processes_with_different_rebar_dirs_exclude_each_other
+--deselect=tests/unit/test_gate_admission_09da.py::test_a_killed_holder_does_not_permanently_consume_a_slot
+--deselect=tests/unit/test_gate_peak_rss_9ea3.py::test_both_gate_entry_points_emit_the_marker[review_plan-plan_review]
+--deselect=tests/unit/test_gate_peak_rss_9ea3.py::test_both_gate_entry_points_emit_the_marker[verify_completion-verify_completion]
+--deselect=tests/unit/test_gate_peak_rss_9ea3.py::test_completion_emits_one_line_start_marker
+--deselect=tests/unit/test_opcert_own_pub_resolution_d26a.py::test_certifies_when_the_key_dir_is_read_only
+--deselect=tests/unit/test_opcert_producer_seam_8d8e.py::test_key_genesis_permissions_and_gitignore
+--deselect=tests/unit/test_recent_creates_shared_journal.py::test_two_processes_with_different_rebar_dirs_take_one_journal_lock
+--deselect=tests/unit/test_snapshot_janitor.py::test_eviction_rename_to_trash_open_reader_survives

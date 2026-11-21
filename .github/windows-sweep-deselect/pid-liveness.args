@@ -1,0 +1,14 @@
+--deselect=tests/interfaces/store/test_atomic_ticket_dir_create_021d.py::test_sweep_removes_dead_owner_staging_but_spares_a_live_one
+--deselect=tests/interfaces/store/test_stale_lock_reclaim_write.py::test_write_reclaims_dead_owner_lock_promptly
+--deselect=tests/scripts/graph/test_doctor_locks.py::test_a_dead_holder_compact_lock_is_a_stale_finding
+--deselect=tests/scripts/graph/test_doctor_locks.py::test_a_dead_holder_is_a_finding
+--deselect=tests/scripts/graph/test_doctor_locks.py::test_a_dead_holder_snapshot_gc_lock_is_a_stale_finding
+--deselect=tests/scripts/graph/test_doctor_locks.py::test_a_dead_holder_stamped_lock_is_a_stale_finding
+--deselect=tests/scripts/graph/test_doctor_locks.py::test_doctor_exits_one_on_a_stale_lock
+--deselect=tests/scripts/graph/test_doctor_locks.py::test_doctor_never_touches_a_lock
+--deselect=tests/unit/store/test_stamped_lock.py::test_a_provably_dead_holder_is_reclaimed_loudly
+--deselect=tests/unit/store/test_stamped_lock.py::test_the_reclaim_warning_names_the_holder_when_a_describer_is_given
+--deselect=tests/unit/test_lock_stale_reclaim.py::test_acquire_reclaims_dead_owner_mkdir_lock
+--deselect=tests/unit/test_lock_timeout_names_holder_7084.py::test_contended_timeout_names_the_holder
+--deselect=tests/unit/test_mcp_idle_sync.py::test_a_busy_write_lock_is_logged_with_its_holder
+--deselect=tests/unit/test_write_lock_busy_probe_7084.py::test_probe_answers_a_lock_held_by_another_process
