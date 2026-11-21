@@ -219,7 +219,8 @@ any commit still referenced by retained state after reconciliation (fails C5).
 
 ## Follow-up
 
-`docs/concurrency.md` §I1's `.retired` lifecycle note is promoted from a *follow-up* to a
-*specified, in-progress* model and cross-references this ADR as the reclamation contract.
-Implementation is tracked by stories **S1** (collapse engine + ledger reconciliation), **S2**
-(publish-swap + rollback), and **S3** (dry-run harness) under epic `536b`.
+`docs/concurrency.md` §I1's `.retired` lifecycle note is promoted from a *follow-up* to an
+*implemented* model. It cross-references this ADR as the reclamation contract and records
+the 2026-11-20 production run and its measured residual pack. The implementation was delivered
+by the child stories of epic `536b`, including S1 (collapse engine + ledger reconciliation),
+S2 (publish-swap + rollback) and S3 (dry-run harness).

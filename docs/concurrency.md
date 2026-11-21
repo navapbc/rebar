@@ -58,21 +58,44 @@ correct in this mixed window** — the reversed-to-active source keeps its origi
 (pre-snapshot) filename, sorts before the SNAPSHOT, and is positionally skipped during
 replay, so it is never double-counted (the `fsck` repair is hygiene, not a read fix).
 
-**`.retired` lifecycle.** Retired files are kept **permanently** for now — an
-accepted storage tradeoff that guarantees a folded source is never lost and can
-never be resurrected into a `SNAPSHOT_INCONSISTENT`. A branch-wide `.retired`
-garbage-collection sweep is a **secondary companion** to the pack lever, not the lever
-itself: `.retired` files are blobs and the pack the CI budget guards is blobless, so
-reclaiming them removes ~0 from that pack. The real pack lever — **remote-anchored
-below-horizon commit/tree history reclamation** — is specified by **ADR 0106**
-(`docs/adr/0106-remote-anchored-history-reclamation.md`), which defines the N-day
-horizon, the remote-reachability anchor, the stale-clone forced-override reconnect
-protocol, the C1–C5 causal-stability boundary at the commit/tree-rewrite level (a
-superset of the "past causal stability" condition below), and the SNAPSHOT
-authorship-ledger carriage + `enforce_since` re-anchor that keep signature/authorship
-verification intact across the rewrite. Both are tracked under
-`polite-antivirus-bedbug` (`536b-8930-b922-4063`), safe only past causal stability
-(once no clone can still be mid-reconvergence against the pre-compaction events).
+**`.retired` lifecycle.** Retired files stay in the working tree permanently. That
+storage tradeoff guarantees a folded source is never lost and can never be resurrected
+into a `SNAPSHOT_INCONSISTENT`. No branch-wide `.retired` sweep exists. Story
+`mystical-capsizable-ibis` was closed wontfix by operator decision on 2026-11-18,
+because the real-data dry run reached its pack reduction without one and the
+sweep's plan review blocked on fsck `SNAPSHOT_MISSING_SOURCES`, snapshot-rebuild
+refusal and retired-event readers. The pack lever is
+**remote-anchored below-horizon commit/tree history reclamation** (ADR 0106,
+`docs/adr/0106-remote-anchored-history-reclamation.md`), and it is implemented.
+It is safe only past causal stability, meaning once no clone can still be
+mid-reconvergence against the pre-compaction events. ADR 0106 makes that condition
+precise as the C1–C5 boundary at the commit/tree level. The implementation is split
+across 7 modules:
+- `rebar._store.reclaim_eligibility`: the `[reclaim].horizon_days` remote-reachability check.
+- `rebar._commands.reclaim_collapse`: the core-git collapse, with authorship-ledger
+  `position→commit_sha` re-resolution and the `enforce_since` re-anchor.
+- `rebar._commands.reclaim_collapse_stream`: the long-lived `fast-import` and
+  `cat-file` sessions the collapse runs on.
+- `rebar._commands.reclaim_resign`: re-signs failing events during the collapse.
+- `rebar._commands.reclaim_publish`: the lease-guarded publish-swap, the S3 bundle-set
+  replacement, and rollback.
+- `rebar._commands.reclaim_dry_run`: the shadow-clone dry-run harness.
+- `rebar._store.stale_override`: the reconnect override.
+
+The reconnect and publish protocols are the paragraphs "Reconnect after a history
+reclaim (ADR 0106 §5)" and "Publishing a reclaimed baseline, and rolling it back
+(ADR 0106 §6)" under Inbound — background sync.
+The reclamation was run on 2026-11-20 at 18:14 PST, under epic `polite-antivirus-bedbug`
+(`536b-8930-b922-4063`). It was one lease-guarded atomic push that moved `tickets` from
+`efcf5ae2b97` to `6a6dda16fc7`, and it left the backup ref
+`refs/tickets-backup/pre-reclaim-20261121T021044Z` at the old tip. Commits went from
+312,156 to 14,235. On the proof's fake remote, the blobless pack went from
+625 MiB to 108 MiB. **Measured residual:** a fresh blobless bare clone of origin
+`tickets` at `4fd8b099490` (14,375 commits), taken 2026-11-20 at 21:13 PST, has
+`size-pack` 122,794 KiB (about 120 MiB). The residual grows with write volume until
+the next reclaim. No CI budget applies to it: the `verify-identity.yml` pack budget
+(102,400 KiB) measures only the code checkout, which excludes `tickets` (`cc4a23a2405`).
+
 `.retired` files are **benign under a code rollback**:
 an older clone whose reducer/fsck predate `is_active_event` still ignores them,
 because it lists events by the `*.json` glob / `.endswith(".json")` filter and a
