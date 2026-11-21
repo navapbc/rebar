@@ -160,7 +160,7 @@ def test_exactly_one_real_map_fields_to_remote_and_it_is_shared() -> None:
             continue
         for node in ast.walk(module.tree):
             if isinstance(node, ast.FunctionDef) and node.name == "map_fields_to_remote":
-                rel = str(module.path.relative_to(_REC))
+                rel = module.path.relative_to(_REC).as_posix()
                 if _is_protocol_stub(node):
                     stubs.append(rel)
                 elif _is_pure_delegation(node):
@@ -200,7 +200,7 @@ def test_adf_entry_points_are_referenced_only_from_allowlisted_modules() -> None
     for module in parsed_python_files(_REC):
         if "__pycache__" in module.path.parts:
             continue
-        rel = str(module.path.relative_to(_REC))
+        rel = module.path.relative_to(_REC).as_posix()
         if rel in _ADF_ALLOWLIST:
             continue
         text = module.source

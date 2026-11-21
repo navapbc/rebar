@@ -653,7 +653,9 @@ def test_profile_denies_writes_then_permits_the_allow_list(tmp_path):
     profile = sb.build_seatbelt_profile([tmp_path])
     assert "(deny file-write*)" in profile
     assert profile.index("(deny file-write*)") < profile.index("(allow file-write*")
-    assert f'(subpath "{tmp_path.resolve()}")' in profile
+    # The profile escapes backslashes (a Windows path), so compare with the escaped form.
+    quoted = str(tmp_path.resolve()).replace("\\", "\\\\")
+    assert f'(subpath "{quoted}")' in profile
 
 
 def test_profile_permits_only_narrow_device_paths(tmp_path):
@@ -663,6 +665,10 @@ def test_profile_permits_only_narrow_device_paths(tmp_path):
     assert '(subpath "/dev")' not in profile, "must not make all of /dev writable"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the fixture directory name contains a double quote, which Windows forbids",
+)
 def test_profile_escapes_quotes_and_backslashes_in_paths(tmp_path):
     nasty = tmp_path / 'we"ird\\path'
     nasty.mkdir(parents=True, exist_ok=True)

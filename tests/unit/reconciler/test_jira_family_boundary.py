@@ -266,7 +266,7 @@ def _modules_defining_map(*, keys: set[str], value_sample: str) -> list[str]:
             literal_keys = {k.value for k in value.keys if isinstance(k, ast.Constant)}
             literal_values = {v.value for v in value.values if isinstance(v, ast.Constant)}
             if keys <= literal_keys and value_sample in literal_values:
-                hits.append(str(module.path.relative_to(_ADAPTERS)))
+                hits.append(module.path.relative_to(_ADAPTERS).as_posix())
     return hits
 
 

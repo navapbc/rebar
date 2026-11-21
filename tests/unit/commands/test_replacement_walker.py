@@ -30,7 +30,7 @@ class _Store:
         self.subject_raises = False
 
     def reduce(self, path: str, *a, **k):
-        tid = str(path).rstrip("/").rsplit("/", 1)[-1]
+        tid = pathlib.Path(path).name
         if tid == _BUG:
             if self.subject_raises:
                 raise OSError("unreadable subject")

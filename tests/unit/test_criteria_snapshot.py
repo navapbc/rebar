@@ -109,7 +109,7 @@ def test_compile_yields_digest_bound_view_with_provenance(tmp_path):
     house = snap.record(_CODE, "project.house-style")
     assert house.kind == "project"
     assert house.exec == "1-TURN"
-    assert house.source.endswith(".rebar/criteria_routing.json")
+    assert Path(house.source).as_posix().endswith(".rebar/criteria_routing.json")
     det = snap.record(_CODE, "project.secret-shape")
     assert det.exec == "DET"
     # a packaged built-in exists on the plan_review gate with packaged provenance

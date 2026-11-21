@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import PurePath
 
 from rebar._commands import compact_plan
 from rebar._store import fsutil, lock
@@ -47,8 +48,10 @@ def write_intent(tracker: str, ticket_id: str, snapshot_path: str, fold_files: l
     os.makedirs(intent_dir, exist_ok=True)
     record = {
         "ticket_id": ticket_id,
-        "snapshot": os.path.relpath(snapshot_path, tracker),
-        "sources": [os.path.relpath(fp, tracker) for fp in fold_files],
+        # POSIX form: the snapshot path is probed as a git tree path (``HEAD:<rel>``), which
+        # always uses ``/``; a Windows ``\`` would read a committed fold as absent.
+        "snapshot": PurePath(os.path.relpath(snapshot_path, tracker)).as_posix(),
+        "sources": [PurePath(os.path.relpath(fp, tracker)).as_posix() for fp in fold_files],
     }
     path = os.path.join(intent_dir, f"{ticket_id}.json")
     fsutil.atomic_write(path, json.dumps(record, indent=2), fsync=True)
@@ -91,7 +94,8 @@ def _snapshot_in_head(tracker: str, rel_snapshot: str) -> bool | None:
     anything indeterminate keeps the journal for the next recovery preamble instead."""
     if _git(tracker, "rev-parse", "-q", "--verify", "HEAD").returncode != 0:
         return None
-    probe = _git(tracker, "cat-file", "-e", f"HEAD:{rel_snapshot}")
+    # A journal written before the POSIX-form fix on Windows holds ``\``; git needs ``/``.
+    probe = _git(tracker, "cat-file", "-e", f"HEAD:{PurePath(rel_snapshot).as_posix()}")
     if probe.returncode == 0:
         return True
     if probe.returncode == 124:

@@ -236,7 +236,8 @@ def test_peer_tracker_dir_keeps_absolute_tracker_dir(tmp_path: Path) -> None:
     root.mkdir()
     _git(root, "init", "-q")
     elsewhere = (tmp_path / "store").resolve()
-    (root / "rebar.toml").write_text(f'[tracker]\ndir = "{elsewhere}"\n')
+    # A TOML literal string: a Windows path's backslashes are not escapes there.
+    (root / "rebar.toml").write_text(f"[tracker]\ndir = '{elsewhere}'\n")
     config.reset_config_cache()
 
     assert config.peer_tracker_dir(root) == elsewhere

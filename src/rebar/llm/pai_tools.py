@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from pathlib import PurePath
 from typing import Any
 
 from rebar.llm.config import denied_paths as _denied_realpaths
@@ -147,7 +148,7 @@ def filesystem_tools(repo_path: str | None) -> list[Callable]:
                 with open(abs_path, encoding="utf-8", errors="strict") as fh:
                     for lineno, line in enumerate(fh, 1):
                         if query in line:
-                            rel = os.path.relpath(abs_path, root)
+                            rel = PurePath(os.path.relpath(abs_path, root)).as_posix()
                             hits.append(f"{rel}:{lineno}: {line.strip()[:200]}")
                             if len(hits) >= _SEARCH_MAX_HITS:
                                 return "\n".join(hits) + "\n…(more hits truncated)"

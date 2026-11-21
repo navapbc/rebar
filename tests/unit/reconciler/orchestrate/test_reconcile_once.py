@@ -431,7 +431,7 @@ def _patch_partitioned(fetcher_mod, applier_mod, issues: list[dict]):
 
 def _snapshot_tree(root: Path) -> set[str]:
     """Return the set of relative file paths currently under *root*."""
-    return {str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()}
+    return {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
 
 
 def test_dry_run_reconcile_once_writes_nothing(

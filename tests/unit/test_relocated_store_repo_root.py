@@ -443,7 +443,8 @@ def test_run_sweep_seam_pins_the_resolved_code_root_on_the_fallback_arm(
         "run_sweep handed the sweep os.path.dirname(tracker) — the EPHEMERAL worktree, which "
         "holds no rebar.toml; on a symlinked/relocated store that reads the wrong [compact] rule"
     )
-    assert str(handed) == os.path.realpath(checkout), (
+    # Compare resolved paths: git reports C:/... on Windows where realpath gives C:\....
+    assert os.path.realpath(handed) == os.path.realpath(checkout), (
         f"expected the resolved code root {os.path.realpath(checkout)!r}, got {str(handed)!r}"
     )
 

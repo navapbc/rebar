@@ -13,7 +13,7 @@ cover wiring. Terraform apply remains an operator action."""
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -294,7 +294,8 @@ def test_autodeploy_mcp_run_new_routes_gate_scratch_to_the_parent_bind() -> None
     assert f"-e REBAR_GATE_TMPDIR={SCRATCH_MOUNT}" in body
     assert f"-e TMPDIR={SCRATCH_MOUNT}" in body
 
-    parent = str(Path(SCRATCH_MOUNT).parent)
+    # A container mount path is POSIX on every host; native Path would use \\ on Windows.
+    parent = str(PurePosixPath(SCRATCH_MOUNT).parent)
     assert f'-v "{parent}:{parent}"' in body
 
 
