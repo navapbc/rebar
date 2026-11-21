@@ -1064,7 +1064,9 @@ in the **verifying environment's own** `verify.trusted_opcert_keys` (never in th
 ADR 0125), sets `verify.require_environment`, and the **merge gate** (`rebar verify-opcert`)
 enforces that the required environment's completion-verifier certificate exists, is signed by
 a listed key, and verifies over the merged log — so a developer who wants to pass cannot forge
-a verdict from an unlisted key. The agent is read-only and never signs its own homework — a
+a verdict from an unlisted key. The merge gate reads its `[verify]` settings and `tracker.dir`
+from the project config committed on `origin/main`, never from the checkout under review, so a
+change cannot widen the trust of its own gate run. The agent is read-only and never signs its own homework — a
 deterministic gate acts on its verdict, and a successful prompt-injection can at worst flip the
 *advisory* verdict, never forge the signature. The completion-verification close gate is the sole
 close-gate attestation (it signs a PASS verdict *after* the close). An unreadable config is an
