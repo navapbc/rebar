@@ -526,7 +526,7 @@ def test_a_detached_sweep_child_is_handed_the_canonical_store_tracker(
     monkeypatch.setattr(
         _proc,
         "subprocess",
-        types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
+        types.SimpleNamespace(**{**vars(subprocess), "Popen": _fake_popen}),
     )
     compact_trigger._spawn_detached_sweep(wt)
 
@@ -561,7 +561,7 @@ def _record_sweep_spawns(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, obje
     monkeypatch.setattr(
         _proc,
         "subprocess",
-        types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
+        types.SimpleNamespace(**{**vars(subprocess), "Popen": _fake_popen}),
     )
     return seen
 
