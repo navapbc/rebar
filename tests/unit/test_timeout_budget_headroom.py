@@ -94,9 +94,10 @@ def test_the_budget_is_still_a_real_hang_guard() -> None:
     )
 
 
-# The autouse `_no_repo_commits` guard (tests/conftest.py) samples this checkout's HEAD with
-# `git rev-parse` in setup and again in teardown, each sample bounded by
-# GIT_PROBE_TIMEOUT_SECONDS and re-tried up to GIT_PROBE_ATTEMPTS times. A per-test marker
+# The autouse `_no_repo_commits` guard (tests/conftest.py) samples this checkout's HEAD in
+# setup and again in teardown. It reads the git files first; where it must fall back to
+# `git rev-parse`, each sample is bounded by GIT_PROBE_TIMEOUT_SECONDS and re-tried up to
+# GIT_PROBE_ATTEMPTS times, and that worst case is the floor below. A per-test marker
 # covers setup + call + teardown (no timeout_func_only), so a marker below that bound can
 # kill the worker inside the guard before the test body runs (stinky-blushing-gelding).
 _AUTOUSE_GIT_PROBE_BOUND_SECS = 2 * GIT_PROBE_TIMEOUT_SECONDS * GIT_PROBE_ATTEMPTS

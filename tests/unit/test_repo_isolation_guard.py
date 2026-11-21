@@ -144,9 +144,10 @@ def _run_real_guard_with_blocking_git(
         raise AssertionError(
             f"real repo-isolation {operation} probe kept pytest alive beyond 90 seconds"
         ) from exc
-    assert int(state.read_text(encoding="utf-8")) >= 2, (
-        "the shim did not block the real guard probe"
-    )
+    if operation == "status":
+        assert int(state.read_text(encoding="utf-8")) >= 2, (
+            "the shim did not block the real guard probe"
+        )
     return result
 
 
@@ -179,6 +180,55 @@ def test_head_is_none_outside_a_repo(tmp_path):
     assert _isolation.head(tmp_path / "not-a-repo") is None
 
 
+def _git_head(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_file_reader_matches_git_on_a_branch_a_packed_ref_and_a_detached_head(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    assert _isolation._read_head_from_files(repo) == _git_head(repo)
+
+    subprocess.run(["git", "-C", str(repo), "pack-refs", "--all"], check=True)
+    assert not (repo / ".git" / "refs" / "heads" / "master").exists()
+    assert not (repo / ".git" / "refs" / "heads" / "main").exists()
+    assert _isolation._read_head_from_files(repo) == _git_head(repo)
+
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach"], check=True)
+    assert _isolation._read_head_from_files(repo) == _git_head(repo)
+
+
+def test_file_reader_matches_git_in_a_linked_worktree(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    linked = tmp_path / "linked"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-q", "-b", "side", str(linked)], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(linked), "commit", "--allow-empty", "-q", "-m", "side"], check=True
+    )
+
+    assert _isolation._read_head_from_files(linked) == _git_head(linked)
+    assert _isolation._read_head_from_files(linked) != _git_head(repo)
+
+
+def test_file_reader_defers_to_git_for_an_unborn_branch_and_a_redirected_git_dir(
+    tmp_path, monkeypatch
+):
+    unborn = tmp_path / "unborn"
+    subprocess.run(["git", "init", "-q", str(unborn)], check=True)
+    assert _isolation._read_head_from_files(unborn) is None
+    assert _isolation.head(unborn) is None, "git, not the reader, decides an unborn HEAD"
+
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    monkeypatch.setenv("GIT_DIR", str(unborn / ".git"))
+    assert _isolation._read_head_from_files(repo) is None
+
+
 def test_porcelain_reports_a_new_working_tree_file(tmp_path):
     _init_repo(tmp_path)
     base = _isolation.porcelain(tmp_path)
@@ -195,11 +245,39 @@ def test_session_finish_fails_explicitly_when_porcelain_times_out(tmp_path):
     assert "TimeoutExpired" in output, output
 
 
-def test_commit_guard_fails_explicitly_when_head_times_out(tmp_path):
+def test_real_commit_guard_reads_head_without_starting_git(tmp_path):
+    """A host too loaded to start ``git`` cannot error a passing test (geode-objective-salamander).
+
+    Every ``rev-parse HEAD`` stalls past the probe bound here, which used to exhaust the
+    re-samples and fail the passing test in setup or teardown. The real guard now reads HEAD
+    from the checkout's git files, so the stalling shim is never reached for HEAD.
+    """
+    if any(os.environ.get(name) for name in _isolation._GIT_LOCATION_ENV):
+        pytest.fail("this test needs the checkout's own git dir; unset GIT_DIR and friends")
     result = _run_real_guard_with_blocking_git(tmp_path, "head")
+    state = tmp_path / "head.count"  # written by the shim on every rev-parse HEAD it sees
     output = result.stdout + result.stderr
-    assert result.returncode != 0, output
-    assert "TimeoutExpired" in output, output
+    assert result.returncode == 0, output
+    assert not state.exists(), (
+        f"the real guard started git for HEAD: {state.read_text(encoding='utf-8')}"
+    )
+
+
+def test_commit_guard_fails_explicitly_when_the_head_probe_times_out(tmp_path, monkeypatch):
+    """Where git must answer (a layout the file reader declines), a stuck probe stays loud."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    state, env = _blocking_git(tmp_path, "head")
+    # Scoped so the suite's own guard samples this checkout with the real reader afterwards.
+    with monkeypatch.context() as patch:
+        patch.setattr(_isolation, "_read_head_from_files", lambda _root: None)
+        patch.setattr(_isolation, "GIT_PROBE_TIMEOUT_SECONDS", 0.5)
+        for key in ("PATH", "PYTHONPATH", "REBAR_BLOCK_GIT_OPERATION", "REBAR_BLOCK_GIT_STATE"):
+            patch.setenv(key, env[key])
+        assert _isolation.head(repo)
+        with pytest.raises(subprocess.TimeoutExpired):
+            _isolation.head(repo)
+    assert int(state.read_text(encoding="utf-8")) >= 2
 
 
 def test_a_transient_probe_stall_is_re_sampled_rather_than_reported(tmp_path, monkeypatch):
@@ -225,6 +303,8 @@ def test_a_transient_probe_stall_is_re_sampled_rather_than_reported(tmp_path, mo
             "REBAR_STALL_LOG",
         ):
             patch.setenv(key, env[key])
+        # The file reader would answer without git; this test is about the git probe.
+        patch.setattr(_isolation, "_read_head_from_files", lambda _root: None)
         # Headroom for a healthy resample under load; the one stalled probe costs this once.
         patch.setattr(_isolation, "GIT_PROBE_TIMEOUT_SECONDS", 2.0)
         before = _isolation.head(repo)
@@ -260,6 +340,8 @@ def test_git_probe_timeout_ignores_a_test_monkeypatch_of_time_sleep(tmp_path, mo
             "REBAR_BLOCK_GIT_STATE",
         ):
             patch.setenv(key, env[key])
+        # The file reader would answer without git; this test is about the git probe.
+        patch.setattr(_isolation, "_read_head_from_files", lambda _root: None)
         assert _isolation.head(repo)
         assert state.read_text(encoding="utf-8") == "1"
         patch.setattr(_isolation, "GIT_PROBE_TIMEOUT_SECONDS", 0.5)

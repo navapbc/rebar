@@ -77,8 +77,104 @@ def repo_leak_snapshot(root) -> set[str]:
     return snap
 
 
+# Environment that redirects git away from ``<root>/.git``; with any of it set, only git
+# itself knows which repository ``git -C <root>`` resolves, so the file reader stands aside.
+_GIT_LOCATION_ENV = ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
+# Refs git keeps per worktree (in the worktree's own git dir); every other ref is shared.
+_PER_WORKTREE_REF_PREFIXES = ("refs/bisect/", "refs/worktree/", "refs/rewritten/")
+_SYMREF_HOPS = 5
+
+
+def _is_object_id(text: str) -> bool:
+    return len(text) in (40, 64) and all(c in "0123456789abcdef" for c in text)
+
+
+def _git_dirs(root) -> tuple[str, str] | None:
+    """``(git_dir, common_dir)`` for a repo whose ``.git`` sits directly in *root*."""
+    dot_git = os.path.join(str(root), ".git")
+    if os.path.isdir(dot_git):
+        git_dir = dot_git
+    elif os.path.isfile(dot_git):
+        with open(dot_git, encoding="utf-8") as handle:
+            line = handle.readline().strip()
+        if not line.startswith("gitdir: "):
+            return None
+        git_dir = os.path.join(str(root), line[len("gitdir: ") :])
+    else:
+        return None
+    common_file = os.path.join(git_dir, "commondir")
+    common_dir = git_dir
+    if os.path.isfile(common_file):
+        with open(common_file, encoding="utf-8") as handle:
+            common_dir = os.path.join(git_dir, handle.readline().strip())
+    if os.path.exists(os.path.join(common_dir, "reftable")):
+        return None
+    return git_dir, common_dir
+
+
+def _packed_ref(common_dir: str, name: str) -> str | None:
+    try:
+        with open(os.path.join(common_dir, "packed-refs"), encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith(("#", "^")):
+                    continue
+                sha, _, ref = line.rstrip("\n").partition(" ")
+                if ref == name:
+                    return sha
+    except FileNotFoundError:
+        return None
+    return None
+
+
+def _resolve_ref(git_dir: str, common_dir: str, content: str) -> str | None:
+    """Follow ``ref: <name>`` indirection to an object id, as git does for ``HEAD``."""
+    for _ in range(_SYMREF_HOPS):
+        if _is_object_id(content):
+            return content
+        if not content.startswith("ref: "):
+            return None
+        name = content[len("ref: ") :]
+        base = git_dir if name.startswith(_PER_WORKTREE_REF_PREFIXES) else common_dir
+        try:
+            with open(os.path.join(base, name), encoding="utf-8") as handle:
+                content = handle.readline().strip()
+        except (FileNotFoundError, NotADirectoryError):
+            packed = _packed_ref(common_dir, name)
+            return packed if packed is not None and _is_object_id(packed) else None
+    return None
+
+
+def _read_head_from_files(root) -> str | None:
+    """HEAD's object id read straight from the git files, or ``None`` to defer to git.
+
+    Reading two or three small files costs no process start, so a host too loaded to
+    start ``git`` inside the probe bound cannot turn a passing test into a teardown
+    error (geode-objective-salamander). Anything this reader does not recognise (an
+    unborn branch, the reftable backend, a redirected ``GIT_DIR``, an unreadable layout)
+    returns ``None``, and :func:`head` asks git, which stays the authority.
+    """
+    if any(os.environ.get(name) for name in _GIT_LOCATION_ENV):
+        return None
+    try:
+        dirs = _git_dirs(root)
+        if dirs is None:
+            return None
+        git_dir, common_dir = dirs
+        with open(os.path.join(git_dir, "HEAD"), encoding="utf-8") as handle:
+            content = handle.readline().strip()
+        return _resolve_ref(git_dir, common_dir, content)
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def head(root) -> str | None:
-    """The repo's current HEAD sha, or ``None`` if *root* is not a git repo."""
+    """The repo's current HEAD sha, or ``None`` if *root* is not a git repo.
+
+    Read from the git files when their layout is plain; otherwise ask git through the
+    bounded, re-sampled probe."""
+    from_files = _read_head_from_files(root)
+    if from_files is not None:
+        return from_files
     try:
         return _run_git_probe(root, "rev-parse", "HEAD").stdout.strip()
     except subprocess.TimeoutExpired:
