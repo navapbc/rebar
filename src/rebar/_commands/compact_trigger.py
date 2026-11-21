@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import sys
 import time
 from typing import IO, Literal
 
@@ -145,7 +144,7 @@ def _open_worker_log(tracker: str, sweep_log: SweepLog) -> int | IO[str]:
 
 
 def _spawn_detached_sweep(tracker: str, sweep_log: SweepLog = "file") -> None:
-    """Detach a sweep child that outlives this command (POSIX), via the shared
+    """Detach a sweep child that outlives this command, via the shared
     detached-rebar-child spawner (:func:`rebar._proc.spawn_detached`), which owns the
     PYTHONPATH bootstrap, the ``-c`` re-entry stub, the detach flags and the durable-cwd
     anchor. This site keeps its own stderr sink (:func:`_open_worker_log`), its canonical
@@ -211,11 +210,19 @@ def stop_local_sweep(tracker: str) -> int | None:
     MCP container on the host, so the stamp may name another container's worker; only a pid
     the stamp proves live in our own namespace is signalled (``unverified-live`` is accepted
     only where the platform cannot read start times, i.e. has no ``/proc``). Returns ``None``
-    when there is nothing of ours to stop. Never raises."""
+    when there is nothing of ours to stop. Never raises.
+
+    Off POSIX it signals nothing and returns ``None``: on Windows ``os.kill(SIGTERM)`` is
+    ``TerminateProcess``, and without a process start time the stamp cannot prove its pid is
+    still the sweep rather than a recycled one. There the sweep runs on to its natural end;
+    the retiring server's ``finish`` still waits for the store write lock it releases at each
+    ticket boundary."""
     import signal
 
     from rebar._store import lock_owner as _owner
 
+    if os.name != "posix":
+        return None
     try:
         stamp = _read_trigger_stamp(tracker)
         fields = _owner._parse_v2_stamp(stamp) if stamp else None
@@ -257,7 +264,8 @@ def _sweep_exited(tracker: str, pid: int) -> bool:
 def retire_local_sweep(
     tracker: str, *, poll_s: float = 0.2, sleep=time.sleep, monotonic=time.monotonic
 ):
-    """Stop this namespace's sweep now; return ``finish(deadline)`` for the exit path.
+    """Stop this namespace's sweep now (POSIX; see :func:`stop_local_sweep` for Windows, where
+    the sweep is left to finish); return ``finish(deadline)`` for the exit path.
 
     ``finish`` waits, never past *deadline* (a ``time.monotonic`` value), for the signalled
     worker to exit and then for the store write lock to be free, so an in-flight fold or
@@ -370,11 +378,9 @@ def maybe_compact(
 
     NEVER raises and never blocks: every branch is guarded, and the default path hands the work
     to a detached child, whose log goes where *sweep_log* says (:func:`_open_worker_log`).
-    Windows is a v1 no-op, because the store lock's ``fcntl`` import would crash a detached
-    child there."""
+    Every platform detaches through :func:`rebar._proc.spawn_detached`; the store lock has a
+    Windows leg, so the child needs no ``fcntl``."""
     try:
-        if sys.platform == "win32":  # pragma: no cover - POSIX CI
-            return
         from rebar import config as _config
 
         try:

@@ -361,7 +361,7 @@ def test_the_detached_child_is_anchored_to_the_durable_store_root(
     monkeypatch.setattr(
         _proc,
         "subprocess",
-        types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
+        types.SimpleNamespace(**{**vars(subprocess), "Popen": _fake_popen}),
     )
     gc_trigger._spawn_detached_gc(store, str(repo))
 

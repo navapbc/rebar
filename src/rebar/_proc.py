@@ -110,10 +110,10 @@ def detached_child_cwd(tracker: str) -> str:
 
 
 def _detach_kwargs() -> dict:
-    """Platform detach kwargs. POSIX: a new session so the child outlives the parent. Windows
-    (authored, API-derisked; NOT reached in v1 — every caller no-ops on nt before spawning):
+    """Platform detach kwargs. POSIX: a new session so the child outlives the parent. Windows:
     DETACHED_PROCESS | CREATE_NO_WINDOW (constants exist only on Windows, referenced only
-    inside this branch)."""
+    inside this branch), used by every :func:`spawn_detached` caller there (the async push,
+    the compaction sweep and snapshot GC)."""
     if os.name == "nt":  # pragma: no cover - POSIX CI
         return {
             "creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,  # type: ignore[attr-defined]
