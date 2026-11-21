@@ -192,20 +192,72 @@ def _list_commits(repo_root: str) -> list[tuple[str, str]]:
     return commits
 
 
-def _read_cap_at(repo_root: str, sha: str) -> int | Literal["invalid"] | None:
-    """Return positive-int cap at ``sha``, ``None`` if missing, or ``"invalid"``.
+def _cat_file(repo_root: str, mode: str, lines: list[str]) -> bytes:
+    """Answer every ``lines`` request in ONE ``git cat-file <mode>`` process.
 
-    A missing blob is the ordinary "not qualified" case. ``git ls-tree`` distinguishes
-    that from real ``git cat-file`` failures without parsing git's localized stderr.
+    Per-revision reads used one git start per revision and request, which a loaded host
+    multiplies into minutes (rubbery-adamantine-panda); one batch costs one start.
     """
-    if not _git(repo_root, "ls-tree", sha, "--", _CAP_FILE).strip():
-        return None
-    content = _git(repo_root, "cat-file", "-p", f"{sha}:{_CAP_FILE}")
+    proc = subprocess.run(
+        ["git", "cat-file", mode],
+        cwd=repo_root,
+        input=("\n".join(lines) + "\n").encode("utf-8"),
+        capture_output=True,
+        text=False,
+        timeout=_GIT_TIMEOUT,
+        check=True,
+    )
+    return proc.stdout
+
+
+def _parse_cap(content: bytes) -> int | Literal["invalid"]:
     try:
-        cap = int(content.strip())
+        cap = int(content.decode("utf-8", errors="replace").strip())
     except ValueError:
         return "invalid"
     return cap if cap > 0 else "invalid"
+
+
+def _read_caps(repo_root: str, shas: list[str]) -> dict[str, int | Literal["invalid"] | None]:
+    """Return each revision's cap: a positive int, ``None`` if the blob is absent, or ``"invalid"``.
+
+    ``--batch-check`` reports a missing path as ``missing`` without failing, so that stays
+    the ordinary "not qualified" case, distinct from a real git failure (which raises).
+    Contents are then read once per distinct blob.
+    """
+    if not shas:
+        return {}
+    # Each revision asks for its root tree too: ``missing`` for the cap path only means
+    # "absent" when the revision itself is readable; an unreadable commit raises, as the
+    # per-revision ``ls-tree`` did.
+    requests = [line for sha in shas for line in (f"{sha}^{{tree}}", f"{sha}:{_CAP_FILE}")]
+    replies = (
+        _cat_file(repo_root, "--batch-check=%(objectname) %(objecttype)", requests)
+        .decode("utf-8", errors="replace")
+        .splitlines()
+    )
+    if len(replies) != len(requests):
+        raise RuntimeError("git cat-file --batch-check returned an incomplete reply")
+    located: dict[str, str | None] = {}
+    caps: dict[str, int | Literal["invalid"] | None] = {}
+    for index, sha in enumerate(shas):
+        if replies[2 * index].split()[-1] != "tree":
+            raise RuntimeError(f"git cannot read revision {sha}: {replies[2 * index]}")
+        line = replies[2 * index + 1]
+        parts = line.split()
+        if parts[-1] == "missing":
+            located[sha] = None
+        elif len(parts) == 2 and parts[1] == "blob":
+            located[sha] = parts[0]
+        elif len(parts) == 2:
+            caps[sha] = "invalid"  # a tree or other non-blob at the cap path
+        else:
+            raise RuntimeError(f"git cat-file --batch-check returned: {line}")
+    blobs = sorted({oid for oid in located.values() if oid})
+    contents = _parse_batch_objects(_cat_file(repo_root, "--batch", blobs)) if blobs else {}
+    for sha, oid in located.items():
+        caps[sha] = None if oid is None else _parse_cap(contents[oid])
+    return caps
 
 
 def _py_blobs_at(repo_root: str, sha: str) -> dict[str, str]:
@@ -254,8 +306,9 @@ def _qualified_history(
         cap_seen = False
         invalid_cap_seen = False
         qualified: list[_Revision] = []
+        caps = _read_caps(repo_root, [sha for sha, _ in in_range])
         for sha, ts in in_range:
-            cap = _read_cap_at(repo_root, sha)
+            cap = caps[sha]
             if isinstance(cap, str):
                 invalid_cap_seen = True
                 continue
@@ -309,9 +362,9 @@ def _sample_indices(count: int) -> list[int]:
     return [round(i * step) for i in range(_SAMPLE_SIZE)]
 
 
-def _parse_batch_output(data: bytes) -> dict[str, int]:
-    """Parse ``git cat-file --batch`` stdout into ``{blob_sha: newline_count}``."""
-    counts: dict[str, int] = {}
+def _parse_batch_objects(data: bytes) -> dict[str, bytes]:
+    """Parse ``git cat-file --batch`` stdout into ``{object_sha: content}``."""
+    objects: dict[str, bytes] = {}
     pos = 0
     length = len(data)
     while pos < length:
@@ -324,37 +377,32 @@ def _parse_batch_output(data: bytes) -> dict[str, int]:
         if len(parts) != 3:
             raise RuntimeError(f"git cat-file --batch returned malformed header: {header}")
         sha, size = parts[0], int(parts[2])
-        counts[sha] = data[pos : pos + size].count(b"\n")
+        objects[sha] = data[pos : pos + size]
         pos += size + 1  # skip the object's trailing newline
-    return counts
+    return objects
+
+
+def _parse_batch_output(data: bytes) -> dict[str, int]:
+    """Parse ``git cat-file --batch`` stdout into ``{blob_sha: newline_count}``."""
+    return {sha: content.count(b"\n") for sha, content in _parse_batch_objects(data).items()}
 
 
 def _blob_newline_counts(repo_root: str, blob_shas: list[str]) -> dict[str, int]:
     """Return ``wc -l``-equivalent newline counts for ``blob_shas`` in one batch call."""
     if not blob_shas:
         return {}
-    proc = subprocess.run(
-        ["git", "cat-file", "--batch"],
-        cwd=repo_root,
-        input=("\n".join(blob_shas) + "\n").encode("utf-8"),
-        capture_output=True,
-        text=False,
-        timeout=_GIT_TIMEOUT,
-        check=True,
-    )
-    return _parse_batch_output(proc.stdout)
+    return _parse_batch_output(_cat_file(repo_root, "--batch", blob_shas))
 
 
-def _revision_sample(repo_root: str, revision: _Revision) -> dict[str, Any]:
-    """Compose one ``module_size_trend`` sample from a qualified revision."""
-    counts = _blob_newline_counts(repo_root, list(revision.py_blobs.values()))
-    max_loc = max(counts.values()) if counts else 0
+def _revision_sample(revision: _Revision, counts: dict[str, int]) -> dict[str, Any]:
+    """Compose one ``module_size_trend`` sample from a qualified revision and blob counts."""
+    loc = [counts[blob] for blob in revision.py_blobs.values()]
     return {
         "sha": revision.sha,
         "timestamp": revision.timestamp,
         "cap": revision.cap,
         "module_count": len(revision.py_blobs),
-        "max_loc": max_loc,
+        "max_loc": max(loc) if loc else 0,
     }
 
 
@@ -365,8 +413,12 @@ def module_size_trend(repo_root: str, since: str | None, until: str | None) -> A
         return qualified
 
     indices = _sample_indices(len(qualified))
+    sampled = [qualified[index] for index in indices]
     try:
-        samples = [_revision_sample(repo_root, qualified[index]) for index in indices]
+        # One batch for every sampled revision's blobs, not one process per revision.
+        blobs = sorted({blob for rev in sampled for blob in rev.py_blobs.values()})
+        counts = _blob_newline_counts(repo_root, blobs)
+        samples = [_revision_sample(rev, counts) for rev in sampled]
     except (subprocess.SubprocessError, OSError, RuntimeError) as exc:
         return Unavailable(reason=_git_failure_reason(exc), accruing_since=_ACCRUING_SINCE)
     return {
