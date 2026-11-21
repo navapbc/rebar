@@ -819,6 +819,17 @@ instead of refusing:
 A remote whose lineage does not name the local epoch, or whose lineage is malformed, is not
 proven to be this store's rewrite, so it still gets the `DIVERGED` refusal.
 
+A write does not wait for the once-a-minute read throttle to run this. When the write
+precheck finds that the already-fetched remote supersedes the clone, it raises
+`SupersededStoreRefused` before anything is committed. `append_event`,
+`transition_core` and `claim_core` take the write lock themselves, so on that refusal they
+run one `reconverge` with the lock free (`freshness.heal_superseded_clone`) and retry the
+write once. The retried event is composed on the reclaimed baseline, so the stale-clone
+discard in step 4 never covers it, and a healthy store pays nothing extra. A clone the heal
+could not move (fetch failure, busy lock, failed override) is refused by the retried
+precheck (bug `smiling-ancient-finwhale`, where a busy MCP server stayed inside the read
+throttle window and refused every write).
+
 **Publishing a reclaimed baseline, and rolling it back (ADR 0106 §6).**
 `rebar._commands.reclaim_publish` publishes from a disposable shadow clone only (S1's shadow
 guard refuses anything else). Each publish succeeds only if the remote still holds T0, the

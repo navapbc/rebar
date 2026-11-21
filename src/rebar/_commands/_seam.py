@@ -12,15 +12,20 @@ import re as _re
 import subprocess
 import sys
 import uuid as _uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
+from typing import ParamSpec, TypeVar
 
 from rebar import config
 from rebar import secret_screen as _secret_screen
 from rebar._ids import resolve_ticket_id
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 # An active import buffer collects finalized events for chunk commits.
 # The default keeps one commit per interactive write. Caller state guards run
@@ -74,6 +79,42 @@ class SecretScreenRefused(CommandError):
     """CommandError subtype for a secret-screen policy refusal.
     LLM sidecars can warn about this refusal before returning their usual
     best-effort failure result."""
+
+
+class SupersededStoreRefused(CommandError):
+    """The write precheck refused a clone whose remote a reclaim proved superseding.
+
+    Raised before anything is committed. A writer that does not hold the write lock heals
+    the clone and retries once through :func:`retry_after_superseded_heal`."""
+
+
+def retry_after_superseded_heal(write: Callable[[], _T], tracker) -> _T:
+    """Run ``write``; if its precheck refused a reclaim-superseded clone, heal and retry once.
+
+    The heal is a sync round (fetch, write lock, stale-clone override), so ``write`` must
+    acquire and release the write lock itself, never hold it across this call. A healthy
+    store pays nothing: the heal runs only after the precheck has already refused. The
+    second refusal, if the heal could not move the clone, propagates (bug
+    smiling-ancient-finwhale)."""
+    try:
+        return write()
+    except SupersededStoreRefused:
+        from rebar._store.freshness import heal_superseded_clone
+
+        heal_superseded_clone(str(tracker))
+        return write()
+
+
+def heals_superseded_store(write: Callable[_P, _T]) -> Callable[_P, _T]:
+    """Decorate a locked write whose first argument is the tracker with
+    :func:`retry_after_superseded_heal`. The decorated function takes and releases the
+    write lock itself, so the heal runs between attempts with the lock free."""
+
+    @wraps(write)
+    def _healing(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        return retry_after_superseded_heal(lambda: write(*args, **kwargs), args[0])
+
+    return _healing
 
 
 def _warn_stderr(message: str | None) -> None:
@@ -397,7 +438,8 @@ def _refuse_unpublishable_store(tracker, repo_root=None) -> None:
     if stale is None:
         return
     remote_ref = stale.get("remote_ref", "the shared store")
-    raise CommandError(
+    refusal = SupersededStoreRefused if stale.get("superseded") else CommandError
+    raise refusal(
         "Error: ticket write refused: "
         f"{stale.get('reason', 'the local ticket store cannot publish')}. "
         f"Run `rebar store fsck` to confirm DIVERGED against {remote_ref}; recover with "
@@ -475,17 +517,22 @@ def append_event(
     # Bind one operation snapshot, reusing the caller's if already present.
     from rebar._operation_config import compose_and_bind_operation_snapshot
 
-    with compose_and_bind_operation_snapshot(repo_root=repo_root):
-        return _append_event_body(
-            ticket_id,
-            event_type,
-            data,
-            tracker,
-            repo_root=repo_root,
-            author_fallback=author_fallback,
-            under_lock_check=under_lock_check,
-            allow_secret_pattern=allow_secret_pattern,
-        )
+    def _append() -> int | None:
+        with compose_and_bind_operation_snapshot(repo_root=repo_root):
+            return _append_event_body(
+                ticket_id,
+                event_type,
+                data,
+                tracker,
+                repo_root=repo_root,
+                author_fallback=author_fallback,
+                under_lock_check=under_lock_check,
+                allow_secret_pattern=allow_secret_pattern,
+            )
+
+    # The append takes the write lock inside write_and_push, so a refused superseded clone
+    # can be healed between attempts (bug smiling-ancient-finwhale).
+    return retry_after_superseded_heal(_append, tracker)
 
 
 def _append_event_body(

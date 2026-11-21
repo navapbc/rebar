@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from rebar._commands._seam import CommandError, finalize_event
+from rebar._commands._seam import CommandError, finalize_event, heals_superseded_store
 from rebar._store import compat, event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.event_commit_git import run_auto_maintenance
@@ -329,6 +329,7 @@ def prepare_transition_event_locked(
 
 
 # raw-git-ok: locked store seam internal
+@heals_superseded_store
 def transition_core(
     tracker_dir: str,
     ticket_id: str,
@@ -389,6 +390,7 @@ def transition_core(
 
 
 # raw-git-ok: locked store seam internal
+@heals_superseded_store
 def claim_core(
     tracker_dir: str,
     ticket_id: str,
