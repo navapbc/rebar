@@ -1086,3 +1086,62 @@ def test_a_populate_links_from_an_entry_before_that_entry_measures(store, repo, 
     cache.acquire(b, repo_root=str(repo), fetch=False)
     other.join()
     assert cache.byte_total(store) == _real_store_bytes(store)
+
+
+# --------------------------------------------------------------------------------------
+# Bug 688f-060e-c96c-4484 — the startup sweep's walk must not hold the accounting lock
+# --------------------------------------------------------------------------------------
+def _pause_the_walk(monkeypatch) -> tuple[threading.Event, threading.Event]:
+    """Patch the sweep's walk to signal ``walking`` and then wait for ``resume``."""
+    walking, resume = threading.Event(), threading.Event()
+    real = cache.distinct_bytes
+
+    def paused(paths):
+        paths = list(paths)
+        walking.set()
+        assert resume.wait(30), "test never resumed the walk"
+        return real(paths)
+
+    monkeypatch.setattr(cache, "distinct_bytes", paused)
+    return walking, resume
+
+
+def test_a_snapshot_build_publishes_while_the_startup_walk_runs(store, repo, monkeypatch):
+    """A review's snapshot build must not wait for the startup sweep's full-store walk.
+
+    On the box that walk took 45-51 minutes, and holding the accounting lock across it
+    stalled every review that needed a new snapshot after a review-bot restart."""
+    _populate(repo, store, "a.txt", "a" * 100)
+    walking, resume = _pause_the_walk(monkeypatch)
+    sweep = threading.Thread(target=janitor.startup_sweep, args=(store,))
+    sweep.start()
+    try:
+        assert walking.wait(30), "the sweep never reached its walk"
+        sha = _commit(repo, "b.txt", "b" * 100)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            build = pool.submit(cache.acquire, sha, repo_root=str(repo), fetch=False)
+            build.result(timeout=20)  # raises TimeoutError if the walk holds the lock
+        assert rs.entry_path(sha, store).is_dir()
+    finally:
+        resume.set()
+        sweep.join(30)
+
+
+def test_startup_sweep_keeps_the_incremental_total_when_an_entry_lands_mid_walk(
+    store, repo, monkeypatch
+):
+    """An entry published during the walk makes the walk stale; the sweep must not reset
+    the total to it, and the incremental total must equal the bytes really on disk."""
+    _populate(repo, store, "a.txt", "a" * 100)
+    walking, resume = _pause_the_walk(monkeypatch)
+    result: list[int] = []
+    sweep = threading.Thread(target=lambda: result.append(janitor.startup_sweep(store)))
+    sweep.start()
+    try:
+        assert walking.wait(30)
+        _populate(repo, store, "b.txt", "b" * 5000)
+    finally:
+        resume.set()
+        sweep.join(30)
+    assert cache.byte_total(store) == _real_store_bytes(store)
+    assert result == [cache.byte_total(store)]

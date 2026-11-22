@@ -73,8 +73,8 @@ reclamation is the wrong response. The only control that bounds live held bytes 
 
 The hold also does not shrink with cache sharing. The snapshot store is content-addressed
 (ADR 0005), so N concurrent reviews of the *same* base share one entry — but the review-bot's
-working clone is **per-review** (`src/rebar/review_bot/voter.py:381`,
-`tempfile.TemporaryDirectory(prefix="reviewbot-")`), so clone bytes scale **linearly** with
+working clone is **per-review** (`ReviewScratch` in `src/rebar/review_bot/review_steps.py`,
+`tempfile.mkdtemp(prefix="reviewbot-")`), so clone bytes scale **linearly** with
 concurrency regardless.
 
 ### The memory budget forbids solving this by growing the host
