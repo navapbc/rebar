@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import json
 import os
-import select
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 
@@ -147,10 +147,15 @@ def test_two_processes_with_different_rebar_dirs_take_one_journal_lock(tmp_path:
 
     holder = _spawn(tracker, blue, "hold", "")
     try:
-        assert holder.stdout is not None
-        ready, _, _ = select.select([holder.stdout], [], [], _CHILD_BOUND_S)
-        assert ready, "holder printed nothing within its bound"
-        assert json.loads(holder.stdout.readline()) == "held", "precondition: blue holds it"
+        stdout = holder.stdout
+        assert stdout is not None
+        # A bounded reader thread, not select: Windows select rejects pipes (WinError 10038).
+        lines: list[str] = []
+        reader = threading.Thread(target=lambda: lines.append(stdout.readline()), daemon=True)
+        reader.start()
+        reader.join(_CHILD_BOUND_S)
+        assert lines, "holder printed nothing within its bound"
+        assert json.loads(lines[0]) == "held", "precondition: blue holds it"
         assert _run(tracker, green, "try_lock", "") == "refused", (
             "a second process over the SAME store took the journal lock concurrently"
         )

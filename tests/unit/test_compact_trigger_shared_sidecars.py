@@ -17,10 +17,10 @@ and bounded by a ``communicate`` timeout, then killed and reaped on every path.
 from __future__ import annotations
 
 import os
-import select
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 
 import pytest
@@ -101,11 +101,19 @@ def _reap(proc: subprocess.Popen[str]) -> None:
 
 
 def _readline(proc: subprocess.Popen[str]) -> str:
-    """One line of the child's stdout, waiting at most the child bound."""
-    assert proc.stdout is not None
-    ready, _, _ = select.select([proc.stdout], [], [], _CHILD_BOUND_S)
-    assert ready, "child printed nothing within its bound"
-    return proc.stdout.readline().strip()
+    """One line of the child's stdout, waiting at most the child bound.
+
+    A reader thread rather than ``select``: Windows ``select`` takes sockets only, and on a
+    pipe raises WinError 10038 (bug aerial-flameproof-antbear). If the bound passes, the
+    caller's ``_reap`` kills the child and the blocked read ends at EOF."""
+    stdout = proc.stdout
+    assert stdout is not None
+    lines: list[str] = []
+    reader = threading.Thread(target=lambda: lines.append(stdout.readline()), daemon=True)
+    reader.start()
+    reader.join(_CHILD_BOUND_S)
+    assert lines, "child printed nothing within its bound"
+    return lines[0].strip()
 
 
 def _run(tracker: str, own_rebar: str, action: str) -> str:

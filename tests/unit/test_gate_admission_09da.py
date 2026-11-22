@@ -9,7 +9,6 @@ covers only the in-process MCP daemon path and not separate-process CLI runs is 
 from __future__ import annotations
 
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -293,7 +292,7 @@ def test_a_killed_holder_does_not_permanently_consume_a_slot(gate_host, tmp_path
     with pytest.raises(ga.GateCongestedError):
         with ga.gate_admission("plan_review", "t-1", root):
             pytest.fail("admitted while the holder was alive")
-    os.kill(holder.pid, signal.SIGKILL)
+    holder.kill()  # SIGKILL on POSIX, TerminateProcess on Windows: no clean release either way
     holder.wait(timeout=10)
     deadline = time.monotonic() + 10
     while True:

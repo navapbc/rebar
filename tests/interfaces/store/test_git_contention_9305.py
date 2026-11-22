@@ -196,11 +196,11 @@ def test_advisory_lock_serializes_against_competing_holder(tmp_path: Path) -> No
         [
             sys.executable,
             "-c",
-            "import sys, time, fcntl, os\n"
+            "import sys, time, os\n"
             "sys.path.insert(0, sys.argv[2])\n"
-            "from rebar._store import gitutil\n"
+            "from rebar._store import gitutil, lock_kernel\n"
             "fd = os.open(gitutil._store_git_lock_path(sys.argv[1]), os.O_CREAT | os.O_RDWR)\n"
-            "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+            "lock_kernel.take_blocking_exclusive(fd)\n"
             "print('held', flush=True)\n"
             "time.sleep(1.5)\n",
             repo,

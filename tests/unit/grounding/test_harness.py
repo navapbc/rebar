@@ -10,11 +10,18 @@ The IRONCLAD invariant: every failure mode becomes a recorded fail-open result
 
 from __future__ import annotations
 
+import contextlib
 import multiprocessing
+import os
+import signal
+import subprocess
 import sys
+import time
+from pathlib import Path
 
 import pytest
 
+from rebar._store import lock_owner
 from rebar.grounding import evidence as ev
 from rebar.grounding import harness
 
@@ -61,20 +68,48 @@ def test_timeout_is_reaped_and_maps_to_timeout() -> None:
     ev.validate(r.as_abstain(job=ev.JOB_SMELL, provenance_tier=ev.TIER_T1))
 
 
-def test_timeout_reaps_pipe_holding_grandchild() -> None:
-    # A child that forks a grandchild holding the stdout pipe: a plain p.kill()
-    # would orphan the grandchild and communicate() would still block. The
-    # process-group reaper must kill the whole group and return within the drain.
+def _gone(pid: int) -> bool:
+    """Whether *pid* has ended. Never ``os.kill(pid, 0)`` on Windows, where it terminates the
+    process; on POSIX a killed orphan is a zombie until its new parent reaps it, so ``Z``
+    counts as ended."""
+    if os.name == "nt":
+        return not lock_owner._pid_alive(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    state = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    return not state or state.startswith("Z")
+
+
+def test_timeout_reaps_pipe_holding_grandchild(tmp_path: Path) -> None:
+    # A child that starts a grandchild holding the inherited stdout pipe: a plain p.kill()
+    # would orphan the grandchild and leave the pipe open. The reaper must end the whole
+    # tree (POSIX: the process group; Windows: the parent-pid descendants, bug
+    # aerial-flameproof-antbear). Popen rather than os.fork, which Windows lacks.
+    pidfile = tmp_path / "grandchild.pid"
     code = (
-        "import os, time, sys\n"
-        "pid = os.fork()\n"
-        "if pid == 0:\n"
-        "    time.sleep(60)\n"  # grandchild holds the inherited stdout pipe
-        "else:\n"
-        "    time.sleep(60)\n"
+        "import subprocess, sys, time\n"
+        "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "with open(sys.argv[1], 'w', encoding='utf-8') as f:\n"
+        "    f.write(str(g.pid))\n"
+        "time.sleep(60)\n"
     )
-    r = harness.run_tool([sys.executable, "-c", code], backend="forky", timeout=0.5)
+    r = harness.run_tool([sys.executable, "-c", code, str(pidfile)], backend="forky", timeout=5)
     assert r.abstained and r.abstain_reason == "timeout"
+    assert pidfile.exists(), "the child never started its grandchild within the timeout"
+    grandchild = int(pidfile.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 10
+    while not _gone(grandchild) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if not _gone(grandchild):
+        with contextlib.suppress(OSError):
+            os.kill(grandchild, signal.SIGTERM)  # never leak it, then fail
+        pytest.fail(f"grandchild PID {grandchild} survived the timeout reap")
 
 
 def test_version_skew_short_circuits_without_running() -> None:

@@ -3,8 +3,10 @@
 Every kernel-mediated store lock goes through here: :func:`rebar._store.lock._acquire_fcntl`
 (the write-lock acquire path), :func:`rebar._store.lock.write_lock_is_busy` (the advisory
 stand-aside probe), :func:`rebar._commands.doctor_locks._probe_fcntl` (``rebar store doctor
---locks``), and :func:`rebar._store.fsutil.sibling_exclusive_lock` (blocking sibling
-read-modify-write locks). They previously each called ``fcntl.flock`` directly.
+--locks``), :func:`rebar._store.fsutil.sibling_exclusive_lock` (blocking sibling
+read-modify-write locks), and the two advisory locks in :mod:`rebar._store.git_locking` (the
+per-store git-op lock and the common-dir fetch lock, bug aerial-flameproof-antbear). They
+previously each called ``fcntl.flock`` directly.
 ``fcntl`` has no Windows build, and while ``lock.py`` guarded the *import*
 (``except ImportError: fcntl = None``), nothing guarded the *uses*, so on Windows
 every ticket write raised ``AttributeError: 'NoneType' object has no attribute

@@ -29,12 +29,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
-from rebar._store import git_outcome
-
-try:  # POSIX advisory locking; absent on some platforms (e.g. plain Windows)
-    import fcntl
-except ImportError:  # pragma: no cover - platform-dependent
-    fcntl = None  # type: ignore[assignment]
+from rebar._store import git_outcome, lock_kernel
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +158,15 @@ def _augment_lock_exhaustion(result: subprocess.CompletedProcess) -> subprocess.
 # get wrong (the cargo/Bazel property, 9305 research §3). ADVISORY: on budget exhaustion
 # we log and proceed WITHOUT it — correctness stays with the git-level retry below (JGit
 # takes its in-process fair lock before the file lock for the same reason, §1c(b)).
+def _has_exclusive_leg() -> bool:
+    """Whether this platform has a kernel-mediated exclusive lock: ``flock`` on POSIX, the
+    ``msvcrt`` byte-range lock on Windows (:mod:`rebar._store.lock_kernel`). Before bug
+    aerial-flameproof-antbear both advisory locks below called ``fcntl`` directly and so were
+    silent no-ops on Windows. With no leg at all they still proceed unlocked, and decide that
+    before opening the lock file so none is created."""
+    return lock_kernel.leg_name() != "none"
+
+
 _STORE_GIT_LOCK_NAME = "rebar-git-op.lock"
 _STORE_GIT_LOCK_WAIT_S = 30.0
 _STORE_GIT_LOCK_POLL_S = 0.05
@@ -188,7 +192,7 @@ def _store_git_op_lock(tracker: str) -> Iterator[None]:
     correctness, so a wedged peer degrades to pre-9305 behavior rather than a new failure
     mode. Best-effort on any OS fault (an unwritable git dir must not fail the git op)."""
     lock_path = _store_git_lock_path(tracker)
-    if lock_path is None or fcntl is None:
+    if lock_path is None or not _has_exclusive_leg():
         yield
         return
     try:
@@ -199,7 +203,7 @@ def _store_git_op_lock(tracker: str) -> Iterator[None]:
     acquired = False
     try:
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_kernel.take_exclusive(fd)
             acquired = True
         except OSError:
             logger.debug("store git-op lock %s contended; waiting (bounded)", lock_path)
@@ -207,7 +211,7 @@ def _store_git_op_lock(tracker: str) -> Iterator[None]:
             while time.monotonic() < deadline:
                 _backoff_sleep(_jitter(_STORE_GIT_LOCK_POLL_S))
                 try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    lock_kernel.take_exclusive(fd)
                     acquired = True
                     break
                 except OSError:
@@ -223,7 +227,7 @@ def _store_git_op_lock(tracker: str) -> Iterator[None]:
     finally:
         try:
             if acquired:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                lock_kernel.release_exclusive(fd)
         except OSError:
             pass
         try:
@@ -290,10 +294,10 @@ def _acquire_fetch_coord_flock(fd: int) -> bool:
     the caller proceeds UNLOCKED (the bounded CAS retry is the net). A blocking wait with no
     ceiling could pin the long-lived MCP server behind a wedged peer fetch, so it is
     deliberately avoided here."""
-    if fcntl is None:
+    if not _has_exclusive_leg():
         return False
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_kernel.take_exclusive(fd)
         return True
     except OSError:
         pass
@@ -301,7 +305,7 @@ def _acquire_fetch_coord_flock(fd: int) -> bool:
     while time.monotonic() < deadline:
         _backoff_sleep(_jitter(_FETCH_COORD_POLL_S))
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_kernel.take_exclusive(fd)
             return True
         except OSError:
             continue
@@ -323,7 +327,7 @@ def fetch_coordination_lock(repo_root: str) -> Iterator[None]:
     net, and that retry is also what covers a NON-rebar git peer, which never takes this lock
     at all."""
     common = _resolve_common_git_dir(repo_root)
-    if common is None or fcntl is None:
+    if common is None or not _has_exclusive_leg():
         yield
         return
     lock_path = os.path.join(common, _FETCH_COORD_LOCK_NAME)
@@ -346,7 +350,7 @@ def fetch_coordination_lock(repo_root: str) -> Iterator[None]:
     finally:
         try:
             if acquired:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                lock_kernel.release_exclusive(fd)
         except OSError:
             pass
         try:

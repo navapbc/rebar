@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from rebar._store import git_locking
+from rebar._store import git_locking, lock_kernel
+
+
+def _no_exclusive_leg(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neither ``fcntl`` nor ``msvcrt``: the platform has no kernel-mediated lock at all."""
+    monkeypatch.setattr(lock_kernel, "fcntl", None)
+    monkeypatch.setattr(lock_kernel, "msvcrt", None)
 
 
 def _fake_git_repo(path: Path) -> None:
@@ -17,7 +23,7 @@ def test_store_git_op_lock_without_fcntl_executes_unlocked(
 ) -> None:
     tracker = tmp_path / "tracker"
     _fake_git_repo(tracker)
-    monkeypatch.setattr(git_locking, "fcntl", None)
+    _no_exclusive_leg(monkeypatch)
 
     protected = tracker / "protected.txt"
     with git_locking._store_git_op_lock(str(tracker)):
@@ -31,7 +37,7 @@ def test_fetch_coordination_lock_without_fcntl_executes_unlocked_without_lock_ar
 ) -> None:
     repo = tmp_path / "repo"
     _fake_git_repo(repo)
-    monkeypatch.setattr(git_locking, "fcntl", None)
+    _no_exclusive_leg(monkeypatch)
 
     protected = repo / "protected.txt"
     with git_locking.fetch_coordination_lock(str(repo)):
@@ -46,7 +52,7 @@ def test_acquire_fetch_coord_flock_without_fcntl_reports_unacquired(
 ) -> None:
     lock_path = tmp_path / "rebar-fetch.lock"
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-    monkeypatch.setattr(git_locking, "fcntl", None)
+    _no_exclusive_leg(monkeypatch)
     try:
         assert git_locking._acquire_fetch_coord_flock(fd) is False
     finally:

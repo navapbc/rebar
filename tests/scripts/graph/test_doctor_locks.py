@@ -166,10 +166,11 @@ def test_a_contended_fcntl_leg_reads_as_held(tmp_path: Path) -> None:
 
 
 def _hold_fcntl(path: str, ready, finish) -> None:  # pragma: no cover - child process
-    import fcntl as _fcntl
+    # The platform's exclusive leg (flock on POSIX, msvcrt on Windows), the one the probe reads.
+    from rebar._store import lock_kernel
 
     fd = os.open(path, os.O_CREAT | os.O_RDWR)
-    _fcntl.flock(fd, _fcntl.LOCK_EX)
+    lock_kernel.take_blocking_exclusive(fd)
     ready.set()
     finish.wait(60)
     os.close(fd)

@@ -35,6 +35,18 @@ def _standalone_tracker(tmp_path: Path) -> Path:
     return tracker
 
 
+#: Windows' ``os.stat_result`` has no ``st_blocks``; footprint then reports every allocation
+#: field as unavailable (``footprint._ALLOCATION_UNAVAILABLE``) rather than inventing one.
+_HAS_BLOCKS = hasattr(os.stat_result, "st_blocks")
+
+
+def _assert_allocation(field: object, expected: int) -> None:
+    if _HAS_BLOCKS:
+        assert _availability_value(field) == expected
+    else:
+        assert field == {"unavailable": {"reason": footprint._ALLOCATION_UNAVAILABLE}}
+
+
 def _availability_value(field: object) -> int:
     assert isinstance(field, dict)
     assert set(field) == {"value"}
@@ -58,7 +70,7 @@ def _file_totals(root: Path, *, exclude_dot_git: bool = False) -> tuple[int, int
             inode = (stat.st_dev, stat.st_ino)
             if inode not in seen:
                 seen.add(inode)
-                allocated += stat.st_blocks * 512
+                allocated += getattr(stat, "st_blocks", 0) * 512
     return logical, allocated, count
 
 
@@ -103,10 +115,8 @@ def test_measure_tracker_reports_exact_standalone_layers(tmp_path: Path) -> None
 
     assert checkout["logical_bytes"] == checkout_logical == 8
     assert checkout["file_count"] == checkout_files == 2
-    assert _availability_value(checkout["allocated_bytes"]) == checkout_allocated
-    assert _availability_value(checkout["allocation_overhead_bytes"]) == (
-        checkout_allocated - checkout_logical
-    )
+    _assert_allocation(checkout["allocated_bytes"], checkout_allocated)
+    _assert_allocation(checkout["allocation_overhead_bytes"], checkout_allocated - checkout_logical)
     assert pack == {
         "logical_bytes": expected_pack,
         "file_count": len(list((tracker / ".git/objects/pack").glob("*.pack"))),
@@ -115,10 +125,10 @@ def test_measure_tracker_reports_exact_standalone_layers(tmp_path: Path) -> None
     }
     assert git_directory["logical_bytes"] == git_logical
     assert git_directory["file_count"] == git_files
-    assert _availability_value(git_directory["allocated_bytes"]) == git_allocated
+    _assert_allocation(git_directory["allocated_bytes"], git_allocated)
     assert whole["logical_bytes"] == checkout_logical + git_logical
     assert whole["file_count"] == checkout_files + git_files
-    assert _availability_value(whole["allocated_bytes"]) == checkout_allocated + git_allocated
+    _assert_allocation(whole["allocated_bytes"], checkout_allocated + git_allocated)
     assert whole["scope"] == "standalone"
     assert set(report["definitions"]) == {
         "logical_bytes",
