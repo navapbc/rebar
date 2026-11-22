@@ -188,6 +188,10 @@ def test_materialize_reconstructed_ticket_scratch_root_has_real_source_files():
         assert (Path(scratch_root) / "SOURCE_MARKER.txt").read_text(encoding="utf-8") == (
             "real source file\n"
         )
+        # Bug neglectful-acceptable-gerbil: a "\r" in the alternates line breaks the borrow
+        # on Windows. Read as bytes so the check sees exactly what git reads.
+        alternates = Path(scratch_root) / ".git" / "objects" / "info" / "alternates"
+        assert b"\r" not in alternates.read_bytes()
     finally:
         tier2.cleanup_reconstructed_ticket(scratch_root, ticket_repo_root=root)
         shutil.rmtree(root, ignore_errors=True)

@@ -78,7 +78,9 @@ def extract_store_snapshot(source: Path | str, tracker: Path, entries: Sequence[
     a pipe keeps the fixture's memory cost constant regardless of how large the slice is.
     """
     with subprocess.Popen(
-        ["git", "archive", "FETCH_HEAD", "--", *entries],
+        # core.autocrlf=false: git archive applies line-ending conversion, which would hand
+        # back CRLF event files on a Windows host (bug neglectful-acceptable-gerbil).
+        ["git", "-c", "core.autocrlf=false", "archive", "FETCH_HEAD", "--", *entries],
         cwd=str(source),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

@@ -193,6 +193,16 @@ def run_git(
             "run_git: bytes input_data requires text=False (binary stdin cannot be "
             "encoded in text mode); pass text=False for binary stdin, or a str for text mode."
         )
+    if text and isinstance(input_data, str):
+        return _run_with_text_stdin(
+            cwd,
+            *args,
+            check=check,
+            capture_output=capture_output,
+            timeout=timeout,
+            env=env,
+            input_text=input_data,
+        )
     argv = ["git", *args] if cwd is None else ["git", "-C", cwd, *args]
     if timeout is not None:
         return _run_in_group(
@@ -215,6 +225,54 @@ def run_git(
         env=env,
         input=input_data,
     )
+
+
+def _decode_git_text(data: bytes | None) -> str | None:
+    """Decode captured git output exactly as text-mode ``subprocess`` would: the git codec,
+    then universal newlines (``\\r\\n`` and ``\\r`` become ``\\n``)."""
+    if data is None:
+        return None
+    return data.decode(_GIT_ENCODING, _GIT_ERRORS).replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _run_with_text_stdin(
+    cwd: str | os.PathLike[str] | None,
+    *args: str,
+    check: bool,
+    capture_output: bool,
+    timeout: float | None,
+    env: Mapping[str, str] | None,
+    input_text: str,
+) -> subprocess.CompletedProcess:
+    """:func:`run_git` for str stdin, sending the exact encoded bytes to git.
+
+    Text-mode stdin is not byte-stable: on Windows Python rewrites every ``\\n`` as
+    ``\\r\\n`` on the way in, so ``hash-object --stdin`` hashed different bytes and
+    ``update-index --index-info`` recorded nothing (bug neglectful-acceptable-gerbil). Run in
+    binary mode with the text encoded by the same codec text mode used, then decode the
+    output the way text mode would, so callers still receive ``str`` and see no change on
+    POSIX. ``check`` is applied after decoding, so a ``CalledProcessError`` carries ``str``,
+    as does a ``TimeoutExpired``."""
+    try:
+        res = run_git(  # raw-git-ok: run_git re-entered in binary mode; caller argv unchanged
+            cwd,
+            *args,
+            check=False,
+            capture_output=capture_output,
+            text=False,
+            timeout=timeout,
+            env=env,
+            input_data=input_text.encode(_GIT_ENCODING, _GIT_ERRORS),
+        )
+    except subprocess.TimeoutExpired as exc:
+        output, stderr = _decode_git_text(exc.output), _decode_git_text(exc.stderr)
+        raise subprocess.TimeoutExpired(exc.cmd, exc.timeout, output, stderr) from exc
+    decoded = subprocess.CompletedProcess(
+        res.args, res.returncode, _decode_git_text(res.stdout), _decode_git_text(res.stderr)
+    )
+    if check:
+        decoded.check_returncode()
+    return decoded
 
 
 _REAP_GRACE_S = 5.0  # SIGTERM lets git delete its own locks and .keep files; SIGKILL cannot
