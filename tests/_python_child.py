@@ -1,4 +1,4 @@
-# mechanism-ok: test_helper tests/_python_child.py — c7b2-e4ed-37fd-4f60 shared dead-pid helper
+# mechanism-ok: test_helper tests/_python_child.py — 1503-b191-89ec-4e13 keep-open admission
 """Portable child-process helpers for lock-holder tests (bug smoking-bereft-boar).
 
 Two Windows facts break the obvious ``subprocess.Popen`` idioms these tests used:
