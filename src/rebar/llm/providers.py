@@ -296,15 +296,20 @@ class ProviderSession:
                 return dataclasses.replace(base, supports_json_schema_output=False)
 
         cfg = self._cfg
-        # Build our OWN client wrapping `httpx.AsyncHTTPTransport()` explicitly: pydantic-ai's
+        # Build our OWN client wrapping an explicit `httpx.AsyncHTTPTransport`: pydantic-ai's
         # `create_async_http_client()` (used when no `http_client=` is passed) builds a bare
         # `httpx.AsyncClient(...)`, so httpx picks its default transport WITHOUT going through
         # the `httpx.AsyncHTTPTransport` module attribute — unreachable by the same
         # `monkeypatch.setattr(httpx, "AsyncHTTPTransport", ...)` seam
         # `_build_retrying_anthropic_model` relies on for its own tests. Also gives the same
         # bounded per-request timeout (`cfg.timeout_s`) local-server config already promises.
+        # An explicit transport switches off httpx's own proxy-environment handling, so it is
+        # the proxy-aware one (bug chilled-rubellite-bluewhale).
+        from rebar.llm.anthropic_model import _env_proxy_aware_transport
+
         http_client = httpx.AsyncClient(
-            transport=httpx.AsyncHTTPTransport(), timeout=httpx.Timeout(float(cfg.timeout_s))
+            transport=_env_proxy_aware_transport(httpx),
+            timeout=httpx.Timeout(float(cfg.timeout_s)),
         )
         self._closeables.append(http_client)
         # RP-04 S4: a runtime OpenAI key (str or callable) takes precedence, then cfg.api_key,

@@ -122,14 +122,14 @@ def _build_httpx2_tenacity_transport(httpx2, *, config, wrapped=None, validate_r
     if HTTPX2TenacityTransport is not None:
         return HTTPX2TenacityTransport(
             config=config,
-            wrapped=wrapped or httpx2.AsyncHTTPTransport(),
+            wrapped=wrapped or _env_proxy_aware_transport(httpx2),
             validate_response=validate_response,
         )
 
     class _Httpx2AsyncTenacityTransport(httpx2.AsyncBaseTransport):  # type: ignore[name-defined]
         def __init__(self):
             self.config = config
-            self.wrapped = wrapped or httpx2.AsyncHTTPTransport()
+            self.wrapped = wrapped or _env_proxy_aware_transport(httpx2)
             self.validate_response = validate_response
 
         async def handle_async_request(self, request):
@@ -160,6 +160,99 @@ def _build_httpx2_tenacity_transport(httpx2, *, config, wrapped=None, validate_r
             await self.wrapped.aclose()
 
     return _Httpx2AsyncTenacityTransport()
+
+
+_PROXY_SCHEMES = ("http", "https", "all")
+
+
+def _env_proxy_aware_transport(http_module):
+    """The transport rebar wraps for an LLM client: direct, or routed through the proxy the
+    environment names, chosen per request URL (bug chilled-rubellite-bluewhale).
+
+    httpx applies ``HTTPS_PROXY``/``HTTP_PROXY``/``ALL_PROXY``/``NO_PROXY`` only when the
+    client gets no explicit transport, and rebar must pass one (the retry wrapper), so this
+    restores that behaviour. The variables are read once, here, through the standard library's
+    environment reader; the system-proxy fallback ``getproxies()`` adds on macOS/Windows is
+    deliberately not consulted, so a host with no proxy variable gets exactly the plain
+    transport it got before. Transports are built through ``http_module.AsyncHTTPTransport``
+    looked up at call time, which keeps the tests' ``monkeypatch.setattr`` seam working."""
+    import urllib.request
+
+    proxies = urllib.request.getproxies_environment()
+    if not any(proxies.get(scheme) for scheme in _PROXY_SCHEMES):
+        return http_module.AsyncHTTPTransport()
+    return _EnvProxyRoutingTransport(http_module, proxies)
+
+
+class _EnvProxyRoutingTransport:
+    """Sends each request direct or through its scheme's proxy (else ``ALL_PROXY``); a host
+    matched by ``NO_PROXY`` goes direct. Inner transports are built up front, as httpx builds
+    its proxy mounts, so a malformed proxy URL fails at client construction. It implements
+    the async transport protocol itself rather than subclassing, because the same class serves
+    httpx and httpx2 and this module imports neither at load time."""
+
+    def __init__(self, http_module, proxies: dict[str, str]) -> None:
+        self._proxies = proxies
+        self._direct = http_module.AsyncHTTPTransport()
+        self._via: dict[str, Any] = {}
+        for scheme in _PROXY_SCHEMES:
+            url = _proxy_url(proxies.get(scheme))
+            if not url or url in self._via:
+                continue
+            try:
+                self._via[url] = http_module.AsyncHTTPTransport(proxy=url)
+            except (ValueError, ImportError) as exc:
+                # rebar ignored these variables before, so a value no transport can use
+                # (unknown scheme, SOCKS without socksio) is skipped rather than breaking
+                # every call. Name the variable, never the URL: it may carry credentials.
+                self._proxies = {k: v for k, v in self._proxies.items() if k != scheme}
+                logger.warning(
+                    "llm transport: ignoring %s_PROXY, no transport can use it (%s)",
+                    scheme.upper(),
+                    type(exc).__name__,
+                )
+
+    def _transport_for(self, url) -> Any:
+        import urllib.request
+
+        proxy = _proxy_url(self._proxies.get(url.scheme) or self._proxies.get("all"))
+        host = url.host if url.port is None else f"{url.host}:{url.port}"
+        # A proxy cannot reach this machine's loopback. proxy_bypass() applies NO_PROXY (its
+        # environment matcher, used whenever proxy variables are set, the only case this
+        # transport exists for).
+        if not proxy or proxy not in self._via or _is_loopback(url.host):
+            return self._direct
+        if urllib.request.proxy_bypass(host):
+            return self._direct
+        return self._via[proxy]
+
+    async def handle_async_request(self, request):
+        return await self._transport_for(request.url).handle_async_request(request)
+
+    async def __aenter__(self):
+        for transport in (self._direct, *self._via.values()):
+            await transport.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:
+        for transport in (self._direct, *self._via.values()):
+            await transport.__aexit__(exc_type, exc_value, traceback)
+
+    async def aclose(self) -> None:
+        for transport in (self._direct, *self._via.values()):
+            await transport.aclose()
+
+
+def _is_loopback(host: str) -> bool:
+    host = host.strip("[]").lower()
+    return host in _LOOPBACK_HOSTS or host.endswith(".localhost")
+
+
+def _proxy_url(value: str | None) -> str | None:
+    """A proxy variable's value as a URL; a bare ``host:port`` means ``http://``, as in httpx."""
+    if not value:
+        return None
+    return value if "://" in value else f"http://{value}"
 
 
 def _is_anthropic_omit(value: object) -> bool:
@@ -277,7 +370,9 @@ def _build_retrying_anthropic_provider(
         before_sleep=_before_sleep,
     )
     wrapped = (
-        _wrapped_transport if _wrapped_transport is not None else http_module.AsyncHTTPTransport()
+        _wrapped_transport
+        if _wrapped_transport is not None
+        else _env_proxy_aware_transport(http_module)
     )
     if http_module.__name__ == "httpx2":
         transport = _build_httpx2_tenacity_transport(
