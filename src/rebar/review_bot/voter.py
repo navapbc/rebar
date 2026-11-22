@@ -12,7 +12,6 @@ import contextlib
 import json
 import logging
 import sys
-import tempfile
 import time
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
@@ -20,13 +19,19 @@ from typing import TYPE_CHECKING, Any
 from rebar.review_bot import adapter
 from rebar.review_bot import startup as _startup
 from rebar.review_bot.artifact_emit import emit_code_review_artifact
-from rebar.review_bot.config import ReceiverConfig
+from rebar.review_bot.config import ReceiverConfig, review_timeout_seconds
 from rebar.review_bot.dedup import DedupStore
 from rebar.review_bot.finding_publish import post_review
 from rebar.review_bot.gerrit_client import GerritClient, GerritError
 from rebar.review_bot.low_disk import GAP_REASON as _LOW_DISK_GAP_REASON
 from rebar.review_bot.low_disk import exhausted_result as _low_disk_exhausted_result
 from rebar.review_bot.low_disk import pre_clone_refusal as _pre_clone_refusal
+from rebar.review_bot.review_steps import (
+    ReviewScratch,
+    ReviewStepTimeout,
+    log_step_start,
+    run_step,
+)
 from rebar.review_bot.voter_merge import (
     assemble_merge_diff as _assemble_merge_diff,
 )
@@ -213,9 +218,27 @@ async def review_and_vote(
     Return a status record for skipped, deferred, voted, or failed work.
     Failures remain fail-closed and never cast a maximum vote."""
     with _counting_in_flight():
-        return await _review_and_vote(
-            event, config=config, gerrit=gerrit, dedup=dedup, force=force, runtime=runtime
-        )
+        try:
+            return await _review_and_vote(
+                event, config=config, gerrit=gerrit, dedup=dedup, force=force, runtime=runtime
+            )
+        except ReviewStepTimeout as exc:
+            return _review_step_timed_out(event, exc)
+
+
+def _review_step_timed_out(event: dict, exc: ReviewStepTimeout) -> dict[str, Any]:
+    """Fail a review whose pre-LLM step exceeded its bound: one VOTER_ERROR naming the step,
+    no vote, and a retryable ``error`` status so the backfill reconciler retries the change
+    (bug 688f-060e-c96c-4484)."""
+    info = _extract(event) or {}
+    change_id = info.get("change_id")
+    _voter_error(
+        change_id=change_id,
+        revision_id=info.get("revision"),
+        vote_value=None,
+        error=f"{exc}; abandoned with no vote, the backfill reconciler will retry",
+    )
+    return {"status": "error", "change_id": change_id, "stage": exc.step}
 
 
 async def _decision_for_clone(
@@ -226,15 +249,18 @@ async def _decision_for_clone(
     is_merge: bool,
     parent_count: int,
     commit_message: str,
+    scratch: ReviewScratch,
     runtime: LLMRuntime | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Fetch the cloned revision's merge or ordinary diff and run the adapter.
     Pass revision for tree-to-vote binding. Return decision and reviewed
     diff for later artifact fingerprinting."""
     change_id, revision = info["change_id"], info["revision"]
+    ids = (change_id, revision)
     if not is_merge:
-        diff_text = await asyncio.to_thread(gc.get_patch, change_id, revision)
-        decision = await asyncio.to_thread(
+        diff_text = await run_step("diff_fetch", ids, gc.get_patch, change_id, revision)
+        _log_llm_step_start(ids)
+        decision = await scratch.run(
             adapter.code_review_decision,
             diff_text,
             repo_root,
@@ -258,8 +284,8 @@ async def _decision_for_clone(
     # failure here is a fail-closed -1 coverage-gap (the clone succeeded, so the vote POST
     # further up can still reach Gerrit).
     try:
-        diff_text, merge_commits, stats = await asyncio.to_thread(
-            _assemble_merge_diff, gc, change_id, revision
+        diff_text, merge_commits, stats = await run_step(
+            "diff_fetch", ids, _assemble_merge_diff, gc, change_id, revision
         )
     except GerritError as exc:
         return _merge_coverage_gap_decision(f"merge context assembly failed: {exc}"), ""
@@ -274,7 +300,8 @@ async def _decision_for_clone(
         integrated_commits=merge_commits,
         **stats,
     )
-    decision = await asyncio.to_thread(
+    _log_llm_step_start(ids)
+    decision = await scratch.run(
         adapter.code_review_decision,
         diff_text,
         repo_root,
@@ -301,13 +328,23 @@ async def _decision_for_review_target(
     ``low_disk.pre_clone_refusal``), which must precede the ``TemporaryDirectory``."""
     if (refusal := _pre_clone_refusal(cfg)) is not None:
         return refusal, ""
-    with tempfile.TemporaryDirectory(prefix="reviewbot-") as repo_root:
-        await asyncio.to_thread(
+    ids = (info["change_id"], info["revision"])
+    # The scratch folder outlives every step thread that uses it, so a step abandoned on
+    # timeout never runs git against a deleted folder (bug 688f-060e-c96c-4484).
+    with ReviewScratch() as scratch:
+        repo_root = scratch.path
+        await run_step(
+            "clone",
+            ids,
             gc.clone_change_ref,
             info["change_number"],
             info["patchset_ref"],
             repo_root,
+            scratch=scratch,
         )
+        # Build the code and ticket snapshots the gate reads as their own bounded step, so a
+        # wait on the snapshot store shows up as this step rather than as a silent LLM stall.
+        await run_step("snapshot", ids, adapter.prepare_review_snapshot, repo_root, scratch=scratch)
         return await _decision_for_clone(
             gc,
             repo_root,
@@ -315,8 +352,14 @@ async def _decision_for_review_target(
             is_merge=is_merge,
             parent_count=parent_count,
             commit_message=commit_message,
+            scratch=scratch,
             runtime=runtime,
         )
+
+
+def _log_llm_step_start(ids: tuple[str, str]) -> None:
+    """Mark the LLM review step's start; it stays bounded by the per-review timeout."""
+    log_step_start("llm_review", ids, timeout=review_timeout_seconds())
 
 
 def _guard_decision_auth(cfg: ReceiverConfig) -> dict[str, Any] | None:
@@ -501,7 +544,13 @@ async def _review_and_vote(
         # Authoritative Gerrit-side guard (catches a lost dedup row / fresh box / an
         # admin vote). A failure HERE is fail-closed: we do not proceed to cast blindly.
         try:
-            if not force and await asyncio.to_thread(gc.has_llm_review_vote, change_id, revision):
+            if not force and await run_step(
+                "existing_vote_check",
+                (change_id, revision),
+                gc.has_llm_review_vote,
+                change_id,
+                revision,
+            ):
                 _emit(
                     logging.INFO,
                     "voter_skip",
@@ -532,7 +581,9 @@ async def _review_and_vote(
         commit_message = ""  # the change's commit body (drives scope-intent); "" if unknown
         diff_text = ""  # the reviewed diff (drives the code_review artifact's change_fingerprint)
         try:
-            commit_info = await asyncio.to_thread(gc.get_commit, change_id, revision)
+            commit_info = await run_step(
+                "commit_fetch", (change_id, revision), gc.get_commit, change_id, revision
+            )
             parent_count = len(commit_info.get("parents") or [])
             commit_message = str(commit_info.get("message") or "")
             is_merge = parent_count >= 2

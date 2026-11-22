@@ -80,11 +80,20 @@ alone, so link changes and measurements are serialized under one store-wide acco
 its candidate search through its hardlinks, delta rewrite, publish rename, and increment,
 and discards a failed build's links before releasing it. An eviction holds it from its
 measurement through the rename to trash, the `rmtree`, and the decrement. Trash draining
-and the startup sweep's cleanup, walk, and reset hold it too. A full materialization writes
+and the startup sweep's cleanup and reset hold it too. A full materialization writes
 only fresh inodes that no other build can link, so it builds outside the lock and takes it
 only to publish and account. Without this ordering a populate could hardlink a file between
 an eviction's measurement and its rename (an undercount), or measure after its donor was
 deleted (an overcount) (bug 3822-a9e3-5999-422c).
+
+The startup sweep's walk itself runs outside the lock. On the production store (a few hundred
+ticket snapshots of about 224,000 files each) one walk takes 45-51 minutes, and holding the lock
+across it made every snapshot build wait that long after each review-bot restart, so reviews
+hit their timeout (bug 688f-060e-c96c-4484). The sweep records the entry set (name and
+directory inode) in the same hold as its cleanup, walks without the lock, and re-takes it to
+reset the total only if the entry set is unchanged. If a populate or eviction landed during the
+walk, it already moved the total under the lock, so the stale walk is discarded and the
+incremental total stands.
 
 An apportioned `st_size // st_nlink` was tried and rejected. It is a fair way to divide bytes
 for a report, but as an increment it is wrong in the direction that matters: evicting one of

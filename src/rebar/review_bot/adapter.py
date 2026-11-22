@@ -25,6 +25,7 @@ __all__ = [
     "ReviewedTreeMismatch",
     "append_retries_exhausted_note",
     "code_review_decision",
+    "prepare_review_snapshot",
 ]
 
 #: The review-message first-line tag suffixes, keyed by reason. The message begins with
@@ -222,6 +223,33 @@ def _assert_reviewed_tree(repo_root: str | Path, ref: str, revision: str) -> Non
         "reviewing one commit and certifying another cannot be made safe. Check that the clone "
         "directory was fresh and that the fetch of that ref completed, then re-trigger."
     )
+
+
+#: The ref and source the code-review gate resolves first (``CodeReviewRequest`` defaults):
+#: the cloned patchset's ``HEAD`` under the configured default source.
+_GATE_SNAPSHOT_REF = "HEAD"
+
+
+def prepare_review_snapshot(repo_root: str | Path) -> None:
+    """Build (or reuse) the code and ticket snapshots the gate reads, before the LLM step.
+
+    The gate's first act is the same ``resolve_gate_handle`` call; running it here as its own
+    logged, bounded review step means a wait on the snapshot store (bug 688f-060e-c96c-4484:
+    the janitor's startup sweep held its lock for ~50 minutes) is attributed to this step
+    instead of stalling silently inside the LLM step, and the gate's own call becomes a cache
+    hit. Best-effort: a failure is logged and left to the gate, which raises it again and keeps
+    its fail-closed decision (including the low-disk BLOCK). A folder that is not a clone is
+    skipped, so this never resolves refs in a surrounding repository."""
+    if not (Path(repo_root) / ".git").exists():
+        return
+    try:
+        from rebar.llm import gate_source
+
+        gate_source.resolve_gate_handle(
+            ref=_GATE_SNAPSHOT_REF, source=None, repo_root=str(repo_root)
+        )
+    except Exception as exc:  # noqa: BLE001 — the gate re-raises it and decides fail-closed
+        logger.warning("adapter: snapshot preparation failed; the gate will retry it: %s", exc)
 
 
 def code_review_decision(

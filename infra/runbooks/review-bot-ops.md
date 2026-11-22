@@ -775,8 +775,11 @@ Both review-gate consumers now write to the dedicated gp3 volume mounted at
 
 - the content-addressed snapshot store (`rebar-gate-snapshots/`, plus the admission slot
   files under `locks/`), via `REBAR_GATE_TMPDIR`; and
-- the voter's per-change clone, `tempfile.TemporaryDirectory(prefix="reviewbot-")` in
-  `src/rebar/review_bot/voter.py`, via `TMPDIR`.
+- the voter's per-change clone, `ReviewScratch` (`tempfile.mkdtemp(prefix="reviewbot-")`) in
+  `src/rebar/review_bot/review_steps.py`, via `TMPDIR`. It is removed when the review ends;
+  if the review was abandoned on a timeout while a step thread still ran in it, it is removed
+  when that thread returns, so a `reviewbot-*` folder can outlive its review by up to one
+  step bound (bug 688f-060e-c96c-4484).
 
 Both env vars are set on the `review-bot` service in `infra/compose/docker-compose.yml`, and
 the container binds `/var/lib/rebar` (the mount's PARENT, not the mount point — see the marker

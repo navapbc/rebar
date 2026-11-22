@@ -313,19 +313,43 @@ class GcResult:
     healed: int = 0
 
 
+def _entry_identities(root: Path) -> frozenset[tuple[str, int]]:
+    """Name and directory inode of every published entry.
+
+    Entries are immutable once published, so an unchanged identity set means no entry was
+    published, evicted, or republished under the same name since it was taken."""
+    ids: set[tuple[str, int]] = set()
+    for entry in _entries(root):
+        try:
+            ids.add((entry.name, entry.stat().st_ino))
+        except OSError:  # pragma: no cover - racing eviction
+            continue
+    return frozenset(ids)
+
+
 def startup_sweep(root: Path | None = None) -> int:
     """Crash recovery: clear ``tmp/*`` and ``trash/*`` and reconcile the byte total via one
-    full walk (the authoritative count). Returns the reconciled byte total."""
+    full walk (the authoritative count). Returns the reconciled byte total.
+
+    The walk runs OUTSIDE the accounting lock. On a store of a few hundred ticket snapshots
+    it takes most of an hour, and every snapshot build waits on this lock to publish, so
+    holding it across the walk stalled every review that needed a new snapshot after a
+    review-bot restart (bug 688f-060e-c96c-4484). The reset is applied only when no entry was
+    published or evicted during the walk; otherwise those operations already moved the total
+    under the lock and the walk is stale, so the incremental total is kept."""
     root = root or store_root()
-    # Clearing debris and the walk-and-reset share one accounting-lock hold: a crashed donor
-    # build or a trash straggler still holds links, and a populate must not land between the
-    # walk and the reset.
+    # Clearing debris shares one hold with recording the entry set: a crashed donor build or a
+    # trash straggler still holds links, and must be gone before the walk counts inodes.
     with _cache.accounting_lock(root):
         sweep_tmp(root)
         _drain_trash_held(root)
-        # Charge each inode ONCE: summing per-entry sizes would count a blob shared by k
-        # entries k times, and the incremental path (exclusive_size) counts it once.
-        total = _cache.distinct_bytes(_entries(root))
+        before = _entry_identities(root)
+    # Charge each inode ONCE: summing per-entry sizes would count a blob shared by k
+    # entries k times, and the incremental path (exclusive_size) counts it once.
+    total = _cache.distinct_bytes(root / name for name, _ino in sorted(before))
+    with _cache.accounting_lock(root):
+        if _entry_identities(root) != before:
+            return _cache.byte_total(root)
         # Authoritative reset (not an increment) — the walk IS ground truth.
         _cache.add_bytes_held(total - _cache.byte_total(root), root)
     return total
