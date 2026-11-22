@@ -93,7 +93,7 @@ def _run_scan_git(
 ) -> subprocess.CompletedProcess[str]:
     """Run bounded Git for the unknown-event scan and normalize launch failures."""
     try:
-        return run_git(  # raw-git-ok: bounded read-only grep/show of the committed tickets ref
+        return run_git(  # raw-git-ok: bounded read-only grep/cat-file of the committed tickets ref
             tickets_tracker,
             *args,
             check=False,
@@ -109,8 +109,10 @@ def _unknown_event_types_from_ref(tickets_tracker: Path) -> list[str]:
     """Find unknown top-level event types on the committed tickets ref.
 
     ``git grep`` cheaply locates candidate blobs without a tickets checkout. A
-    second ``git show`` pass validates each residual candidate as top-level JSON,
-    preventing comment or nested compiled-state text from becoming a finding.
+    second ``git cat-file blob`` pass validates each residual candidate as top-level JSON,
+    preventing comment or nested compiled-state text from becoming a finding. ``cat-file``
+    takes an object name only; ``git show <ref>:<path>`` would also stat the argument as a
+    filename, which fails on Windows past MAX_PATH (bug comic-heavyset-jerboa).
     """
     from rebar.reducer._version import _NON_REPLAY_KNOWN_TYPES, KNOWN_EVENT_TYPES
 
@@ -148,9 +150,10 @@ def _unknown_event_types_from_ref(tickets_tracker: Path) -> list[str]:
     for path in sorted(candidate_paths):
         shown = _run_scan_git(
             tickets_tracker,
-            "show",
+            "cat-file",
+            "blob",
             f"{_TICKETS_REF}:{path}",
-            operation=f"git show for candidate {path!r}",
+            operation=f"git cat-file for candidate {path!r}",
         )
         if shown.returncode != 0:
             diagnostic = (shown.stderr or shown.stdout or "no diagnostic").strip()

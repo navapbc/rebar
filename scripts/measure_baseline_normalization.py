@@ -40,7 +40,7 @@ def _git(repo: Path, *args: str) -> bytes:
 
 
 def _load_bindings(repo: Path, ref: str) -> tuple[bytes, dict[str, Any]]:
-    raw = _git(repo, "show", f"{ref}:{_BINDINGS_PATH}")
+    raw = _git(repo, "cat-file", "blob", f"{ref}:{_BINDINGS_PATH}")
     parsed = json.loads(raw)
     if not isinstance(parsed, dict) or not isinstance(parsed.get("bindings"), dict):
         raise ValueError(f"{ref}:{_BINDINGS_PATH} is not a binding-store object")

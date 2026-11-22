@@ -50,10 +50,10 @@ def _canonical(payload: dict[str, Any]) -> bytes:
 
 
 def _snapshot(repo: Path, revision: str, *, cutover: bool) -> tuple[bytes, bytes]:
-    bindings_raw = _git(repo, "show", f"{revision}:{_BINDINGS}")
+    bindings_raw = _git(repo, "cat-file", "blob", f"{revision}:{_BINDINGS}")
     bindings = json.loads(bindings_raw)
     try:
-        rotation = json.loads(_git(repo, "show", f"{revision}:{_ROTATION}"))
+        rotation = json.loads(_git(repo, "cat-file", "blob", f"{revision}:{_ROTATION}"))
     except subprocess.CalledProcessError:
         rotation = {"version": 1, "last_get_pass": {}}
     entries = bindings.get("bindings")

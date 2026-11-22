@@ -437,7 +437,7 @@ def _untrack_runtime_markers_unit(tracker: str) -> EnsureOutcome:
 
 # raw-git-ok: store-maintenance command, seam-internal
 def _commit_precommit(tracker: str) -> None:
-    if _git(tracker, "show", "tickets:.pre-commit-config.yaml").returncode != 0:
+    if _git(tracker, "cat-file", "blob", "tickets:.pre-commit-config.yaml").returncode != 0:
         with open(os.path.join(tracker, ".pre-commit-config.yaml"), "w", encoding="utf-8") as f:
             f.write(_PRECOMMIT)
         _git(tracker, "add", ".pre-commit-config.yaml")

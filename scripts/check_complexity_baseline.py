@@ -514,7 +514,7 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
     if exists.returncode != 0:
         return None  # main has no baseline yet — bootstrap, allow
     show = subprocess.run(
-        ["git", "show", f"{rev}:{_BASELINE_REPO_RELPATH}"],
+        ["git", "cat-file", "blob", f"{rev}:{_BASELINE_REPO_RELPATH}"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         check=False,
