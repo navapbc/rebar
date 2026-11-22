@@ -346,7 +346,9 @@ def _active_event_files(ticket_dir: str) -> list[str]:
 def _ledger_events(snapshot: dict, ticket_id: str) -> list[_ScopedEvent]:
     """Signed events preserved in a SNAPSHOT's ``authorship_ledger`` (raw files retired)."""
     out: list[_ScopedEvent] = []
-    ledger = snapshot.get("data", {}).get("compiled_state", {}).get("authorship_ledger")
+    data = snapshot.get("data")
+    compiled = data.get("compiled_state") if isinstance(data, dict) else None
+    ledger = compiled.get("authorship_ledger") if isinstance(compiled, dict) else None
     if not isinstance(ledger, list):
         return out
     for entry in ledger:
@@ -383,13 +385,17 @@ def _event_from_file(ticket_id: str, filename: str, path: str) -> list[_ScopedEv
             event = json.load(f)
     except (OSError, ValueError):
         return []
+    if not isinstance(event, dict):
+        # Valid JSON that is not an event object is as unusable as unparseable JSON.
+        return []
     if event.get("event_type") == "SNAPSHOT":
         return _ledger_events(event, ticket_id)
 
     # Ignore reducer-unknown observability sidecars because they do not mutate ticket state.
     # Best-effort producers may omit signatures, so scanning sidecars would produce false
     # enforcement failures.
-    if event.get("event_type") not in KNOWN_EVENT_TYPES:
+    kind = event.get("event_type")
+    if not isinstance(kind, str) or kind not in KNOWN_EVENT_TYPES:
         return []
 
     author_sig = event.get("author_sig")
