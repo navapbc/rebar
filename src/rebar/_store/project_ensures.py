@@ -64,7 +64,7 @@ def seed_projects_mapping_unit(tracker: str) -> EnsureOutcome:
     Its ``projects`` mapping starts empty so the project command retains ownership. Every init
     runs the seed before ticket state can diverge across clones. The unit commits this file and
     writes no ticket events. Its empty project set cannot trigger the multi-project stamp."""
-    if _git(tracker, "show", f"tickets:{_PROJECTS_REL_PATH}").returncode == 0:
+    if _git(tracker, "cat-file", "blob", f"tickets:{_PROJECTS_REL_PATH}").returncode == 0:
         return EnsureOutcome(SEED_ID, "ok", "projects.json present")
 
     project = _effective_project()

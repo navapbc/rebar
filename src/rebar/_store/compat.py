@@ -177,14 +177,14 @@ def _remote_store_epoch(
     tracker_path = os.fspath(tracker)
     source = f"{remote_ref}:{COMPAT_FILENAME}"
     try:
-        shown = run_git(tracker_path, "show", source, check=False)
+        shown = run_git(tracker_path, "cat-file", "blob", source, check=False)
     except OSError as err:
         return None, f"remote ref {remote_ref} is unreadable: {err}"
     if shown.returncode == 0:
         epoch, problem = _epoch_from_record(shown.stdout, source)
         return epoch, f"remote {problem}" if problem is not None else None
 
-    # `git show ref:path` uses the same non-zero status for a missing path and an
+    # `git cat-file blob ref:path` uses the same non-zero status for a missing path and an
     # unreadable ref. Resolve the ref separately so operators get the right remedy.
     try:
         resolved = run_git(
@@ -271,7 +271,9 @@ def _remote_lineage_names(
     tracker: str | os.PathLike[str], remote_ref: str, epoch: str | None
 ) -> bool:
     try:
-        shown = run_git(os.fspath(tracker), "show", f"{remote_ref}:{COMPAT_FILENAME}", check=False)
+        shown = run_git(
+            os.fspath(tracker), "cat-file", "blob", f"{remote_ref}:{COMPAT_FILENAME}", check=False
+        )
     except OSError:
         return False
     if shown.returncode != 0:
@@ -293,7 +295,7 @@ def remote_epoch_supersedes_local(tracker: str | os.PathLike[str], remote_commit
         return False
     source = f"{remote_commit}:{COMPAT_FILENAME}"
     try:
-        shown = run_git(os.fspath(tracker), "show", source, check=False)
+        shown = run_git(os.fspath(tracker), "cat-file", "blob", source, check=False)
     except OSError:
         return False
     if shown.returncode != 0:

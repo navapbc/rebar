@@ -60,7 +60,7 @@ _GIT_TIMEOUT_S = 30
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     """Run a read-only git command in ``root``; a git failure surfaces as a ConfigError."""
     try:
-        return subprocess.run(  # raw-git-ok: read-only remote/rev-parse/symbolic-ref/ls-tree/show
+        return subprocess.run(  # raw-git-ok: read-only remote/rev-parse/ls-tree/cat-file etc.
             ["git", "-C", str(root), *args],
             capture_output=True,
             text=True,
@@ -192,7 +192,7 @@ def _committed_toml(root: Path, spec: str) -> dict | None:
         raise ConfigError(f"op-cert gate: could not list {spec}: {listed.stderr.strip()}")
     if not listed.stdout.strip():
         return None
-    shown = _git(root, "show", spec)
+    shown = _git(root, "cat-file", "blob", spec)
     if shown.returncode != 0:
         raise ConfigError(f"op-cert gate: could not read {spec}: {shown.stderr.strip()}")
     try:

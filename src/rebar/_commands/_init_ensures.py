@@ -95,7 +95,7 @@ def _gitattributes_unit(tracker: str) -> EnsureOutcome:
 
     Tree-checks the committed blob first, so a converged store makes zero commits and
     reports ``ok`` (ensure-registry unit; run_ensures catches any raise → ``failed``)."""
-    show = _git(tracker, "show", "tickets:.gitattributes")
+    show = _git(tracker, "cat-file", "blob", "tickets:.gitattributes")
     if show.returncode != 0:
         with open(os.path.join(tracker, ".gitattributes"), "w", encoding="utf-8") as f:
             f.write(_GITATTRIBUTES)
@@ -119,7 +119,7 @@ def _gitignore_unit(tracker: str) -> EnsureOutcome:
     (ensure-registry unit). Tree-checks the committed blob first, so it commits only
     when creating it or appending a missing line — a converged store reports ``ok``
     and makes zero commits."""
-    show = _git(tracker, "show", "tickets:.gitignore")
+    show = _git(tracker, "cat-file", "blob", "tickets:.gitignore")
     if show.returncode != 0:
         with open(os.path.join(tracker, ".gitignore"), "w", encoding="utf-8") as f:
             f.write(_GITIGNORE)
@@ -161,7 +161,7 @@ def _store_compat_unit(tracker: str) -> EnsureOutcome:
     record remains readable as legacy. An unrecognized record blocks writes."""
     from rebar._store import compat
 
-    if _git(tracker, "show", f"tickets:{compat.COMPAT_FILENAME}").returncode == 0:
+    if _git(tracker, "cat-file", "blob", f"tickets:{compat.COMPAT_FILENAME}").returncode == 0:
         return EnsureOutcome("store-compat", "ok", "compat record present")
     compat.write_compat_record(tracker)
     _git(tracker, "add", compat.COMPAT_FILENAME)

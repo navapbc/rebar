@@ -702,7 +702,7 @@ def test_scan_failures_raise_public_rebar_error(
             raise FileNotFoundError("git")
         if mode == "grep_timeout" and args[0] == "grep":
             raise subprocess.TimeoutExpired(args, timeout)
-        if mode == "candidate_timeout" and args[0] == "show":
+        if mode == "candidate_timeout" and args[0] == "cat-file":
             raise subprocess.TimeoutExpired(args, timeout)
         if args[0] == "grep":
             if mode == "malformed_grep":

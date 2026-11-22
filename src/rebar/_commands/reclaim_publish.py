@@ -105,7 +105,7 @@ def stamp_superseding_epoch(
 
 
 def _record_at(root: Path, rev: str) -> dict[str, object]:
-    shown = run_git(root, "show", f"{rev}:{compat.COMPAT_FILENAME}", check=False)
+    shown = run_git(root, "cat-file", "blob", f"{rev}:{compat.COMPAT_FILENAME}", check=False)
     if shown.returncode != 0:
         # No record yet: the implicit legacy store, which has no epoch.
         return {"format_version": compat.CURRENT_FORMAT_VERSION, "required_capabilities": []}

@@ -214,7 +214,7 @@ def _fixture_files(row: dict[str, Any], checkout: Path) -> tuple[dict[str, str],
             continue
         # raw-git-ok: reads the harness checkout's own committed tree, not the tracker
         shown = subprocess.run(
-            ["git", "-C", str(checkout), "show", f"HEAD:{path}"],
+            ["git", "-C", str(checkout), "cat-file", "blob", f"HEAD:{path}"],
             capture_output=True,
             text=True,
             encoding="utf-8",
