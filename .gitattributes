@@ -15,3 +15,9 @@ src/rebar/llm/reviewers/*.md   eol=lf
 # with core.autocrlf would rewrite them to CRLF; pin LF so every platform holds the same bytes
 # and tests/unit/test_windows_sweep_deselect.py can compare lines exactly.
 .github/windows-sweep-deselect/*.args eol=lf
+
+# SHA-256-pinned vendored files (bug neglectful-acceptable-gerbil). Git for Windows defaults to
+# core.autocrlf=true, which would check these out CRLF and break their pins; -text keeps every
+# checkout byte-identical to the committed blob.
+.github/schemas/gitlab-ci.schema.json -text
+tests/external/live_jira_dc/pycontribs-jira-LICENSE.txt -text

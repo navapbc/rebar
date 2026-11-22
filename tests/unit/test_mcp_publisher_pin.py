@@ -42,8 +42,8 @@ def _verify(archive: Path, expected_sha: str) -> subprocess.CompletedProcess:
     # Replicates the mcp_verify step exactly: `echo "<sha>  <file>" | sha256sum -c --strict`.
     return subprocess.run(
         ["sha256sum", "-c", "--strict"],
-        input=f"{expected_sha}  {archive.name}\n",
-        text=True,
+        # Bytes, not text: text-mode stdin on Windows appends "\r" to the filename.
+        input=f"{expected_sha}  {archive.name}\n".encode(),
         capture_output=True,
         cwd=str(archive.parent),
         check=False,
