@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import struct
 import zipfile
 from pathlib import Path
@@ -93,7 +94,8 @@ def test_mismatched_architecture_installs_the_verified_binary(
     installed = ensure_pandoc.repo_pandoc_path(tmp_path)
     assert "installed" in outcome
     assert installed.read_bytes() == payload
-    assert installed.stat().st_mode & 0o111
+    if os.name != "nt":  # Windows has no exec bit; it reports 0o666 for every file
+        assert installed.stat().st_mode & 0o111
 
 
 def test_digest_mismatch_refuses_and_installs_nothing(

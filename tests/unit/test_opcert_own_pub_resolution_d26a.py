@@ -7,6 +7,7 @@ derives its public key in memory.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -117,6 +118,11 @@ def test_key_path_override_cert_certifies_in_the_same_environment(
     assert not (_tracker(store) / ".opcert-key").exists()
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="chmod cannot make a Windows directory unwritable (the read-only attribute is "
+    "ignored on directories), so the read-only key dir this test needs cannot be built there",
+)
 def test_certifies_when_the_key_dir_is_read_only(
     store: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -108,15 +108,21 @@ def test_fresh_clone_json_exposes_allocation_without_a_policy_verdict(
         "scope": "standalone",
         "shared_reasons": [],
     }
-    checkout_allocated = _availability_value(payload["layers"]["checkout"]["allocated_bytes"])
+    checkout_allocation = payload["layers"]["checkout"]["allocated_bytes"]
     pack_logical = payload["layers"]["pack"]["logical_bytes"]
     # A fresh single-branch clone owns its objects outright: the pack measurement is complete.
     assert payload["layers"]["pack"]["complete"] is True
     assert pack_logical > 0
-    # Capability assertion: this platform exposes st_blocks, so allocation is a concrete value.
+    # Capability assertion: where the platform exposes st_blocks, allocation is a concrete
+    # value; where it does not (Windows), it is reported unavailable rather than invented.
     # We deliberately avoid asserting any allocated-to-pack ratio, which would depend on the
     # host filesystem's block-charging policy (see test_footprint injected-block coverage).
-    assert checkout_allocated >= 0
+    if hasattr(os.stat_result, "st_blocks"):
+        assert _availability_value(checkout_allocation) >= 0
+    else:
+        assert checkout_allocation == {
+            "unavailable": {"reason": "filesystem stat does not expose st_blocks"}
+        }
     assert payload["layers"]["checkout"]["file_count"] >= 256
     serialized = json.dumps(payload).lower()
     assert "threshold" not in serialized

@@ -605,6 +605,9 @@ def test_non_posix_reaper_uses_kill_not_killpg(monkeypatch):
         raise AssertionError("killpg must not be used on the non-POSIX path")
 
     monkeypatch.setattr(_proc.os, "killpg", _boom_killpg, raising=False)
+    # 4321 is not a child of this process. On a Windows host the real descendant walk would
+    # end whatever runner processes name that pid as their parent, so the walk sees none.
+    monkeypatch.setattr(_proc, "_windows_process_table", list)
     proc = _FakeProc()
     _proc.reap_process_group(
         proc, grace=0.01, drain=0.01, label="acli", logger=logging.getLogger("t")
