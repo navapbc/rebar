@@ -695,3 +695,74 @@ def test_no_resolvable_base_names_what_was_tried(tmp_path: Path, _clean_config: 
         gate_config(str(repo))
     assert "refs/remotes/origin/HEAD and refs/remotes/origin/main" in str(err.value)
     assert "git remote set-head origin --auto" in str(err.value)
+
+
+def _write_raw(repo: Path, ticket_id: str, name: str, text: str) -> None:
+    """Drop a raw file with arbitrary content into a ticket directory."""
+    ticket_dir = Path(str(config.tracker_dir(str(repo)))) / ticket_id
+    ticket_dir.mkdir(parents=True, exist_ok=True)
+    (ticket_dir / name).write_text(text, encoding="utf-8")
+
+
+_LATE = f"{9 * 10**18}-00000000-0000-4000-8000-000000000000"
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+@pytest.mark.parametrize(
+    "name_text",
+    [
+        (f"{_LATE}-STATUS.json", '{"event_type": "STATUS", "data": "closed"}'),
+        (f"{_LATE}-EDIT.json", '{"event_type": "EDIT", "data": {"fields": ["status"]}}'),
+        (f"{_LATE}-EDIT.json", "{not json"),
+        (f"{_LATE}-EDIT.json", '["a", "list"]'),
+        (f"{_LATE}-SNAPSHOT.json", '{"event_type": "SNAPSHOT", "data": "x"}'),
+        (f"{_LATE}-SNAPSHOT.json", '{"event_type": "SNAPSHOT", "data": {"compiled_state": [1]}}'),
+        (f"{_LATE}-EDIT.json", '{"event_type": ["STATUS"]}'),
+    ],
+    ids=[
+        "data-is-a-string",
+        "fields-is-a-list",
+        "unparseable",
+        "not-an-object",
+        "snapshot-data-is-a-string",
+        "snapshot-compiled-state-is-a-list",
+        "event-type-is-a-list",
+    ],
+)
+def test_malformed_raw_event_is_judged_not_a_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    name_text: tuple[str, str],
+    _clean_config: None,
+) -> None:
+    """Bug semidivine-proud-fieldmouse: a malformed raw event must make the ticket judged and
+    named, never raise out of the gate."""
+    repo, _closed, _open = _closed_ticket_repo(tmp_path, monkeypatch)
+    tid = _in_progress_ticket(repo)
+    _write_raw(repo, tid, *name_text)
+    _break_show_ticket(monkeypatch, tid)
+
+    rc, text = _gate(capsys, repo, "--require-environment", ENV_ID)
+
+    assert rc == 1, text
+    assert f"{tid}: {_UNREADABLE}" in text, text
+
+
+@pytest.mark.skipif(not _SSH_OK, reason="ssh-keygen >= 8.9 required for SSHSIG")
+def test_ticket_directory_with_only_retired_files_is_judged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _clean_config: None,
+) -> None:
+    """No active event file proves nothing about closure, so the ticket is judged."""
+    repo, _closed, _open = _closed_ticket_repo(tmp_path, monkeypatch)
+    ghost = "4444-5555-6666-7777"
+    _write_raw(repo, ghost, f"{_LATE}-STATUS.json.retired", '{"event_type": "STATUS"}')
+    _break_show_ticket(monkeypatch, ghost)
+
+    rc, text = _gate(capsys, repo, "--require-environment", ENV_ID)
+
+    assert rc == 1, text
+    assert f"{ghost}: {_UNREADABLE}" in text, text

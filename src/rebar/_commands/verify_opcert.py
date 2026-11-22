@@ -34,7 +34,8 @@ def _close_anchor_event(events, ticket_id):
             continue
         if ev.event.get("event_type") != "STATUS":
             continue
-        if (ev.event.get("data") or {}).get("status") == "closed":
+        data = ev.event.get("data") or {}
+        if isinstance(data, dict) and data.get("status") == "closed":
             anchor = ev
     return anchor
 
@@ -106,13 +107,20 @@ def _completion_cert_problem(state, ticket_id, root, required_env, trusted_pairs
 
 def _sets_closed(event: dict) -> bool:
     """Whether one raw event can leave the ticket ``closed``: a STATUS to closed, a CREATE
-    whose genesis status is closed, or an EDIT that writes ``status: closed``."""
+    whose genesis status is closed, or an EDIT that writes ``status: closed``.
+
+    A ``data`` or ``fields`` that is not an object, or an ``event_type`` that is not a string,
+    is malformed, and a malformed event "may close" the ticket: it is judged, never a crash
+    (bug semidivine-proud-fieldmouse)."""
     data = event.get("data") or {}
     kind = event.get("event_type")
+    if not isinstance(data, dict) or not isinstance(kind, str):
+        return True
     if kind in ("STATUS", "CREATE"):
         return data.get("status") == "closed"
     if kind == "EDIT":
-        return (data.get("fields") or {}).get("status") == "closed"
+        fields = data.get("fields") or {}
+        return not isinstance(fields, dict) or fields.get("status") == "closed"
     return False
 
 
