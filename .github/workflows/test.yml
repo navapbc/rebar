@@ -282,7 +282,6 @@ jobs:
           -n 4 --dist worksteal -q -p no:cacheprovider
           --timeout=600 --timeout-method=thread
           '@.github/windows-sweep-deselect/crlf.args'
-          '@.github/windows-sweep-deselect/locale-subprocess.args'
           '@.github/windows-sweep-deselect/locale-tests.args'
           '@.github/windows-sweep-deselect/path-separators.args'
           '@.github/windows-sweep-deselect/posix-api.args'
