@@ -10,7 +10,7 @@ from rebar.reconciler.scratch_retention import alerts_dir
 #: The stable sibling every appender serializes on. A dotfile, so retention
 #: (``scratch_retention``) and the dedupe scan, which read ``*.jsonl``, ignore it.
 #: It replaces an in-file fcntl flock that Windows lacks (appends there overwrote each other).
-# mechanism-ok: lock .append.lock — b8dd-85be-1dbb-45b9 portable append serialization
+# mechanism-ok: lock .append.lock — 3bc8-49a4-6c84-4b19 keep-open admission
 _APPEND_LOCK_NAME = ".append.lock"
 
 _24H_NS = 24 * 3600 * 1_000_000_000
