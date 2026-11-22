@@ -194,12 +194,12 @@ host observability probe greps the review-bot container's journald for it and
 publishes `rebar/host:voter_errors`, watched by the `rebar-gerrit-voter-errors`
 CloudWatch alarm (`infra/terraform/monitoring_s4b.tf`) — mirroring the S5
 `replication_errors` pattern, so no AWS creds are needed inside the container.
-The voter ALSO makes a **best-effort direct** `cloudwatch:PutMetricData` of the same
-`rebar/host:voter_errors` metric via boto3 (instance role) from the `VOTER_ERROR` path,
-wrapped so any `ImportError` / missing-credential / network failure is silently skipped.
-In-container IMDS may be unreachable (the container IMDS hop limit can preclude it), so
-**the journald → host-probe path is the reliable fallback**; the direct publish is a
-convenience when IMDS is reachable, never load-bearing.
+The host probe is the **only** publisher of `rebar/host:voter_errors`. The voter once also
+published the same metric directly through boto3 as a convenience, assuming the container
+usually could not reach the instance role. On the box it could, so every error counted twice
+and two isolated timeouts paged (bug ab02-9eaa-5b93-4c1f). The direct publish was removed,
+and `tests/unit/test_review_bot_single_metric_publisher.py` fails if review-bot code publishes
+any metric the probe also publishes.
 
 ## Consequences
 

@@ -21,7 +21,6 @@ REPO_SRC = Path(__file__).resolve().parents[2] / "src"
 _EMITTERS: dict[str, tuple[str, str]] = {
     "VOTER_ERROR": (
         "import rebar.review_bot.voter as m\n"
-        "m._publish_voter_error_metric = lambda: None\n"
         "m._voter_error(change_id='Itest', revision_id='r1', vote_value=-1,"
         " http_status=500, error='boom')\n"
     ),
@@ -32,7 +31,6 @@ _EMITTERS: dict[str, tuple[str, str]] = {
     ),
     "MERGE_CHANGE_ERROR": (
         "import rebar.review_bot.voter_merge as m\n"
-        "m.publish_merge_change_error_metric = lambda reason: None\n"
         "m.merge_change_error('merge_files_error', 'files', change_id='Itest')\n"
     ),
     "RECONCILE_DEGRADED": (

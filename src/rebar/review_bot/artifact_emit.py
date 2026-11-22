@@ -23,9 +23,11 @@ __all__ = ["emit_code_review_artifact"]
 
 
 def _publish_artifact_emit_error_metric() -> None:
-    """Best-effort publish of ``rebar/host:review_bot_artifact_emit_errors``, mirroring
-    :func:`_publish_voter_error_metric`. The journald marker + the host probe is the reliable
-    path; in-container boto3 may not reach IMDS, so any failure is swallowed."""
+    """Best-effort publish of ``rebar/host:review_bot_artifact_emit_errors``. This is the
+    metric's ONLY publisher: the host probe does not count ``ARTIFACT_EMIT_ERROR`` markers, so
+    there is no double count (bug ab02-9eaa-5b93-4c1f). If the container cannot reach the
+    instance role the metric is simply not published; the journald marker stays the record.
+    Any failure is swallowed."""
     try:
         import boto3
 

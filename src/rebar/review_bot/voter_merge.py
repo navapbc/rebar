@@ -3,7 +3,7 @@
 Extracted from ``voter`` as a cohesive call-graph seam (the merge-change review path): a
 merge revision (>= 2 parents) cannot use the bare ``/patch`` (409) and must be reviewed on
 ONLY its auto-merge delta plus its integrated-commit list. This module owns that assembly and
-the reason-tagged fail-closed markers/metrics it emits; the voter routes a merge review through
+the reason-tagged fail-closed markers it emits; the voter routes a merge review through
 :func:`assemble_merge_diff` and turns any REST failure into a fail-closed ``-1`` coverage-gap
 vote via :func:`merge_coverage_gap_decision`.
 
@@ -25,34 +25,14 @@ from rebar.review_bot.gerrit_client import GerritClient, GerritError
 logger = logging.getLogger("rebar.review_bot.voter")
 
 
-def publish_merge_change_error_metric(reason: str) -> None:
-    """Best-effort publish of ``rebar/host:review_bot_merge_change_errors`` (reason-tagged).
-    The journald marker + the host probe (observability.sh) is the reliable path; in-container
-    boto3 may not reach IMDS, so any failure is swallowed."""
-    try:
-        import boto3
-
-        boto3.client("cloudwatch").put_metric_data(
-            Namespace="rebar/host",
-            MetricData=[
-                {
-                    "MetricName": "review_bot_merge_change_errors",
-                    "Value": 1,
-                    "Unit": "Count",
-                    "Dimensions": [{"Name": "reason", "Value": reason}],
-                }
-            ],
-        )
-    except Exception:  # noqa: BLE001 — IMDS hop limit / no creds / offline: journald is the fallback
-        pass
-
-
 def merge_change_error(event: str, reason: str, **fields: Any) -> None:
     """Structured ERROR marker for a merge-path REST failure. Writes a greppable
-    ``MERGE_CHANGE_ERROR`` line to stderr (the host observability probe greps it to publish
-    ``rebar/host:review_bot_merge_change_errors``, reason-tagged) with the specific event name
+    ``MERGE_CHANGE_ERROR`` line to stderr with the specific event name
     (``merge_commit_error`` / ``merge_files_error`` / ``mergelist_fetch_error`` /
-    ``merge_diff_error``) AND publishes the reason-tagged merge metric. The voter turns the
+    ``merge_diff_error``) and the ``reason`` in the record. The host observability probe
+    (observability.sh §4c) counts it and is the ONLY publisher of
+    ``rebar/host:review_bot_merge_change_errors``; this module publishes nothing itself, so one
+    failure is one count (bug ab02-9eaa-5b93-4c1f). The voter turns the
     failure into a fail-closed ``-1`` coverage-gap vote (see :func:`merge_coverage_gap_decision`)
     so the merge change is BLOCKED and visibly flagged as an INFRA veto, not silently no-voted.
     The stderr print is the SINGLE line-start marker emission the observability anchor
@@ -62,7 +42,6 @@ def merge_change_error(event: str, reason: str, **fields: Any) -> None:
     body = json.dumps(record, default=str)
     logger.error(body)
     print("MERGE_CHANGE_ERROR " + body, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
-    publish_merge_change_error_metric(reason)
 
 
 def merge_coverage_gap_decision(note: str) -> dict[str, Any]:

@@ -107,22 +107,10 @@ def _voter_error(**fields: Any) -> None:
     # Write the token-prefixed marker straight to stderr (journald) so the greppable
     # VOTER_ERROR line — the source for the rebar/host:voter_errors metric — lands exactly
     # once, whether or not logging is configured.
+    # The host probe (observability.sh §4) is the ONLY publisher of voter_errors: it counts this
+    # marker from the journal. A second in-container publish double-counted every error once the
+    # container could reach the instance role (bug ab02-9eaa-5b93-4c1f).
     print("VOTER_ERROR " + body, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
-    _publish_voter_error_metric()
-
-
-def _publish_voter_error_metric() -> None:
-    """Publish voter_errors to CloudWatch best-effort. The journald marker
-    remains available when container credentials or network access fail."""
-    try:
-        import boto3
-
-        boto3.client("cloudwatch").put_metric_data(
-            Namespace="rebar/host",
-            MetricData=[{"MetricName": "voter_errors", "Value": 1, "Unit": "Count"}],
-        )
-    except Exception:  # noqa: BLE001 — IMDS hop limit / no creds / offline: journald is the fallback
-        pass
 
 
 # Use the runner's token fields from coverage metrics for usage

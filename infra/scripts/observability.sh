@@ -959,7 +959,10 @@ fi
 
 # --- 4. Review-bot LLM-Review voter failures -------------------------------
 # Count new structured VOTER_ERROR records from the host journal; the container needs no AWS
-# credentials. Cursor state turns the stream into per-interval voter_errors.
+# credentials. Cursor state turns the stream into per-interval voter_errors. This probe is the
+# ONLY publisher of voter_errors and review_bot_merge_change_errors (§4c): review-bot code must
+# not publish them too, or each error counts twice (bug ab02-9eaa-5b93-4c1f; guarded by
+# tests/unit/test_review_bot_single_metric_publisher.py).
 VOTER_CONTAINER="${VOTER_CONTAINER:-compose-review-bot-1}"
 VOTER_OFFSET_FILE="${VOTER_OFFSET_FILE:-/var/lib/rebar/voter-fail-offset}"
 mkdir -p "$(dirname "$VOTER_OFFSET_FILE")"
