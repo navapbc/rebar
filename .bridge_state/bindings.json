@@ -9623,6 +9623,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T19:35:22Z"
     },
+    "1503-b191-89ec-4e13": {
+      "created_at": "2026-11-22T06:43:33Z",
+      "jira_id": "4599780",
+      "jira_key": "REB-7350",
+      "state": "confirmed",
+      "updated_at": "2026-11-22T06:43:36Z"
+    },
     "150b-2200-13e7-4629": {
       "baseline": {
         "assignee": {
@@ -102892,6 +102899,13 @@
       "state": "confirmed",
       "updated_at": "2026-09-05T08:57:24Z"
     },
+    "e37b-2ac1-c998-4fb3": {
+      "created_at": "2026-11-22T06:43:36Z",
+      "jira_id": "4599781",
+      "jira_key": "REB-7351",
+      "state": "confirmed",
+      "updated_at": "2026-11-22T06:43:39Z"
+    },
     "e37c-d93e-e532-419d": {
       "baseline": {
         "assignee": null,
@@ -121848,7 +121862,16 @@
     "1795279764169608001": "__rebar_unknown_comment_id__",
     "1795280621315866001": "__rebar_unknown_comment_id__",
     "1795281584063009001": "__rebar_unknown_comment_id__",
-    "1795283855611027001": "__rebar_unknown_comment_id__"
+    "1795283855611027001": "__rebar_unknown_comment_id__",
+    "1795325722194666001": "__rebar_unknown_comment_id__",
+    "1795325727527055001": "__rebar_unknown_comment_id__",
+    "1795325745075398001": "__rebar_unknown_comment_id__",
+    "1795325777714562001": "__rebar_unknown_comment_id__",
+    "1795325948045650001": "__rebar_unknown_comment_id__",
+    "1795326047468599001": "__rebar_unknown_comment_id__",
+    "1795326159393085001": "__rebar_unknown_comment_id__",
+    "1795326159414669001": "__rebar_unknown_comment_id__",
+    "1795327287051399001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -127538,6 +127561,8 @@
     "REB-7348": "6c2e-f2d9-6264-4c55",
     "REB-7349": "e6f5-f793-67a1-443b",
     "REB-735": "6f0a-0c1e-cdf8-4a8d",
+    "REB-7350": "1503-b191-89ec-4e13",
+    "REB-7351": "e37b-2ac1-c998-4fb3",
     "REB-736": "9408-861a-405d-4131",
     "REB-739": "df42-5932-6178-4376",
     "REB-74": "3164-34ca-ce91-4612",
