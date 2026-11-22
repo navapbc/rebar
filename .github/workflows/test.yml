@@ -281,7 +281,6 @@ jobs:
           uv run --no-sync pytest -m "not integration and not external"
           -n 4 --dist worksteal -q -p no:cacheprovider
           --timeout=600 --timeout-method=thread
-          '@.github/windows-sweep-deselect/crlf.args'
           '@.github/windows-sweep-deselect/detached-maintenance.args'
           '@.github/windows-sweep-deselect/locale-subprocess.args'
           '@.github/windows-sweep-deselect/locale-tests.args'

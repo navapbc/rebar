@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _exe_stub import install_exe_stub
 from _git_upkeep import init_bare_remote
 from _sandbox_capabilities import requires_posix_shell
+from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).parents[2] / "infra" / "scripts" / "reclaim_bridge_history.py"
 PROTECTED_TAG = "refs/tags/pre-heal-a118-20260710T005736Z"
@@ -20,7 +24,7 @@ def _git(
     repo: Path,
     *args: str,
     check: bool = True,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -35,7 +39,7 @@ def _bare_git(
     repo: Path,
     *args: str,
     check: bool = True,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "--git-dir", str(repo), *args],
@@ -149,7 +153,7 @@ def _run_script(
     fixture: ReclaimFixture,
     *,
     max_pack_bytes: int = PACK_CEILING,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     assert SCRIPT.is_file(), "reclaim_bridge_history.py is not implemented"
     return subprocess.run(
@@ -325,34 +329,43 @@ def test_unrelated_remote_ref_movement_does_not_fail_dry_run(
     wrapper_dir = tmp_path / "bin"
     wrapper_dir.mkdir()
     counter = tmp_path / "ls-remote-count"
-    wrapper = wrapper_dir / "git"
-    wrapper.write_text(
-        "#!/bin/sh\n"
-        'case "$*" in\n'
-        "  *'ls-remote origin'*)\n"
-        "    count=0\n"
-        '    test ! -f "$LS_REMOTE_COUNT" || count=$(cat "$LS_REMOTE_COUNT")\n'
-        "    count=$((count + 1))\n"
-        '    printf \'%s\\n\' "$count" > "$LS_REMOTE_COUNT"\n'
-        '    if test "$count" -eq 2; then\n'
-        '      "$REAL_GIT" -C "$REMOTE_REPO" update-ref refs/heads/unrelated "$UNRELATED_TIP"\n'
-        "    fi\n"
-        "    ;;\n"
-        "esac\n"
-        'exec "$REAL_GIT" "$@"\n',
-        encoding="utf-8",
+    # A Python-body stub that Windows can run (a "#!/bin/sh" file named git never runs
+    # there, because CreateProcess only finds git.exe; bug neglectful-acceptable-gerbil).
+    install_exe_stub(
+        wrapper_dir,
+        "git",
+        """
+        import os
+        argv = sys.argv[1:]
+        if "ls-remote origin" in " ".join(argv):
+            path = os.environ["LS_REMOTE_COUNT"]
+            count = int(open(path).read()) if os.path.exists(path) else 0
+            count += 1
+            with open(path, "w") as fh:
+                fh.write(f"{count}\\n")
+            if count == 2:
+                subprocess.run(
+                    [os.environ["REAL_GIT"], "-C", os.environ["REMOTE_REPO"], "update-ref",
+                     "refs/heads/unrelated", os.environ["UNRELATED_TIP"]],
+                    check=True,
+                )
+        exec_real([os.environ["REAL_GIT"], *argv])
+        """,
     )
-    wrapper.chmod(0o755)
     source_before = _bare_ref(fixture.remote, "refs/heads/tickets")
     tag_before = _bare_ref(fixture.remote, PROTECTED_TAG)
-    environment = {
-        "PATH": f"{wrapper_dir}:{Path(git_executable).parent}:/usr/bin:/bin",
-        "REAL_GIT": git_executable,
-        "REMOTE_REPO": str(fixture.remote),
-        "UNRELATED_TIP": fixture.protected_tag_tip,
-        "LS_REMOTE_COUNT": str(counter),
-        "LC_ALL": "C",
-    }
+    # The ambient environment (Windows needs SYSTEMROOT/PATHEXT) with the stub dir FIRST on
+    # PATH, joined with the platform's own separator.
+    environment = subprocess_env(
+        PATH=os.pathsep.join(
+            [str(wrapper_dir), str(Path(git_executable).parent), os.environ.get("PATH", "")]
+        ),
+        REAL_GIT=git_executable,
+        REMOTE_REPO=str(fixture.remote),
+        UNRELATED_TIP=fixture.protected_tag_tip,
+        LS_REMOTE_COUNT=str(counter),
+        LC_ALL="C",
+    )
 
     completed = _run_script(fixture, env=environment)
 

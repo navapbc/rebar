@@ -98,7 +98,8 @@ def test_str_input_is_forwarded_to_stdin(tmp_path: Path) -> None:
     content = "hello from stdin\n"
     piped = run_git(repo, "hash-object", "--stdin", input_data=content).stdout.strip()
     # Cross-check against git hashing a real file with the same bytes.
-    (repo / "probe").write_text(content)
+    # Bytes, so the comparison side is LF on every platform too.
+    (repo / "probe").write_bytes(content.encode())
     direct = run_git(repo, "hash-object", str(repo / "probe")).stdout.strip()
     assert piped == direct
 

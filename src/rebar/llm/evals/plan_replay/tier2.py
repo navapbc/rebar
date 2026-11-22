@@ -222,7 +222,9 @@ def _scratch_source_checkout(ticket_repo_root: str) -> str:
     subprocess.run(["git", "init", "-q", scratch_root], check=True)
     alternates = os.path.join(scratch_root, ".git", "objects", "info", "alternates")
     os.makedirs(os.path.dirname(alternates), exist_ok=True)
-    with open(alternates, "w", encoding="utf-8") as fh:
+    # newline="\n": a Windows text-mode "\r\n" would leave "\r" in the objects path, so
+    # git would not find the borrowed objects (bug neglectful-acceptable-gerbil).
+    with open(alternates, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(os.path.join(common_dir, "objects") + "\n")
     subprocess.run(["git", "reset", "--hard", "-q", head], cwd=scratch_root, check=True)
     return scratch_root
