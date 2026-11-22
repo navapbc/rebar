@@ -1,4 +1,4 @@
-# mechanism-ok: test_helper tests/_exe_stub.py — e062-1686-1a27-41a4 one portable tool stub
+# mechanism-ok: test_helper tests/_exe_stub.py — e37b-2ac1-c998-4fb3 one portable tool stub
 """Install a stand-in executable that a bare-name spawn finds on POSIX and on Windows.
 
 Tests stand in for ``git``, ``scc``, ``acli`` and similar tools by putting a stub first on
