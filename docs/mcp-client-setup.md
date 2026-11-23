@@ -86,14 +86,12 @@ your box host). The server binds loopback behind the nginx `/mcp/` TLS edge; see
 Project config file: the repository-root [`.mcp.json`](../.mcp.json). Copilot CLI 1.0.83 loads
 workspace `.mcp.json` before `.github/mcp.json` and lets workspace entries override user-level
 entries, so the rebar server is scoped to this checkout instead of every directory on the host.
-The CLI expands the header env var from the environment, so the PAT stays out of the file. For a
-user-level fallback/template, see
-[`examples/mcp-clients/copilot/mcp-config.json`](../examples/mcp-clients/copilot/mcp-config.json):
-
-```sh
-copilot mcp add --transport http rebar https://rebar.solutions.navateam.com/mcp/ \
-  --header "Authorization: Bearer $MCP_CLIENT_PAT_COPILOT"
-```
+The CLI expands a `${VAR}` reference in a header value from the environment when it connects
+(github/copilot-cli#1232; changelog 1.0.108), so the PAT stays out of the file and off every
+command line. For a user-level fallback, copy or merge the entry from
+[`examples/mcp-clients/copilot/mcp-config.json`](../examples/mcp-clients/copilot/mcp-config.json)
+into `~/.copilot/mcp-config.json` by editing the file. Do **not** use `copilot mcp add --header`
+for the PAT (see [Keep the PAT off the command line](#keep-the-pat-off-the-command-line)):
 
 ```jsonc
 {
@@ -101,7 +99,7 @@ copilot mcp add --transport http rebar https://rebar.solutions.navateam.com/mcp/
     "rebar": {
       "type": "http",
       "url": "https://rebar.solutions.navateam.com/mcp/",
-      "headers": { "Authorization": "Bearer $MCP_CLIENT_PAT_COPILOT" },
+      "headers": { "Authorization": "Bearer ${MCP_CLIENT_PAT_CLI}" },
       "tools": ["*"]
     }
   }
@@ -164,14 +162,18 @@ Verify from this repository: `codex mcp get rebar`. From a non-project directory
 ## Claude Code
 
 Project config file: the repository-root [`.mcp.json`](../.mcp.json) (or `~/.claude.json` for a
-user-level fallback). Claude Code expands `${VAR}` in a `headers` value from the environment.
-The project config uses `MCP_CLIENT_PAT_CLI`, the same local alias Copilot uses, so one machine
-slot covers both CLI clients. A user-level template is in
-[`examples/mcp-clients/claude/.mcp.json`](../examples/mcp-clients/claude/.mcp.json):
+user-level fallback). Claude Code expands `${VAR}` in a `headers` value from the environment when
+it connects, for project `.mcp.json` entries and for local- and user-scope entries in
+`~/.claude.json` ([Claude Code MCP docs](https://code.claude.com/docs/en/mcp)). The project config
+uses `MCP_CLIENT_PAT_CLI`, the same local alias Copilot uses, so one machine slot covers both CLI
+clients. A user-level template is in
+[`examples/mcp-clients/claude/.mcp.json`](../examples/mcp-clients/claude/.mcp.json). To add the
+user-level entry from the command line, use `add-json` with the JSON in **single** quotes, so the
+shell passes the literal `${MCP_CLIENT_PAT_CLI}` and Claude Code stores the reference, not the PAT:
 
 ```sh
-claude mcp add --transport http rebar https://rebar.solutions.navateam.com/mcp/ \
-  --header "Authorization: Bearer ${MCP_CLIENT_PAT_CLAUDE}"
+claude mcp add-json -s user rebar \
+  '{"type":"http","url":"https://rebar.solutions.navateam.com/mcp/","headers":{"Authorization":"Bearer ${MCP_CLIENT_PAT_CLI}"}}'
 ```
 
 ```jsonc
@@ -180,7 +182,7 @@ claude mcp add --transport http rebar https://rebar.solutions.navateam.com/mcp/ 
     "rebar": {
       "type": "http",
       "url": "https://rebar.solutions.navateam.com/mcp/",
-      "headers": { "Authorization": "Bearer ${MCP_CLIENT_PAT_CLAUDE}" }
+      "headers": { "Authorization": "Bearer ${MCP_CLIENT_PAT_CLI}" }
     }
   }
 }
@@ -193,6 +195,28 @@ Verify from this repository: `claude mcp list` lists the project `rebar` server.
 > wrong or expired PAT therefore fails **hard** with a `401 Unauthorized` surfaced to the client —
 > there is no silent OAuth retry. If you see a 401, re-export the correct PAT (rotation may have
 > invalidated the old one — see the runbook) rather than expecting an interactive login.
+
+## Keep the PAT off the command line
+
+Never give `copilot mcp add` or `claude mcp add` an `Authorization` header whose value names the
+PAT variable inside double quotes. The shell expands the variable before the client starts, so the
+PAT sits in the process's argv, readable by any local user through `ps`, and the client then saves
+the expanded value in clear in its config file. Edit the config file, or use `claude mcp add-json` with
+single quotes as above, so only the `${VAR}` reference is ever written.
+
+If you already ran one of those commands, the PAT is saved in clear:
+
+- **Claude Code.** Without `-s`, `claude mcp add` saved a local-scope entry for the directory it
+  ran in, inside `~/.claude.json`. From that directory run `claude mcp remove rebar -s local`
+  (and `claude mcp remove rebar -s user` if you added it with `-s user`).
+- **Copilot CLI.** `copilot mcp add` saved the entry to `~/.copilot/mcp-config.json`; run
+  `copilot mcp remove rebar`.
+
+Then re-add the entry as documented above, and ask the operator to rotate that PAT (see
+[`infra/runbooks/mcp-client-pats.md`](../infra/runbooks/mcp-client-pats.md)): it was exposed on a
+command line and on disk. `rebar store doctor` does not find these entries: it reads only the
+top-level `mcpServers` map of the home configs, and skips them when the working directory has a
+project `.mcp.json`.
 
 ## Troubleshooting
 
