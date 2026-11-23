@@ -41,9 +41,11 @@ def _failure_hint(outcome: Any | None) -> tuple[int, str]:
     returncode = 11 if (outcome and outcome.retryable) else 1
     if outcome is None:
         return returncode, ""
+    diag = outcome.diagnostic or {}
     message = failure.message_for(
         outcome.resolution_class.value,
-        finish_reason=(outcome.diagnostic or {}).get("finish_reason"),
+        finish_reason=diag.get("finish_reason"),
+        error_type=diag.get("error_type"),
     )
     hint = f" [{outcome.resolution_class.value}: {message}]" if message else ""
     return returncode, hint

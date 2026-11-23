@@ -76,20 +76,23 @@ def _render_record_line(record: dict) -> None:
 def _llm_error_exit_code(exc: Exception) -> int:
     """Exit code for a RAISED ``LLMError`` (story blackbear): a retryable disposition attached by
     the classifier (`.outcome.retryable`) → exit 11 ("transient — retry"); else 1 (fail-closed).
-    Used where a gate call raises rather than returning a degraded verdict dict."""
-    from rebar.llm.failure import outcome_of
+    Used where a gate call raises rather than returning a degraded verdict dict. Any classified
+    outcome prints its ``llm-degrade`` line, so a non-retryable cause (e.g. a proxy refusal,
+    bug vinyl-dubnium-squamata) is named too, not only a retryable one."""
+    from rebar.llm.failure import message_for, outcome_of
 
     o = outcome_of(exc)
-    if o is not None and getattr(o, "retryable", False):
-        from rebar.llm.failure import message_for
-
-        msg = message_for(
-            o.resolution_class.value, finish_reason=(o.diagnostic or {}).get("finish_reason")
-        )
-        if msg:
-            sys.stderr.write(f"llm-degrade: {o.resolution_class.value} — {msg}\n")
-        return 11
-    return 1
+    if o is None:
+        return 1
+    diag = o.diagnostic or {}
+    msg = message_for(
+        o.resolution_class.value,
+        finish_reason=diag.get("finish_reason"),
+        error_type=diag.get("error_type"),
+    )
+    if msg:
+        sys.stderr.write(f"llm-degrade: {o.resolution_class.value} — {msg}\n")
+    return 11 if getattr(o, "retryable", False) else 1
 
 
 def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
@@ -104,8 +107,10 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
     if rc:
         from rebar.llm.failure import message_for
 
-        _fr = (coverage.get("diagnostic") or {}).get("finish_reason")
-        msg = message_for(rc, finish_reason=_fr)
+        _diag = coverage.get("diagnostic") or {}
+        msg = message_for(
+            rc, finish_reason=_diag.get("finish_reason"), error_type=_diag.get("error_type")
+        )
         sys.stderr.write(f"llm-degrade: {rc} — {msg}\n" if msg else f"llm-degrade: {rc}\n")
     # `verdict` is a string on the plan-review result and the WHOLE nested gate verdict dict on
     # the code-review review_result (`shim._verdict_to_review_result` attaches it) — accept both.

@@ -197,6 +197,10 @@ def _base_diagnostic(exc: BaseException | None, ctx: ClassifyContext) -> dict:
         err = _http_error_body(exc)
         diag["error_type"] = err.get("type")
         diag["error_code"] = err.get("code")
+    refusal = _proxy_refusal_of(exc)
+    if refusal is not None:
+        diag["error_type"] = PROXY_REFUSED
+        diag["message"] = f"{diag['message']} [HTTP proxy refused: {refusal}]"
     if isinstance(exc, UsageLimitExceeded):
         # Disambiguate a genuine step budget (request_limit) from a stuck/looping tool
         # (tool_calls_limit) — the message names which limit tripped.
@@ -204,6 +208,47 @@ def _base_diagnostic(exc: BaseException | None, ctx: ClassifyContext) -> dict:
         diag["tool_calls_limit"] = "tool_calls" in msg or "tool call" in msg
         diag["request_limit"] = "request_limit" in msg or "request limit" in msg
     return diag
+
+
+# An HTTP proxy that answers CONNECT with a 4xx (an allowlist refusal such as a sandbox egress
+# proxy's 403 "not in allowed_domains", or 407 proxy-auth-required) has refused by POLICY:
+# retrying cannot succeed (bug vinyl-dubnium-squamata). httpcore raises
+# ``ProxyError("<status> <reason>")`` for a non-2xx CONNECT answer; pydantic_ai and the provider
+# SDK wrap it as ModelAPIError <- APIConnectionError <- httpx.ProxyError. A proxy 5xx (the
+# upstream is unreachable through it) is not a refusal and keeps the transport disposition.
+PROXY_REFUSED = "proxy_refused"
+_PROXY_REFUSAL_STATUS = re.compile(r"\s*4\d\d\b")
+_CHAIN_LIMIT = 16
+
+
+def _proxy_refusal(exc: BaseException | None) -> str | None:
+    """The proxy's refusal text when ``exc`` or its cause/context chain holds an
+    ``httpx.ProxyError`` answered with a 4xx, else ``None``. Bounded and cycle-safe."""
+    try:
+        import httpx
+    except ImportError:
+        return None
+    seen: set[int] = set()
+    node = exc
+    while node is not None and id(node) not in seen and len(seen) < _CHAIN_LIMIT:
+        seen.add(id(node))
+        if isinstance(node, httpx.ProxyError) and _PROXY_REFUSAL_STATUS.match(str(node)):
+            return str(node).strip()
+        node = node.__cause__ or node.__context__
+    return None
+
+
+def _proxy_refusal_of(exc: BaseException | None) -> str | None:
+    """:func:`_proxy_refusal` for one exception, or for a fallback group whose EVERY leg is a
+    proxy refusal (the legs' distinct texts joined by ``"; "``). A group with any other leg
+    is not a refusal."""
+    legs = getattr(exc, "exceptions", None)
+    if not legs:
+        return _proxy_refusal(exc)
+    texts = [_proxy_refusal(leg) for leg in legs]
+    if not all(texts):
+        return None
+    return "; ".join(dict.fromkeys(t for t in texts if t))  # distinct texts, leg order
 
 
 def _map_http(exc: Any) -> ResolutionClass:  # exc is a pydantic_ai ModelHTTPError (lazy-typed)
@@ -254,6 +299,10 @@ def _classify_fallback_group(group: Any) -> ResolutionClass:
     for candidate in _GROUP_RECOVERABILITY:
         if candidate in leg_classes:
             return candidate
+    if _proxy_refusal_of(group) is not None:
+        # Every leg was refused by the same kind of proxy policy: switching model/provider
+        # behind that proxy cannot help, so the remedy is the proxy setting itself.
+        return ResolutionClass.CHANGE_SETTINGS
     return ResolutionClass.CHANGE_PROVIDER_OR_MODEL
 
 
@@ -305,7 +354,16 @@ def _map(exc: BaseException | None, ctx: ClassifyContext) -> ResolutionClass:
         return ResolutionClass.CHANGE_SETTINGS
     if isinstance(exc, FallbackExceptionGroup):
         return _classify_fallback_group(exc)
-    if isinstance(exc, ModelAPIError):  # no status_code (ModelHTTPError handled above)
+    return _map_tail(exc, ModelAPIError)
+
+
+def _map_tail(exc: BaseException, model_api_error: type[BaseException]) -> ResolutionClass:
+    """The transport tail of :func:`_map`: a 4xx proxy refusal anywhere in the cause chain is a
+    setting (CHANGE_SETTINGS, non-retryable) BEFORE the status-less ``ModelAPIError`` -> RETRY_NOW
+    arm that would otherwise call it a blip; anything else unmatched is NEEDS_INVESTIGATION."""
+    if _proxy_refusal(exc) is not None:
+        return ResolutionClass.CHANGE_SETTINGS
+    if isinstance(exc, model_api_error):  # no status_code (ModelHTTPError handled above)
         return ResolutionClass.RETRY_NOW
     return ResolutionClass.NEEDS_INVESTIGATION
 
@@ -378,8 +436,28 @@ CONTENT_FILTER_MESSAGE = (
     "formatting problem; adjust the input, or the guardrail configuration, and retry."
 )
 
+# A 4xx proxy refusal classifies CHANGE_SETTINGS, whose generic message points at the provider
+# credentials/model/bounds. This specialization names the real cause (bug vinyl-dubnium-squamata).
+PROXY_REFUSED_MESSAGE = (
+    "An HTTP proxy refused the connection to the model provider (it answered CONNECT with a "
+    "4xx, e.g. a sandbox egress proxy's allowed-domains policy). This is a fixed proxy policy, "
+    "not a transient blip, so an immediate retry cannot succeed; allow the provider's host "
+    "through the proxy (or run where it is allowed), then retry."
+)
 
-def message_for(resolution_class: str | None, *, finish_reason: str | None = None) -> str | None:
+PROXY_REFUSED_REMEDY = (
+    "The verifier could not reach the model provider through the HTTP proxy; this is not a "
+    "missing install or API key. Allow the provider's host through the proxy (or close from "
+    "where it is allowed), then close again."
+)
+
+
+def message_for(
+    resolution_class: str | None,
+    *,
+    finish_reason: str | None = None,
+    error_type: str | None = None,
+) -> str | None:
     """The human-facing stderr message for a persisted `coverage.resolution_class` value
     (a plain string), or ``None`` when the class is absent/unknown.
 
@@ -387,11 +465,14 @@ def message_for(resolution_class: str | None, *, finish_reason: str | None = Non
     disambiguates the shared ``CHANGE_INPUT`` class: a ``content_filter`` block gets the
     guardrail/content-policy message, while genuine size/malformed CHANGE_INPUT cases
     (HTTP 413, context-length 400) keep the generic one. Omitting it preserves the prior
-    behaviour for the string-only caller."""
+    behaviour for the string-only caller. ``error_type`` (the diagnostic's) likewise
+    specializes ``CHANGE_SETTINGS`` for a proxy refusal (``error_type == "proxy_refused"``)."""
     if not resolution_class:
         return None
     if finish_reason == "content_filter" and resolution_class == ResolutionClass.CHANGE_INPUT.value:
         return CONTENT_FILTER_MESSAGE
+    if error_type == PROXY_REFUSED and resolution_class == ResolutionClass.CHANGE_SETTINGS.value:
+        return PROXY_REFUSED_MESSAGE
     return RESOLUTION_MESSAGES.get(resolution_class)
 
 
@@ -660,9 +741,12 @@ def _is_unavailable_runtime(exc: object, outcome: LLMOutcome | None) -> bool:
 def close_gate_remedy(exc: object, outcome: LLMOutcome | None = None) -> str:
     """The remedy sentence the close gate prints for a completion-verifier failure.
 
-    Three dispositions, because they need three different operator actions:
+    Four dispositions, because they need four different operator actions:
 
     * a bounded-recovery breach -> :func:`recovery_failure_cause` (size/stage + sidecar);
+    * a 4xx HTTP proxy refusal -> :data:`PROXY_REFUSED_REMEDY` (the proxy policy, not an
+      install or key problem, even though it classifies ``CHANGE_SETTINGS``; the hint
+      before it already carries :data:`PROXY_REFUSED_MESSAGE`);
     * a genuine UNAVAILABILITY (no ``[agents]`` extra, no API key, or any classified
       ``CHANGE_SETTINGS`` outcome) -> :data:`UNAVAILABLE_REMEDY`, which is correct there;
     * anything else -> the failure's OWN remedy. A verifier that spent minutes making real
@@ -674,6 +758,8 @@ def close_gate_remedy(exc: object, outcome: LLMOutcome | None = None) -> str:
     cause = recovery_failure_cause(exc)
     if cause:
         return cause
+    if outcome is not None and (outcome.diagnostic or {}).get("error_type") == PROXY_REFUSED:
+        return PROXY_REFUSED_REMEDY  # a proxy policy, not a missing install or API key
     if _is_unavailable_runtime(exc, outcome):
         return UNAVAILABLE_REMEDY
     detail = str(exc).strip()
