@@ -12,6 +12,7 @@ for the old URL-userinfo shape and for an auth header passed as a ``-c`` argumen
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 import subprocess
@@ -197,9 +198,6 @@ _OPERATOR_GLOBS = (
     "AGENTS.md",
     "CONTRIBUTING.md",
 )
-# The MCP client PAT in ``copilot``/``claude mcp add --header``: a different credential
-# whose fix depends on each vendor CLI's ``${VAR}`` expansion (bug limitless-defaceable-beaver).
-_OPERATOR_EXCLUDED = frozenset({"docs/mcp-client-setup.md"})
 _SECRET_NAME = r"\w*(?:token|pass|secret|pw|pat|key)\w*"
 _OPERATOR_PATTERNS = {
     # curl -u / --user with a credential after the colon.
@@ -229,7 +227,7 @@ def _operator_files() -> list[Path]:
     for pattern in _OPERATOR_GLOBS:
         for path in _REPO_ROOT.glob(pattern):
             rel = path.relative_to(_REPO_ROOT).as_posix()
-            if path.is_file() and rel not in _OPERATOR_EXCLUDED:
+            if path.is_file():
                 seen[rel] = path
     return [seen[rel] for rel in sorted(seen)]
 
@@ -290,6 +288,8 @@ def test_the_operator_scan_covers_the_files_named_by_the_bug():
         "AGENTS.md",
         "CONTRIBUTING.md",
         "infra/runbooks/gerrit-auth-hardening.md",
+        # The MCP client PAT setup guide (bug limitless-defaceable-beaver).
+        "docs/mcp-client-setup.md",
     ):
         assert rel in scanned, rel
 
@@ -304,3 +304,35 @@ def test_no_operator_script_or_doc_puts_a_credential_in_argv():
         "credential on a command line; pass it on stdin (curl -K -, aws --value "
         f"file:///dev/stdin) or via GIT_CONFIG_* env (infra/gerrit/lib-credentials.sh): {hits}"
     )
+
+
+# ── copy-ready MCP client examples ──────────────────────────────────────────────────
+# Bug limitless-defaceable-beaver: the example configs carry setup commands inside a JSON
+# ``$comment`` list, where escaped quotes hide them from the line scan above.
+
+
+def _example_comment_hits(text: str) -> list[str]:
+    comment = json.loads(text).get("$comment", [])
+    lines = comment if isinstance(comment, list) else [comment]
+    return _operator_hits("\n".join(lines))
+
+
+def test_the_example_scan_flags_a_header_argument_inside_a_comment():
+    leaky = {
+        "$comment": [
+            "  claude mcp add rebar https://h/mcp/ \\",
+            '    --header "Authorization: Bearer ${MCP_CLIENT_PAT_CLI}"',
+        ]
+    }
+    assert _example_comment_hits(json.dumps(leaky)) == ["header-arg"]
+
+
+def test_no_mcp_client_example_puts_a_credential_in_argv():
+    examples = sorted((_REPO_ROOT / "examples" / "mcp-clients").rglob("*.json"))
+    assert examples, "examples/mcp-clients/ has no JSON configs to scan"
+    hits = {
+        path.relative_to(_REPO_ROOT).as_posix(): found
+        for path in examples
+        if (found := _example_comment_hits(path.read_text(encoding="utf-8")))
+    }
+    assert not hits, f"credential on a command line in an example's $comment: {hits}"
