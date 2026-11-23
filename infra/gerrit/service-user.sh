@@ -56,15 +56,19 @@ fi
 # keeps & and \ out of the template substitution in step 5.
 $GERRIT_SSH gerrit set-account "$BOT_USER" --delete-token default 2>/dev/null || true
 generated="$($GERRIT_SSH gerrit set-account "$BOT_USER" --generate-http-password)"
+generated="${generated%$'\r'}"
 TOKEN="${generated#New password: }"
-TOKEN="${TOKEN%$'\r'}"
+# The prefix must be present (a missing one leaves TOKEN == generated) and the rest one
+# token-shaped word. On failure Gerrit has ALREADY replaced the token, so the bot cannot
+# authenticate until this script runs again successfully.
+if [ "$TOKEN" = "$generated" ] || case "$TOKEN" in "" | *[!A-Za-z0-9+/=._~-]*) true ;; *) false ;; esac; then
+	unset generated TOKEN
+	echo "service-user: unexpected --generate-http-password output (value not printed)." >&2
+	echo "service-user: Gerrit's token for '$BOT_USER' was already replaced and SSM was NOT" >&2
+	echo "service-user: updated; the review-bot cannot authenticate until this script succeeds." >&2
+	exit 1
+fi
 unset generated
-case "$TOKEN" in
-	"" | *[!A-Za-z0-9+/=._~-]*)
-		echo "service-user: unexpected --generate-http-password output (value not printed)" >&2
-		exit 1
-		;;
-esac
 
 # --- 4. Store the token in SSM (SecureString, overwrite) -------------------
 # The instance role grants ssm:GetParameter on /rebar/prod/* for the box; this

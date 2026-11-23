@@ -57,13 +57,13 @@ def _clean_env(tmp_path: Path, fakebin: Path, rec: Path, **extra: str) -> Subpro
 # ── service-user.sh ──────────────────────────────────────────────────────────────
 
 
-def _service_user_stubs(fakebin: Path, *, account_exists: bool, generated: str) -> None:
+def _service_user_stubs(fakebin: Path, *, account_exists: bool) -> None:
     create = 'echo "fatal: username already exists" >&2; exit 1' if account_exists else "exit 0"
     _write_exec(
         fakebin / "ssh",
         f"""case "$*" in
   *create-account*) {create} ;;
-  *--generate-http-password*) printf '%s\\n' {generated!r} ;;
+  *--generate-http-password*) cat "$REC/generated-output" ;;
   *) exit 0 ;;
 esac
 """,
@@ -87,7 +87,9 @@ def _run_service_user(
     fakebin, rec, gerrit = tmp_path / "bin", tmp_path / "rec", tmp_path / "gerrit"
     for d in (fakebin, rec, gerrit):
         d.mkdir()
-    _service_user_stubs(fakebin, account_exists=account_exists, generated=generated)
+    # Replayed byte for byte by the ssh stub, so control characters such as CR survive.
+    (rec / "generated-output").write_bytes(generated.encode() + b"\n")
+    _service_user_stubs(fakebin, account_exists=account_exists)
     # A copy of the tool next to a template that still carries the legacy placeholder,
     # so the render path that substitutes the token is exercised.
     shutil.copy(GERRIT_DIR / "service-user.sh", gerrit / "service-user.sh")
@@ -128,16 +130,32 @@ def test_service_user_keeps_the_token_out_of_every_argv(tmp_path, account_exists
 
 @pytest.mark.parametrize(
     "generated",
-    ["", "New password:", f"New password: {GENERATED} extra", "New password: a&b", "oops\\x"],
+    [
+        "",
+        "New password:",
+        f"New password: {GENERATED} extra",
+        "New password: a&b",
+        "oops\\x",
+        GENERATED,  # token-shaped, but the "New password: " prefix is missing
+        f"Password: {GENERATED}",
+    ],
 )
 def test_service_user_fails_closed_on_unexpected_generator_output(tmp_path, generated):
     result, rec = _run_service_user(tmp_path, generated=generated)
     assert result.returncode != 0
     assert "unexpected --generate-http-password output" in result.stderr
     assert not (rec / "aws-stdin").exists(), "SSM must not be written"
+    assert "already replaced" in result.stderr  # the operator learns the bot is now broken
     payload = generated.removeprefix("New password:").strip()
     if payload:
         assert payload not in result.stdout + result.stderr
+
+
+def test_service_user_strips_a_trailing_carriage_return(tmp_path):
+    result, rec = _run_service_user(tmp_path, generated=f"New password: {GENERATED}\r")
+    assert result.returncode == 0, result.stderr
+    assert (rec / "aws-stdin").read_text(encoding="utf-8") == GENERATED
+    assert f"?token={GENERATED}\n" in (rec / "rendered").read_text(encoding="utf-8")
 
 
 # ── lib-credentials.sh ───────────────────────────────────────────────────────────
