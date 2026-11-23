@@ -11,7 +11,6 @@ The git seam is stubbed to return the watchdog's own result (code 124), so no te
 
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 from collections.abc import Callable
@@ -155,18 +154,19 @@ def test_a_failed_config_write_is_reported_failed_not_changed(
     assert "could not lock config file" in outcome.detail
 
 
-def test_the_bootstrap_pin_stops_after_one_timed_out_call_and_warns(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+def test_the_bootstrap_pin_stops_after_one_timed_out_call_and_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The pin no longer swallows the timeout: every later bootstrap call would wait out the
+    # same bound, so init_core stops there (bug corrupting-plaster-seagull).
     repo = _git_repo(tmp_path / "r")
     calls: list[tuple] = []
     monkeypatch.setattr(
         _init_ensures, "run_git_write", _stall_config(_init_ensures.run_git_write, calls)
     )
-    with caplog.at_level(logging.WARNING, logger="rebar"):
+    with pytest.raises(GitTimedOut):
         init._pin_auto_maintenance(str(repo))
     assert len(calls) == 1
-    assert "auto-maintenance pin skipped" in caplog.text
 
 
 def test_any_other_unit_error_is_still_recorded_and_the_sweep_continues(

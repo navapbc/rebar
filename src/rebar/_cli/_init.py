@@ -45,7 +45,22 @@ def _create_tracker(repo_root: str) -> None:
 
     Linking a worktree to an existing store is local and automatic. Creating the
     first store changes repository state and therefore delegates to the consent gate.
+    A git watchdog timeout while deciding which path applies stops here: a timed-out
+    probe says nothing about whether a store exists, so it must never lead to creating one.
     """
+    from rebar._store.git_outcome import GitTimedOut
+
+    try:
+        _choose_init_path(repo_root)
+    except GitTimedOut as exc:
+        sys.stderr.write(
+            f"Error: {exc} while checking for an existing ticket store; nothing was "
+            "initialized. Run 'rebar init' once git responds.\n"
+        )
+        raise SystemExit(1) from exc
+
+
+def _choose_init_path(repo_root: str) -> None:
     from rebar._commands import init as _init_cmd
 
     if _init_cmd.pending_init_is_symlink(repo_root):

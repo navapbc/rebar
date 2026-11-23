@@ -52,9 +52,20 @@ repos: []
 logger = logging.getLogger("rebar")
 
 
+# A failed git returns its result for the caller to inspect, but a watchdog timeout raises
+# ``GitTimedOut``, as in the ensure units' seam: its empty output is not an answer ("not a
+# worktree", "no branch", "unset"), and every further call would wait out the same bound
+# (bug corrupting-plaster-seagull). ``init_core`` reports it and stops.
 # raw-git-ok: store-maintenance command, seam-internal
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
-    return run_git_write(cwd, *args, check=False)
+    return raise_if_watchdog_timeout(run_git_write(cwd, *args, check=False), " ".join(args[:2]))
+
+
+# raw-git-ok: read-only ``remote get-url`` probes for _init_probe, seam-internal
+def _probe_git(cwd: str, *args: str, **_kwargs: object) -> subprocess.CompletedProcess:
+    """``run_git_fn`` for ``_init_probe``'s local ``remote get-url`` reads: bounded by
+    :func:`_git`, where plain ``run_git`` carries no timeout at all."""
+    return _git(cwd, *args)
 
 
 # A cold branch fetch can transfer a large event history through a proxy. Use the tunable
@@ -141,7 +152,10 @@ def _exclude(git_dir: str, *entries: str) -> None:
 
 def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = False) -> int:
     """Bootstrap (or verify) the tracker. Returns 0 on success / already-init,
-    1 on a fatal error (message already emitted to stderr)."""
+    1 on a fatal error (message already emitted to stderr).
+
+    A git watchdog timeout ends init at that call: nothing after it runs, and the next
+    ``rebar init`` finishes an interrupted bootstrap (see :func:`_finish_bootstrap`)."""
     repo = _resolve_repo_root(repo_root)
     if repo is None:
         sys.stderr.write("Error: not inside a git repository\n")
@@ -149,37 +163,21 @@ def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = F
     from rebar.config import tracker_dir
 
     tracker = str(tracker_dir(repo))
+    try:
+        return _init_core(repo, tracker, silent=silent, force_new_store=force_new_store)
+    except GitTimedOut as exc:
+        sys.stderr.write(
+            f"Error: {exc} during rebar init; nothing after it ran. "
+            "Re-run 'rebar init' to finish.\n"
+        )
+        return 1
 
+
+def _init_core(repo: str, tracker: str, *, silent: bool, force_new_store: bool) -> int:
     # ── Idempotency: valid worktree already mounted ──────────────────────────
     if os.path.isdir(tracker) and os.path.isfile(os.path.join(tracker, ".git")):
         if _git_ok(tracker, "rev-parse", "--is-inside-work-tree"):
-            git_dir = _git(tracker, "rev-parse", "--git-dir").stdout.strip()
-            kind = _detect_stale(git_dir) if git_dir else ""
-            if kind:
-                _emit(
-                    f"WARNING: Stale {kind} state on tickets branch; attempting recovery",
-                    silent,
-                )
-                if kind in ("rebase-merge", "rebase-apply", "REBASE_HEAD"):
-                    try:
-                        cp = _git(tracker, "-c", "rebase.autostash=true", "rebase", "--continue")
-                        rc = cp.returncode
-                    except Exception:  # noqa: BLE001 — rebase --continue failure surfaced as a WARNING + abort below
-                        rc = 1
-                    if rc != 0:
-                        _emit(
-                            "WARNING: rebase --continue failed; aborting rebase. Run "
-                            "'rebar store fsck-recover' to cherry-pick stranded commits.",
-                            silent,
-                        )
-                        _git(tracker, "rebase", "--abort")
-                elif kind == "MERGE_HEAD":
-                    _emit("WARNING: Aborting stale merge on tickets branch", silent)
-                    _git(tracker, "merge", "--abort")
-            # Run idempotent ensure units so re-init corrects store configuration drift.
-            _run_ensures_logged(tracker, silent)
-            _emit("Ticket system already initialized.", silent)
-            return 0
+            return _reinit_mounted(repo, tracker, silent)
 
     # ── Host repo is itself a linked worktree (.git is a file) → symlink ──────
     if os.path.isfile(os.path.join(repo, ".git")):
@@ -202,15 +200,17 @@ def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = F
         sys.stderr.write("Error: could not acquire ticket-init lock within 30s\n")
         return 1
     try:
+        # Marks the bootstrap unfinished until it completes, so an init stopped part-way
+        # (a git timeout, a kill) is finished by the next one rather than read as done.
+        pending = _pending_marker(lock_dir)
+        with open(pending, "w", encoding="utf-8"):
+            pass
         rc = _mount_or_create_branch(repo, tracker, force_new_store=force_new_store)
         if rc != 0:
             return rc
-        # Fresh-init-only bootstrap (NOT ensure-registry units): these run once at
-        # genesis and are not idempotent drift-correctors.
-        _ensure_branch_user_config(repo, tracker)
-        _exclude_scratch_in_tracker(tracker)
-        _commit_precommit(tracker)
-        _gen_local_files(tracker)  # writes .env-id (env-id unit then no-ops below)
+        if not _finish_bootstrap(repo, tracker):
+            return 1
+        os.remove(pending)
         # Run gitignore, attributes, GC, merge-driver, and environment ensures after bootstrap.
         _run_ensures_logged(tracker, silent)
         _emit("Ticket system initialized.", silent)
@@ -220,6 +220,107 @@ def init_core(repo_root=None, *, silent: bool = False, force_new_store: bool = F
             os.rmdir(lock_dir)
         except OSError:
             pass
+
+
+def _reinit_mounted(repo: str, tracker: str, silent: bool) -> int:
+    """Re-init of a mounted tracker: recover a stale rebase/merge, finish a bootstrap an
+    earlier init left part-way, then converge the ensure units."""
+    git_dir = _git(tracker, "rev-parse", "--git-dir").stdout.strip()
+    kind = _detect_stale(git_dir) if git_dir else ""
+    if kind:
+        _recover_stale(tracker, kind, silent)
+    if os.path.exists(_pending_marker(_init_lock_dir(repo))):
+        rc = _resume_bootstrap(repo, tracker, silent)
+        if rc != 0:
+            return rc
+    # Run idempotent ensure units so re-init corrects store configuration drift.
+    _run_ensures_logged(tracker, silent)
+    _emit("Ticket system already initialized.", silent)
+    return 0
+
+
+# raw-git-ok: store-maintenance command, seam-internal
+def _recover_stale(tracker: str, kind: str, silent: bool) -> None:
+    _emit(f"WARNING: Stale {kind} state on tickets branch; attempting recovery", silent)
+    if kind in ("rebase-merge", "rebase-apply", "REBASE_HEAD"):
+        try:
+            cp = _git(tracker, "-c", "rebase.autostash=true", "rebase", "--continue")
+            rc = cp.returncode
+        except GitTimedOut:
+            raise
+        except Exception:  # noqa: BLE001 — rebase --continue failure surfaced as a WARNING + abort below
+            rc = 1
+        if rc != 0:
+            _emit(
+                "WARNING: rebase --continue failed; aborting rebase. Run "
+                "'rebar store fsck-recover' to cherry-pick stranded commits.",
+                silent,
+            )
+            _git(tracker, "rebase", "--abort")
+    elif kind == "MERGE_HEAD":
+        _emit("WARNING: Aborting stale merge on tickets branch", silent)
+        _git(tracker, "merge", "--abort")
+
+
+def _pending_marker(lock_dir: str) -> str:
+    """The unfinished-bootstrap marker, beside the init lock in the common git dir."""
+    return os.path.join(os.path.dirname(lock_dir), "ticket-init.pending")
+
+
+def _resume_bootstrap(repo: str, tracker: str, silent: bool) -> int:
+    """Finish a bootstrap an earlier init left part-way, under the init lock so it cannot
+    run alongside an init that is still bootstrapping (that one holds the lock and the
+    marker); the marker is re-checked once the lock is held."""
+    lock_dir = _init_lock_dir(repo)
+    if not _acquire_init_lock(lock_dir):
+        sys.stderr.write("Error: could not acquire ticket-init lock within 30s\n")
+        return 1
+    try:
+        pending = _pending_marker(lock_dir)
+        if not os.path.exists(pending):
+            return 0
+        _emit("WARNING: finishing an interrupted ticket-store bootstrap", silent)
+        if not _finish_bootstrap(repo, tracker):
+            return 1
+        os.remove(pending)
+        return 0
+    finally:
+        try:
+            os.rmdir(lock_dir)
+        except OSError:
+            pass
+
+
+# raw-git-ok: store-maintenance command, seam-internal
+def _finish_bootstrap(repo: str, tracker: str) -> bool:
+    """Fresh-store bootstrap after the mount: identity, the root commit of a new orphan
+    branch, and the one-time files. Every step is idempotent or guarded, so a re-run after
+    an interrupted init completes it. These are not ensure-registry units: they run at
+    genesis, or to finish it, and are not drift-correctors."""
+    _ensure_branch_user_config(repo, tracker)
+    if not _git_ok(tracker, "rev-parse", "--verify", "-q", "HEAD"):  # unborn orphan branch
+        _git(tracker, "config", "commit.gpgsign", "false")
+        _git(tracker, "config", "tag.gpgsign", "false")
+        root = _git(
+            tracker,
+            "commit",
+            "--allow-empty",
+            "-q",
+            "--no-verify",
+            "-m",
+            "chore: initialize ticket tracker",
+        )
+        if root.returncode != 0:
+            # Keep the marker: the next init retries the root commit.
+            sys.stderr.write(
+                "Error: could not create the ticket store's first commit: "
+                f"{(root.stderr or root.stdout).strip()}. Re-run 'rebar init' to finish.\n"
+            )
+            return False
+    _exclude_scratch_in_tracker(tracker)
+    _commit_precommit(tracker)
+    _gen_local_files(tracker)  # writes .env-id (env-id unit then no-ops below)
+    return True
 
 
 def _rmtree(path: str) -> None:
@@ -274,12 +375,9 @@ def _warn_force_no_effect(reason: str) -> None:
 
 def _pin_auto_maintenance(repo: str) -> None:
     """Run :func:`_gc_config_unit` at *repo* before the store's first commit. A watchdog
-    timeout stops the unit at its first stalled call; init then proceeds as it always
-    has after this best-effort pin, and the post-bootstrap sweep retries the unit."""
-    try:
-        _gc_config_unit(repo)
-    except GitTimedOut as exc:
-        logger.warning("init: auto-maintenance pin skipped: %s", exc)
+    timeout propagates: every later bootstrap call would wait out the same bound, so
+    :func:`init_core` stops there and the next init retries."""
+    _gc_config_unit(repo)
 
 
 # raw-git-ok: store-maintenance command, seam-internal
@@ -306,7 +404,7 @@ def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = 
 
     branch = tickets_branch(repo)  # configured tracker.branch (default "tickets")
     remote_name = tickets_remote(repo)  # configured sync.remote (default "origin")
-    _init_probe.require_s3_helper_if_s3_remote(repo, remote_name, run_git_fn=run_git)
+    _init_probe.require_s3_helper_if_s3_remote(repo, remote_name, run_git_fn=_probe_git)
     local = _git_ok(repo, "rev-parse", "--verify", branch)
     remote = _git_ok(repo, "rev-parse", "--verify", f"{remote_name}/{branch}")
     if local:
@@ -336,7 +434,7 @@ def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = 
             sys.stderr.write(f"ERROR: git worktree add (remote branch) failed: {cp.stderr}\n")
             return 1
         return 0
-    if _init_probe.remote_exists(repo, remote_name, run_git_fn=run_git):
+    if _init_probe.remote_exists(repo, remote_name, run_git_fn=_probe_git):
         state = _init_probe.probe_remote_branch(repo, remote_name, branch, run_git_fn=run_git)
         if state == _init_probe.ADVERTISED:
             if force_new_store:
@@ -380,18 +478,7 @@ def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = 
             return 1
         _git(tracker, "checkout", "--orphan", branch)
         _git(tracker, "rm", "-rf", ".", "--quiet")
-    _ensure_branch_user_config(repo, tracker)
-    _git(tracker, "config", "commit.gpgsign", "false")
-    _git(tracker, "config", "tag.gpgsign", "false")
-    _git(
-        tracker,
-        "commit",
-        "--allow-empty",
-        "-q",
-        "--no-verify",
-        "-m",
-        "chore: initialize ticket tracker",
-    )
+    # The root commit is made by _finish_bootstrap while HEAD is unborn.
     return 0
 
 
@@ -533,7 +620,7 @@ def pending_init_attaches_to_existing(repo_root=None) -> bool:
         repo, "rev-parse", "--verify", f"{remote_name}/{branch}"
     ):
         return True
-    return _init_probe.remote_exists(repo, remote_name, run_git_fn=run_git) and (
+    return _init_probe.remote_exists(repo, remote_name, run_git_fn=_probe_git) and (
         _init_probe.probe_remote_branch(repo, remote_name, branch, run_git_fn=run_git)
         == _init_probe.ADVERTISED
     )
