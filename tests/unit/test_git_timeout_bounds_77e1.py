@@ -115,17 +115,18 @@ def test_clone_change_ref_timeout_raises_a_descriptive_gerrit_error(tmp_path):
 
 
 def test_clone_change_ref_timeout_does_not_leak_the_bot_token(tmp_path):
-    """``TimeoutExpired.cmd`` carries the ``user:token@host`` fetch URL.
+    """A timeout's ``cmd`` goes through the same redaction as stderr.
 
-    The pre-existing handler redacted only ``stderr``, and ``TimeoutExpired`` did not even
-    reach it. Route the timeout through the SAME redaction so a bounded failure is not a
-    credential-disclosure path.
+    The fetch argv no longer carries the token (bug antiviral-agrarian-amurminnow), so the
+    fake puts it there itself: the handler must still scrub a credential from whatever argv
+    timed out, so a bounded failure is never a credential-disclosure path.
     """
     from rebar.review_bot import gerrit_client as gc_mod
 
     def _fake_run(cmd, **kwargs):
         if "fetch" in cmd:
-            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout", 300))
+            leaky = [*cmd, f"https://bot:{_TOKEN}@gerrit.example.test/a/rebar"]
+            raise subprocess.TimeoutExpired(cmd=leaky, timeout=kwargs.get("timeout", 300))
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     gc = _client(tmp_path)
