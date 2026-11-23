@@ -164,8 +164,8 @@ def test_open_reader_survives_eviction_then_relookup_misses(store, repo):
         # an in-place delete of a live entry.
         if os.name == "nt":
             # Windows refuses to rename a directory holding an open file. The janitor's
-            # _evict treats that OSError as "nothing reclaimed" and keeps the entry, so
-            # the live reader is protected by the refusal instead of by delete-on-close.
+            # _evict reports that entry as deferred and keeps it for a later pass, so the
+            # live reader is protected by the refusal instead of by delete-on-close.
             with pytest.raises(PermissionError):
                 os.rename(dest, trash)
             assert _lf(fh.read()) == b"content\n"

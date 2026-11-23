@@ -206,16 +206,69 @@ def test_trash_straggler_redrained(store, repo):
 # --------------------------------------------------------------------------------------
 # AC6 — eviction is rename-to-trash THEN rmtree; an open reader survives (no in-place del)
 # --------------------------------------------------------------------------------------
+def _pressure_cfg() -> janitor.JanitorConfig:
+    return janitor.JanitorConfig(
+        free_watermark_bytes=2 * 1024**3, grace_seconds=10, max_age_seconds=10**9
+    )
+
+
+def _deferral(res: janitor.GcResult) -> tuple[int, int | None]:
+    """``(evicted, deferred)``; ``None`` for deferred when the result cannot report it, so a
+    janitor without the deferral report fails an assertion rather than an attribute lookup."""
+    return res.evicted, getattr(res, "deferred", None)
+
+
 def test_eviction_rename_to_trash_open_reader_survives(store, repo):
+    """An open reader keeps reading on every platform. POSIX renames the entry away at once
+    (delete-on-last-close); Windows refuses to rename a directory holding an open file, so
+    the pass reports the entry deferred and a pass after the reader closes evicts it."""
     now = time.time()
     _sha, entry = _populate(repo, store, "f.txt", "content\n", mtime=now - 5000)
     with open(entry / "f.txt", "rb") as fh:
-        cfg = janitor.JanitorConfig(
-            free_watermark_bytes=2 * 1024**3, grace_seconds=10, max_age_seconds=10**9
-        )
-        janitor.run_gc(store, config=cfg, now=now, free_bytes=0)
-        assert not entry.exists()  # gone from the canonical path
+        res = janitor.run_gc(store, config=_pressure_cfg(), now=now, free_bytes=0)
+        if os.name == "nt":
+            assert entry.exists()
+            assert _deferral(res) == (0, 1)
+        else:
+            assert not entry.exists()  # gone from the canonical path
+            assert _deferral(res) == (1, 0)
         assert fh.read() == b"content\n"  # but the held fd still reads it
+    later = janitor.run_gc(store, config=_pressure_cfg(), now=now, free_bytes=0)
+    assert not entry.exists()
+    if os.name == "nt":
+        assert _deferral(later) == (1, 0)
+
+
+def _refuse_rename(monkeypatch) -> None:
+    """Make every janitor rename fail the way Windows does for an entry with an open file."""
+
+    def refused(src, dst):
+        raise PermissionError(13, "in use", str(src))
+
+    monkeypatch.setattr(janitor.os, "rename", refused)
+
+
+def test_an_in_use_entry_is_deferred_and_a_later_pass_evicts_it(store, repo, monkeypatch):
+    """The deferral contract on every platform: the entry, its bytes and its sidecars stay,
+    the pass reports it deferred rather than evicted, and the next pass evicts it."""
+    now = time.time()
+    sha, entry = _populate(repo, store, "f.txt", "x" * 4000, mtime=now - 5000)
+    assert janitor.reverify_entry(sha, store) is False  # stamp an integrity sidecar
+    sidecar = store / f"{sha}.integrity"
+    total = cache.byte_total(store)
+
+    with monkeypatch.context() as m:
+        _refuse_rename(m)
+        res = janitor.run_gc(store, config=_pressure_cfg(), now=now, free_bytes=0)
+    assert _deferral(res) == (0, 1)
+    assert res.reclaimed_bytes == 0
+    assert entry.is_dir() and sidecar.exists()
+    assert cache.byte_total(store) == total == _real_store_bytes(store)
+
+    later = janitor.run_gc(store, config=_pressure_cfg(), now=now, free_bytes=0)
+    assert _deferral(later) == (1, 0)
+    assert not entry.exists() and not sidecar.exists()
+    assert cache.byte_total(store) == _real_store_bytes(store)
 
 
 # --------------------------------------------------------------------------------------
@@ -249,6 +302,57 @@ def test_corrupt_entry_detected_and_self_heals(store, repo):
     # Self-heal: the next acquire re-materializes faithful content.
     h = cache.acquire(sha, repo_root=str(repo), fetch=False)
     assert (h.path / "f.txt").read_text(encoding="utf-8") == "good\n"
+
+
+def test_a_corrupt_entry_in_use_is_a_failure_not_discarded(store, repo, monkeypatch):
+    """A corrupt entry that cannot be moved is still published, so reverify must not report
+    it discarded; it raises, leaves the stamp old, and a later call discards it."""
+    sha, entry = _populate(repo, store, "f.txt", "good\n")
+    assert janitor.reverify_entry(sha, store) is False
+    (entry / "f.txt").write_text("TAMPERED", encoding="utf-8")
+    with monkeypatch.context() as m:
+        _refuse_rename(m)
+        with pytest.raises(janitor.SnapshotEntryInUseError):
+            janitor.reverify_entry(sha, store)
+    assert entry.is_dir()
+    assert janitor.reverify_entry(sha, store) is True
+    assert not entry.exists()
+
+
+def test_the_reverify_pass_counts_an_in_use_corrupt_entry_as_deferred(store, repo, monkeypatch):
+    """With room to spare only the reverify pass touches the entry: it counts the unmovable
+    corrupt entry once, as deferred, never as healed, and the pass still completes."""
+    sha, entry = _populate(repo, store, "f.txt", "good\n")
+    assert janitor.reverify_entry(sha, store) is False
+    (entry / "f.txt").write_text("TAMPERED", encoding="utf-8")
+    cfg = janitor.JanitorConfig(free_watermark_bytes=1, reverify_seconds=1)
+    later = time.time() + 3600  # past the reverify period, inside the cold-trim age
+    with monkeypatch.context() as m:
+        _refuse_rename(m)
+        res = janitor.run_gc(store, config=cfg, now=later, free_bytes=10**12)
+    assert (res.reverified, res.healed, res.deferred, res.evicted) == (1, 0, 1, 0)
+    assert entry.is_dir()
+    res = janitor.run_gc(store, config=cfg, now=later, free_bytes=10**12)
+    assert (res.healed, res.deferred) == (1, 0)
+    assert not entry.exists()
+
+
+def test_an_entry_deferred_by_reclaim_is_not_reverified_in_the_same_pass(store, repo, monkeypatch):
+    """One in-use entry is one deferral per pass, even when reverify is due on it too."""
+    now = time.time()
+    sha, entry = _populate(repo, store, "f.txt", "good\n", mtime=now - 5000)
+    assert janitor.reverify_entry(sha, store) is False
+    (entry / "f.txt").write_text("TAMPERED", encoding="utf-8")
+    cfg = janitor.JanitorConfig(
+        free_watermark_bytes=2 * 1024**3,
+        grace_seconds=10,
+        max_age_seconds=10**9,
+        reverify_seconds=1,
+    )
+    with monkeypatch.context() as m:
+        _refuse_rename(m)
+        res = janitor.run_gc(store, config=cfg, now=now + 3600, free_bytes=0)
+    assert (res.deferred, res.reverified, res.healed) == (1, 0, 0)
 
 
 def test_reverify_passes_when_unchanged(store, repo):

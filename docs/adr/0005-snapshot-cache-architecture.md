@@ -127,6 +127,14 @@ disappearance) THEN `rmtree`s it — NEVER an in-place recursive delete of a liv
 reader holding an open fd keeps reading the evicted content (POSIX delete-on-last-close),
 and a *new* lookup that hits `ENOENT`/a read error treats it as a miss and re-materializes.
 
+On Windows an open file blocks renaming its entry directory, so delete-on-last-close is not
+available there. The janitor defers that entry instead (bug aerial-flameproof-antbear): the
+pass reports it in `GcResult.deferred`, the entry keeps its bytes and sidecars, and a later
+pass evicts it once the reader has closed it. A corrupt entry that cannot be moved makes
+`reverify_entry` raise `SnapshotEntryInUseError` rather than report it discarded. Until the
+later pass, lookups keep serving the entry, a corrupt one included, and overlapping readers can
+extend the deferral; that is the accepted cost of not adding a reader lease.
+
 **Rejected alternative — a PID + heartbeat reader lease.** A spike showed it is unsound:
 an entry has N concurrent readers (one lease slot can't model them), PIDs are reused (a
 stale lease points at an unrelated process), and a crashed reader leaves the lease held
