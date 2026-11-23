@@ -31,18 +31,15 @@ SSH="ssh -i $GERRIT_ADMIN_SSH_KEY -p $GERRIT_SSH_PORT -o StrictHostKeyChecking=n
 GERRIT_SSH="$SSH ${GERRIT_SSH_USER}@${GERRIT_HOST}"
 export GIT_SSH_COMMAND="$SSH"
 
-# --- 2. Generate a strong token locally ------------------------------------
-# 256 bits of hex. Never echoed to stdout (only written to SSM + refs/meta/config).
-TOKEN="$(openssl rand -hex 32)"
-
-# Create the bot or rotate its token only when the account already exists.
-# Gerrit's SSH parser needs inner quotes around names with spaces. Capture
-# errors without printing the token. Unexpected failures must stop setup.
+# --- 2. Create the bot if absent ------------------------------------------
+# No password on this command line: a process's argv is readable by every local
+# user (ps, /proc/<pid>/cmdline), so the token is generated server-side in step 3
+# (bug immoral-heated-doctorfish). Gerrit's SSH parser needs inner quotes around
+# names with spaces. Capture errors without printing. Unexpected failures stop setup.
 if err="$($GERRIT_SSH gerrit create-account "$BOT_USER" \
 	--group "\"Service Users\"" \
 	--full-name "\"rebar review bot\"" \
-	--email "$BOT_EMAIL" \
-	--http-password "$TOKEN" 2>&1 1>/dev/null)"; then
+	--email "$BOT_EMAIL" 2>&1 1>/dev/null)"; then
 	echo "service-user: created account '$BOT_USER' in Service Users" >&2
 else
 	case "$err" in
@@ -50,20 +47,35 @@ else
 		*) echo "service-user: create-account failed: $err" >&2; exit 1 ;;
 	esac
 	echo "service-user: account '$BOT_USER' exists — rotating HTTP token" >&2
-	# Replace Gerrit's default HTTP token. Setting a second default fails.
-	$GERRIT_SSH gerrit set-account "$BOT_USER" --delete-token default 2>/dev/null || true
-	$GERRIT_SSH gerrit set-account "$BOT_USER" --http-password "$TOKEN"
 fi
+
+# --- 3. Rotate: Gerrit generates the new HTTP token -------------------------
+# Replace Gerrit's default HTTP token; setting a second default fails. Gerrit 3.14
+# prints "New password: <token>" on stdout, captured here and never echoed, so the
+# token reaches no local argv. Fail closed on any other shape: the value check also
+# keeps & and \ out of the template substitution in step 5.
+$GERRIT_SSH gerrit set-account "$BOT_USER" --delete-token default 2>/dev/null || true
+generated="$($GERRIT_SSH gerrit set-account "$BOT_USER" --generate-http-password)"
+TOKEN="${generated#New password: }"
+TOKEN="${TOKEN%$'\r'}"
+unset generated
+case "$TOKEN" in
+	"" | *[!A-Za-z0-9+/=._~-]*)
+		echo "service-user: unexpected --generate-http-password output (value not printed)" >&2
+		exit 1
+		;;
+esac
 
 # --- 4. Store the token in SSM (SecureString, overwrite) -------------------
 # The instance role grants ssm:GetParameter on /rebar/prod/* for the box; this
-# put runs with whatever AWS creds the operator workstation holds.
-aws ssm put-parameter \
+# put runs with whatever AWS creds the operator workstation holds. The value goes
+# on stdin (printf is a builtin), never as `--value <token>` in aws's argv.
+printf '%s' "$TOKEN" | aws ssm put-parameter \
 	--region "$AWS_REGION" \
 	--name "$SSM_TOKEN_PARAM" \
 	--type SecureString \
 	--overwrite \
-	--value "$TOKEN" >/dev/null
+	--value file:///dev/stdin >/dev/null
 echo "service-user: stored bot token in SSM ${SSM_TOKEN_PARAM}" >&2
 
 # --- 5. Render webhooks.config + surgical push to refs/meta/config ---------
@@ -77,11 +89,13 @@ cd "$work/repo"
 git fetch -q origin refs/meta/config
 git checkout -q FETCH_HEAD
 
-# Render the committed template. Kept as an awk substitution so older checked-out
+# Render the committed template. The substitution stays so older checked-out
 # templates with __BOT_TOKEN__ still rotate safely; current templates deliberately
-# do not embed the secret in webhook URLs or unsupported header keys.
-awk -v tok="$TOKEN" '{ gsub(/__BOT_TOKEN__/, tok); print }' \
-	"${SCRIPT_DIR}/webhooks.config" > webhooks.config
+# do not embed the secret in webhook URLs or unsupported header keys. A bash loop,
+# not `awk -v tok=<token>`, so no process carries the token in its argv.
+while IFS= read -r line || [ -n "$line" ]; do
+	printf '%s\n' "${line//__BOT_TOKEN__/$TOKEN}"
+done <"${SCRIPT_DIR}/webhooks.config" >webhooks.config
 
 # Stage ONLY webhooks.config — leave project.config / groups untouched.
 git add webhooks.config

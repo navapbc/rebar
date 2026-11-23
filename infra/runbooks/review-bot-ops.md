@@ -148,8 +148,8 @@ Pass the change as an id or number. A successful durable reset and enqueue ACKs 
 TOKEN=$(aws ssm get-parameter --profile frontier --name /rebar/prod/gerrit-bot-token \
   --with-decryption --query Parameter.Value --output text)
 
-curl -sS -X POST \
-  -H "X-Rebar-Token: $TOKEN" \
+# The header goes to curl on stdin (printf is a shell builtin), not on its command line.
+printf 'header = "X-Rebar-Token: %s"\n' "$TOKEN" | curl -sS -X POST -K - \
   "https://rebar.solutions.navateam.com/review/rerun?change=<CHANGE_ID_OR_NUMBER>"
 # → 202 Accepted  (the review runs asynchronously on the background worker)
 ```

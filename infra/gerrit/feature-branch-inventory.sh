@@ -6,6 +6,9 @@
 # HTTPS auth comes from git credential fill and is never printed. GERRIT_HOST,
 # GERRIT_USER, PROJECT, CAP_DAYS, and DELETE may be overridden.
 set -euo pipefail
+# Credentials reach curl and git through stdin/env, never argv (lib-credentials.sh).
+# shellcheck source=infra/gerrit/lib-credentials.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-credentials.sh"
 
 GERRIT_HOST="${GERRIT_HOST:-rebar.solutions.navateam.com}"
 GERRIT_USER="${GERRIT_USER:-JoeOakhartNava}"
@@ -20,7 +23,7 @@ _cred="$(printf 'protocol=https\nhost=%s\nusername=%s\n\n' "$GERRIT_HOST" "$GERR
 PW="$(printf '%s' "$_cred" | sed -n 's/^password=//p')"
 [ -n "$PW" ] || { echo "no password for ${GERRIT_USER}" >&2; exit 2; }
 
-api() { curl -sS -u "${GERRIT_USER}:${PW}" "https://${GERRIT_HOST}/a$1" | sed "1s/^)]}'//"; }
+api() { curl_auth "$GERRIT_USER" "$PW" -sS "https://${GERRIT_HOST}/a$1" | sed "1s/^)]}'//"; }
 urlenc() { printf '%s' "$1" | sed 's#/#%2F#g'; }
 
 content_matches_main() {
@@ -91,7 +94,7 @@ fi
 echo "${#stale[@]} branch(es) past the cap. Owner-confirmed deletion (Gerrit + GitHub mirror):"
 for fb in "${stale[@]}"; do
 	if [ -n "$DELETE" ]; then
-		code="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -u "${GERRIT_USER}:${PW}" \
+		code="$(curl_auth "$GERRIT_USER" "$PW" -sS -o /dev/null -w '%{http_code}' -X DELETE \
 			"https://${GERRIT_HOST}/a/projects/${PROJECT}/branches/$(urlenc "$fb")")"
 		echo "  deleted ${fb} (gerrit http ${code})"
 		gh api -X DELETE "repos/navapbc/${PROJECT}/git/refs/heads/${fb}" >/dev/null 2>&1 \

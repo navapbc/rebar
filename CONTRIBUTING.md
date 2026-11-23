@@ -264,10 +264,14 @@ about one:
 # at push time, if you already know it isn't ready
 git push gerrit HEAD:refs/for/main%wip
 
-# on a change that is already up (n = the change number)
-curl -u "$USER:$PASS" -X POST https://rebar.solutions.navateam.com/a/changes/<n>/wip
+# on a change that is already up (n = the change number). The credential goes to curl
+# on stdin (printf is a shell builtin), never as -u on its command line, where any
+# local user could read it with ps.
+printf 'user = "%s:%s"\n' "$USER" "$PASS" |
+  curl --config - -X POST https://rebar.solutions.navateam.com/a/changes/<n>/wip
 # …and when it's resolved:
-curl -u "$USER:$PASS" -X POST https://rebar.solutions.navateam.com/a/changes/<n>/ready
+printf 'user = "%s:%s"\n' "$USER" "$PASS" |
+  curl --config - -X POST https://rebar.solutions.navateam.com/a/changes/<n>/ready
 ```
 
 `%ready` on the next push does the same as the `/ready` call. The Gerrit UI's **Mark as

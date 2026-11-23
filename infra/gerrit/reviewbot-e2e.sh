@@ -11,6 +11,9 @@
 # Run manually after deploy. The required admin SSH key and other overrides
 # are read from environment variables below.
 set -euo pipefail
+# Credentials reach curl and git through stdin/env, never argv (lib-credentials.sh).
+# shellcheck source=infra/gerrit/lib-credentials.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-credentials.sh"
 
 GERRIT_HOST="${GERRIT_HOST:-rebar.solutions.navateam.com}"
 GERRIT_SSH_USER="${GERRIT_SSH_USER:-admin}"
@@ -57,7 +60,7 @@ trap cleanup EXIT
 
 # --- helpers: authenticated Gerrit REST GET (strips XSSI guard) -------------
 api_get() {  # $1 = path under /a
-	curl -sS -u "${BOT_USER}:${TOKEN}" "https://${GERRIT_HOST}/a$1" | sed "1s/^)]}'//"
+	curl_auth "$BOT_USER" "$TOKEN" -sS "https://${GERRIT_HOST}/a$1" | sed "1s/^)]}'//"
 }
 
 # --- 1. ensure the Gerrit test branch exists --------------------------------
@@ -89,8 +92,8 @@ git checkout -q -B e2e-probe FETCH_HEAD
 
 # Install the commit-msg hook so the push carries a Change-Id (Gerrit requires it).
 mkdir -p .git/hooks
-curl -sS -Lo .git/hooks/commit-msg \
-	"https://${BOT_USER}:${TOKEN}@${GERRIT_HOST}/tools/hooks/commit-msg" \
+curl_auth "$BOT_USER" "$TOKEN" -sS -Lo .git/hooks/commit-msg \
+	"https://${GERRIT_HOST}/tools/hooks/commit-msg" \
 	|| harness "could not fetch the commit-msg hook"
 chmod +x .git/hooks/commit-msg
 

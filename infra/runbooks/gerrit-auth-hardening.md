@@ -117,8 +117,11 @@ Dev-mode required no credentials, so service accounts have none. Before restarti
    → must be `OAUTH` (NOT `DEVELOPMENT_BECOME_ANY_ACCOUNT`).
 3. In a browser, "Sign in" → redirected to GitHub → back to Gerrit as your GitHub identity. Confirm
    the *Become* link is gone.
-4. Bot check: with the bot HTTP password, `curl -u rebar-review-bot:<pw> https://rebar.solutions.navateam.com/a/accounts/self`
-   returns the bot account.
+4. Bot check: with the bot HTTP password in `$BOT_PW`,
+   `printf 'user = "rebar-review-bot:%s"\n' "$BOT_PW" | curl -K - https://rebar.solutions.navateam.com/a/accounts/self`
+   returns the bot account. The password reaches curl on stdin, not on its command line
+   (`curl -u` would let any local user read it with `ps`); `infra/gerrit/smoke-check.sh` runs
+   this check and the git-over-HTTPS one from SSM.
 
 ## Account migration
 Dev-mode accounts were self-asserted usernames; OAuth identities are keyed by the GitHub

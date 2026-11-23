@@ -87,15 +87,17 @@ store:
 gerrit_credential=$(printf 'protocol=https\nhost=rebar.solutions.navateam.com\n\n' | git credential fill)
 gerrit_user=$(printf '%s\n' "$gerrit_credential" | sed -n 's/^username=//p')
 gerrit_password=$(printf '%s\n' "$gerrit_credential" | sed -n 's/^password=//p')
-curl --fail --silent --show-error --user "$gerrit_user:$gerrit_password" \
-  https://rebar.solutions.navateam.com/a/changes/
+printf 'user = "%s:%s"\n' "$gerrit_user" "$gerrit_password" |
+  curl --fail --silent --show-error --config - https://rebar.solutions.navateam.com/a/changes/
 unset gerrit_credential gerrit_user gerrit_password
 ```
 
 Never echo or log the credential response or password, and keep shell tracing disabled while
-using them. A `curl --netrc` request returning `401` only shows that `.netrc` is absent or does
-not contain the working Gerrit credential; unless `.netrc` was explicitly configured, that
-response does not invalidate credentials already proven by Git over HTTPS.
+using them. Hand the credential to curl on stdin (`--config -`, fed by the `printf` builtin),
+never as `--user`/`-u` or in a URL: any local user can read a running process's command line.
+A `curl --netrc` request returning `401` only shows that `.netrc` is absent or does not contain
+the working Gerrit credential; unless `.netrc` was explicitly configured, that response does
+not invalidate credentials already proven by Git over HTTPS.
 
 **AWS CLI: pass `--profile frontier` on every `aws` command against this deployment** (account
 `896586841071`, `us-east-1`). The default credential chain has no credentials for that account,

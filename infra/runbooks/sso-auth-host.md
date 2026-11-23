@@ -127,9 +127,9 @@ so you rotate it **out-of-band** and then force consumers to pick it up:
 1. Write a fresh key and force the auth host to redeploy so warm containers drop the
    old cached key:
    ```
-   aws ssm put-parameter --profile frontier --name /auth-solutions/COOKIE_SIGNING_SECRET \
-     --type SecureString --value "$(openssl rand -base64 36 | tr -d '/+=' | head -c 48)" \
-     --overwrite --region us-east-1
+   openssl rand -base64 36 | tr -d '/+=\n' | head -c 48 |
+     aws ssm put-parameter --profile frontier --name /auth-solutions/COOKIE_SIGNING_SECRET \
+       --type SecureString --value file:///dev/stdin --overwrite --region us-east-1
    python3 scripts/terraform_prod.py plan --out <plan> -- -replace=aws_lambda_function.auth_host
    python3 scripts/terraform_prod.py apply <plan>
    ```

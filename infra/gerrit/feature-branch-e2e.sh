@@ -10,6 +10,9 @@
 # This mutates configured Gerrit and GitHub and is run manually with admin plus feature
 # driver rights, not as a default CI job. Environment overrides are set below.
 set -euo pipefail
+# Credentials reach curl and git through stdin/env, never argv (lib-credentials.sh).
+# shellcheck source=infra/gerrit/lib-credentials.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-credentials.sh"
 
 GERRIT_HOST="${GERRIT_HOST:-rebar.solutions.navateam.com}"
 GERRIT_USER="${GERRIT_USER:-JoeOakhartNava}"
@@ -47,15 +50,16 @@ GERRIT_PW="$(printf '%s' "$_CRED" | sed -n 's/^password=//p')"
 [ -n "$GERRIT_PW" ] || harness "no password for ${GERRIT_USER} from the credential helper"
 # Embed only the USERNAME in git URLs (a username-pinned credential-helper query is
 # unambiguous) — the password may contain URL-reserved chars (/, +) that break a
-# user:pw@host URL. git resolves the password via the helper; curl uses -u directly.
+# user:pw@host URL. git resolves the password via the helper; curl gets it on stdin
+# through curl_auth, never as `-u user:pw` in its argv.
 GIT_HTTPS_URL="https://${GERRIT_USER}@${GERRIT_HOST}/a/${PROJECT}"
 
 # --- authenticated Gerrit REST helpers (strip the XSSI guard) ----------------
-api_get()  { curl -sS -u "${GERRIT_USER}:${GERRIT_PW}" "https://${GERRIT_HOST}/a$1" | sed "1s/^)]}'//"; }
-api_post() { curl -sS -X POST -u "${GERRIT_USER}:${GERRIT_PW}" \
+api_get()  { curl_auth "$GERRIT_USER" "$GERRIT_PW" -sS "https://${GERRIT_HOST}/a$1" | sed "1s/^)]}'//"; }
+api_post() { curl_auth "$GERRIT_USER" "$GERRIT_PW" -sS -X POST \
 	-H 'Content-Type: application/json' -d "${2:-{}}" "https://${GERRIT_HOST}/a$1" | sed "1s/^)]}'//"; }
-api_put()  { curl -sS -X PUT -u "${GERRIT_USER}:${GERRIT_PW}" "https://${GERRIT_HOST}/a$1"; }
-api_del()  { curl -sS -o /dev/null -w '%{http_code}' -X DELETE -u "${GERRIT_USER}:${GERRIT_PW}" "https://${GERRIT_HOST}/a$1"; }
+api_put()  { curl_auth "$GERRIT_USER" "$GERRIT_PW" -sS -X PUT "https://${GERRIT_HOST}/a$1"; }
+api_del()  { curl_auth "$GERRIT_USER" "$GERRIT_PW" -sS -o /dev/null -w '%{http_code}' -X DELETE "https://${GERRIT_HOST}/a$1"; }
 
 # url-encode a ref for the branches REST endpoint (feature/x -> feature%2Fx)
 urlenc()   { printf '%s' "$1" | sed 's#/#%2F#g'; }
@@ -197,7 +201,7 @@ ensure_fb() {
 clone_repo() {
 	git clone -q "$GIT_HTTPS_URL" "$tmp/repo" || harness "clone failed"
 	cd "$tmp/repo"
-	curl -sS -Lo .git/hooks/commit-msg -u "${GERRIT_USER}:${GERRIT_PW}" \
+	curl_auth "$GERRIT_USER" "$GERRIT_PW" -sS -Lo .git/hooks/commit-msg \
 		"https://${GERRIT_HOST}/tools/hooks/commit-msg" \
 		|| harness "could not fetch commit-msg hook"
 	chmod +x .git/hooks/commit-msg

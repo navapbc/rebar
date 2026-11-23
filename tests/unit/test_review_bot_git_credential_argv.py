@@ -180,3 +180,127 @@ def test_no_source_file_puts_a_credential_in_a_url_or_argv():
             if _USERINFO_SECRET.search(line) or _ARGV_HEADER.search(line):
                 hits.append(f"{path.relative_to(_REPO_ROOT)}:{n}")
     assert not hits, f"credential in a URL or command line (pass it via GIT_CONFIG_* env): {hits}"
+
+
+# ── static guard over operator scripts, workflows and docs ──────────────────────────
+# Bug immoral-heated-doctorfish: the same class outside src/rebar. Operator tooling and
+# the guidance people copy from put Gerrit and Jira credentials on curl, git, ssh, aws and
+# awk command lines. A credential is a ``$``-expanded value or a ``<pw>``-style placeholder.
+
+_OPERATOR_GLOBS = (
+    "infra/**/*.sh",
+    "infra/**/*.md",
+    "scripts/**/*.sh",
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    "docs/**/*.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+)
+# The MCP client PAT in ``copilot``/``claude mcp add --header``: a different credential
+# whose fix depends on each vendor CLI's ``${VAR}`` expansion (bug limitless-defaceable-beaver).
+_OPERATOR_EXCLUDED = frozenset({"docs/mcp-client-setup.md"})
+_SECRET_NAME = r"\w*(?:token|pass|secret|pw|pat|key)\w*"
+_OPERATOR_PATTERNS = {
+    # curl -u / --user with a credential after the colon.
+    "curl-user": re.compile(r"""(?<![\w-])(?:-u|--user)(?:\s+|=)["']?[^\s"']*:(?:\$|<)""", re.I),
+    # https://user:$PW@host or https://user:<pw>@host.
+    "url-userinfo": re.compile(r"""://[^/\s:@"'<>]+:(?:\$|<)[^@\s"']*@"""),
+    # Gerrit SSH set/create-account with the password as an argument.
+    "http-password-arg": re.compile(r"--http-password[\s=]"),
+    # aws ... --value "$TOKEN" / "$(cat key)" / "$(openssl rand ...)": use file://.
+    "cli-value": re.compile(
+        rf"""--value(?:\s+|=)["']?\$(?:\((?:cat|openssl)\b|\{{?{_SECRET_NAME}\b)""", re.I
+    ),
+    # awk -v tok="$TOKEN".
+    "awk-var": re.compile(rf"""-v\s+\w+=["']?\$\{{?{_SECRET_NAME}""", re.I),
+    # An auth or token header built from a variable on the command line. The IMDSv2
+    # session header is excluded: a short-lived, instance-local token, not a credential.
+    "header-arg": re.compile(
+        r"""(?:-H|--header)(?:\s+|=)["'](?!X-aws-ec2-metadata-token)[^"']*"""
+        r"""(?:authorization|token|bearer)[^"']*\$""",
+        re.I,
+    ),
+}
+
+
+def _operator_files() -> list[Path]:
+    seen: dict[str, Path] = {}
+    for pattern in _OPERATOR_GLOBS:
+        for path in _REPO_ROOT.glob(pattern):
+            rel = path.relative_to(_REPO_ROOT).as_posix()
+            if path.is_file() and rel not in _OPERATOR_EXCLUDED:
+                seen[rel] = path
+    return [seen[rel] for rel in sorted(seen)]
+
+
+def _operator_hits(text: str) -> list[str]:
+    return [name for name, pat in _OPERATOR_PATTERNS.items() if pat.search(text)]
+
+
+@pytest.mark.parametrize(
+    ("line", "name"),
+    [
+        ('curl -sS -u "${BOT_USER}:${TOKEN}" "https://h/a/x"', "curl-user"),
+        ('curl --user "$gerrit_user:$gerrit_password" https://h/a/', "curl-user"),
+        ("`curl -u rebar-review-bot:<pw> https://h/a/accounts/self`", "curl-user"),
+        ('git clone -q "https://${BOT_USER}:${TOKEN}@${GERRIT_HOST}/a/p" d', "url-userinfo"),
+        ('gerrit set-account "$BOT_USER" --http-password "$TOKEN"', "http-password-arg"),
+        ('--value "$TOKEN" >/dev/null', "cli-value"),
+        ('--value "$(cat ~/.ssh/rebar_ci_gerrit)"', "cli-value"),
+        ('--value "$(openssl rand -base64 36 | head -c 48)"', "cli-value"),
+        ("awk -v tok=\"$TOKEN\" '{ gsub(/x/, tok); print }'", "awk-var"),
+        ('-H "X-Rebar-Token: $TOKEN" \\', "header-arg"),
+        ('--header "Authorization: Bearer ${PAT}"', "header-arg"),
+    ],
+)
+def test_operator_patterns_flag_the_shapes_they_exist_to_catch(line, name):
+    assert name in _operator_hits(line)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'printf \'user = "%s:%s"\\n\' "$U" "$P" | curl -sS -K - https://h/a/x',
+        'curl_auth "$BOT_USER" "$TOKEN" -sS "https://${GERRIT_HOST}/a$1"',
+        'git_auth "https://${GERRIT_HOST}" "$U" "$P" clone -q "https://${GERRIT_HOST}/a/p" d',
+        'GIT_HTTPS_URL="https://${GERRIT_USER}@${GERRIT_HOST}/a/${PROJECT}"',
+        'gerrit set-account "$BOT_USER" --generate-http-password',
+        "--value file:///dev/stdin >/dev/null",
+        '--metric-name gerrit_healthy --unit Count --value "$gerrit_ok"',
+        '-H "X-aws-ec2-metadata-token: $TOKEN"',
+        "-H 'Content-Type: application/json' -d \"${2:-{}}\"",
+        'diff -u "$before" "$after" >&2 || true',
+    ],
+)
+def test_operator_patterns_pass_the_fixed_and_unrelated_shapes(line):
+    assert _operator_hits(line) == []
+
+
+def test_the_operator_scan_covers_the_files_named_by_the_bug():
+    scanned = {p.relative_to(_REPO_ROOT).as_posix() for p in _operator_files()}
+    for rel in (
+        "infra/gerrit/service-user.sh",
+        "infra/gerrit/smoke-check.sh",
+        "infra/gerrit/reviewbot-e2e.sh",
+        "infra/gerrit/feature-branch-e2e.sh",
+        "infra/gerrit/feature-branch-e2e-scenarios.sh",
+        "infra/gerrit/feature-branch-inventory.sh",
+        ".github/workflows/external-integration.yml",
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "infra/runbooks/gerrit-auth-hardening.md",
+    ):
+        assert rel in scanned, rel
+
+
+def test_no_operator_script_or_doc_puts_a_credential_in_argv():
+    hits = []
+    for path in _operator_files():
+        rel = path.relative_to(_REPO_ROOT).as_posix()
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            hits.extend(f"{rel}:{n} [{name}]" for name in _operator_hits(line))
+    assert not hits, (
+        "credential on a command line; pass it on stdin (curl -K -, aws --value "
+        f"file:///dev/stdin) or via GIT_CONFIG_* env (infra/gerrit/lib-credentials.sh): {hits}"
+    )

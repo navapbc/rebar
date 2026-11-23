@@ -68,6 +68,9 @@ def test_rebased_content_equivalent_branch_reports_merged(
         fakebin / "curl",
         """#!/usr/bin/env bash
 set -euo pipefail
+# The script hands curl its credential as a config file on stdin (curl_auth, -K -).
+# Real curl reads it all; draining it here keeps the writer's pipe from SIGPIPE.
+cat >/dev/null
 url="${@: -1}"
 case "$url" in
   *'/branches/')

@@ -94,8 +94,10 @@ lost. The box never reads this param — it is GitHub-side only.
 aws ssm put-parameter --profile frontier --region us-east-1 \
   --name /rebar/prod/ci-gerrit-ssh-key \
   --type SecureString --overwrite \
-  --value "$(cat ~/.ssh/rebar_ci_gerrit)"
+  --value "file://$HOME/.ssh/rebar_ci_gerrit"
 ```
+`file://` makes the AWS CLI read the key from the file, so the key never appears on the
+`aws` command line, where any local user could read it with `ps`.
 
 ### 2d. Set the GitHub repo variables + secret
 The workflow reads four **variables** and one **secret** (`gerrit-verify.yaml`):

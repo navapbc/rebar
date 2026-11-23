@@ -440,7 +440,7 @@ Gerrit → GitHub** (ADR-0010). Set up the deploy-key identity, then apply the c
 # (a) Generate an ed25519 deploy keypair; store the PRIVATE half in SSM:
 ssh-keygen -t ed25519 -f ./rebar-replication -N ''
 aws ssm put-parameter --overwrite --type SecureString \
-  --name /rebar/prod/github-replication-deploy-key --value "$(cat ./rebar-replication)"
+  --name /rebar/prod/github-replication-deploy-key --value file://./rebar-replication
 
 # (b) Register the PUBLIC half as a write-enabled deploy key on your repo:
 REPO=<your-org>/<your-repo> PUBKEY_FILE=./rebar-replication.pub \

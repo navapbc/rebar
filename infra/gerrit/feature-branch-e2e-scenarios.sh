@@ -321,13 +321,13 @@ scenario_7() {
 		npw="$(printf '%s' "$ncred" | sed -n 's/^password=//p')"
 		if [ -n "$npw" ]; then
 			# (c) branch creation by non-member → expect 403/409
-			local code_c; code_c="$(curl -sS -o /dev/null -w '%{http_code}' -X PUT \
-				-u "${NEG_USER}:${npw}" "https://${GERRIT_HOST}/a/projects/${PROJECT}/branches/$(urlenc "feature/neg-$(date -u +%s)")")"
+			local code_c; code_c="$(curl_auth "$NEG_USER" "$npw" -sS -o /dev/null -w '%{http_code}' -X PUT \
+				"https://${GERRIT_HOST}/a/projects/${PROJECT}/branches/$(urlenc "feature/neg-$(date -u +%s)")")"
 			_evi 7 "nonmember_create_branch_http=${code_c} expect=403_or_409"
 			# (b) merge push by non-member → expect rejection
 			git checkout -q -B s7-neg "$(git ls-remote "$GIT_HTTPS_URL" refs/heads/main | awk '{print $1}')"
 			git fetch -q "$GIT_HTTPS_URL" "$FB"; git merge --no-ff --signoff -q FETCH_HEAD -m "test(e2e-s7): non-member merge push (must be refused)" 2>/dev/null || git merge --abort 2>/dev/null
-			local out_b; out_b="$(git push "https://${NEG_USER}:${npw}@${GERRIT_HOST}/a/${PROJECT}" HEAD:refs/for/main 2>&1 || true)"
+			local out_b; out_b="$(git_auth "https://${GERRIT_HOST}" "$NEG_USER" "$npw" push "https://${GERRIT_HOST}/a/${PROJECT}" HEAD:refs/for/main 2>&1 || true)"
 			echo "$out_b" | grep -qiE 'prohibited|not permitted|not allowed|no new changes|Push Merge' && _evi 7 "nonmember_merge_push=refused" || _evi 7 "nonmember_merge_push=CHECK: ${out_b:0:120}"
 		else
 			_evi 7 "neg_probes=skipped reason=no_NEG_USER_password"

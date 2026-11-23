@@ -780,11 +780,11 @@ jobs:
             echo "sweeping leaked issue $key"
             acli jira workitem delete --key "$key" --yes || true
           done
-          versions="$(curl -fsS -u "${JIRA_USER}:${JIRA_API_TOKEN}" "${JIRA_URL%/}/rest/api/3/project/${JIRA_PROJECT:-REB}/versions" 2>/dev/null)"
+          versions="$(printf 'user = "%s:%s"\n' "$JIRA_USER" "$JIRA_API_TOKEN" | curl -fsS -K - "${JIRA_URL%/}/rest/api/3/project/${JIRA_PROJECT:-REB}/versions" 2>/dev/null)"
           ids="$(printf '%s' "$versions" | PREFIX="$prefix" python3 -c 'import json,os,sys; p=os.environ["PREFIX"]+"-"; print("\n".join(str(v["id"]) for v in json.load(sys.stdin) if str(v.get("name","")).startswith(p)))' 2>/dev/null)"
           for id in $ids; do
             echo "sweeping leaked fix version $id"
-            curl -fsS -X DELETE -u "${JIRA_USER}:${JIRA_API_TOKEN}" "${JIRA_URL%/}/rest/api/3/version/${id}" || true
+            printf 'user = "%s:%s"\n' "$JIRA_USER" "$JIRA_API_TOKEN" | curl -fsS -X DELETE -K - "${JIRA_URL%/}/rest/api/3/version/${id}" || true
           done
 
   pandoc-corpus-replay:
