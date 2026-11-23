@@ -215,9 +215,11 @@ def _base_diagnostic(exc: BaseException | None, ctx: ClassifyContext) -> dict:
 # retrying cannot succeed (bug vinyl-dubnium-squamata). httpcore raises
 # ``ProxyError("<status> <reason>")`` for a non-2xx CONNECT answer; pydantic_ai and the provider
 # SDK wrap it as ModelAPIError <- APIConnectionError <- httpx.ProxyError. A proxy 5xx (the
-# upstream is unreachable through it) is not a refusal and keeps the transport disposition.
+# upstream is unreachable through it) is not a refusal and keeps the transport disposition,
+# and neither is a transient 4xx from the proxy itself: 408 Request Timeout or 429 Too Many
+# Requests, which a later attempt can get past.
 PROXY_REFUSED = "proxy_refused"
-_PROXY_REFUSAL_STATUS = re.compile(r"\s*4\d\d\b")
+_PROXY_REFUSAL_STATUS = re.compile(r"\s*4(?!08\b|29\b)\d\d\b")
 _CHAIN_LIMIT = 16
 
 
@@ -241,11 +243,12 @@ def _proxy_refusal(exc: BaseException | None) -> str | None:
 def _proxy_refusal_of(exc: BaseException | None) -> str | None:
     """:func:`_proxy_refusal` for one exception, or for a fallback group whose EVERY leg is a
     proxy refusal (the legs' distinct texts joined by ``"; "``). A group with any other leg
-    is not a refusal."""
+    is not a refusal. A leg that is itself a group (a nested fallback chain) is judged the
+    same way, recursively."""
     legs = getattr(exc, "exceptions", None)
     if not legs:
         return _proxy_refusal(exc)
-    texts = [_proxy_refusal(leg) for leg in legs]
+    texts = [_proxy_refusal_of(leg) for leg in legs]
     if not all(texts):
         return None
     return "; ".join(dict.fromkeys(t for t in texts if t))  # distinct texts, leg order
@@ -289,8 +292,11 @@ def _classify_fallback_group(group: Any) -> ResolutionClass:
     leg. A retryable leg (``WAIT_AND_RETRY``/``RETRY_NOW``) on ANY candidate wins, so a
     fallback leg's non-retryable failure (e.g. a keyless provider's auth error) can no
     longer MASK a retryable primary throttle as a hard INDETERMINATE (bug 1c0d). A group
-    whose legs are ALL non-retryable keeps the ``CHANGE_PROVIDER_OR_MODEL`` disposition —
-    the whole chain is unavailable, which is what switching model/provider would address.
+    whose EVERY leg (nested groups included) is a 4xx HTTP proxy refusal is
+    ``CHANGE_SETTINGS``: switching model/provider behind the same proxy cannot help (bug
+    vinyl-dubnium-squamata). Any other group whose legs are ALL non-retryable keeps the
+    ``CHANGE_PROVIDER_OR_MODEL`` disposition — the whole chain is unavailable, which is what
+    switching model/provider would address.
 
     Each leg is classified through the TOTAL public classifier (so a tenacity-wrapped or
     nested-group leg is unwrapped/recursed, never raised)."""
@@ -758,7 +764,11 @@ def close_gate_remedy(exc: object, outcome: LLMOutcome | None = None) -> str:
     cause = recovery_failure_cause(exc)
     if cause:
         return cause
-    if outcome is not None and (outcome.diagnostic or {}).get("error_type") == PROXY_REFUSED:
+    if (
+        outcome is not None
+        and outcome.resolution_class is ResolutionClass.CHANGE_SETTINGS
+        and (outcome.diagnostic or {}).get("error_type") == PROXY_REFUSED
+    ):
         return PROXY_REFUSED_REMEDY  # a proxy policy, not a missing install or API key
     if _is_unavailable_runtime(exc, outcome):
         return UNAVAILABLE_REMEDY
