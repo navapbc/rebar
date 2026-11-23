@@ -89,7 +89,9 @@ def test_key_genesis_permissions_and_gitignore(store: Path) -> None:
     key = tracker / ".opcert-key"
     pub = tracker / ".opcert-key.pub"
     assert key.exists() and pub.exists()
-    assert oct(key.stat().st_mode & 0o777) == "0o600"
+    if os.name != "nt":  # Windows has no mode bits; it relies on the default ACL
+        # (decision cloistered-decomposed-nymph), so 0o600 is intentionally unchecked there.
+        assert oct(key.stat().st_mode & 0o777) == "0o600"
     # passphrase-free Ed25519 (the .pub advertises the ed25519 type).
     assert pub.read_text(encoding="utf-8").startswith("ssh-ed25519 ")
     # git-ignored on the tickets branch.

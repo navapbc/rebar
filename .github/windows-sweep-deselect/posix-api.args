@@ -1,6 +1,1 @@
---deselect=tests/unit/test_gate_peak_rss_9ea3.py::test_both_gate_entry_points_emit_the_marker[review_plan-plan_review]
---deselect=tests/unit/test_gate_peak_rss_9ea3.py::test_both_gate_entry_points_emit_the_marker[verify_completion-verify_completion]
---deselect=tests/unit/test_gate_peak_rss_9ea3.py::test_completion_emits_one_line_start_marker
 --deselect=tests/unit/test_opcert_own_pub_resolution_d26a.py::test_certifies_when_the_key_dir_is_read_only
---deselect=tests/unit/test_opcert_producer_seam_8d8e.py::test_key_genesis_permissions_and_gitignore
---deselect=tests/unit/test_snapshot_janitor.py::test_eviction_rename_to_trash_open_reader_survives
