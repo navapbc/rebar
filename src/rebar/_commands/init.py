@@ -14,6 +14,7 @@ not replaced by their git toplevel. The output contract is covered by ``test_e4_
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
@@ -35,6 +36,7 @@ from rebar._commands._init_ensures import (  # noqa: F401  (re-export)
 from rebar._snapshot.git_fetch import fetch_timeout as _fetch_timeout
 from rebar._store.ensures import EnsureOutcome, run_ensures
 from rebar._store.env_identity import mint_env_id_guarded
+from rebar._store.git_outcome import GitTimedOut, raise_if_watchdog_timeout
 from rebar._store.gitutil import run_git, run_git_write
 from rebar.reducer.marker import ARCHIVE_MARKER_NAME, MARKER_LOCK_NAME
 
@@ -46,6 +48,8 @@ _PRECOMMIT = """# No-op pre-commit config for the tickets orphan branch.
 # without requiring PRE_COMMIT_ALLOW_NO_CONFIG=1 on every caller.
 repos: []
 """
+
+logger = logging.getLogger("rebar")
 
 
 # raw-git-ok: store-maintenance command, seam-internal
@@ -94,7 +98,7 @@ def _emit(msg: str, silent: bool) -> None:
 def _run_ensures_logged(tracker: str, silent: bool) -> None:
     """Run the ensure registry at an init entry point and surface any ``failed``
     unit as a warning (init never aborts on an ensure failure — :func:`run_ensures`
-    already skip-and-continues and never raises)."""
+    never raises; it records failures and stops early only on a git watchdog timeout)."""
     for outcome in run_ensures(tracker):
         if outcome.status == "failed":
             _emit(f"WARNING: ensure '{outcome.id}' failed: {outcome.detail}", silent)
@@ -268,6 +272,16 @@ def _warn_force_no_effect(reason: str) -> None:
     )
 
 
+def _pin_auto_maintenance(repo: str) -> None:
+    """Run :func:`_gc_config_unit` at *repo* before the store's first commit. A watchdog
+    timeout stops the unit at its first stalled call; init then proceeds as it always
+    has after this best-effort pin, and the post-bootstrap sweep retries the unit."""
+    try:
+        _gc_config_unit(repo)
+    except GitTimedOut as exc:
+        logger.warning("init: auto-maintenance pin skipped: %s", exc)
+
+
 # raw-git-ok: store-maintenance command, seam-internal
 def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = False) -> int:
     from rebar.config import tickets_branch, tickets_remote
@@ -288,7 +302,7 @@ def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = 
     # worktree shares the host repo's ``.git/config``, so this writes the same three
     # settings to the same file the later sweep targets, which then converges as a no-op.
     # ``_gc_config_unit`` stays their single definition; nothing is restated here.
-    _gc_config_unit(repo)
+    _pin_auto_maintenance(repo)
 
     branch = tickets_branch(repo)  # configured tracker.branch (default "tickets")
     remote_name = tickets_remote(repo)  # configured sync.remote (default "origin")
@@ -418,19 +432,29 @@ def _untrack_runtime_markers_unit(tracker: str) -> EnsureOutcome:
     ARCHIVED events remain authoritative, and readers recreate optional cache markers.
     """
     uid = "untrack-runtime-markers"
-    ls = _git(tracker, "ls-files", "--", f"*/{ARCHIVE_MARKER_NAME}", f"*/{MARKER_LOCK_NAME}")
+    # A timed-out ls-files is not "no tracked markers" (bug hilarious-loony-crayfish).
+    ls = raise_if_watchdog_timeout(
+        _git(tracker, "ls-files", "--", f"*/{ARCHIVE_MARKER_NAME}", f"*/{MARKER_LOCK_NAME}"),
+        "ls-files",
+    )
     tracked = [ln for ln in ls.stdout.splitlines() if ln]
     if not tracked:
         return EnsureOutcome(uid, "ok", "no tracked runtime markers")
     for i in range(0, len(tracked), _UNTRACK_BATCH):
-        _git(tracker, "rm", "--cached", "--quiet", "--", *tracked[i : i + _UNTRACK_BATCH])
-    _git(
-        tracker,
+        raise_if_watchdog_timeout(
+            _git(tracker, "rm", "--cached", "--quiet", "--", *tracked[i : i + _UNTRACK_BATCH]),
+            "rm --cached",
+        )
+    raise_if_watchdog_timeout(
+        _git(
+            tracker,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            "chore: untrack per-ticket runtime markers (.archived, .write.lock)",
+        ),
         "commit",
-        "-q",
-        "--no-verify",
-        "-m",
-        "chore: untrack per-ticket runtime markers (.archived, .write.lock)",
     )
     return EnsureOutcome(uid, "changed", f"untracked {len(tracked)} runtime marker file(s)")
 

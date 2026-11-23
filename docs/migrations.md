@@ -29,16 +29,16 @@ Each unit has a **stable, immutable id** and a callable `(tracker) -> EnsureOutc
 class EnsureOutcome:
     id: str
     status: Literal["ok", "changed", "failed"]  # ok = already converged (no-op);
-    detail: str = ""                             # changed = drift corrected; failed = raised
+    detail: str = ""                             # changed = drift corrected; failed = raised or a write failed
 ```
 
-`run_ensures(tracker)` runs **every** unit unconditionally under the store write lock. It catches an exception from an individual unit, records `failed`, excludes that unit from the applied set, and continues. Lock acquisition failures, marker write failures, and other sweep failures are logged without aborting the caller. `StoreIncompatibleError` from the write-lock compatibility gate is the deliberate exception. It escapes the sweep so an incompatible store fails closed during init, MCP boot, and `rebar store fsck --repair`.
+`run_ensures(tracker)` runs every unit in order under the store write lock. It catches an exception from an individual unit, records `failed`, excludes that unit from the applied set, and continues. The one exception is `GitTimedOut` (`rebar._store.git_outcome`), raised when a unit's git call is killed by its watchdog: the sweep records that unit `failed` and stops, because every later git call would wait out the same bound on a stalled filesystem. The units after it produce no outcome and run again on the next sweep. Lock acquisition failures, marker write failures, and other sweep failures are logged without aborting the caller. `StoreIncompatibleError` from the write-lock compatibility gate is the deliberate exception. It escapes the sweep so an incompatible store fails closed during init, MCP boot, and `rebar store fsck --repair`.
 
 ## Adding an ensure unit
 
 1. Implement a **check-then-act** callable that returns an `EnsureOutcome`. Read current state
    first; act (and return `changed`) only on drift; otherwise return `ok`. Let exceptions
-   propagate — `run_ensures` converts a raise into `failed` and keeps going. Commit units
+   propagate — `run_ensures` converts a raise into `failed` and keeps going (a `GitTimedOut` stops the sweep instead). Pass git results through `raise_if_watchdog_timeout` so a timed-out read is never taken as "unset" or "absent", and return `failed` when a write fails. Commit units
    (e.g. `.gitattributes`) must **tree-check before committing** so a converged store makes
    **zero** git commits on the next sweep.
 2. Give it a **stable id** and register it in `rebar._store.ensures`: add the id to the frozen
@@ -136,7 +136,7 @@ text-only (excluded from `--output json`, so it never inflates `issue_count`).
 
 ## The two markers (both git-ignored)
 
-- **`.ensure-applied`** — a JSON array of the **non-failed** unit ids from the last sweep,
+- **`.ensure-applied`** — a JSON array of the **non-failed** ids of the units that ran in the last sweep,
   written atomically (`fsutil.atomic_write`, temp-in-same-dir + rename). Absent / garbage /
   non-list degrades to the **empty set** (a pre-feature or corrupt store reads as "everything
   pending"). It is a **hint**, not a gate: units are always re-run and self-check regardless.

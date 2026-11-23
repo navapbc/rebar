@@ -278,6 +278,23 @@ def is_watchdog_timeout(result: Any) -> bool:
     return bool(returncode) and WATCHDOG_TIMEOUT_MARKER in _failure_text(result).lower()
 
 
+class GitTimedOut(RuntimeError):
+    """A git call was killed by its watchdog; ``operation`` names it (for example
+    ``config --get``). Raised so no caller reads the watchdog's empty output as an answer."""
+
+    def __init__(self, operation: str) -> None:
+        super().__init__(f"git {operation} timed out")
+        self.operation = operation
+
+
+def raise_if_watchdog_timeout(result: Any, operation: str) -> Any:
+    """Return *result*, or raise :class:`GitTimedOut` naming *operation* when
+    :func:`is_watchdog_timeout` says its bound killed it."""
+    if is_watchdog_timeout(result):
+        raise GitTimedOut(operation)
+    return result
+
+
 def is_missing_credential(text: str) -> bool:
     """Git reached an authenticated remote with no non-interactive credential source."""
     return _any(text, MISSING_CREDENTIAL_MARKERS) is not None
