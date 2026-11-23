@@ -181,8 +181,9 @@ still applies, so a buggy/hostile custom verifier cannot mint a wrong-audience t
 
 Because rebar is RS-only (no AS/DCR), a client obtains its token elsewhere and presents
 it. Three paths:
-1. **Static bearer** — Claude Code `--header "Authorization: Bearer <token>"` / Claude.ai
-   `static_headers`; pairs with the `static` verifier.
+1. **Static bearer** — Claude Code `headers.Authorization` with a `${VAR}` reference (never a
+   PAT on the command line; see [mcp-client-setup.md](mcp-client-setup.md#keep-the-pat-off-the-command-line))
+   / Claude.ai `static_headers`; pairs with the `static` verifier.
 2. **Automatic OAuth** when the client and your org IdP support DCR + client-id metadata
    discovery (CIMD); pairs with `jwt`/`introspection`.
 3. **Pre-registered client** — `--client-id`/`--client-secret` against an IdP that does
@@ -324,7 +325,7 @@ env-var **name** only; no secret is written to a config file. The three config s
 |---|---|---|---|
 | GitHub Copilot CLI | project `.mcp.json` (or `~/.copilot/mcp-config.json`) | `headers.Authorization` bearer, `${MCP_CLIENT_PAT_CLI}` in this repo | `https://<box>/mcp/` |
 | Codex | project `.codex/config.toml` (or `~/.codex/config.toml`) | `bearer_token_env_var = "MCP_CLIENT_PAT_CODEX"` | `https://<box>/mcp/` |
-| Claude Code | project `.mcp.json` (or `~/.claude.json`), or `--header` | `headers.Authorization` bearer, `${MCP_CLIENT_PAT_CLI}` in this repo | `https://<box>/mcp/` |
+| Claude Code | project `.mcp.json` (or `~/.claude.json`, e.g. via `claude mcp add-json -s user`) | `headers.Authorization` bearer, `${MCP_CLIENT_PAT_CLI}` in this repo | `https://<box>/mcp/` |
 
 > **Static-header gotcha (all clients, most visible in Claude Code).** A static
 > `Authorization` header takes **precedence** and does **not** fall back to OAuth if the
