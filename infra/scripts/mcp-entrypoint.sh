@@ -1,6 +1,6 @@
 #!/bin/sh
 # Provision the persistent ticket store and attested-gate code checkout, then exec
-# the MCP server as PID 1. Provisioning runs asynchronously so the long tickets clone
+# the MCP server, which replaces this shell under the container's init. Provisioning runs asynchronously so the long tickets clone
 # cannot miss readiness; reads report store_uninitialized until convergence. Failures
 # remain visible in logs and --provision-only status without blocking container startup.
 set -e
@@ -381,5 +381,8 @@ if [ "${1:-}" = "--provision-only" ]; then
   exit $?
 fi
 
-provision_store &
+# Detach provisioning from the server: the subshell exits at once, so provisioning is
+# re-parented to the container's init, which reaps it and its git children. As a plain
+# child of the exec'd server it was never waited for (ultrashort-emaciated-krill).
+( provision_store & )
 exec "$@"

@@ -13,6 +13,9 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.gerrit
     restart: unless-stopped
+    # Run docker-init (tini) as PID 1 so it reaps orphaned processes, such as the
+    # daemonized `git maintenance run --auto --detach` children (ultrashort-emaciated-krill).
+    init: true
     mem_limit: 3072m
     ports:
       # HTTP stays on host loopback behind nginx.
@@ -48,6 +51,9 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.reviewbot
     restart: unless-stopped
+    # Run docker-init (tini) as PID 1 so it reaps orphaned processes, such as the
+    # daemonized `git maintenance run --auto --detach` children (ultrashort-emaciated-krill).
+    init: true
     mem_limit: 2048m
     # Allow an in-flight review and its store write to finish on SIGTERM.
     # Grace = 1200s review drain + 10s cancel + 60s lock acquisition
@@ -149,6 +155,9 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.opcert
     restart: unless-stopped
+    # Run docker-init (tini) as PID 1 so it reaps orphaned processes, such as the
+    # daemonized `git maintenance run --auto --detach` children (ultrashort-emaciated-krill).
+    init: true
     mem_limit: 256m
     # Load the gate credentials and origin guard from the regenerated .env.
     env_file:
@@ -188,6 +197,9 @@ services:
       context: ../..
       dockerfile: infra/compose/Dockerfile.mcp
     restart: always
+    # Run docker-init (tini) as PID 1 so it reaps orphaned processes, such as the
+    # daemonized `git maintenance run --auto --detach` children (ultrashort-emaciated-krill).
+    init: true
     mem_limit: 3712m
     # Cover the 1200s certified-op SIGTERM grace with 60s margin.
     # The HTTP transport test checks this relationship.
