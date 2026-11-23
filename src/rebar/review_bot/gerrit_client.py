@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import subprocess
 import urllib.error
 import urllib.parse
@@ -343,21 +344,33 @@ class GerritClient:
                 logger.debug("events-log: skipping unparseable line")
         return events
 
+    def _gerrit_git_env(self) -> dict[str, str]:
+        """Return a child environment that authenticates git to Gerrit outside argv.
+
+        A command line is readable by anyone who can list processes, so the bot's Basic
+        header rides as URL-scoped ``http.<base>/.extraHeader`` config in git's own
+        ``GIT_CONFIG_COUNT``/``GIT_CONFIG_KEY_<n>``/``GIT_CONFIG_VALUE_<n>`` variables,
+        which only the process owner and root can read (bug antiviral-agrarian-amurminnow).
+        The entry goes after inherited entries: the review-bot container sets
+        ``safe.directory`` this way. git rejects a non-numeric count outright, so one is
+        replaced. The URL scope keeps the header off every other host, and prompts stay
+        off so a rejected header fails fast."""
+        env = dict(os.environ)
+        count_text = env.get("GIT_CONFIG_COUNT", "0")
+        base = int(count_text) if count_text.isdigit() else 0
+        env[f"GIT_CONFIG_KEY_{base}"] = f"http.{self._base}/.extraHeader"
+        env[f"GIT_CONFIG_VALUE_{base}"] = f"Authorization: {self._auth}"
+        env["GIT_CONFIG_COUNT"] = str(base + 1)
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        return env
+
     # raw-git-ok: disposable sandbox repo, not the tracker
     def clone_change_ref(self, change_number: int, revision_ref: str, dest: str) -> str:
         """Fetch the patchset ref into a disposable checkout and return its path.
-        Use HTTPS bot credentials, bounded git calls, and a stall abort on
-        network fetches. Fetch the tickets branch from its mirror for attested
-        review. Redact credentials from failures."""
-        parsed = urllib.parse.urlsplit(self._base)
-        userinfo = (
-            f"{urllib.parse.quote(self._cfg.bot_user, safe='')}:"
-            f"{urllib.parse.quote(self._cfg.gerrit_bot_token, safe='')}@"
-        )
-        netloc = f"{userinfo}{parsed.netloc}"
-        repo_url = urllib.parse.urlunsplit(
-            (parsed.scheme or "http", netloc, f"/a/{self._cfg.project}", "", "")
-        )
+        Authenticate the Gerrit fetch through :meth:`_gerrit_git_env`, never the URL or
+        argv. Bound every git call and stall-abort network fetches. Fetch the tickets
+        branch from its mirror for attested review. Redact credentials from failures."""
+        repo_url = f"{self._base}/a/{self._cfg.project}"
         try:
             subprocess.run(
                 ["git", "init", "-q", dest],
@@ -387,6 +400,7 @@ class GerritClient:
                 text=True,
                 encoding="utf-8",
                 timeout=_GIT_TIMEOUT,
+                env=self._gerrit_git_env(),
             )
             subprocess.run(
                 ["git", "-C", dest, "checkout", "-q", "FETCH_HEAD"],
@@ -428,7 +442,7 @@ class GerritClient:
             )
         except subprocess.TimeoutExpired as exc:
             # Convert git timeouts through the same credential redaction as other
-            # fetch failures. Timeout arguments can contain the tokenized URL.
+            # fetch failures, in case a credential ever reaches a timed-out argv.
             raise GerritError(
                 f"clone_change_ref(change={change_number}, ref={revision_ref}) failed: "
                 f"git {_git_op(exc.cmd)} timed out after {_GIT_TIMEOUT} seconds: "
