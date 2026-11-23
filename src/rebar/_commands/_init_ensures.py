@@ -9,6 +9,7 @@ import os
 import subprocess
 
 from rebar._store.ensures import APPLIED_MARKER, HINTED_MARKER, EnsureOutcome
+from rebar._store.git_outcome import raise_if_watchdog_timeout
 from rebar._store.gitutil import run_git_write
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
 from rebar.graph._cache import _GRAPH_CACHE_FILE
@@ -47,12 +48,22 @@ _GITATTRIBUTES = """# Shared mutable root files are per-pass derived CACHES the 
 """
 
 
-# The units' git seam. A thin non-raising wrapper over the shared
-# ``_store.gitutil.run_git_write`` seam — the same two-line form ``init`` keeps for its
-# own provisioning calls, so neither module reaches into the other's globals.
+# The units' git seam over the shared ``_store.gitutil.run_git_write`` seam. A failed
+# git returns its result for the unit to inspect, but a watchdog timeout raises
+# ``GitTimedOut``: its empty output is not an answer ("unset", "absent"), and every
+# further call would wait out the same bound (bug hilarious-loony-crayfish).
+# ``run_ensures`` records the unit failed and stops the sweep.
 # raw-git-ok: store-maintenance command, seam-internal
 def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
-    return run_git_write(cwd, *args, check=False)
+    return raise_if_watchdog_timeout(run_git_write(cwd, *args, check=False), " ".join(args[:2]))
+
+
+def _write_failure(uid: str, result: subprocess.CompletedProcess) -> EnsureOutcome | None:
+    """A ``failed`` outcome carrying git's stderr when a config write failed, else None."""
+    if result.returncode == 0:
+        return None
+    detail = (result.stderr or result.stdout or "").strip() or f"exit {result.returncode}"
+    return EnsureOutcome(uid, "failed", f"git {' '.join(result.args[-3:])}: {detail}")
 
 
 def _gc_config_unit(tracker: str) -> EnsureOutcome:
@@ -64,11 +75,13 @@ def _gc_config_unit(tracker: str) -> EnsureOutcome:
     tracked configuration differs."""
     changed = False
     if _git(tracker, "config", "--get", "gc.auto").returncode == 0:
-        _git(tracker, "config", "--unset", "gc.auto")
+        if failed := _write_failure("gc-config", _git(tracker, "config", "--unset", "gc.auto")):
+            return failed
         changed = True
     for key in ("gc.autoDetach", "maintenance.autoDetach"):
         if _git(tracker, "config", "--get", key).stdout.strip() != "false":
-            _git(tracker, "config", key, "false")
+            if failed := _write_failure("gc-config", _git(tracker, "config", key, "false")):
+                return failed
             changed = True
     return EnsureOutcome(
         "gc-config",
@@ -83,7 +96,8 @@ def _merge_ours_unit(tracker: str) -> EnsureOutcome:
     lets a converged clone report ok without a write."""
     if _git(tracker, "config", "--get", "merge.ours.driver").stdout.strip() == "true":
         return EnsureOutcome("merge-ours", "ok", "merge.ours.driver=true")
-    _git(tracker, "config", "merge.ours.driver", "true")
+    if failed := _write_failure("merge-ours", _git(tracker, "config", "merge.ours.driver", "true")):
+        return failed
     return EnsureOutcome("merge-ours", "changed", "set merge.ours.driver=true")
 
 

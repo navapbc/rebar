@@ -5,10 +5,13 @@ operations. They are not an ordered migration ledger. See ``docs/migrations.md``
 Each unit has a stable identifier and returns :class:`EnsureOutcome`, with no
 change when its state is already converged.
 
-:func:`run_ensures` executes every unit under the store write lock. Concurrent
+:func:`run_ensures` executes the units in order under the store write lock. Concurrent
 sweeps serialize, failures are recorded and skipped, and a converged sweep makes
-no Git commit. An atomic rewrite of the ignored ``.ensure-applied`` marker records
-all nonfailed identifiers. The marker informs the write-path warning and the
+no Git commit. A git call killed by its watchdog (:class:`GitTimedOut`) instead
+stops the sweep: that unit is recorded ``failed`` and later units do not run, so a
+stalled filesystem costs one bound rather than one per call. An atomic rewrite of
+the ignored ``.ensure-applied`` marker records the nonfailed identifiers of the
+units that ran. The marker informs the write-path warning and the
 ``rebar store fsck`` applied count, but never controls execution.
 
 Content-backed units live in :mod:`rebar._commands._init_ensures` and remain
@@ -34,10 +37,12 @@ from rebar._store import fsutil
 from rebar._store import lock as _lock
 from rebar._store.compat import StoreIncompatibleError
 from rebar._store.fsutil import open_published
+from rebar._store.git_outcome import GitTimedOut
 
 logger = logging.getLogger("rebar")
 
-# Git-ignored marker (JSON array of non-failed unit ids). Absent/garbage → empty set.
+# Git-ignored marker (JSON array of non-failed ids of the units that ran in the last
+# sweep). Absent/garbage → empty set.
 APPLIED_MARKER = ".ensure-applied"
 
 # Git-ignored marker (WS2): a single last-hinted unix timestamp that rate-limits the
@@ -50,7 +55,8 @@ EnsureStatus = Literal["ok", "changed", "failed"]
 @dataclass(frozen=True)
 class EnsureOutcome:
     """The typed result of one ensure unit: ``ok`` (already converged, no-op),
-    ``changed`` (drift corrected), or ``failed`` (the unit raised; skipped)."""
+    ``changed`` (drift corrected), or ``failed`` (the unit raised or reported a failed
+    write; skipped)."""
 
     id: str
     status: EnsureStatus
@@ -134,17 +140,41 @@ def _write_applied(tracker: str, ids: list[str]) -> None:
         logger.warning("run_ensures: could not write %s: %s", APPLIED_MARKER, exc)
 
 
+def _run_units(tracker: str) -> list[EnsureOutcome]:
+    """Run each registered unit in order. A raise records ``failed`` and the sweep
+    continues, except :class:`GitTimedOut`: a git call that outlived its watchdog means
+    the filesystem or git is stalled, and every later unit would wait out the same
+    bound (bug hilarious-loony-crayfish), so the sweep stops there."""
+    reg = _registry()
+    outcomes: list[EnsureOutcome] = []
+    for index, uid in enumerate(REGISTRY_IDS):
+        try:
+            outcomes.append(reg[uid](tracker))  # type: ignore[operator]
+        except GitTimedOut as exc:
+            skipped = len(REGISTRY_IDS) - index - 1
+            detail = f"{exc}; stopped the sweep, {skipped} later unit(s) not run"
+            logger.warning("ensure unit %s failed: %s", uid, detail)
+            outcomes.append(EnsureOutcome(uid, "failed", detail))
+            break
+        except Exception as exc:  # noqa: BLE001 — skip-and-continue contract
+            logger.warning("ensure unit %s failed: %s", uid, exc)
+            outcomes.append(EnsureOutcome(uid, "failed", str(exc)))
+    return outcomes
+
+
 def run_ensures(
     tracker: str | os.PathLike,
     *,
     timeout: int | None = None,
     attempts: int | None = None,
 ) -> list[EnsureOutcome]:
-    """Run every ensure under the write lock and return each outcome.
+    """Run the ensures in order under the write lock and return each outcome.
 
     Unit failures become ``failed`` outcomes and are omitted from
-    ``.ensure-applied``. Lock acquisition or unexpected sweep failures are logged
-    as no-ops so init and boot continue. The store compatibility gate is the only
+    ``.ensure-applied``. A unit stopped by a git watchdog timeout ends the sweep;
+    the units after it return no outcome and run again on the next sweep. Lock
+    acquisition or unexpected sweep failures are logged as no-ops so init and boot
+    continue. The store compatibility gate is the only
     propagated exception, which keeps init, MCP boot, and ``fsck --repair``
     fail-closed for an incompatible store.
 
@@ -160,14 +190,7 @@ def run_ensures(
     outcomes: list[EnsureOutcome] = []
     try:
         with _lock.write_lock(tracker, **lock_kwargs):
-            reg = _registry()
-            for uid in REGISTRY_IDS:
-                fn = reg[uid]
-                try:
-                    outcomes.append(fn(tracker))  # type: ignore[operator]
-                except Exception as exc:  # noqa: BLE001 — skip-and-continue contract
-                    logger.warning("ensure unit %s failed: %s", uid, exc)
-                    outcomes.append(EnsureOutcome(uid, "failed", str(exc)))
+            outcomes = _run_units(tracker)
             _write_applied(tracker, [o.id for o in outcomes if o.status != "failed"])
     except _lock.LockTimeout as exc:
         logger.warning("run_ensures: write lock unavailable, skipping sweep: %s", exc)
