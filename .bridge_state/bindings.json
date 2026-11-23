@@ -41029,9 +41029,17 @@
       "updated_at": "2026-09-05T01:14:04Z"
     },
     "5a11-867f-8354-4172": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nFound 2026-11-23 PST by the LLM-Review of Gerrit change 3535 (immoral-heated-doctorfish follow-up). `infra/gerrit/service-user.sh` deletes the review-bot's `default` Gerrit token and then has Gerrit generate a new one before it stores the token in SSM. Since 35c1983cb07 it prints a notice when the generator output has the wrong shape: Gerrit's token was already replaced, SSM was not updated, and the review-bot cannot authenticate until a re-run succeeds. 2 other failures after the delete leave the bot in the same broken state with no such notice, because `set -euo pipefail` exits silently on them:\n- `gerrit set-account --generate-http-password` exits non-zero.\n- `aws ssm put-parameter` fails (expired AWS session, missing permission).\n\nAn operator rotating the token would then see a bare non-zero exit and might not know the bot is now locked out.\n\n## Acceptance Criteria\n- [ ] When `service-user.sh` fails at any step after deleting the bot's `default` token and before the SSM write succeeds, it tells the operator on stderr that Gerrit's token was replaced, SSM was not updated, and the review-bot cannot authenticate until the script succeeds, without printing the token.\n- [ ] A test drives the generator-failure and SSM-failure paths through the existing argv-recording stubs (`tests/scripts/test_operator_credential_argv.py`) and asserts the notice, a non-zero exit, and that the token appears in no output or argv.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "service-user.sh partial rotation failures lack notice"
+      },
       "created_at": "2026-11-23T14:33:20Z",
       "jira_id": "4599818",
       "jira_key": "REB-7380",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-11-23T14:33:23Z"
     },
@@ -122310,7 +122318,9 @@
     "1795432930428619001": "__rebar_unknown_comment_id__",
     "1795436749949289001": "__rebar_unknown_comment_id__",
     "1795438590865076001": "__rebar_unknown_comment_id__",
-    "1795438614501109001": "__rebar_unknown_comment_id__"
+    "1795438614501109001": "__rebar_unknown_comment_id__",
+    "1795444399627695001": "__rebar_unknown_comment_id__",
+    "1795444417647727001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
