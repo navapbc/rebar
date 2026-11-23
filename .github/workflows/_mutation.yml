@@ -45,7 +45,7 @@ jobs:
         id: checkout-gerrit-attempt-1
         if: inputs.gerrit-refspec != ''
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@8721c15dacdd703064df5ade1416f7e5590b65f3  # v1.4.1
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -61,7 +61,7 @@ jobs:
         id: checkout-gerrit-attempt-2
         if: ${{ inputs.gerrit-refspec != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@8721c15dacdd703064df5ade1416f7e5590b65f3  # v1.4.1
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -76,7 +76,7 @@ jobs:
       - name: Checkout the Gerrit patchset attempt 3
         id: checkout-gerrit-attempt-3
         if: ${{ inputs.gerrit-refspec != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@8721c15dacdd703064df5ade1416f7e5590b65f3  # v1.4.1
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -140,7 +140,7 @@ jobs:
         id: checkout-gerrit-attempt-1
         if: inputs.gerrit-refspec != ''
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@8721c15dacdd703064df5ade1416f7e5590b65f3  # v1.4.1
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -156,7 +156,7 @@ jobs:
         id: checkout-gerrit-attempt-2
         if: ${{ inputs.gerrit-refspec != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' }}
         continue-on-error: true
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@8721c15dacdd703064df5ade1416f7e5590b65f3  # v1.4.1
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -171,7 +171,7 @@ jobs:
       - name: Checkout the Gerrit patchset attempt 3
         id: checkout-gerrit-attempt-3
         if: ${{ inputs.gerrit-refspec != '' && steps.checkout-gerrit-attempt-1.outcome == 'failure' && steps.checkout-gerrit-attempt-2.outcome == 'failure' }}
-        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        uses: lfreleng-actions/checkout-gerrit-change-action@8721c15dacdd703064df5ade1416f7e5590b65f3  # v1.4.1
         with:
           gerrit-refspec: ${{ inputs.gerrit-refspec }}
           gerrit-project: ${{ inputs.gerrit-project }}
@@ -205,7 +205,7 @@ jobs:
           uv run --locked python scripts/mutation_gate.py run --base HEAD^ --head HEAD --shard "$MATRIX_SHARD"
       - name: Publish mutation evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: mutation-results-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: mutation-results/
