@@ -54,18 +54,43 @@ fi
 # prints "New password: <token>" on stdout, captured here and never echoed, so the
 # token reaches no local argv. Fail closed on any other shape: the value check also
 # keeps & and \ out of the template substitution in step 5.
-$GERRIT_SSH gerrit set-account "$BOT_USER" --delete-token default 2>/dev/null || true
+#
+# While Gerrit holds a token that SSM does not, ANY exit leaves the bot locked out:
+# a set -e failure (the generator or aws exits non-zero), the shape check, or an
+# interrupt. So an EXIT trap tells the operator, armed once Gerrit's token is gone
+# (the delete succeeded) or replaced (the generator succeeded), and disarmed only
+# after the SSM write succeeds (bug wary-unmindful-ibisbill). It never prints the
+# token. A failed delete (Gerrit unreachable, or no default token yet) replaced nothing.
+rotation_notice() {
+	if [ -n "${interrupted:-}" ]; then
+		# bash runs a trapped signal only after the foreground aws returns, so the
+		# write may have committed: do not claim it did not.
+		echo "service-user: interrupted after Gerrit's token for '$BOT_USER' was replaced; SSM may" >&2
+		echo "service-user: not hold the new token, and the review-bot may be unable to authenticate" >&2
+		echo "service-user: until this script succeeds." >&2
+	else
+		echo "service-user: Gerrit's token for '$BOT_USER' was already replaced and SSM was NOT" >&2
+		echo "service-user: updated; the review-bot cannot authenticate until this script succeeds." >&2
+	fi
+}
+arm_lockout_notice() {
+	trap rotation_notice EXIT
+	trap 'interrupted=1; exit 129' HUP
+	trap 'interrupted=1; exit 130' INT
+	trap 'interrupted=1; exit 143' TERM
+}
+if $GERRIT_SSH gerrit set-account "$BOT_USER" --delete-token default 2>/dev/null; then
+	arm_lockout_notice
+fi
 generated="$($GERRIT_SSH gerrit set-account "$BOT_USER" --generate-http-password)"
+arm_lockout_notice
 generated="${generated%$'\r'}"
 TOKEN="${generated#New password: }"
 # The prefix must be present (a missing one leaves TOKEN == generated) and the rest one
-# token-shaped word. On failure Gerrit has ALREADY replaced the token, so the bot cannot
-# authenticate until this script runs again successfully.
+# token-shaped word. Gerrit has already replaced the token; the EXIT trap says so.
 if [ "$TOKEN" = "$generated" ] || case "$TOKEN" in "" | *[!A-Za-z0-9+/=._~-]*) true ;; *) false ;; esac; then
 	unset generated TOKEN
 	echo "service-user: unexpected --generate-http-password output (value not printed)." >&2
-	echo "service-user: Gerrit's token for '$BOT_USER' was already replaced and SSM was NOT" >&2
-	echo "service-user: updated; the review-bot cannot authenticate until this script succeeds." >&2
 	exit 1
 fi
 unset generated
@@ -80,6 +105,7 @@ printf '%s' "$TOKEN" | aws ssm put-parameter \
 	--type SecureString \
 	--overwrite \
 	--value file:///dev/stdin >/dev/null
+trap - EXIT HUP INT TERM # SSM holds the new token: the bot can authenticate again
 echo "service-user: stored bot token in SSM ${SSM_TOKEN_PARAM}" >&2
 
 # --- 5. Render webhooks.config + surgical push to refs/meta/config ---------

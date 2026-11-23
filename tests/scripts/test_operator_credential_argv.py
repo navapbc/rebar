@@ -59,16 +59,34 @@ def _clean_env(tmp_path: Path, fakebin: Path, rec: Path, **extra: str) -> Subpro
 
 def _service_user_stubs(fakebin: Path, *, account_exists: bool) -> None:
     create = 'echo "fatal: username already exists" >&2; exit 1' if account_exists else "exit 0"
+    # Each step's outcome is read from a file in $REC, so a test can fail any one of them.
     _write_exec(
         fakebin / "ssh",
         f"""case "$*" in
   *create-account*) {create} ;;
-  *--generate-http-password*) cat "$REC/generated-output" ;;
+  *--delete-token*) exit "$(cat "$REC/delete-rc")" ;;
+  *--generate-http-password*) cat "$REC/generated-output"; exit "$(cat "$REC/generator-rc")" ;;
   *) exit 0 ;;
 esac
 """,
     )
-    _write_exec(fakebin / "aws", 'cat > "$REC/aws-stdin"\n')
+    # aws-mode: "ok"; "fail" (an expired AWS session); or "signal": the write commits
+    # and the script is sent SIGTERM while aws is still running.
+    _write_exec(
+        fakebin / "aws",
+        """cat > "$REC/aws-stdin"
+case "$(cat "$REC/aws-mode")" in
+  fail) echo "An error occurred (ExpiredTokenException)" >&2; exit 254 ;;
+  signal) kill -TERM "$PPID" ;;
+esac
+""",
+    )
+    _write_exec(
+        fakebin / "mktemp",
+        """[ "$(cat "$REC/mktemp-rc")" = 0 ] || exit 1
+PATH=/usr/bin:/bin exec mktemp "$@"
+""",
+    )
     _write_exec(
         fakebin / "git",
         """case "$1" in
@@ -82,13 +100,27 @@ exit 0
 
 
 def _run_service_user(
-    tmp_path: Path, *, account_exists: bool = True, generated: str = f"New password: {GENERATED}"
+    tmp_path: Path,
+    *,
+    account_exists: bool = True,
+    generated: str = f"New password: {GENERATED}",
+    delete_rc: int = 0,
+    generator_rc: int = 0,
+    aws_mode: str = "ok",
+    mktemp_rc: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     fakebin, rec, gerrit = tmp_path / "bin", tmp_path / "rec", tmp_path / "gerrit"
     for d in (fakebin, rec, gerrit):
         d.mkdir()
     # Replayed byte for byte by the ssh stub, so control characters such as CR survive.
     (rec / "generated-output").write_bytes(generated.encode() + b"\n")
+    for name, value in (
+        ("delete-rc", delete_rc),
+        ("generator-rc", generator_rc),
+        ("aws-mode", aws_mode),
+        ("mktemp-rc", mktemp_rc),
+    ):
+        (rec / name).write_text(f"{value}\n", encoding="utf-8")
     _service_user_stubs(fakebin, account_exists=account_exists)
     # A copy of the tool next to a template that still carries the legacy placeholder,
     # so the render path that substitutes the token is exercised.
@@ -126,6 +158,73 @@ def test_service_user_keeps_the_token_out_of_every_argv(tmp_path, account_exists
     # The template render still substitutes the token, with no awk -v.
     assert f"?token={GENERATED}\n" in (rec / "rendered").read_text(encoding="utf-8")
     assert "awk" not in argv
+    assert "already replaced" not in result.stderr
+
+
+# ── service-user.sh: the operator learns when the bot is locked out ─────────────
+# Bug wary-unmindful-ibisbill: once Gerrit's old token is gone, every way out before the
+# SSM write succeeds must say so; none may claim a lockout that did not happen.
+
+_LOCKOUT_NOTICE = (
+    "Gerrit's token for 'rebar-review-bot' was already replaced and SSM was NOT",
+    "the review-bot cannot authenticate until this script succeeds",
+)
+
+
+def _assert_token_never_shown(result: subprocess.CompletedProcess[str], rec: Path) -> None:
+    assert GENERATED not in (rec / "argv").read_text(encoding="utf-8")
+    assert GENERATED not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_rc"),
+    [
+        # Gerrit prints a token and then exits non-zero: set -e exits on the assignment.
+        ({"generator_rc": 1}, 1),
+        # aws ssm put-parameter fails (an expired AWS session, a missing permission).
+        ({"aws_mode": "fail"}, 254),
+        # The delete reported failure but the generator replaced the token anyway.
+        ({"delete_rc": 255, "aws_mode": "fail"}, 254),
+    ],
+    ids=["generator-fails", "ssm-write-fails", "delete-failed-then-ssm-write-fails"],
+)
+def test_service_user_reports_the_lockout_on_every_failure_after_the_delete(
+    tmp_path, failure, expected_rc
+):
+    result, rec = _run_service_user(tmp_path, **failure)
+    assert result.returncode == expected_rc, result.stderr
+    for line in _LOCKOUT_NOTICE:
+        assert line in result.stderr
+    assert "--delete-token default" in (rec / "argv").read_text(encoding="utf-8")
+    _assert_token_never_shown(result, rec)
+
+
+def test_service_user_reports_an_interrupted_write_without_claiming_its_outcome(tmp_path):
+    # bash runs the TERM trap after aws returns; here the write committed first.
+    result, rec = _run_service_user(tmp_path, aws_mode="signal")
+    assert result.returncode == 143, result.stderr
+    assert "interrupted after Gerrit's token for 'rebar-review-bot' was replaced" in result.stderr
+    assert "SSM may" in result.stderr and "not hold the new token" in result.stderr
+    assert "SSM was NOT" not in result.stderr
+    _assert_token_never_shown(result, rec)
+
+
+@pytest.mark.parametrize(
+    ("steps", "expected_rc"),
+    [
+        # Gerrit unreachable: the delete and the generator both fail; the old token is intact.
+        ({"delete_rc": 255, "generator_rc": 255}, 255),
+        # SSM already holds the new token when mktemp fails, before step 5's own EXIT trap.
+        ({"mktemp_rc": 1}, 1),
+    ],
+    ids=["delete-and-generator-fail", "failure-after-the-ssm-write"],
+)
+def test_service_user_claims_no_lockout_that_did_not_happen(tmp_path, steps, expected_rc):
+    result, rec = _run_service_user(tmp_path, **steps)
+    assert result.returncode == expected_rc, result.stderr
+    assert "already replaced" not in result.stderr
+    assert "interrupted" not in result.stderr
+    _assert_token_never_shown(result, rec)
 
 
 @pytest.mark.parametrize(
