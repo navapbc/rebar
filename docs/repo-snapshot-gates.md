@@ -190,7 +190,10 @@ free-space watermark using LRU by touch-on-read `mtime`, skipping the grace wind
 by the `max_bytes` byte-total cap and a secondary max-age cold-trim. Eviction is
 `rename`-to-trash **then** `rmtree` (never an in-place delete of a live entry), so a reader
 holding an open file keeps reading via POSIX
-delete-on-last-close; a new lookup that misses simply re-materializes. The cache is
+delete-on-last-close; a new lookup that misses simply re-materializes. On Windows an open file
+blocks the rename, so the pass reports that entry as `deferred` and a later pass evicts it once
+the reader has closed it; until then lookups keep serving it, a corrupt one included, and
+overlapping readers can extend the deferral. The cache is
 regenerable — losing it costs only re-materialization.
 
 **When a reclamation pass runs.** Two drivers funnel into the same `run_gc` policy, so they

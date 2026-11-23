@@ -1,7 +1,8 @@
 """Reclaim snapshot-cache disk and metadata safely off the read/populate path.
 
 Readers use touch-on-read ``mtime`` and POSIX delete-on-last-close, not unsound
-PID/heartbeat leases. One GC pass holds ``<root>/gc/lock`` and evicts LRU entries by
+PID/heartbeat leases; on Windows, where an open file blocks the rename, the eviction of that
+entry is deferred to a later pass. One GC pass holds ``<root>/gc/lock`` and evicts LRU entries by
 atomically renaming them to trash before recursive deletion, so open descriptors survive.
 
 Reclamation combines four pressures: the larger of absolute and volume-relative free-space
@@ -15,6 +16,7 @@ resolves documented defaults through ``REBAR_GATE_*`` environment values, then
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import shutil
@@ -70,6 +72,13 @@ class SnapshotLowDiskError(RuntimeError):
             f"low disk on {space.path}: free={space.free_bytes} bytes, "
             f"floor={space.min_free_bytes} bytes"
         )
+
+
+class SnapshotEntryInUseError(OSError):
+    """A corrupt entry could not be moved aside because a reader holds a file in it open.
+
+    Windows refuses to rename a directory that holds an open file. The entry stays published
+    and its integrity stamp stays old, so a later reverify pass checks and evicts it again."""
 
 
 def min_free_bytes(repo_root: str | os.PathLike[str] | None = None) -> int:
@@ -195,8 +204,13 @@ def _remove_sidecars(root: Path, sha: str) -> None:
 
 
 # ── eviction: rename-to-trash THEN rmtree (never in-place) ──────────────────────────
-def _evict(root: Path, entry: Path) -> int:
+def _evict(root: Path, entry: Path) -> int | None:
     """Rename one entry to trash, delete it, remove sidecars, and return freed bytes.
+
+    Returns 0 when the entry is already gone (another evictor took it) and ``None`` when the
+    rename fails while the entry is still there: on Windows an open file in the entry blocks
+    the rename, so the eviction is deferred. A deferred entry keeps its bytes in the running
+    total and its sidecars, and a later pass evicts it once the reader has closed it.
 
     Measure :func:`exclusive_size` before rename: shared hardlinks free nothing, while the
     result drives both free-space progress and the running-total decrement. Open readers
@@ -211,7 +225,9 @@ def _evict(root: Path, entry: Path) -> int:
         try:
             os.rename(entry, dest)
         except OSError:
-            return 0  # already gone (raced another evictor) — nothing reclaimed
+            # Gone: another evictor raced us, nothing reclaimed. Still present: a reader holds
+            # a file in it open (Windows refuses the rename), so defer to a later pass.
+            return None if entry.exists() else 0
         shutil.rmtree(dest, ignore_errors=True)
         _cache.add_bytes_held(-size, root)
     _remove_sidecars(root, sha)
@@ -268,7 +284,9 @@ def reverify_entry(sha: str, root: Path | None = None) -> bool:
     """TOFU-check an entry digest, evicting corruption for rematerialization.
 
     The integrity sidecar's ``mtime`` records the last clean check for periodic GC
-    revalidation. Return ``True`` only when corruption was discarded."""
+    revalidation. Return ``True`` only when corruption was discarded. Raise
+    :class:`SnapshotEntryInUseError` when the entry is corrupt but in use and so could not be
+    moved aside: it is still published, so reporting it as discarded would be false."""
     root = root or store_root()
     entry = root / sha
     if not entry.is_dir():
@@ -285,7 +303,10 @@ def reverify_entry(sha: str, root: Path | None = None) -> bool:
         atomic_write(digest_path, current)
         return False
     if current != stored:
-        _evict(root, entry)
+        if _evict(root, entry) is None:
+            raise SnapshotEntryInUseError(
+                errno.EBUSY, "corrupt snapshot entry is in use; eviction deferred", str(entry)
+            )
         return True
     # Clean: stamp the last-reverified time so the period is honored next pass.
     try:
@@ -308,6 +329,7 @@ class GcResult:
     skipped: str | None = None  # set if the pass did not run (e.g. "locked")
     evicted: int = 0
     reclaimed_bytes: int = 0
+    deferred: int = 0  # in use (Windows: an open file blocks the rename); a later pass retries
     skipped_grace: int = 0
     reverified: int = 0
     healed: int = 0
@@ -433,8 +455,9 @@ def _reclaim_loop(
     free: int,
     space_trigger: int,
     space_target: int,
-) -> None:
-    """Evict ``entries`` LRU-first and accumulate results in ``res``.
+) -> set[str]:
+    """Evict ``entries`` LRU-first, accumulate results in ``res``, and return the names of
+    entries whose eviction was deferred because they are in use.
 
     Free-space, byte-cap, entry-cap, and cold-age pressure compose independently. Grace
     protects recent entries from the first three; cold trim intentionally overrides it.
@@ -448,6 +471,7 @@ def _reclaim_loop(
     need_space = free < space_trigger
     over_budget = cfg.max_bytes > 0 and used > cfg.max_bytes
     over_count = cfg.max_entries > 0 and live > cfg.max_entries
+    deferred: set[str] = set()
 
     for entry in entries:
         mtime = _cache.entry_mtime(entry)
@@ -464,6 +488,10 @@ def _reclaim_loop(
             continue  # nothing is asking for room and the entry is not cold — keep it
 
         reclaimed = _evict(root, entry)
+        if reclaimed is None:
+            res.deferred += 1
+            deferred.add(entry.name)
+            continue
         if reclaimed or not entry.exists():
             res.evicted += 1
             res.reclaimed_bytes += reclaimed
@@ -473,20 +501,30 @@ def _reclaim_loop(
             need_space = need_space and free < space_target
             over_budget = over_budget and used > byte_target
             over_count = over_count and live > count_target
+    return deferred
 
 
-def _reverify_pass(root: Path, cfg: JanitorConfig, now: float, res: GcResult) -> None:
+def _reverify_pass(
+    root: Path, cfg: JanitorConfig, now: float, res: GcResult, in_use: set[str]
+) -> None:
     """Optional periodic integrity reverify (opt-in via ``reverify_seconds > 0``). Honors the
     PERIOD: an entry reverified within the window is skipped (its integrity sidecar's mtime is
-    the last-reverified stamp). Accumulates into ``res`` in place."""
+    the last-reverified stamp). Accumulates into ``res`` in place. An entry this pass already
+    found in use (``in_use``) is left to the next pass rather than counted twice; a corrupt
+    entry that cannot be moved counts as deferred, not healed."""
     if cfg.reverify_seconds <= 0:
         return
     reverify_floor = now - cfg.reverify_seconds
     for entry in _entries(root):
-        if _last_reverified(root, entry.name) > reverify_floor:
+        if entry.name in in_use or _last_reverified(root, entry.name) > reverify_floor:
             continue
         res.reverified += 1
-        if reverify_entry(entry.name, root):
+        try:
+            healed = reverify_entry(entry.name, root)
+        except SnapshotEntryInUseError:
+            res.deferred += 1
+            continue
+        if healed:
             res.healed += 1
 
 
@@ -502,7 +540,7 @@ def _gc_pass(root: Path, cfg: JanitorConfig, now: float, free_bytes: int | None)
     usage = shutil.disk_usage(str(root))
     free = usage.free if free_bytes is None else free_bytes
     trigger, target = _space_thresholds(usage.total, cfg)
-    _reclaim_loop(
+    in_use = _reclaim_loop(
         root,
         cfg,
         entries,
@@ -513,7 +551,7 @@ def _gc_pass(root: Path, cfg: JanitorConfig, now: float, free_bytes: int | None)
         space_target=target,
     )
 
-    _reverify_pass(root, cfg, now, res)
+    _reverify_pass(root, cfg, now, res, in_use)
     return res
 
 

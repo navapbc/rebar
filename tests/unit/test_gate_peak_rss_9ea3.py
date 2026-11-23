@@ -8,11 +8,28 @@ into the gate."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 
 import pytest
 
 from rebar.llm import peak_rss
+
+#: ``resource`` is Unix-only. Where it is missing (Windows) the measurement is ``None`` by
+#: decision (aerial-flameproof-antbear): the only consumer is on-box Linux journald monitoring.
+_HAS_RESOURCE = importlib.util.find_spec("resource") is not None
+
+
+def _assert_measured(record: dict) -> None:
+    """An int peak where ``resource`` exists, ``None`` for both fields where it does not."""
+    if _HAS_RESOURCE:
+        assert isinstance(record["peak_rss_bytes"], int)
+        assert record["peak_rss_bytes"] > 0
+        assert isinstance(record["peak_delta_bytes"], int)
+    else:
+        assert record["peak_rss_bytes"] is None
+        assert record["peak_delta_bytes"] is None
 
 
 def _marker_records(captured: str) -> list[dict]:
@@ -74,10 +91,25 @@ def test_completion_emits_one_line_start_marker(capsys: pytest.CaptureFixture[st
     assert record["event"] == peak_rss.MARKER
     assert record["gate"] == "plan_review"
     assert record["ticket_id"] == "9ea3-7d07-ea55-4496"
-    assert isinstance(record["peak_rss_bytes"], int)
-    assert record["peak_rss_bytes"] > 0
-    assert isinstance(record["peak_delta_bytes"], int)
+    _assert_measured(record)
     assert isinstance(record["elapsed_ms"], int)
+
+
+def test_without_resource_the_marker_reports_no_measurement(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Hide ``resource`` on any platform: the reading is ``None`` and the marker is still
+    emitted, carrying ``None`` for both the peak and the delta."""
+    monkeypatch.setitem(sys.modules, "resource", None)  # makes ``import resource`` fail
+    assert peak_rss.peak_rss_bytes() is None
+
+    with peak_rss.gate_peak_rss("plan_review", "9ea3-7d07-ea55-4496"):
+        pass
+
+    records = _marker_records(capsys.readouterr().err)
+    assert len(records) == 1
+    assert records[0]["peak_rss_bytes"] is None
+    assert records[0]["peak_delta_bytes"] is None
 
 
 def test_the_logger_copy_carries_no_line_start_token(
@@ -199,4 +231,4 @@ def test_both_gate_entry_points_emit_the_marker(
     assert len(records) == 1, f"{entry_point} emitted {len(records)} markers, expected exactly 1"
     assert records[0]["gate"] == gate
     assert records[0]["ticket_id"] == "9ea3-7d07-ea55-4496"
-    assert isinstance(records[0]["peak_rss_bytes"], int)
+    _assert_measured(records[0])
