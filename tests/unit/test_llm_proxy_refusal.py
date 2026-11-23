@@ -94,6 +94,25 @@ def test_raw_httpx_proxy_refusal_is_not_retryable():
     assert outcome.diagnostic["error_type"] == failure.PROXY_REFUSED
 
 
+@pytest.mark.parametrize("answer", ["408 Request Timeout", "429 Too Many Requests"])
+def test_a_transient_proxy_4xx_is_not_a_refusal(answer):
+    outcome = failure.classify_llm_failure(_group(_proxy_leg(answer), _proxy_leg(answer)))
+    assert outcome.retryable is True
+    assert "error_type" not in outcome.diagnostic
+
+
+def test_a_nested_fallback_group_of_refusals_is_a_refusal():
+    outcome = failure.classify_llm_failure(_group(_group(_proxy_leg(), _proxy_leg()), _proxy_leg()))
+    assert outcome.resolution_class is RC.CHANGE_SETTINGS
+    assert outcome.diagnostic["error_type"] == failure.PROXY_REFUSED
+
+
+def test_close_gate_remedy_needs_the_change_settings_class_too():
+    """The proxy remedy follows the classification, not the diagnostic marker alone."""
+    marked = failure.LLMOutcome(RC.RETRY_NOW, {"error_type": failure.PROXY_REFUSED}, retryable=True)
+    assert failure.close_gate_remedy(RuntimeError("x"), marked) != failure.PROXY_REFUSED_REMEDY
+
+
 def test_proxy_5xx_is_not_a_refusal_and_keeps_the_transport_disposition():
     outcome = failure.classify_llm_failure(_proxy_leg("502 Bad Gateway"))
     assert outcome.resolution_class is RC.RETRY_NOW
@@ -182,7 +201,7 @@ def test_degraded_verdict_prints_the_proxy_refusal(capsys):
 
     outcome = failure.classify_llm_failure(_group(_proxy_leg()))
     result = {"verdict": "INDETERMINATE", "coverage": failure.resolution_fields(outcome)}
-    assert _disposition_exit_code(result, indeterminate_code=2) != 11
+    assert _disposition_exit_code(result, indeterminate_code=2) == 2  # INDETERMINATE, no retry
     err = capsys.readouterr().err
     assert failure.PROXY_REFUSED_MESSAGE in err
     assert "Transient connection blip" not in err
