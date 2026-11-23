@@ -572,7 +572,7 @@ before it is ever persisted ([ADR 0041](adr/0041-llm-diagnostic-sanitization.md)
 | `WAIT_AND_RETRY` | ✅ | Provider overload / rate-limit (429/529) — wait for the backoff window, then retry. |
 | `RETRY_NOW` | ✅ | Transient connection blip (network error) — retry immediately. |
 | `INCREASE_PROVIDER_LIMITS` | | Provider usage/quota ceiling hit — raise the limit or wait for the reset. |
-| `CHANGE_SETTINGS` | | A setting was rejected (credentials, model id, or a token / step / timeout bound; 401/403, non-context-length 400) — check the configured model, credentials and bounds, then retry. |
+| `CHANGE_SETTINGS` | | A setting was rejected (credentials, model id, or a token / step / timeout bound; 401/403, non-context-length 400) — check the configured model, credentials and bounds, then retry. Also an HTTP proxy refusing the provider CONNECT with a 4xx (an allowlist refusal, 407), diagnostic `error_type: proxy_refused` — allow the provider host through the proxy. |
 | `CHANGE_INPUT` | | Input rejected (too large / context-length / malformed) — reduce or fix it. |
 | `CHANGE_PROVIDER_OR_MODEL` | | Model/provider unavailable, refused, or content-filtered — switch model/provider. |
 | `FIX_AGENT_DESIGN` | | Agent-construction bug (no tools / bad output contract) — fix the op wiring. |

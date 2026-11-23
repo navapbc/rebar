@@ -387,20 +387,28 @@ def should_fall_back(exc: Exception) -> bool:
     Always retain a non-primary leg's failure so exhaustion exposes the full
     ``FallbackExceptionGroup`` and classification can use its most recoverable
     cause. For the primary, attempt fallback only for taxonomy dispositions
-    ``WAIT_AND_RETRY``, ``RETRY_NOW``, or ``CHANGE_PROVIDER_OR_MODEL``; credential,
-    input-size, and quota failures must surface. Read that taxonomy at call time
+    ``WAIT_AND_RETRY``, ``RETRY_NOW``, or ``CHANGE_PROVIDER_OR_MODEL``, or for an HTTP
+    proxy refusal (a CHANGE_SETTINGS that is per host: a later leg on another host may be
+    allowed, bug vinyl-dubnium-squamata); credential, input-size, and quota failures must
+    surface. Read that taxonomy at call time
     to avoid a second exception list. The traced candidate marker distinguishes
     fallback legs from the primary (bug 1c0d)."""
     from rebar.llm.tracing import is_fallback_leg_failure
 
     if is_fallback_leg_failure(exc):
         return True
-    from rebar.llm.failure import _RETRYABLE, ResolutionClass, classify_llm_failure
+    from rebar.llm.failure import (
+        _RETRYABLE,
+        ResolutionClass,
+        _proxy_refusal,
+        classify_llm_failure,
+    )
 
     resolution_class = classify_llm_failure(exc).resolution_class
     return (
         resolution_class in _RETRYABLE
         or resolution_class is ResolutionClass.CHANGE_PROVIDER_OR_MODEL
+        or _proxy_refusal(exc) is not None
     )
 
 
