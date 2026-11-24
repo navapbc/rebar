@@ -10,6 +10,152 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-23
+
+### Added
+
+- Each verifying environment can now list the operation-certificate signers it trusts
+  (ADR 0125). The new `verify.trusted_opcert_keys` setting (env
+  `REBAR_VERIFY_TRUSTED_OPCERT_KEYS`, comma-separated) takes entries of the form
+  `<env_id> <key-type> <base64> [comment]`. With a list set, a valid certificate from an
+  unlisted (environment, key) pair gets the new verdict `untrusted` in
+  `verify_signature_result` and `plan_review_status`, and a listed pair reads
+  `trust_basis: trust_list`. Every result now carries `signing_key`, the SHA256
+  fingerprint of the key that signed the certificate, whatever the verdict.
+- MCP `review_code_start` and `transition_ticket_start` async tools. A
+  completion-gated close and a code review over MCP can outlast the client's ~60 s
+  deadline; these return a job handle at once and are polled with `gate_status` like
+  `review_plan_start` and `verify_completion_start`. A transition job reads `passed`
+  with verdict `applied` once the status changed, or `failed` with the refusal. The
+  synchronous `review_code` now shares its de-duplication key, so a re-fire after a
+  timeout attaches to the running review instead of starting a second one.
+- `rebar --version` prints `rebar <version> (<commit>)`.
+- Ticket-store history reclamation (ADR 0106) is implemented as operator-run library
+  modules: a streamed collapse of history older than `[reclaim].horizon_days` into a
+  checkpoint that keeps the ledger anchor on the branch and re-signs events that would
+  fail enforced `verify-identity`, a publish swap with rollback for git and S3
+  remotes, and `python -m rebar._commands.reclaim_dry_run`, which rehearses the whole
+  run against a throwaway remote and writes `evidence.json`.
+- A clone left behind by a reclaimed (rewritten) tickets history now heals itself
+  instead of refusing every sync and write as `DIVERGED`. When the remote's store
+  epoch proves it supersedes the local one, rebar backs up the old head under
+  `refs/rebar/stale-override/`, resets to the remote, and replays unpushed events
+  inside the reclaim horizon. Every writer (append, transition, claim, delete, import,
+  reconcile, gated claim and start-work) heals and retries once. Unrelated remotes are
+  still refused.
+
+### Changed
+
+- **Breaking:** operation-certificate verification is validity-only by default
+  (ADR 0125). A certificate verifies when its SSHSIG signature holds under the key
+  embedded in it, for its principal, and its signed subject binds the ticket and kind.
+  `trust_basis` is now `envelope_key` or `trust_list`; the `own_key` and
+  `pinned_environment` values are gone. `verify.require_environment` now requires a
+  trust list: without one, verification refuses with `foreign_key` and
+  `rebar verify-opcert` exits 2. Signing is no longer refused for a key not pinned for
+  its principal. The MCP `/health` `opcert` field compares the bound signer with the
+  deployment's trust list and adds `trust_source`. See `docs/release-notes.md`.
+- `rebar verify-identity` reports an event signed by a valid key that is not on the
+  claimed author's keyring as `signer-not-on-keyring` rather than `bad-signature`. It
+  still fails enforcement; advisory mode only reports it. Ledger entries with a null
+  `signer_pubkey` are now verified instead of rejected, and each reported line and
+  JSON entry names the signing key's SHA256 fingerprint (`signing_key`).
+- **Breaking for MCP server deployments:** the MCP server signs ticket writes with the
+  authorship key (`identity.signing_key`, `REBAR_IDENTITY_SIGNING_KEY`) and reads its
+  operation-certificate key only from `REBAR_OPCERT_KEY_PATH`. When
+  `REBAR_OPCERT_ENV_ID` is set, startup fails closed if either key is missing or
+  unusable. Deployments that pointed `REBAR_IDENTITY_SIGNING_KEY` at the op-cert key
+  must set `REBAR_OPCERT_KEY_PATH`.
+- The Homebrew formula is now bumped automatically when a release is published, so
+  `brew` installs track PyPI releases.
+
+### Removed
+
+- **Breaking:** the `rebar trusted-env` command, the repository pin file
+  `.rebar/trusted_environments.yaml`, and its library loader `rebar.attest.trusted_env`
+  (ADR 0125). Nothing reads a repository-pinned op-cert trust file any more; list
+  trusted signers in each verifying environment's own `verify.trusted_opcert_keys`.
+  `rebar trusted-env` now fails as an unknown command.
+
+### Fixed
+
+- Jira sync no longer creates duplicate issues or comments. A create that landed in
+  Jira but failed on the way back used to be re-sent; creates and comment creates on
+  Cloud and Data Center are no longer replayed (only a rate-limit rejection is
+  retried), the `jira` library's own request retry is turned off, and an issue now
+  carries its `rebar-id:` label from the moment it is created, so the next pass finds
+  and binds it.
+- The MCP server returns freed memory to the system when it goes idle, instead of
+  holding gigabytes after gate runs. The `agents` and `mcp` extras now require
+  `anyio>=4.15`, which stops each gate run's event loop from staying alive.
+- `gate_status` no longer marks a job as failed while another server process (for
+  example the draining side of a blue-green cutover) is still running it, and a gate
+  job writes its records to the store it started in even if the working directory or
+  `REBAR_ROOT` changes mid-run.
+- A gate called with a ticket alias that hit a provider failure no longer writes into a
+  stray directory named after the alias, which broke every later call by that alias.
+- LLM gate calls honour `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` and `NO_PROXY`. On a
+  proxy-only host they used to fail with a DNS error and return INDETERMINATE.
+- A gate request refused by an HTTP proxy (a 4xx answer to `CONNECT`) is reported as a
+  non-retryable settings problem naming the proxy refusal, instead of "transient
+  connection blip - retry immediately". A proxy's 408 or 429 stays retryable.
+- `rebar verify-opcert` reports a ticket with malformed raw events as unreadable instead
+  of crashing with a traceback; `verify-identity` skips such events the same way.
+- Enforced `rebar verify-identity --all` finishes on large and reclaimed histories; it
+  previously ran for hours.
+- `rebar fsck` no longer reports `ENV_ID_MISMATCH` on every run when two environments
+  commit under the same git author. Environments are now told apart by signing key.
+- `rebar init` and the ensure sweep stop at a git watchdog timeout instead of reading
+  the empty output as an answer. A stalled filesystem could make `init` delete the
+  tracker directory or report a half-built store as finished; an interrupted bootstrap
+  is now completed by the next `init`.
+- Two concurrent closes of one ticket no longer fail with "flock: could not acquire lock
+  after 10s"; the merge waits the same lock budget as every other store write.
+- Snapshot cache byte accounting stays correct under concurrent builds and evictions,
+  and the startup sweep no longer holds the accounting lock for its whole walk, which
+  stalled reviews for up to an hour on large stores.
+- Patching a bug-alert record no longer drops an alert appended at the same moment.
+- `rebar metrics` history trends start a fixed number of git processes instead of one
+  or two per revision.
+- The prompt-eval harnesses score real cases again: `run_eval` and calibration run
+  inside a gate session, the plan-review finder solvers exist, the G7 eval spec loads
+  on case-sensitive filesystems, and `engine_comparison` and `provider_parity` mount the
+  ticket store before reading tickets.
+- Windows: file locks, gate admission slots and the alert store now lock through
+  `msvcrt` instead of running unlocked; dead lock holders are detected without
+  signalling them; timed-out git calls kill their whole process tree; and the
+  background compaction sweep and snapshot GC run detached as on other platforms.
+- Windows: text I/O and subprocess output use UTF-8 everywhere instead of the cp1252
+  locale codec, and git stdin is sent byte-exact. CLI stdin, stdout and stderr are
+  UTF-8 on every platform, so `rebar explain` no longer fails when piped.
+- Windows: contended file replaces and reads of just-replaced files are retried;
+  ticket snapshots are checked out under short paths that fit `MAX_PATH`; revision
+  reads use `git cat-file` so long working directories no longer make existing files
+  read as missing; repository paths are written with forward slashes; the read-fetch
+  throttle marker lives in the system temp directory; and in-use snapshot entries are
+  evicted later instead of being counted as freed.
+- Windows: operation-certificate signing works. Key-file mode checks are skipped
+  (Windows has no POSIX mode bits), the temporary key copy is restricted to the current
+  user so Win32-OpenSSH accepts it, and op-cert workspaces with read-only git files are
+  removed.
+- Review bot: each review step before the LLM call is logged and bounded, so a slow
+  clone or snapshot ends the review with a retryable error instead of stalling, and
+  voter-error metrics are no longer counted twice.
+
+### Security
+
+- `rebar verify-opcert` takes its trust configuration from the committed `rebar.toml`
+  on the reviewed base branch, not from the working tree, so a change under review can
+  no longer add its own trusted key or drop `require_environment` to pass its own gate.
+  The base is the `sync.remote`'s default branch (falling back to `<remote>/main`)
+  instead of a hard-coded `origin/main`; a missing remote or unfetched base fails
+  closed with exit 2.
+- `rebar verify-opcert` no longer skips a ticket whose state cannot be read. It used to
+  print OK and exit 0 with `verify.require_environment` set even when such a ticket had
+  no valid certificate; such tickets are now judged like any unsatisfied ticket.
+- The review bot no longer puts its Gerrit HTTP token in the `git fetch` command line,
+  where any local user could read it.
+
 ## [0.16.0] - 2026-11-13
 
 ### Added
@@ -2167,7 +2313,8 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.16.0...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/navapbc/rebar/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/navapbc/rebar/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/navapbc/rebar/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/navapbc/rebar/compare/v0.14.0...v0.15.0

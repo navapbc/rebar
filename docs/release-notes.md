@@ -9,7 +9,7 @@ across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
 
-## Unreleased: op-cert trust moves to each verifying environment (ADR 0125)
+## 0.17.0: op-cert trust moves to each verifying environment (ADR 0125)
 
 **Contract change for any client that verifies operation certificates or runs `rebar
 trusted-env`.**
